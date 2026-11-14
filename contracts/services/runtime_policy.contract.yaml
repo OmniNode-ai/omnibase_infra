@@ -559,6 +559,29 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: true
+        # OMN-21611: the shared credentials the h051 stability lane resolves, by
+        # path in the lab secret store and never by a copy in a lane path. The
+        # GitHub, Gemini and Google keys are named under /shared/env (the
+        # folder the shared key registry and the lane bus map declare for
+        # them); the Linear key is read where it is held, in /shared/lab-lane-env.
+        # A name absent from its folder resolves to nothing and a required
+        # caller refuses: the store holds none of GITHUB_TOKEN, GEMINI_API_KEY
+        # and GOOGLE_API_KEY on 2026-11-09, and seeding them is the operator's.
+        #
+        # Process-level, as the dev lane's tenant credential rule is: an
+        # Infisical-backed rule makes the process demand a store identity at
+        # boot. Renders as STABILITY_TEST_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON,
+        # which only docker-compose.stability-h051-secrets.yml binds; every other
+        # lane that borrows this profile keeps the house-only config and demands no identity.
+        secret_resolver_namespaces:
+          - namespace: shared_env_credentials
+            ref_pattern: "^(GITHUB_TOKEN|GEMINI_API_KEY|GOOGLE_API_KEY)$"
+            source_type: infisical
+            source_path_template: "/shared/env/{ref}"
+          - namespace: shared_lane_env_credentials
+            ref_pattern: "^LINEAR_API_KEY$"
+            source_type: infisical
+            source_path_template: "/shared/lab-lane-env/{ref}"
       effects:
         runtime_id: stability-test-effects
         runtime_address: runtime://omninode-pc/stability-test/effects

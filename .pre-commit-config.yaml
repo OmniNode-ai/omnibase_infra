@@ -2253,6 +2253,12 @@ repos:
         language: system
         files: docker/(docker-compose\.dev-tenant-fold\.yml|dev-tenant-fold-required-env\.manifest\.txt)
         pass_filenames: false
+      - id: check-stability-h051-secrets-required-env-vars
+        name: Check the h051 stability secret binding required env vars are declared
+        entry: uv run --frozen python scripts/check_required_env_vars.py --compose-file docker/docker-compose.stability-h051-secrets.yml --manifest-file docker/stability-h051-secrets-required-env.manifest.txt
+        language: system
+        files: docker/(docker-compose\.stability-h051-secrets\.yml|stability-h051-secrets-required-env\.manifest\.txt)
+        pass_filenames: false
       # OMN-4857: Block Consul references in source (decommissioned service)
       # Prevents reintroduction of CONSUL_HOST or consul.connect.io references in src/.
       - id: no-consul-references
