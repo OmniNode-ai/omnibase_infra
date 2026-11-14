@@ -1,0 +1,69 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-24427"
+title: "Remove the old hand-run deploy command script and move its callers to the signed deploy step"
+summary: "The hand-run deploy agent trigger script, its python module and their tests are removed from omnibase_infra, the file shape baselines drop them, and the comments that named the module as the way to publish a promotion now name node_branch_deploy_command_effect (omnimarket). The script read a signing key from whichever machine ran it, so a command signed with a different key than the agent's was published and silently dropped; the node refuses loudly when its key is missing. Two other callers, the lab-rebuild-triage skill and the runtime deployment runbook, move in their own pull requests in two other repositories."
+is_seam_ticket: true
+interface_change: false
+interfaces_touched:
+  - infrastructure
+requirements:
+  - id: "req-retire-deploy-agent-trigger"
+    statement: "No file in omnibase_infra outside decision text names the retired trigger script or module as something to run, the script, module and their tests are gone, and the signed deploy step is the one sender of the rebuild command."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the legacy trigger script, its python module and its tests are removed from omnibase_infra and no file there names them as something to run -- falsifier: git grep -n deploy-agent-trigger on the branch head returns only decision text"
+      - id: "AC2"
+        statement: "AC2: the file shape baseline no longer lists the removed script and module and the ratchet passes -- falsifier: pre-commit run canonical-file-shape --all-files in omnibase_infra"
+      - id: "AC3"
+        statement: "AC3: the two other callers (the lab-rebuild-triage skill and the runtime deployment runbook, each in its own repository) name the signed deploy step and not the script -- falsifier: git grep -n deploy-agent-trigger in each of those two repositories, over the skill and the runbook, returns nothing"
+      - id: "AC4"
+        statement: "AC4: integrated: onex run-node node_branch_deploy_command_effect on dev for the running sha reads a terminal event published, not refused, in the running dev runtime, with the old script absent -- falsifier: the terminal event reads status refused or failed"
+evidence_requirements:
+  - kind: "tests"
+    description: "The retirement test passes at the head; at the merge base both retired files exist and the scan finds references."
+    command: "uv run pytest tests/ci/test_deploy_agent_trigger_retired_omn24427.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn24427-ac1-retired"
+    description: "AC1 hosted probe. The script and module are absent and no tracked file outside decision text names them; the control case shows the scan reporting a planted reference."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_deploy_agent_trigger_retired_omn24427.py -q"
+        cwd: "."
+    binds_ac: ["AC1"]
+  - id: "dod-omn24427-ac2-baseline"
+    description: "AC2 hosted probe. The file shape baseline lists neither retired path."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_deploy_agent_trigger_retired_omn24427.py -k baseline -q"
+        cwd: "."
+    binds_ac: ["AC2"]
+  - id: "dod-omn24427-ac3-other-callers-proxy"
+    description: "Hosted proxy for AC3. The deploy agent's own sources and the lane routing table name the node as the one publisher; the two callers in other repositories are read in their own pull requests and are the step left here."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_deploy_agent_trigger_retired_omn24427.py -k tracked_file -q"
+        cwd: "."
+    binds_ac: ["AC3"]
+  - id: "dod-omn24427-ac4-integrated-proxy"
+    description: "Hosted proxy for AC4. The old script and module are absent from the tree the deploy agent self-updates from; the terminal event of one signed deploy command in the running dev runtime is not reachable from a hosted runner and is the step left."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_deploy_agent_trigger_retired_omn24427.py -k retired_trigger_files -q"
+        cwd: "."
+    binds_ac: ["AC4"]
+  - id: "dod-omn24427-deploy-agent-suite-focused"
+    description: "The deploy agent's tests that shared a file with the trigger still pass at the head."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_overlay_ref_declaration_omn24216.py scripts/deploy-agent/tests/unit/test_open_pr_declaration_omn21928.py scripts/deploy-agent/tests/unit/test_lineage_fence_omn19270.py scripts/deploy-agent/tests/unit/test_executor_build_path_omn16442.py -q"
+        cwd: "."
+    binds_ac: ["AC1"]

@@ -1472,9 +1472,6 @@ entries:
   - path: scripts/deploy-agent/deploy_agent/routing.py
     family: O
     content_sha1: ac7ab9f99cee2889f38ec8452d8d4d1066d170ae
-  - path: scripts/deploy-agent/deploy_agent/trigger.py
-    family: O
-    content_sha1: 72c185a921f72f41132d8aeaa9747e2b6f693b8d
   - path: scripts/deploy-agent/deploy_agent/unit_drift.py
     family: F
     content_sha1: 12d121016a12b2a20efb5f7cebd355a6057b0e63
