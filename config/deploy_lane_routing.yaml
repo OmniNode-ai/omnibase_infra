@@ -150,12 +150,13 @@ instances:
   dev-202:
     hostnames: [omnipc2]
     consumer_group: onex-deploy-agent-dev-202
-    # OMN-21402: this instance's host is out for hardware repair (operator,
-    # 2026-10-25), so none of its agents reads the control topic and the
-    # default instance skipped every omnimarket rebuild routed here. While it
-    # is out, the omnimarket route below resolves to the default instance. Set
-    # true when the host is back.
-    available: false
+    # OMN-21402: this instance's host was out for hardware repair (operator,
+    # 2026-10-25), so none of its agents read the control topic and the
+    # default instance skipped every omnimarket rebuild routed here; the
+    # omnimarket route below then resolved to the default instance. The host
+    # is back and this instance's agent has read the control topic since
+    # 2026-11-12 (OMN-24213): the instance is available again.
+    available: true
     flags:
       max_dev_lag_minutes: 20
     lane:
