@@ -1,0 +1,59 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24306
+title: "Start new build machines with Python already on disk"
+summary: "The runner image bakes CPython 3.12 and 3.13 as an Actions tool cache, the two lab CI pools opt into it with a named volume per runner so a fresh runner starts with it and a recreate keeps it, the image build smoke checks the layout, and a test holds the package index the hook wires to the fleet declaration."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24306-python-toolcache-seed
+    statement: A fresh runner in an opted-in pool starts with the baked CPython builds in the Actions tool-cache layout, a runner whose volume already holds a cache keeps it, and the declared package index equals the one the hook wires.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a runner whose tool cache holds no Python gets the image''s Python 3.12 placed in the Actions tool-cache layout before the job runs, and a runner that already holds a 3.12 is left untouched -- falsifier: pytest tests/scripts/test_runner_job_started_python_toolcache_seed.py -q'
+      - id: AC2
+        statement: 'AC2: the package index declared in the fleet config equals the index the runner hook wires for pip and uv -- falsifier: pytest tests/scripts/test_runner_job_started_python_toolcache_seed.py -q -k index'
+      - id: AC3
+        statement: 'AC3: integrated: a real job on one of our own runners shows setup-python finding the interpreter in the tool cache with no download and uv resolving from the package cache -- falsifier: the job log of that run shows a download line for the interpreter or a resolve against the outside index'
+evidence_requirements:
+  - kind: tests
+    description: The tool-cache and index tests pass at the head and fail on the base, which bakes no tool cache and sets no pool opt-in.
+    command: uv run pytest tests/scripts/test_runner_job_started_python_toolcache_seed.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24306-seed-tests
+    description: The hook seed tests, the fleet-config seam tests and the existing image tests pass at the head.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_runner_job_started_python_toolcache_seed.py tests/ci/test_runner_image_python_source_omn17427.py tests/ci/test_runner_toolcache_libpython_omn23342.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24306-pool-opt-in-end-to-end
+    description: The image bake, the two pool compose files and the image smoke step are read together, so a pool that sets the tool-cache directory also holds the named volume at the baked path.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_runner_job_started_python_toolcache_seed.py -q -k pool_opts_into
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24306-published-pool-opt-in
+    description: Hosted readback of both pool compose files at the evaluated commit; the tool-cache directory setting and the per-runner named volume are absent at the merge base.
+    source: manual
+    binds_ac: [AC1, AC3]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'for p in hp051 hp053; do gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-${p}-ci-runner.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "AGENT_TOOLSDIRECTORY: /opt/hostedtoolcache" > /dev/null; done'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24306-integration-proof-runner-job
+    description: On our own runner host the hook is installed from the branch and a job's setup-python step reads the tool cache and uv reads the package cache.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: 'bash -n docker/runners/runner-job-started.sh'
+        cwd: ${OMNI_HOME}/omnibase_infra

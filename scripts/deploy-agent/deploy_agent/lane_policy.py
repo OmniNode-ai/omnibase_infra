@@ -28,19 +28,21 @@ from deploy_agent.events import EnumRuntimeLane
 from deploy_agent.tracking_ref import ENV_TRACKING_REF
 
 ENV_ALLOWED_LANES = "DEPLOY_AGENT_ALLOWED_LANES"
+#: OMN-21485: set to ``1`` on a lab dev agent to keep the stability lane on the
+#: dev tag dev ran (``idle_converge.decide_stability_follow``). It adds that lane
+#: to the fence the allow-list names, so the unit declares the dev fence once and
+#: the lane id stays an enum value, not a literal in a tracked unit.
+ENV_FOLLOW_STABILITY = "DEPLOY_AGENT_FOLLOW_STABILITY"
 
 
 class LaneNotAllowedError(RuntimeError):
     """Raised when a command targets a lane this agent may not deploy."""
 
 
+# Parse a comma-separated allow-list into runtime lanes. Raises ``ValueError`` on
+# an empty list or an unknown lane name -- never silently drops an entry, because
+# a typo would otherwise narrow the fence without anyone noticing.
 def parse_allowed_lanes(raw: str) -> frozenset[EnumRuntimeLane]:
-    """Parse a comma-separated allow-list into runtime lanes.
-
-    Raises ``ValueError`` on an empty list or an unknown lane name — never
-    silently drops an entry, because a typo would otherwise narrow the fence
-    without anyone noticing.
-    """
     tokens = [token.strip() for token in raw.split(",")]
     named = [token for token in tokens if token]
     if not named:
@@ -60,13 +62,11 @@ def parse_allowed_lanes(raw: str) -> frozenset[EnumRuntimeLane]:
     return frozenset(lanes)
 
 
+# Load the required lane allow-list from the environment. There is intentionally
+# no default: a deploy agent that does not declare which lanes it may deploy is
+# one whose blast radius is decided by whoever publishes to its topic. A lab dev
+# fence with ENV_FOLLOW_STABILITY=1 also holds the stability lane (OMN-21485).
 def load_allowed_lanes_from_env() -> frozenset[EnumRuntimeLane]:
-    """Load the required lane allow-list from the environment.
-
-    There is intentionally no default. A deploy agent that does not declare
-    which lanes it may deploy is a deploy agent whose blast radius is decided
-    by whoever publishes to its topic.
-    """
     raw = os.environ.get(ENV_ALLOWED_LANES, "").strip()
     if not raw:
         raise RuntimeError(
@@ -75,7 +75,12 @@ def load_allowed_lanes_from_env() -> frozenset[EnumRuntimeLane]:
             "undeclared fence means the control bus decides the blast radius. "
             "Set it on the systemd unit (e.g. DEPLOY_AGENT_ALLOWED_LANES=dev)."
         )
-    return parse_allowed_lanes(raw)
+    allowed = parse_allowed_lanes(raw)
+    if os.environ.get(ENV_FOLLOW_STABILITY, "").strip() == "1" and is_lab_dev_fence(
+        allowed
+    ):
+        return allowed | {EnumRuntimeLane.STABILITY_TEST}
+    return allowed
 
 
 #: OMN-19998: the lanes a lab deploy agent may hold together. A dev agent whose

@@ -6,7 +6,8 @@
 # Why this exists: the OMN-12567 runner image (docker/runners/Dockerfile) merged
 # green but had NEVER been built. Its prebuilt-env bake stage failed with an
 # EACCES because the runner user could not create its uv cache under the
-# root-owned /home/runner/.cache. No CI job built docker/runners/Dockerfile, so a
+# root-owned .cache directory in the runner user's home. No CI job built
+# docker/runners/Dockerfile, so a
 # non-building image passed every check. This workflow closes that gap:
 # "enforcement, not detection" — when a PR touches the runner image inputs, we
 # actually build the image (through the prebuilt-env bake stage that broke) so a
@@ -197,6 +198,63 @@ jobs:
             exit "${missing}"
           '
           echo "Playwright chromium libraries PASSED: every soname resolves in the baked image."
+
+      # OMN-19998: the image bakes an Actions tool cache of CPython (setup-python
+      # layout: <toolcache>/Python/<x.y.z>/<arch> beside an <arch>.complete
+      # marker) so a runner that cannot reach GitHub quickly still finds the
+      # Python its job asks for. The baked version list is read back from the
+      # Dockerfile on the runner, so a Dockerfile edit that drops a version
+      # fails here instead of at fleet-rollout time. The assertions run as the
+      # unprivileged runner user, in the NEW image.
+      - name: Assert baked Actions tool cache holds CPython in the setup-python layout
+        run: |
+          set -euo pipefail
+          versions="$(sed -n 's/^ARG OMNI_TOOLCACHE_PYTHON_VERSIONS="\(.*\)"$/\1/p' docker/runners/Dockerfile)"
+          if [[ -z "${versions}" ]]; then
+            echo "::error::docker/runners/Dockerfile declares no ARG OMNI_TOOLCACHE_PYTHON_VERSIONS; the tool cache is empty."
+            exit 1
+          fi
+          docker run --rm --user runner -e VERSIONS="${versions}" --entrypoint bash "${SMOKE_TAG}" -lc '
+            set -euo pipefail
+            case "$(uname -m)" in
+              x86_64) arch=x64 ;;
+              aarch64) arch=arm64 ;;
+              *) echo "::error::unsupported machine arch $(uname -m); cannot locate the baked tool cache."; exit 1 ;;
+            esac
+            for minor in ${VERSIONS}; do
+              found=0
+              for d in /opt/hostedtoolcache/Python/"${minor}".*/; do
+                [[ -d "${d}" ]] || continue
+                found=1
+                marker="${d%/}/${arch}.complete"
+                if [[ ! -f "${marker}" ]]; then
+                  echo "::error::baked tool cache has ${d} but no ${marker} marker; setup-python would re-download it."
+                  exit 1
+                fi
+                py="${d%/}/${arch}/bin/python3"
+                out="$("${py}" -c "import sys; print(sys.version)")"
+                mm="${out%% *}"
+                mm="${mm%.*}"
+                if [[ "${mm}" != "${minor}" ]]; then
+                  echo "::error::baked Python at ${d%/}/${arch} reports ${mm}, expected major.minor ${minor}."
+                  exit 1
+                fi
+                "${py}" -m pip --version
+                em="${d%/}/${arch}/lib/python${minor}/EXTERNALLY-MANAGED"
+                if [[ -e "${em}" ]]; then
+                  echo "::error::baked Python at ${d%/}/${arch} is externally managed (${em}); job pip installs would fail."
+                  exit 1
+                fi
+                echo "baked CPython ${minor} ready: ${d%/}/${arch} (.complete marker, interpreter major.minor, pip checked)"
+                break
+              done
+              if [[ "${found}" -ne 1 ]]; then
+                echo "::error::baked tool cache has no /opt/hostedtoolcache/Python/${minor}.* directory."
+                exit 1
+              fi
+            done
+          '
+          echo "baked Actions tool cache PASSED: every baked CPython is in the setup-python layout."
 
       # OMN-19659: a resolved soname is not a launch. Launch Chromium inside the
       # NEW image as the unprivileged runner user, shape a downloaded web font,

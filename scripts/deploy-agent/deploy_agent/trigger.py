@@ -5,29 +5,9 @@
 THE COMMAND IS BUILT FROM THE CONTRACT, NOT BESIDE IT (OMN-16442)
 -----------------------------------------------------------------
 
-``deploy-agent-trigger.sh`` used to hand-write the command JSON in an embedded
-Python snippet::
-
-    envelope = {
-        "correlation_id": ..., "git_ref": ..., "reason": ...,
-        "requested_by": ..., "scope": "runtime", "services": [],
-    }
-
-and the agent that consumes it validates against
-:class:`deploy_agent.events.ModelRebuildRequested`, which **requires**
-``runtime_lane`` and **forbids** ``reason``. The two drifted apart and nothing
-noticed, because nothing compared them. Measured on the .201 dev lane at
-2026-09-08T12:14:27Z, verbatim from the agent's journal::
-
-    Invalid payload (correlation_id=2b017562-...): 2 validation errors for
-    ModelRebuildRequested / runtime_lane / Field required / reason / Extra
-    inputs are not permitted
-    Rejected command: invalid_payload
-
-So no operator invocation of the sanctioned script could ever be accepted --
-and the script's own header forbids hand-building the JSON (correctly: the
-HMAC is computed over exact bytes). The entry point was closed in both
-directions.
+The old shell script hand-wrote the command JSON beside the model and drifted
+from it, so no command it published was ever accepted. How it broke, and the
+measured journal line, is in docs/decisions/deploy_agent_trigger_from_contract.yaml.
 
 The fix is structural rather than a field edit: this module constructs a
 ``ModelRebuildRequested`` and serialises **it**. A field added to, removed
@@ -37,15 +17,8 @@ A drift of the old kind is no longer expressible.
 TRANSPORT IS RESOLVED THE WAY THE AGENT RESOLVES IT
 ---------------------------------------------------
 
-The old script read unprefixed ``KAFKA_SASL_USERNAME`` /
-``KAFKA_SASL_PASSWORD``, while the .201 lane env file carries the dev SCRAM
-principal under ``DEV_``-prefixed names -- so its SASL block was silently
-skipped -- and both its ``kcat`` and ``rpk`` branches then hardcoded
-``SASL_SSL`` / ``PLAIN`` against a broker that has been ``SASL_PLAINTEXT`` +
-``SCRAM-SHA-256`` since 2026-09-07 (OMN-18012 Phase B). Neither tool is on
-PATH on .201, so resolution fell through to a third branch that published
-through ``docker exec ... rpk --brokers localhost:9092`` with **no
-authentication at all**.
+The old script skipped the prefixed SASL names and published without
+authentication (history in the same decision record).
 
 This module calls :func:`deploy_agent.kafka_config.load_deploy_agent_kafka_config_from_env`
 -- the same loader the agent itself starts from, prefix support included. There
@@ -72,6 +45,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import uuid
 from datetime import UTC, datetime
@@ -98,8 +72,6 @@ from deploy_agent.tracking_ref import (
 )
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
-logger = logging.getLogger(__name__)
-
 ENV_HMAC_SECRET = "DEPLOY_AGENT_HMAC_SECRET"
 
 PUBLISH_FLUSH_TIMEOUT_SECONDS = 30
@@ -122,6 +94,7 @@ def build_rebuild_command(
     image_digest: str | None = None,
     rollback: ModelRollbackDeclaration | None = None,
     open_pr: str = "",
+    overlay_ref: str = "",
     requested_at: datetime | None = None,
 ) -> ModelRebuildRequested:
     """Build the command as the contract model, resolving declared defaults.
@@ -144,6 +117,7 @@ def build_rebuild_command(
         image_digest=image_digest,
         rollback=rollback,
         open_pr=open_pr,
+        overlay_ref=overlay_ref,
         requested_at=requested_at,
     )
 
@@ -295,6 +269,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default="",
         help="Build an open PR's head (OMN-21928): <repo>#<number>@<head sha>.",
     )
+    parser.add_argument(
+        "--overlay-ref",
+        default="",
+        help="Overlays revision (40-hex) the dev job mounts (OMN-24216); dev only, needs a rollback declaration.",
+    )
     parser.add_argument("--requested-by", default="operator-manual")
     parser.add_argument("--correlation-id", default=None)
     parser.add_argument(
@@ -418,6 +397,20 @@ def _resolve_rollback(
     return ModelRollbackDeclaration(actor=actor, reason=reason)
 
 
+def _resolve_overlay_ref(
+    raw: str, runtime_lane: EnumRuntimeLane, rollback: ModelRollbackDeclaration | None
+) -> str:
+    """The overlays revision rides only on the dev lane, with a rollback declaration."""
+    if raw and not re.fullmatch(r"[0-9a-f]{40}", raw):
+        raise TriggerRefusedError("--overlay-ref must be a 40-hex sha (lowercase).")
+    if raw and (runtime_lane is not EnumRuntimeLane.DEV or rollback is None):
+        raise TriggerRefusedError(
+            "--overlay-ref needs --runtime-lane dev with --rollback-actor and "
+            "--rollback-reason; the declaration names who asked and the revision to return to."
+        )
+    return raw
+
+
 def _resolve_git_ref(raw: str | None) -> str:
     if raw:
         return raw
@@ -451,6 +444,7 @@ def main(argv: list[str] | None = None) -> int:
                 "--runtime-lane prod requires --image-digest sha256:...\n"
                 "       Production deploys the exact stability-proven digest."
             )
+        rollback = _resolve_rollback(args.rollback_actor, args.rollback_reason)
         command = build_rebuild_command(
             git_ref=_resolve_git_ref(args.git_ref),
             runtime_lane=runtime_lane,
@@ -461,8 +455,9 @@ def main(argv: list[str] | None = None) -> int:
             services=list(args.services),
             image_ref=args.image_ref,
             image_digest=args.image_digest,
-            rollback=_resolve_rollback(args.rollback_actor, args.rollback_reason),
+            rollback=rollback,
             open_pr=args.open_pr,
+            overlay_ref=_resolve_overlay_ref(args.overlay_ref, runtime_lane, rollback),
             # OMN-19270: the moment this command was requested, signed. A
             # deliberate request is never superseded, so this is the record's
             # honest publish time rather than a lever.
@@ -481,6 +476,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"runtime_lane:   {command.runtime_lane.value}")
     print(f"scope:          {command.scope.value}")
     print(f"build_source:   {command.build_source.value}")
+    print(f"overlay_ref:    {command.overlay_ref or '(none)'}")
     print(f"correlation_id: {command.correlation_id}")
     print(f"requested_by:   {command.requested_by}")
     if command.rollback is not None:
