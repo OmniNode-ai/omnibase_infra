@@ -57,3 +57,12 @@ dod_evidence:
         check_value: "test \"$(grep -cE '^      - \\$\\{STABILITY_TEST_REDPANDA_ADVERTISED_(KAFKA|PANDAPROXY)_ADDR:\\?' docker/docker-compose.stability-host-broker.yml)\" = 2"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn24429-ac3-hosted-stand-in
+    description: >-
+      Hosted stand-in for AC3, which is read on the running second machine and is not read yet. The advertised external port of the lane's own value and of a host's value equals the published broker port, and every value keeps the internal listener, which is what makes the address a client is handed one it can reach.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/infra/test_stability_host_advertised_addr.py -q -n 0 -p no:cacheprovider -k "published_port or internal_listener"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
