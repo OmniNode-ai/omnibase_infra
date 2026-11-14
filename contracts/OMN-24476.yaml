@@ -46,3 +46,6 @@ dod_evidence:
       - check_type: command
         check_value: uv run --frozen python scripts/render_runtime_policy_env.py --check-env-file docker/runtime-policy.env
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: bash -c '! docker ps --format "{{.Names}}" | grep -qx onex-api'
+        cwd: ${OMNI_HOME}/omnibase_infra
