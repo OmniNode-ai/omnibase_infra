@@ -1,0 +1,82 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24280
+title: "Remove the retired change-control repository from the lab-proof settings and exemption rule"
+summary: "The lab-proof settings drop the retired change-control repository: its registry entry, its proof row and the bot companion exemption rule, together with the exemption class, the companion rule model, the registry field and check, the classifier branch and the tests that existed only for it."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24280-retire-change-control-lab-proof
+    statement: The lab-proof registry names no retired repository for the change-control repository, every active repository keeps its proof row, and no code or test names the removed exemption rule.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the retirement scan over the repository names no retired repository in config/lab_proof_profiles.yaml -- falsifier: run retired_repository_findings from node_host_reconcile_effect over the repository root at the base commit and see an onex_change_control finding for config/lab_proof_profiles.yaml, then at the change head and see none'
+      - id: AC2
+        statement: 'AC2: the lab-proof registry still validates and every active repository keeps its proof row -- falsifier: pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py tests/integration/lab_proof -q'
+      - id: AC3
+        statement: 'AC3: no code or test names the removed exemption rule -- falsifier: grep for bot_change_control_companion and change_control_companion under src, scripts and tests and see no match'
+      - id: AC4
+        statement: 'AC4: integrated: the unit onex-host-reconcile on h051 reports no retired-repository-targets line for any omnibase_infra file on its next run after the change reaches that host -- falsifier: the unit''s out log for that run still names a file under the omnibase_infra checkout in a retired-repository-targets line'
+evidence_requirements:
+  - kind: tests
+    description: The lab-proof registry validator tests and the lab-proof integration tests pass at the head.
+    command: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py tests/integration/lab_proof -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24280-registry-tests
+    description: The registry validator tests and the lab-proof integration tests pass at the head, so every active repository keeps its proof row.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py tests/integration/lab_proof -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24280-registry-validates
+    description: The committed registry validates with the retired repository's entry and proof row removed.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: uv run python scripts/ci/validate_lab_proof_profiles.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24280-no-exemption-rule-name
+    description: No file under src, scripts or tests names the removed exemption rule.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: sh -c '! grep -rnE "bot_change_control_companion|change_control_companion" src scripts tests'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24280-retirement-scan
+    description: The retirement scan from node_host_reconcile_effect over the repository root reports no finding for config/lab_proof_profiles.yaml naming onex_change_control. It reads the omnimarket checkout, so it runs on a host that has one.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: sh -c 'cd "$OMNI_HOME/omnimarket" && .venv/bin/python -I -c "import sys; sys.path.insert(0, \"src\"); from pathlib import Path; from omnimarket.nodes.node_host_reconcile_effect.handlers.retired_repositories import retired_repository_findings, load_retirement_policy; found = [f for f in retired_repository_findings(Path(sys.argv[1]), load_retirement_policy()) if f.repository == \"onex_change_control\"]; print(found); raise SystemExit(1 if found else 0)" "$OMNI_HOME/omnibase_infra"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24280-host-reconcile-log
+    description: After the change reaches the host and the unit onex-host-reconcile has run again, the newest part of its out log holds no retired-repository-targets line naming a file under the omnibase_infra checkout. It reads the unit's own log on the host, so it holds only on a host that has run the unit after the change, and not before the retired compat package change also merges.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: sh -c '! tail -n 400 "$OMNI_HOME/.onex_state/host-reconcile/host-reconcile.out.log" | grep -E "retired-repository-targets.*omnibase_infra"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24280-registry-names-no-retired-repository
+    description: The registry file and its loaded rows name no onex_change_control entry, the hosted precondition of the retirement scan finding nothing in config/lab_proof_profiles.yaml (AC1) and of the host reconcile unit reading no retired-repository-targets line for an omnibase_infra file (AC4, which also needs the retired compat package change merged and the unit's next run).
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC1, AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k retired_change_control
+        cwd: ${OMNI_HOME}/omnibase_infra

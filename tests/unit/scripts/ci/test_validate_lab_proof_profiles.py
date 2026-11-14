@@ -42,8 +42,6 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[4]
 REGISTRY = REPO_ROOT / "config" / "lab_proof_profiles.yaml"
 SCRIPT = REPO_ROOT / "scripts" / "ci" / "validate_lab_proof_profiles.py"
-OCC = "OmniNode-ai/onex_change_control"
-OCC_BOT = "onexbot-occ-writer[bot]"
 
 
 def _raw() -> dict[str, Any]:
@@ -104,12 +102,20 @@ def test_committed_registry_has_the_two_exempt_documentation_repos() -> None:
 def test_docker_profiles_exclude_the_script_only_host() -> None:
     registry = load_lab_proof_profile_registry(REGISTRY)
     runtime = registry.profile_for("OmniNode-ai/omnibase_infra").variants[0]
-    scripts = registry.profile_for(registry.change_control_companion.repo).variants[0]
+    scripts = [
+        variant
+        for profile in registry.profiles
+        for variant in profile.variants
+        if variant.proof_kind == "script_replay" and variant.host_selector is not None
+    ]
     assert runtime.host_selector is not None
-    assert scripts.host_selector is not None
-    script_only_hosts = set(scripts.host_selector.allowed_hosts) - set(
-        runtime.host_selector.allowed_hosts
-    )
+    assert scripts
+    script_only_hosts: set[str] = set()
+    for variant in scripts:
+        assert variant.host_selector is not None
+        script_only_hosts |= set(variant.host_selector.allowed_hosts) - set(
+            runtime.host_selector.allowed_hosts
+        )
     assert len(script_only_hosts) == 1
     checked = 0
     for profile in registry.profiles:
@@ -139,8 +145,16 @@ def test_runtime_profile_reuses_hosts_without_changing_script_profiles() -> None
         and variant.host_selector is not None
         and len(variant.host_selector.allowed_hosts) == 3
     ]
-    assert len(script_selectors) == 2
-    assert script_selectors[0].allowed_hosts == script_selectors[1].allowed_hosts
+    assert len(script_selectors) == 1
+
+
+def test_registry_names_no_retired_change_control_repository() -> None:
+    """The retirement scan refuses a registry list naming a retired repository."""
+    retired = "onex_change_control"
+    registry = load_lab_proof_profile_registry(REGISTRY)
+    assert not any(retired in repo for repo in registry.registry_repos)
+    assert not any(retired in profile.repo for profile in registry.profiles)
+    assert retired not in REGISTRY.read_text(encoding="utf-8")
 
 
 def test_script_exits_zero_on_the_committed_registry() -> None:
@@ -240,20 +254,10 @@ def test_a_not_safe_row_that_runs_something_is_refused() -> None:
         ModelLabProofProfileRegistry.model_validate(data)
 
 
-def test_an_exemption_class_outside_the_ruled_two_is_refused() -> None:
+def test_an_exemption_class_outside_the_ruled_set_is_refused() -> None:
     data = _raw()
     data["profiles"][0]["exempt_classes"] = ["docs_only", "workflow_only"]
     with pytest.raises(ValidationError):
-        ModelLabProofProfileRegistry.model_validate(data)
-
-
-def test_the_companion_exemption_is_refused_outside_the_change_control_repo() -> None:
-    data = _raw()
-    data["profiles"][0]["exempt_classes"] = [
-        "docs_only",
-        "bot_change_control_companion",
-    ]
-    with pytest.raises(ValidationError, match="only valid on"):
         ModelLabProofProfileRegistry.model_validate(data)
 
 
@@ -289,49 +293,6 @@ def test_documentation_diff_plus_one_source_file_is_not_exempt(
     )
     assert not decision.exempt
     assert decision.exempt_class is None
-
-
-def test_bot_change_control_companion_is_exempt(
-    registry: ModelLabProofProfileRegistry,
-) -> None:
-    decision = classify_exemption(
-        registry,
-        OCC,
-        [
-            "contracts/OMN-19543.yaml",
-            "drift/dod_receipts/OMN-19543/dod-pr-4118/command.yaml",
-        ],
-        OCC_BOT,
-    )
-    assert decision.exempt
-    assert decision.exempt_class is EnumLabProofExemptClass.BOT_CHANGE_CONTROL_COMPANION
-
-
-def test_human_authored_change_control_contract_is_not_exempt(
-    registry: ModelLabProofProfileRegistry,
-) -> None:
-    decision = classify_exemption(
-        registry,
-        OCC,
-        [
-            "contracts/OMN-19543.yaml",
-            "drift/dod_receipts/OMN-19543/dod-pr-4118/command.yaml",
-        ],
-        "jonahgabriel",
-    )
-    assert not decision.exempt
-
-
-def test_bot_pr_that_also_touches_a_prod_grant_is_not_exempt(
-    registry: ModelLabProofProfileRegistry,
-) -> None:
-    decision = classify_exemption(
-        registry,
-        OCC,
-        ["contracts/OMN-16753.yaml", "grants/prod_promotion_grants.yaml"],
-        OCC_BOT,
-    )
-    assert not decision.exempt
 
 
 def test_empty_diff_is_never_exempt(registry: ModelLabProofProfileRegistry) -> None:
@@ -409,37 +370,6 @@ def test_documentation_diff_plus_a_workflow_file_is_not_exempt(
     )
     assert not decision.exempt
     assert decision.proof_kind is not EnumLabProofKind.EXEMPT
-
-
-@pytest.mark.parametrize(
-    "paths",
-    [
-        [".github/workflows/ci.yml"],
-        ["contracts/OMN-1.yaml", ".github/workflows/ci.yml"],
-    ],
-)
-def test_bot_change_control_diff_with_a_workflow_file_is_not_exempt(
-    registry: ModelLabProofProfileRegistry, paths: list[str]
-) -> None:
-    decision = classify_exemption(
-        registry, registry.change_control_companion.repo, paths, OCC_BOT
-    )
-    assert not decision.exempt
-    assert decision.proof_kind is not EnumLabProofKind.EXEMPT
-    if paths == [".github/workflows/ci.yml"]:
-        assert decision.proof_kind is EnumLabProofKind.SCRIPT_REPLAY
-
-
-def test_bot_change_control_contract_without_a_workflow_file_is_exempt(
-    registry: ModelLabProofProfileRegistry,
-) -> None:
-    decision = classify_exemption(
-        registry,
-        registry.change_control_companion.repo,
-        ["contracts/OMN-1.yaml"],
-        OCC_BOT,
-    )
-    assert decision.exempt
 
 
 def _knowledge_base_exempt_variant(data: dict[str, Any]) -> dict[str, Any]:

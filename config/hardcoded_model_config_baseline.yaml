@@ -316,9 +316,6 @@ entries:
     content_sha1: d75368d40c0774479c3fa6952067f2e299bd1470
   - path: config/lab_proof_profiles.yaml
     family: E-LAN
-    content_sha1: d75368d40c0774479c3fa6952067f2e299bd1470
-  - path: config/lab_proof_profiles.yaml
-    family: E-LAN
     content_sha1: e68c9a03aacf423c43e90393b0e9e229b88da765
   - path: config/lab_proof_profiles.yaml
     family: E-LAN

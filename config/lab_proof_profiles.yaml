@@ -8,10 +8,9 @@
 #   verbatim: "OK so it seems to me like we need to start using this for all PR's
 #   not just one set change the runtime". Every code PR gets a lab proof on a lab
 #   host before merge, through a per-repository proof profile declared as data.
-#   Documentation-only PRs and bot change-control companions are exempt by
-#   default. Enforcement follows proof: `enforce` stays false until the bar in
-#   plan section 6 is met for the row's profile_version, and the typed model
-#   refuses `enforce: true` until the receipt projection that records the bar
+#   Documentation-only PRs are exempt by default. Enforcement follows proof:
+#   `enforce` stays false until the bar in plan section 6 is met for the row's
+#   profile_version, and the typed model refuses `enforce: true` until the receipt projection that records the bar
 #   exists (OMN-19566, OMN-19584).
 #   Plan: knowledge-base-internal beta/plans/2026-09-25-lab-proof-for-every-pr-plan.md.
 #
@@ -59,7 +58,6 @@ registry_repos:
   - OmniNode-ai/omnidash
   - OmniNode-ai/omniweb
   - OmniNode-ai/omninode_infra
-  - OmniNode-ai/onex_change_control
   - OmniNode-ai/omni_home
   - OmniNode-ai/knowledge_base
   - OmniNode-ai/knowledge-base-internal
@@ -69,19 +67,6 @@ registry_repos:
 excluded_repos:
   - repo: OmniNode-ai/omnidash-archived
     reason: "archived legacy dashboard; takes no pull requests"
-# A bot-authored change-control companion: the change-control bot, in the
-# change-control repository, touching only contract, receipt, binding and
-# evidence data. Grants are deliberately NOT companion paths: a prod grant is a
-# CODEOWNERS-reviewed change (CLAUDE.md rule 2a), never an automatic exemption.
-change_control_companion:
-  repo: OmniNode-ai/onex_change_control
-  authors:
-    - "onexbot-occ-writer[bot]"
-  path_globs:
-    - "contracts/OMN-*.yaml"
-    - "drift/dod_receipts/**"
-    - "drift/occ_bindings/**"
-    - "evidence/**"
 profiles:
   - profile_key: omnibase_infra.runtime_and_scripts
     # 2 (OMN-19566): changed_path_live and forwarder_refused_topic moved from
@@ -435,35 +420,6 @@ profiles:
         status: not_safe
         status_reason: "an apply mutates the shared .201 k3s, and no lab host has kind; a render-only check is CI, not a lab proof"
         execution: none
-  - profile_key: onex_change_control.script_replay
-    profile_version: 1
-    repo: OmniNode-ai/onex_change_control
-    exempt_classes: [docs_only, bot_change_control_companion]
-    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
-    enforce: false
-    variants:
-      - variant_key: validators
-        proof_kind: script_replay
-        status: live
-        status_reason: "the changed validator at head and at base over the same main corpus; read-only"
-        execution: manual_recipe
-        recipe_ref: "interim-recipes.md section F"
-        match:
-          base_branches: [dev, main]
-          include_globs: ["src/**", "scripts/**"]
-        host_selector:
-          allowed_hosts: ["192.168.86.202", "192.168.86.101", "192.168.86.105"]
-          required_tools: [git, uv]
-          min_free_mem_mib: 2048
-          max_load_ratio: 1.0
-        mandatory_checks:
-          - script_replay_read_only
-          - focused_tests
-        negative_control:
-          kind: base_rerun
-        timeout_minutes: 15
-        budget_minutes: 5
-        budget_basis: estimate
   - profile_key: omni_home.script_replay
     profile_version: 1
     repo: OmniNode-ai/omni_home
