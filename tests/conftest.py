@@ -68,9 +68,10 @@ import asyncio
 import inspect
 import logging
 import os
-from collections.abc import AsyncGenerator
+import subprocess
+from collections.abc import AsyncGenerator, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -239,6 +240,42 @@ def _strip_test_local_git_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_EDITOR", "true")
+
+
+@pytest.fixture(autouse=True)
+def _children_inherit_ld_library_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every child process the session's LD_LIBRARY_PATH (OMN-23967).
+
+    Many tests build a child environment from scratch (``env={"PATH": ...}``)
+    and so drop ``LD_LIBRARY_PATH``. On runners whose venv python is a
+    shared-libpython CPython the library is found only through that variable,
+    so such a child dies with exit 127. This wrapper copies the caller's
+    mapping and adds the session value only when the caller did not name the
+    key; an explicit value (even empty) or ``env=None`` is left alone, and the
+    caller's mapping is never mutated.
+    """
+    original_init = subprocess.Popen.__init__
+    # Position of ``env`` among the arguments after ``self``.
+    env_index = list(inspect.signature(original_init).parameters).index("env") - 1
+
+    def _patched_init(
+        self: subprocess.Popen[Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        env = kwargs.get("env")
+        if env is None and env_index < len(args):
+            env = args[env_index]
+        session_value = os.environ.get("LD_LIBRARY_PATH", "")
+        if isinstance(env, Mapping) and "LD_LIBRARY_PATH" not in env and session_value:
+            patched_env = {**env, "LD_LIBRARY_PATH": session_value}
+            if "env" in kwargs:
+                kwargs["env"] = patched_env
+            else:
+                args = (*args[:env_index], patched_env, *args[env_index + 1 :])
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess.Popen, "__init__", _patched_init)
 
 
 # Load environment variables from .env file at test session start
