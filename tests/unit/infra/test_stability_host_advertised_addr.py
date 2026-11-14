@@ -214,7 +214,12 @@ def test_seam_advertised_external_port_is_the_published_port() -> None:
         published[container_port] = host_port
     published_port = published[listen.group(1)]
 
-    for value in (_value_after(command, KAFKA_FLAG), HOST_KAFKA):
+    layer = _layer_command(HOST_ENV)
+    for value in (
+        _value_after(command, KAFKA_FLAG),
+        HOST_KAFKA,
+        _value_after(layer, KAFKA_FLAG),
+    ):
         external = [item for item in value.split(",") if item.startswith("external://")]
         assert len(external) == 1, value
         assert external[0].endswith(f":{published_port}"), (external, published_port)
@@ -223,8 +228,17 @@ def test_seam_advertised_external_port_is_the_published_port() -> None:
 def test_every_value_keeps_the_internal_listener() -> None:
     """In-network clients reach the broker on the internal listener."""
     command = _command(BASE_FILE)
+    layer = _layer_command(HOST_ENV)
 
-    for value in (_value_after(command, KAFKA_FLAG), HOST_KAFKA):
+    for value in (
+        _value_after(command, KAFKA_FLAG),
+        HOST_KAFKA,
+        _value_after(layer, KAFKA_FLAG),
+    ):
         assert value.startswith("internal://redpanda:9092,")
-    for value in (_value_after(command, PANDAPROXY_FLAG), HOST_PANDAPROXY):
+    for value in (
+        _value_after(command, PANDAPROXY_FLAG),
+        HOST_PANDAPROXY,
+        _value_after(layer, PANDAPROXY_FLAG),
+    ):
         assert value.startswith("internal://redpanda:8082,")
