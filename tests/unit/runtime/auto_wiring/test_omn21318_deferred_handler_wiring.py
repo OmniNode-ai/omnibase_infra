@@ -504,3 +504,39 @@ async def test_roster_partition_accounts_for_deferred_contracts() -> None:
     assert partition.is_partition, partition.describe_violations()
     assert partition.attempted == ("node_in_use",)
     assert partition.excluded == ("node_idle",)
+
+
+def _raising_wirer(
+    _manifest: ModelAutoWiringManifest,
+    _engine: MessageDispatchEngine,
+    _bus: RecordingKafkaBus,
+) -> DeferredContractWirer:
+    """A first-request wiring step that raises instead of returning a row."""
+
+    async def wire(contract: ModelDiscoveredContract) -> ModelContractWiringResult:
+        raise RuntimeError(f"wiring {contract.name} blew up (test)")
+
+    return wire
+
+
+@pytest.mark.asyncio
+async def test_error_chain_a_start_that_raises_is_logged_and_attaches_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An exception out of a first-request start is logged, never lost or fatal."""
+    demand = FakeDemandSource(frozenset({ACTIVE}))
+    with patch(
+        "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+        side_effect=_recording_import([]),
+    ):
+        bus, _engine, _report, _exclusions, _results = await _boot(
+            demand, _raising_wirer
+        )
+        assert demand.on_first_record is not None
+        with caplog.at_level("ERROR"):
+            await demand.on_first_record(IDLE)
+            for _ in range(10):
+                await asyncio.sleep(0)
+
+    assert bus.joins == [(ACTIVE, None)]
+    assert any("ended with an exception" in r.getMessage() for r in caplog.records)

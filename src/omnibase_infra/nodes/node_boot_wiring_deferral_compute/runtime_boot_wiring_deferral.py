@@ -302,6 +302,16 @@ class BootWiringDeferral:
                     return
                 await asyncio.sleep(_wiring.DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS)
 
+        def _finish_start(done: asyncio.Task[None]) -> None:
+            """Forget a finished start; a start that raised is logged, never lost."""
+            tasks.discard(done)
+            if not done.cancelled() and done.exception() is not None:
+                logger.error(
+                    "Demand start: task '%s' ended with an exception (OMN-21318)",
+                    done.get_name(),
+                    exc_info=done.exception(),
+                )
+
         async def start(topic: str) -> None:
             for contract in by_topic.get(topic, ()):
                 if contract.name in started:
@@ -312,7 +322,7 @@ class BootWiringDeferral:
                     name=f"demand-start-{contract.name}",
                 )
                 tasks.add(task)
-                task.add_done_callback(tasks.discard)
+                task.add_done_callback(_finish_start)
 
         await self._relay.bind(start)
         logger.info(
