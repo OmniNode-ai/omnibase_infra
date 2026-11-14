@@ -4460,7 +4460,7 @@ jobs:
   # (1c9566e2c249) from the 14-tag bound until 2026-11-16 and nothing else; the migration
   # ticket OMN-22867 bumps that rev and deletes this input in the same change.
   dependency-pins:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261105190003-87a6f5ddcbcc
+    uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261110125852-e6bc5e13e9e7
     with:
       omnibase-core-ref: dev-20261109032923-9f0af2b9bd43
     permissions:
