@@ -630,6 +630,22 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_deploy_runners.HandlerActionArchiveCacheFill.runner_action_archive_cache_fill_f7ca7914": {
+      "category": "command",
+      "contract_name": "node_deploy_runners",
+      "event_model_module": "omnibase_infra.models.model_action_archive_cache_fill_request",
+      "event_model_name": "ModelActionArchiveCacheFillRequest",
+      "handler_id": "dispatcher.auto.node_deploy_runners.HandlerActionArchiveCacheFill.runner_action_archive_cache_fill_f7ca7914",
+      "handler_module": "omnibase_infra.handlers.handler_action_archive_cache_fill",
+      "handler_name": "HandlerActionArchiveCacheFill",
+      "message_types": [
+        "ModelActionArchiveCacheFillRequest",
+        "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}",
+        "platform.runner-tmp-prepare"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f": {
       "category": "command",
       "contract_name": "node_deploy_runners",
@@ -3832,10 +3848,10 @@
       "contracts_discovered": 179,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 103,
-      "probe_count": 1137,
-      "registered_dispatchers": 138,
-      "registered_routes": 121,
-      "type_scoped_dispatchers": 85
+      "probe_count": 1138,
+      "registered_dispatchers": 139,
+      "registered_routes": 122,
+      "type_scoped_dispatchers": 86
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3881,9 +3897,9 @@
       "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-11-13T00:18:19.882370+00:00",
+    "generated_at_utc": "2026-11-13T18:29:57.572267+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.47.76",
+      "omnibase-core": "0.47.73.dev9+ga09066ca",
       "omnibase-infra": "0.38.77",
       "omniclaude": null,
       "omniintelligence": null,
@@ -7701,6 +7717,26 @@
         "status": "success"
       },
       "topic": "${topic:contract:omnimarket.EVT_DELEGATE_SKILL_FAILED_V1}"
+    },
+    "P4::dispatcher.auto.node_deploy_runners.HandlerActionArchiveCacheFill.runner_action_archive_cache_fill_f7ca7914::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_deploy_runners.HandlerActionArchiveCacheFill.runner_action_archive_cache_fill_f7ca7914",
+      "event_model": "omnibase_infra.models.model_action_archive_cache_fill_request.ModelActionArchiveCacheFillRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runner-tmp-prepare",
+        "payload": "ModelActionArchiveCacheFillRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_deploy_runners.HandlerActionArchiveCacheFill.runner_action_archive_cache_fill_f7ca7914"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.runner-tmp-prepare",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}"
     },
     "P4::dispatcher.auto.node_deploy_runners.HandlerDeployRunners.runner_tmp_prepare_89d5038f::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
       "construct_only": true,
@@ -25965,6 +26001,16 @@
       "route_id": "route.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e.onex_evt_omnimarket_delegate_skill_completed_v1",
       "topic": "${topic:contract:omnimarket.EVT_DELEGATE_SKILL_COMPLETED_V1}",
       "topic_pattern": "*.evt.omnimarket.delegate-skill-completed.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_deploy_runners",
+      "dispatcher_id": "dispatcher.auto.node_deploy_runners.HandlerActionArchiveCacheFill.runner_action_archive_cache_fill_f7ca7914",
+      "handler_id": "dispatcher.auto.node_deploy_runners.HandlerActionArchiveCacheFill.runner_action_archive_cache_fill_f7ca7914",
+      "message_category": "command",
+      "route_id": "route.auto.node_deploy_runners.HandlerActionArchiveCacheFill.runner_action_archive_cache_fill_f7ca7914.onex_cmd_platform_runner_tmp_prepare_v1",
+      "topic": "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}",
+      "topic_pattern": "*.cmd.platform.runner-tmp-prepare.*",
       "type_scoped": true
     },
     {

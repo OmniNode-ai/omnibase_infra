@@ -105,6 +105,9 @@ x-runner-base: &runner-base
     # so uv hardlinks wheel contents into a venv instead of copying them. See the header.
     UV_CACHE_DIR: ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work/.uv-cache
     TMPDIR: ${RUNNER_USER_HOME:-/home/runner}/tmp
+    # OMN-24299: the runner reads this cache first and downloads an action
+    # archive from GitHub only when it is absent here (fail-open).
+    ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE: /opt/onex-action-archives
     # OMN-19998: the image's baked Actions tool cache (CPython preloaded), on a named volume per runner
     # so it is filled from the image on first start and survives a recreate. Same path as the Dockerfile's OMNI_TOOLCACHE_DIR.
     AGENT_TOOLSDIRECTORY: /opt/hostedtoolcache
@@ -114,6 +117,7 @@ x-runner-base: &runner-base
     - *runner-disk-admission-pause
     - *runner-lab-credentials
     - *lab-host-table
+    - /data/scratch/action-archives:/opt/onex-action-archives:ro
   group_add:
     - "988" # h051 docker group GID (getent group docker on the host, read 2026-10-29)
   healthcheck:
@@ -141,6 +145,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - /data/scratch/action-archives:/opt/onex-action-archives:ro
       - /data/scratch/cache/runners/1/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/1/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/1/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -164,6 +169,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - /data/scratch/action-archives:/opt/onex-action-archives:ro
       - /data/scratch/cache/runners/2/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/2/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/2/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -187,6 +193,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - /data/scratch/action-archives:/opt/onex-action-archives:ro
       - /data/scratch/cache/runners/3/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/3/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/3/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
@@ -210,6 +217,7 @@ services:
       - *runner-disk-admission-pause
       - *runner-lab-credentials
       - *lab-host-table
+      - /data/scratch/action-archives:/opt/onex-action-archives:ro
       - /data/scratch/cache/runners/4/pip:${RUNNER_USER_HOME:-/home/runner}/.cache/pip
       - /data/scratch/cache/runners/4/pre-commit:${RUNNER_USER_HOME:-/home/runner}/.cache/pre-commit
       - /data/scratch/cache/runners/4/pnpm:${RUNNER_USER_HOME:-/home/runner}/.cache/pnpm
