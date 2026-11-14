@@ -55,11 +55,11 @@ dod_evidence:
     binds_ac:
       - AC3
   - id: dod-omn24299-deploy-probe
-    description: 'Deploy probe: the branch carries the fill handler. This is a presence probe over the checked-out source, absent at the merge base, not the runtime proof; AC4 is read in the running runtime (a job log on a recreated runner) and recorded in the pull request Lab comment, because hosted CI cannot reach the lab.'
+    description: 'Deploy probe: the fill handler is read through the GitHub contents API at the checked-out commit (a live read, 404 at the merge base). This is a presence probe, absent at the merge base, not the runtime proof; AC4 is read in the running runtime (a job log on a recreated runner) and recorded in the pull request Lab comment, because hosted CI cannot reach the lab.'
     source: manual
     checks:
       - check_type: command
-        check_value: grep -c 'class HandlerActionArchiveCacheFill' src/omnibase_infra/handlers/handler_action_archive_cache_fill.py
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_action_archive_cache_fill.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "class HandlerActionArchiveCacheFill" > /dev/null'
         cwd: .
     binds_ac:
       - AC2
