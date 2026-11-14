@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-24341
 title: Let the development lane add the tenant column to the skill run table
 summary: >-
-  Child of OMN-19998. After the dev runtime rolled to omnimarket a379d63e35b6 (2026-11-14T00:29Z) the skill lifecycle writer was refused on every event with UndefinedColumnError (column tenant_id of relation skill_executions does not exist). The forward-migration job log read SKIP (operator-gated) for node:node_projection_skill_lifecycle:0002_grant_tenant_projection_writer_skill_executions.sql, the migration that adds the column and puts FORCE ROW LEVEL SECURITY and a tenant policy on the table. This change adds that id to the compose runner's dev arm release set (the baseline fence entry stays). It waits for the operator's ruling before the pull request is marked ready.
+  Child of OMN-19998. After the dev runtime rolled to omnimarket a379d63e35b6 (2026-11-14T00:29Z) the skill lifecycle writer was refused on every event with UndefinedColumnError (column tenant_id of relation skill_executions does not exist). The forward-migration job log read SKIP (operator-gated) for node:node_projection_skill_lifecycle:0002_grant_tenant_projection_writer_skill_executions.sql, the migration that adds the column and puts FORCE ROW LEVEL SECURITY and a tenant policy on the table. This change adds that id to the compose runner's dev arm release set (the baseline fence entry stays). Its authority is the OPERATOR-CONSENT row of 2026-09-14T12:11:31Z (tenant row-level security on TENANT-class migrations, lab first).
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []

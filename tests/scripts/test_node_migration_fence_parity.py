@@ -744,8 +744,8 @@ DEV_LANE_VALUE = "dev"
 # refusal was a writer defect, fixed by OMN-17627, not a property of the SQL.
 # OMN-24341: node_projection_skill_lifecycle 0002 joined this arm. The skill lifecycle
 # writer inserts skill_executions.tenant_id, which that migration adds; fenced, every
-# write is refused. It stays in the BASELINE fence like the others, and the release
-# waits for the operator's ruling.
+# write is refused. It stays in the BASELINE fence like the others; the release rests on
+# the OPERATOR-CONSENT row of 2026-09-14T12:11:31Z (tenant row-level security, lab first).
 LANE_RELEASED_IDS = (
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
     "node:node_projection_delegation:"

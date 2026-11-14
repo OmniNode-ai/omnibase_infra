@@ -942,7 +942,7 @@ fenced_node_migrations:
   # as written -- this id remains in the BASELINE. What changed is the compose
   # runner's own dev arm (scripts/run-forward-migrations.sh
   # LANE_RELEASED_NODE_MIGRATION_IDS), which un-gates this id on
-  # ONEX_MIGRATION_LANE=dev and on no other lane. The release waits for the
-  # operator's ruling before the pull request is marked ready.
+  # ONEX_MIGRATION_LANE=dev and on no other lane. Authority: the OPERATOR-CONSENT row of
+  # 2026-09-14T12:11:31Z (tenant row-level security on TENANT-class migrations, lab first).
   - id: "node:node_projection_skill_lifecycle:0002_grant_tenant_projection_writer_skill_executions.sql"
     ticket: "OMN-21933"

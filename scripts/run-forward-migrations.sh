@@ -817,8 +817,8 @@ case "${ONEX_MIGRATION_LANE}" in
     # skill_executions.tenant_id and puts FORCE ROW LEVEL SECURITY and a tenant policy on
     # the table. The skill lifecycle writer inserts tenant_id, so while the id is fenced
     # every write is refused with UndefinedColumnError. The baseline fence entry stays;
-    # the release is consulted only on ONEX_MIGRATION_LANE=dev, and it waits for the
-    # operator's ruling before the pull request is marked ready.
+    # the release is consulted only on ONEX_MIGRATION_LANE=dev. Authority: the OPERATOR-CONSENT
+    # row of 2026-09-14T12:11:31Z (tenant row-level security on TENANT-class migrations, lab first).
     LANE_RELEASED_NODE_MIGRATION_IDS="\
 node:node_projection_registration:0002_node_service_registry_tenant_rls.sql
 node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_isolation.sql
