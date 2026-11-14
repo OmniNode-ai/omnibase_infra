@@ -10,6 +10,9 @@ typed form of the same operation is ``HandlerVenvAtomicInstall``.
     exchange A B | supported | installed-commit | verify
     stage --python P --stage-dir D [--no-deps] [--label L] -- REQUIREMENT ...
     commit --python P --stage-dir D | rollback --stage-dir D | finalize --stage-dir D
+    staging-lock-acquire --path P --pid N | staging-lock-release --path P --pid N
+    staging-lock-held --path P
+    promote-floor --venv V --uv-lock L --workspace-root H --floor F [--changed]
 """
 
 from __future__ import annotations
@@ -47,14 +50,43 @@ def main(argv: list[str] | None = None) -> int:
             "finalize",
             "verify",
             "installed-commit",
+            "staging-lock-acquire",
+            "staging-lock-release",
+            "staging-lock-held",
+            "promote-floor",
         ],
     )
+    parser.add_argument("--path", type=Path)
+    parser.add_argument("--pid", type=int)
+    parser.add_argument("--venv", type=Path)
+    parser.add_argument("--uv-lock", type=Path)
+    parser.add_argument("--workspace-root", type=Path)
+    parser.add_argument("--floor", type=Path)
+    parser.add_argument("--changed", action="store_true")
     parser.add_argument("--python")
     parser.add_argument("--stage-dir", type=Path)
     parser.add_argument("--no-deps", action="store_true")
     parser.add_argument("--label", default="install")
     parser.add_argument("rest", nargs="*")
     args = parser.parse_intermixed_args(argv)
+    if args.command in (
+        "staging-lock-acquire",
+        "staging-lock-release",
+        "staging-lock-held",
+        "promote-floor",
+    ):
+        return int(
+            _load("dispatch_venv_promotion").run_promotion_command(
+                args.command.replace("-", "_"),
+                path=args.path,
+                pid=args.pid,
+                venv=args.venv,
+                uv_lock=args.uv_lock,
+                workspace_root=args.workspace_root,
+                floor=args.floor,
+                changed=args.changed,
+            )
+        )
     if args.command in ("verify", "installed-commit"):
         verify = _load("skill_install_verify")
         if args.command == "installed-commit":

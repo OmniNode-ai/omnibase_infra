@@ -6,7 +6,8 @@ The census guard refuses a generator map row for a lane the lane census does
 not declare (``orphan_map_entries``). The lab compose lane ``prod`` was retired
 on 2026-09-13 and its rows were removed; the ``judge`` compose project was taken
 down on 2026-10-21 and removed from the census the same day, and its two rows,
-left behind, made every pull request's lab-overlay parity check fail. This
+left behind, made every pull request's lab-overlay parity check fail. The
+``dashboard-owner`` lane's declaration was retired from the census (OMN-24214). This
 check needs no private overlay, so it runs in every split.
 """
 
@@ -28,7 +29,7 @@ from generate_claude_lane_block import (
     _LANE_PORT_MAP,
 )
 
-RETIRED_LANES = frozenset({"prod", "judge"})
+RETIRED_LANES = frozenset({"prod", "judge", "dashboard-owner"})
 
 
 @pytest.mark.parametrize("retired", sorted(RETIRED_LANES))

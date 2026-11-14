@@ -48,6 +48,7 @@ INCIDENT_FIELDS = {
     "recovery_verified",
     "recovery_skipped_healthy",
     "recovery_error",
+    "failed_phase",
     "runtime_kept_revision",
     "health_probes",
     "log_captures",
@@ -286,6 +287,28 @@ def test_an_unreadable_docker_start_time_is_the_fallback(raw: str | None) -> Non
     fallback = datetime(2000, 1, 1, tzinfo=UTC)
 
     assert docker_started_at(raw, fallback=fallback) == fallback
+
+
+def test_preflight_failure_sends_manifest_then_incident_with_failed_phase() -> None:
+    bus = _Bus()
+    DevRollEventsPublisher(bus, TOPICS).preflight_failure(
+        COMMAND,
+        error="Git remote unreachable",
+        phase="preflight",
+        project="omnibase-infra-dev",
+    )
+
+    assert [topic for topic, _k, _p in bus.sent] == [
+        TOPIC_DEV_ROLL_MANIFEST,
+        TOPIC_DEV_ROLL_INCIDENT,
+    ]
+    incident_payload = bus.sent[1][2]
+    assert incident_payload["issuer"] == "gha/omnimarket/pr-5942"
+    assert incident_payload["failed_phase"] == "preflight"
+    assert incident_payload["error"] == "Git remote unreachable"
+    assert incident_payload["recovery_verified"] is False
+    assert set(incident_payload) == INCIDENT_FIELDS
+    ModelDevRollIncident.model_validate(incident_payload)
 
 
 def test_the_agents_sender_creates_the_topic_then_produces(

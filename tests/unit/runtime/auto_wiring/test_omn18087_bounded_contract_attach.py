@@ -47,6 +47,7 @@ from tests.unit.runtime.auto_wiring.test_per_contract_boot_interleave import (
     _contract,
     _fake_handler_cls,
 )
+from tests.unit.runtime.test_omn18087_boot_bound_and_policy import LAB_COMMAND_NODES
 
 pytestmark = pytest.mark.unit
 
@@ -237,3 +238,67 @@ async def test_dev_main_policy_puts_the_work_ledger_query_responder_in_the_first
     priority_waves = bus.entered[: len(boot.priority_contracts)]
     assert query_topic in priority_waves
     assert not filler_topics.intersection(priority_waves)
+
+
+@pytest.mark.asyncio
+async def test_dev_main_policy_puts_the_lab_command_nodes_in_the_first_wave() -> None:
+    """The six lab command nodes answer run-node sends before the backlog.
+
+    The start-path census, host role baseline, both plugin revision nodes,
+    delegated code edit and delegation routing order are asked by ``onex
+    run-node`` with a 30 s to 60 s wait. On 2026-11-14 their consumers joined
+    141 s to 284 s after the container start, so a send made during a roll
+    waited unconsumed past the sender's wait (OMN-24426). The
+    boot policy names all six as priority contracts: even discovered last,
+    behind a dozen fillers, their consumers subscribe in the first wave,
+    ahead of every nonpriority contract.
+    """
+    policy_path = (
+        Path(__file__).resolve().parents[4]
+        / "contracts"
+        / "services"
+        / "runtime_policy.contract.yaml"
+    )
+    raw_policy = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    boot = (
+        ModelRuntimePolicyContract.model_validate(raw_policy)
+        .profiles["dev"]
+        .processes["main"]
+        .boot
+    )
+
+    lab_topics = {
+        f"onex.cmd.test.lab-command-{i}.v1" for i in range(len(LAB_COMMAND_NODES))
+    }
+    filler_topics = {f"onex.cmd.test.filler-{i}.v1" for i in range(12)}
+    pairs: list[tuple[str, str]] = [
+        (name, f"onex.cmd.test.priority-{i}.v1")
+        for i, name in enumerate(boot.priority_contracts)
+        if name not in LAB_COMMAND_NODES
+    ]
+    pairs.extend(
+        (f"node_filler_{i:02d}", f"onex.cmd.test.filler-{i}.v1") for i in range(12)
+    )
+    pairs.extend(
+        (name, f"onex.cmd.test.lab-command-{i}.v1")
+        for i, name in enumerate(LAB_COMMAND_NODES)
+    )
+
+    bus, task = await _boot_gated(
+        tuple(pairs),
+        ModelTopicReadinessConfig(
+            max_concurrent_contract_attach=boot.max_concurrent_contract_attach,
+            priority_contracts=boot.priority_contracts,
+        ),
+    )
+
+    await _yield_to_loop()
+    bus.release.set()
+    await asyncio.wait_for(task, timeout=30)
+
+    # The join limit is below the priority list's length, so the list fills the
+    # first waves of joins; the six lab command nodes must be inside them,
+    # ahead of every nonpriority contract.
+    first_wave = bus.entered[: len(boot.priority_contracts)]
+    assert lab_topics.issubset(first_wave)
+    assert not filler_topics.intersection(first_wave)

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import logging
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_dev_roll_events import (
         ProtocolDevRollEvents,
     )
+
+logger = logging.getLogger(__name__)
 
 _NODE = "src/omnibase_infra/nodes/node_dev_roll_events_effect"
 
@@ -114,3 +117,27 @@ def build_events_at(repo_root: Path) -> ProtocolDevRollEvents:
         agent_send(), {str(k): str(v) for k, v in topics.items()}
     )
     return publisher
+
+
+def announce_preflight_failure(
+    execution: ModuleType,
+    command: Mapping[str, JsonValue],
+    error: str,
+    phase: str,
+) -> None:
+    """Publish the preflight-failure events for a dev roll; never fails or delays a roll."""
+    try:
+        if str(command.get("runtime_lane")) != "dev":
+            return
+        module_file = execution.__file__
+        if not module_file:
+            raise RuntimeError("dev roll events need the deploy agent source location")
+        events = build_events_at(Path(module_file).resolve().parents[3])
+        lane = execution.lane_config_for(execution.EnumRuntimeLane.DEV)
+        events.preflight_failure(
+            command, error=error, phase=phase, project=lane.compose_project
+        )
+    except Exception:
+        logger.exception(
+            "dev preflight incident could not be announced friction_type=dev_event_publish_failed"
+        )

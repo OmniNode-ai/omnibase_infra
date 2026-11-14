@@ -819,15 +819,14 @@ def test_proven_reconcile_after_a_clone_advance_leaves_onex_runnable(
     assert "REFUSED" not in wrapped.stderr
 
 
-def test_default_reconcile_after_a_clone_advance_installs_past_the_floor_and_the_gate_refuses(
+def test_default_reconcile_after_a_clone_advance_cannot_leave_the_floor_behind(
     ws: _Workspace,
 ) -> None:
-    """OMN-17305, the measured mechanism and the gate's negative case.
+    """OMN-16932 supersedes the earlier negative case.
 
-    The same clone advance with the default repair mode installs the clone HEAD.
-    That commit is not the floor's, nothing restamps the floor on this path, and
-    the wrapper refuses the evidence command. The gate is not relaxed to accept
-    a descendant of the floor commit.
+    The default repair run installs the clone HEAD into the dispatch venv. The
+    plain install shim writes no dist-info, so the floor cannot be advanced
+    with the venv and the run must fail rather than leave the floor behind.
     """
     proven = ws.market_head
     newer = _advance(ws.omnimarket, "newer")
@@ -838,14 +837,9 @@ def test_default_reconcile_after_a_clone_advance_installs_past_the_floor_and_the
 
     proc = ws.run()
 
-    assert proc.returncode == _EXIT_OK, proc.stdout + proc.stderr
+    assert proc.returncode == _EXIT_FAILED, proc.stdout + proc.stderr
+    assert "floor" in proc.stdout + proc.stderr
     assert ws.install_refs() == [newer]
-    assert newer != proven
-    wrapped = _evidence_command_after_install(ws, ws.install_refs()[-1])
-    assert wrapped.returncode == _WRAPPER_EXIT_BELOW_FLOOR, (
-        wrapped.stdout + wrapped.stderr
-    )
-    assert "not the proven commit" in wrapped.stderr
 
 
 def test_proven_never_updates_head_under_a_detach_refusing_guard(

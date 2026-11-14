@@ -45,9 +45,6 @@ from omnibase_infra.event_bus.model_topic_readiness_config import (
 )
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
-from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
-    HandlerKafkaTopicDemandSource,
-)
 from omnibase_infra.models.projection.model_snapshot_topic_config import (
     ModelSnapshotTopicConfig,
 )
@@ -67,6 +64,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
+from tests.helpers.kafka_demand_source_container import demand_source_over_bus
 
 pytestmark = [pytest.mark.integration, pytest.mark.kafka]
 
@@ -290,7 +288,7 @@ async def _boot(
                 max_concurrent_contract_attach=1
             ),
             exclusions_out=exclusions,
-            demand_source=HandlerKafkaTopicDemandSource(bus.config),
+            demand_source=demand_source_over_bus(bus),
             demand_watch_stops_out=stops,
         )
 

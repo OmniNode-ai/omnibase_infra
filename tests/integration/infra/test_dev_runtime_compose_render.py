@@ -1418,7 +1418,7 @@ _SKILL_OVERLAY_ROOTS_HOST_VAR = "DEV_LANE_SKILL_OVERLAY_ROOTS_DIR"
 _OVERLAY_STORE_ROOT_TARGET = "/etc/onex/skill-overlays-store"
 _OVERLAY_STORE_ROOT_HOST_VAR = "DEV_LANE_OVERLAY_STORE_ROOTS_DIR"
 _SKILL_OVERLAY_ROOTS_VALUE = (
-    f"{_SKILL_OVERLAY_ROOTS_TARGET}:{_OVERLAY_STORE_ROOT_TARGET}"
+    f"{_OVERLAY_STORE_ROOT_TARGET}:{_SKILL_OVERLAY_ROOTS_TARGET}"
 )
 
 
@@ -1462,9 +1462,9 @@ def test_dev_lane_skill_overlay_roots_render_without_the_operator_variable() -> 
 
 
 @pytest.mark.integration
-def test_dev_lane_overlay_store_root_is_appended_after_the_frozen_root() -> None:
-    """The second overlay root is appended after the frozen one, so a document the
-    frozen root holds still wins and one it lacks resolves in the store root."""
+def test_dev_lane_overlay_store_root_is_ahead_of_the_frozen_root() -> None:
+    """The store root comes first, so its copy of a document wins; the frozen root
+    comes second and still serves a document the store lacks (OMN-24077)."""
     env = _render_env(
         DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
         **{
@@ -1477,8 +1477,8 @@ def test_dev_lane_overlay_store_root_is_appended_after_the_frozen_root() -> None
     effects = yaml.safe_load(result.stdout)["services"]["runtime-effects"]
 
     assert effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV).split(":") == [
-        _SKILL_OVERLAY_ROOTS_TARGET,
         _OVERLAY_STORE_ROOT_TARGET,
+        _SKILL_OVERLAY_ROOTS_TARGET,
     ]
 
     store_mounts = _mounts_at(effects, _OVERLAY_STORE_ROOT_TARGET)
@@ -1496,6 +1496,88 @@ def test_dev_lane_overlay_store_root_is_appended_after_the_frozen_root() -> None
     )
     (frozen_mount,) = frozen_mounts
     assert frozen_mount["source"] == "/srv/operator/skill-overlays"
+
+
+def _resolve_node_overlay_text(service: dict[str, Any], node_name: str) -> str | None:
+    """The overlay text the runtime's first root holding <node>/overlay.yaml gives.
+
+    Walks the service's ONEX_SKILL_OVERLAY_ROOTS in order and maps each container
+    root to the host directory mounted there, as the reader does inside the runtime.
+    """
+    for root in service["environment"][_SKILL_OVERLAY_ROOTS_ENV].split(":"):
+        (mount,) = _mounts_at(service, root)
+        candidate = Path(mount["source"]) / node_name / "overlay.yaml"
+        if candidate.is_file():
+            return candidate.read_text(encoding="utf-8")
+    return None
+
+
+def _write_shadowed_overlay_roots(tmp_path: Path) -> tuple[Path, Path]:
+    """A frozen root and a store root that both hold node_swarm_registry_compute."""
+    frozen, store = tmp_path / "frozen", tmp_path / "store"
+    for root, host, port in ((frozen, "frozen", 8002), (store, "store", 8100)):
+        node_dir = root / "node_swarm_registry_compute"
+        node_dir.mkdir(parents=True)
+        (node_dir / "overlay.yaml").write_text(
+            f'endpoints: {{embedding: "http://{host}:{port}"}}\n', encoding="utf-8"
+        )
+    return frozen, store
+
+
+@pytest.mark.integration
+def test_dev_lane_resolves_a_shadowed_node_overlay_to_the_store_copy(
+    tmp_path: Path,
+) -> None:
+    """OMN-24077: with a stale frozen copy and a newer store copy of one node's
+    overlay, the runtime-effects root order resolves the store copy (the failing
+    control: the frozen-first order resolves the frozen copy)."""
+    frozen, store = _write_shadowed_overlay_roots(tmp_path)
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **{
+            _SKILL_OVERLAY_ROOTS_HOST_VAR: str(frozen),
+            _OVERLAY_STORE_ROOT_HOST_VAR: str(store),
+        },
+    )
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    effects = yaml.safe_load(result.stdout)["services"]["runtime-effects"]
+
+    resolved = _resolve_node_overlay_text(effects, "node_swarm_registry_compute")
+    assert resolved == (store / "node_swarm_registry_compute/overlay.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "8100" in (resolved or "")
+
+
+@pytest.mark.integration
+def test_tenant_fold_resolves_a_shadowed_node_overlay_to_the_store_copy(
+    tmp_path: Path,
+) -> None:
+    """OMN-24077: the folded omninode-runtime service resolves the store copy of a
+    node overlay the frozen root also holds."""
+    frozen, store = _write_shadowed_overlay_roots(tmp_path)
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **{
+            _SKILL_OVERLAY_ROOTS_HOST_VAR: str(frozen),
+            _OVERLAY_STORE_ROOT_HOST_VAR: str(store),
+        },
+    )
+    result = _run_compose_config(
+        env,
+        profile="runtime",
+        with_dev_lane_overlay=True,
+        with_tenant_fold=True,
+    )
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    runtime = yaml.safe_load(result.stdout)["services"]["omninode-runtime"]
+
+    resolved = _resolve_node_overlay_text(runtime, "node_swarm_registry_compute")
+    assert resolved == (store / "node_swarm_registry_compute/overlay.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "8100" in (resolved or "")
 
 
 @pytest.mark.integration
@@ -1517,9 +1599,9 @@ def test_dev_lane_overlay_store_root_default_is_the_clone_beside_this_checkout()
 
 
 @pytest.mark.integration
-def test_tenant_fold_overlay_store_root_is_appended_after_the_frozen_root() -> None:
-    """The tenant-fold lane appends the store root after the frozen one, on the
-    omninode-runtime service that carries the folded effects role."""
+def test_tenant_fold_overlay_store_root_is_ahead_of_the_frozen_root() -> None:
+    """The tenant-fold lane puts the store root ahead of the frozen one, on the
+    omninode-runtime service that carries the folded effects role (OMN-24077)."""
     env = _render_env(
         DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
         **{
@@ -1537,8 +1619,8 @@ def test_tenant_fold_overlay_store_root_is_appended_after_the_frozen_root() -> N
     runtime = yaml.safe_load(result.stdout)["services"]["omninode-runtime"]
 
     assert runtime["environment"].get(_SKILL_OVERLAY_ROOTS_ENV).split(":") == [
-        _SKILL_OVERLAY_ROOTS_TARGET,
         _OVERLAY_STORE_ROOT_TARGET,
+        _SKILL_OVERLAY_ROOTS_TARGET,
     ]
 
     store_mounts = _mounts_at(runtime, _OVERLAY_STORE_ROOT_TARGET)

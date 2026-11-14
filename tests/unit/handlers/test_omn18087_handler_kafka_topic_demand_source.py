@@ -10,7 +10,12 @@ from collections.abc import Callable, Iterator
 import pytest
 from aiokafka.structs import TopicPartition
 
+from omnibase_core.container import ModelONEXContainer
+from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
+    ProtocolEventBusSubscriber,
+)
 from omnibase_infra.event_bus import kafka_transport
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.handlers import handler_kafka_topic_demand_source as module
 from omnibase_infra.handlers import kafka_idle_topic_watches
@@ -18,12 +23,13 @@ from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
     HandlerKafkaTopicDemandSource,
 )
 from omnibase_infra.handlers.kafka_idle_topic_watches import idle_watched_topics
+from tests.helpers.kafka_demand_source_container import demand_source_for
 
 pytestmark = pytest.mark.unit
 
-BUSY = "onex.cmd.test.busy.v1"
-IDLE = "onex.cmd.test.idle.v1"
-ABSENT = "onex.cmd.test.not-provisioned.v1"
+BUSY = "test.omn18087.busy"
+IDLE = "test.omn18087.idle"
+ABSENT = "test.omn18087.not-provisioned"
 
 
 class FakeConsumer:
@@ -130,9 +136,7 @@ def _isolated_idle_registry() -> Iterator[None]:
 
 
 def _source() -> HandlerKafkaTopicDemandSource:
-    return HandlerKafkaTopicDemandSource(
-        ModelKafkaEventBusConfig(bootstrap_servers="localhost:9092")
-    )
+    return demand_source_for("localhost:9092")
 
 
 async def test_split_watches_only_empty_readable_topics(
@@ -432,3 +436,115 @@ async def test_boot_set_of_unprovisioned_topics_starts_no_reader(
     assert in_use == {ABSENT}
     assert FakeConsumer.instances == []
     await stop()
+
+
+MEASURE_PREFIX = "Boot subscription demand measure: "
+
+
+def _measure_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith(MEASURE_PREFIX)
+    ]
+
+
+async def test_measure_logs_one_line_with_the_split_counts(
+    broker: dict[str, tuple[int, int]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """OMN-24223: retained, unreadable and idle-watched topics, in one line."""
+    broker.update({BUSY: (0, 5), IDLE: (3, 3)})
+
+    async def on_first(topic: str) -> None:
+        raise AssertionError("no record arrived")
+
+    with caplog.at_level("INFO", logger=module.logger.name):
+        in_use, stop = await _source().watch_idle_topics({BUSY, IDLE, ABSENT}, on_first)
+    try:
+        lines = _measure_lines(caplog)
+        assert lines == [
+            f"{MEASURE_PREFIX}topics=3 retained=1 unreadable=1 idle_watched=1 "
+            "(OMN-24223)"
+        ]
+        # The counts are the split's own answer: in use = retained + unreadable.
+        assert len(in_use) == 1 + 1
+    finally:
+        await stop()
+
+
+async def test_measure_counts_every_topic_unreadable_when_none_exists(
+    broker: dict[str, tuple[int, int]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A boot set with no provisioned topic is all unreadable and all in use."""
+
+    async def on_first(topic: str) -> None:
+        raise AssertionError("nothing is watched")
+
+    with caplog.at_level("INFO", logger=module.logger.name):
+        in_use, stop = await _source().watch_idle_topics({ABSENT, IDLE}, on_first)
+    try:
+        assert _measure_lines(caplog) == [
+            f"{MEASURE_PREFIX}topics=2 retained=0 unreadable=2 idle_watched=0 "
+            "(OMN-24223)"
+        ]
+        assert in_use == {ABSENT, IDLE}
+    finally:
+        await stop()
+
+
+async def test_measure_counts_a_namespaced_boot_set_by_contract_topic(
+    broker: dict[str, tuple[int, int]],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Under a lane namespace the counts are still one per contract topic."""
+    monkeypatch.setenv("KAFKA_TOPIC_NAMESPACE", "prepr9")
+    broker.update({f"prepr9.{BUSY}": (0, 2), f"prepr9.{IDLE}": (4, 4)})
+
+    async def on_first(topic: str) -> None:
+        raise AssertionError("no record arrived")
+
+    with caplog.at_level("INFO", logger=module.logger.name):
+        in_use, stop = await _source().watch_idle_topics({BUSY, IDLE}, on_first)
+    try:
+        assert _measure_lines(caplog) == [
+            f"{MEASURE_PREFIX}topics=2 retained=1 unreadable=0 idle_watched=1 "
+            "(OMN-24223)"
+        ]
+        assert in_use == {BUSY}
+    finally:
+        await stop()
+
+
+async def test_measure_line_is_logged_by_the_source_the_kernel_wires(
+    broker: dict[str, tuple[int, int]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """OMN-24223 AC3: the source built from a container that holds the bus logs it."""
+    container = ModelONEXContainer()
+    assert container.service_registry is not None
+    await container.service_registry.register_instance(
+        ProtocolEventBusSubscriber,
+        EventBusKafka(
+            config=ModelKafkaEventBusConfig(bootstrap_servers="localhost:9092")
+        ),
+    )
+    broker.update({BUSY: (0, 5), IDLE: (3, 3)})
+
+    async def on_first(topic: str) -> None:
+        raise AssertionError("no record arrived")
+
+    with caplog.at_level("INFO", logger=module.logger.name):
+        in_use, stop = await HandlerKafkaTopicDemandSource(container).watch_idle_topics(
+            {BUSY, IDLE, ABSENT}, on_first
+        )
+    try:
+        assert _measure_lines(caplog) == [
+            f"{MEASURE_PREFIX}topics=3 retained=1 unreadable=1 idle_watched=1 "
+            "(OMN-24223)"
+        ]
+        assert in_use == {BUSY, ABSENT}
+    finally:
+        await stop()

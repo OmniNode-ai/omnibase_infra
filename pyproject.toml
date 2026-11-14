@@ -275,7 +275,7 @@ override-dependencies = [
 [tool.uv.sources]
 # RULING 2026-10-29T01:50:26Z: iterate with a dev-merge TAG, verified by
 # core dev_tag_lineage; rev and branch pins remain refused.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261111183916-a85cb916d4c1" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261113013358-a09066caf945" }
 
 
 [tool.ruff]
@@ -487,6 +487,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "cost_estimator_build: exercises the real estimator build settings and host effect",
+    "llm_endpoint_env_render: exercises the real render of the dev lane embedding address from the llm_endpoints overlay",
     "live_contact(artifact): CI-tooling test consuming a recorded real API response or replay via recorded_response (OMN-18648)",
     "unit: Unit tests that test individual components in isolation",
     "integration: Integration tests that test multiple components together",
@@ -628,6 +629,7 @@ node_broker_principal_effect = "omnibase_infra.nodes.node_broker_principal_effec
 node_build_loop_projection_compute = "omnibase_infra.nodes.node_build_loop_projection_compute"
 node_build_loop_write_effect = "omnibase_infra.nodes.node_build_loop_write_effect"
 node_bus_forwarder_effect = "omnibase_infra.nodes.node_bus_forwarder_effect"
+node_c11_delegation_legs_effect = "omnibase_infra.nodes.node_c11_delegation_legs_effect"
 node_c16_pinned_backend_effect = "omnibase_infra.nodes.node_c16_pinned_backend_effect"
 node_chain_canary_effect = "omnibase_infra.nodes.node_chain_canary_effect"
 node_chain_orchestrator = "omnibase_infra.nodes.node_chain_orchestrator"

@@ -370,6 +370,7 @@ class TestHealthSurfaceUnchanged:
             "last_result",
             "pending_publish_count",
             "accept_backlog",
+            "hmac_key_check",  # OMN-24397
         }
 
     async def test_the_queue_route_is_get_only(self, aiohttp_client, tmp_path) -> None:  # type: ignore[no-untyped-def]

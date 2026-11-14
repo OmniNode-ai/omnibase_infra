@@ -40,6 +40,14 @@
 # has no business mutating. deploy_agent.lane_policy refuses to start when the
 # variable is unset — there is no default.
 #
+# DEPLOY_AGENT_FOLLOW_STABILITY=1 (OMN-21485) adds the stability lane to a lab
+# dev fence on purpose: this agent then keeps that lane on the omnimarket dev tag
+# the dev lane ran with a passing deploy record
+# (deploy_agent.idle_converge.decide_stability_follow), because
+# refresh_stability_lane.sh is refused from every remote lane and the pinned
+# release path has no tag that carries sibling staging. Prod is never added: a
+# fence naming prod is a prod agent, and lane_policy ignores the setting there.
+#
 # CONTROL-BUS TRANSPORT (declared, never inferred — OMN-18012)
 #
 # The dev-lane Redpanda EXTERNAL listener on :19092 has required SASL since
@@ -180,7 +188,7 @@ Environment=OMNI_HOME=/data/omninode
 Environment=UNIT_DRIFT_REGISTRY_ROOT=/data/omninode/omni_home
 # OMN-20637: same declaration as the host operator env used by stability refresh.
 Environment=DEPLOY_SOURCE_CLONE_ROOT=/data/omninode
-Environment="DEPLOY_AGENT_ENV_PROTECTED=PATH OMNI_HOME UNIT_DRIFT_REGISTRY_ROOT DEPLOY_SOURCE_CLONE_ROOT DEPLOY_AGENT_ENV_FILE DEPLOY_AGENT_PYTHON DEPLOY_AGENT_ENV_PROTECTED DEPLOY_AGENT_DIR DEPLOY_AGENT_STATE_DIR DEPLOY_AGENT_PORT DEPLOY_AGENT_TRACKING_REF DEPLOY_AGENT_ALLOWED_LANES ONEX_LEDGER_WRITE_VIA ONEX_LEDGER_HOST_NAME KAFKA_BOOTSTRAP_SERVERS KAFKA_ENVIRONMENT KAFKA_SECURITY_PROTOCOL KAFKA_SASL_MECHANISM KAFKA_SASL_ENV_PREFIX DEPLOY_AGENT_LANE_BUILDER DEPLOY_AGENT_OVERLAY_HOME_CLONE"
+Environment="DEPLOY_AGENT_ENV_PROTECTED=PATH OMNI_HOME UNIT_DRIFT_REGISTRY_ROOT DEPLOY_SOURCE_CLONE_ROOT DEPLOY_AGENT_ENV_FILE DEPLOY_AGENT_PYTHON DEPLOY_AGENT_ENV_PROTECTED DEPLOY_AGENT_DIR DEPLOY_AGENT_STATE_DIR DEPLOY_AGENT_PORT DEPLOY_AGENT_TRACKING_REF DEPLOY_AGENT_ALLOWED_LANES DEPLOY_AGENT_FOLLOW_STABILITY ONEX_LEDGER_WRITE_VIA ONEX_LEDGER_HOST_NAME KAFKA_BOOTSTRAP_SERVERS KAFKA_ENVIRONMENT KAFKA_SECURITY_PROTOCOL KAFKA_SASL_MECHANISM KAFKA_SASL_ENV_PREFIX DEPLOY_AGENT_LANE_BUILDER DEPLOY_AGENT_OVERLAY_HOME_CLONE"
 # OMN-21279: the host agent reports a failed dev boot even while the runtime
 # bus workers are down. The ledger writer is bus-only; its local ledger is a
 # read mirror, not a second ledger of record. The guard retains unacknowledged
@@ -192,6 +200,7 @@ Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs-dev
 Environment=DEPLOY_AGENT_PORT=8098
 Environment=DEPLOY_AGENT_TRACKING_REF=dev
 Environment=DEPLOY_AGENT_ALLOWED_LANES=dev
+Environment=DEPLOY_AGENT_FOLLOW_STABILITY=1
 # OMN-19211: lane image builds run on the dedicated builder declared as `lane` in
 # deploy/buildkit/builders.yaml, not on dockerd's embedded BuildKit.
 Environment=DEPLOY_AGENT_LANE_BUILDER=lane

@@ -168,6 +168,56 @@ class TestModelLlmEndpointEntry:
         with pytest.raises((ValidationError, TypeError)):
             entry.slot_id = "y"  # type: ignore[misc]
 
+    def test_lane_overlay_binding_requires_endpoint_from_overlay(self) -> None:
+        with pytest.raises(ValidationError, match="lane_overlay_binding"):
+            ModelLlmEndpointEntry(
+                slot_id="x",
+                role="embedding",
+                status="planned",
+                lane_overlay_binding={
+                    "backend": "local-embedding",
+                    "env_var": "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
+                },
+            )
+
+    def test_lane_overlay_binding_allowed_with_overlay(self) -> None:
+        entry = ModelLlmEndpointEntry(
+            slot_id="embeddings-201",
+            role="embedding",
+            status="running",
+            endpoint_from_overlay=True,
+            model_hf_id="test/model",
+            lane_overlay_binding={
+                "backend": "local-embedding",
+                "env_var": "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
+            },
+        )
+        assert entry.lane_overlay_binding is not None
+        assert entry.lane_overlay_binding.backend == "local-embedding"
+        assert (
+            entry.lane_overlay_binding.env_var == "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL"
+        )
+
+    def test_lane_overlay_binding_non_empty(self) -> None:
+        with pytest.raises(ValidationError):
+            ModelLlmEndpointEntry(
+                slot_id="x",
+                role="embedding",
+                status="planned",
+                endpoint_from_overlay=True,
+                model_hf_id="test/model",
+                lane_overlay_binding={"backend": "", "env_var": "X"},
+            )
+        with pytest.raises(ValidationError):
+            ModelLlmEndpointEntry(
+                slot_id="x",
+                role="embedding",
+                status="planned",
+                endpoint_from_overlay=True,
+                model_hf_id="test/model",
+                lane_overlay_binding={"backend": "b", "env_var": ""},
+            )
+
 
 # ---------------------------------------------------------------------------
 # ModelLlmEndpointContract

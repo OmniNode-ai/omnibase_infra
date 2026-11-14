@@ -16,10 +16,8 @@ from collections.abc import Callable, Coroutine
 import pytest
 from aiokafka import AIOKafkaProducer
 
-from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
-    HandlerKafkaTopicDemandSource,
-)
+from omnibase_infra.handlers import handler_kafka_topic_demand_source as handler_module
+from tests.helpers.kafka_demand_source_container import demand_source_for
 
 pytestmark = [pytest.mark.integration, pytest.mark.kafka, pytest.mark.asyncio]
 
@@ -44,9 +42,7 @@ async def test_split_and_first_record_against_real_broker(
         async def on_first(topic: str) -> None:
             started.append(topic)
 
-        source = HandlerKafkaTopicDemandSource(
-            ModelKafkaEventBusConfig(bootstrap_servers=bootstrap)
-        )
+        source = demand_source_for(bootstrap)
         in_use, stop = await source.watch_idle_topics({busy, idle}, on_first)
         try:
             assert in_use == {busy}
@@ -55,6 +51,49 @@ async def test_split_and_first_record_against_real_broker(
                 while not started:
                     await asyncio.sleep(0.1)
             assert started == [idle]
+        finally:
+            await stop()
+    finally:
+        await producer.stop()
+
+
+async def test_measure_counts_match_the_split_against_real_broker(
+    ensure_test_topic: Callable[[str, int], Coroutine[object, object, str]],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """OMN-24223: the logged counts equal the split's answer on a real broker."""
+    monkeypatch.delenv("KAFKA_TOPIC_NAMESPACE", raising=False)
+    bootstrap = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
+    suffix = uuid.uuid4().hex[:12]
+    busy = await ensure_test_topic(f"test.omn24223.busy.{suffix}", 1)
+    idle = await ensure_test_topic(f"test.omn24223.idle.{suffix}", 1)
+    missing = f"test.omn24223.missing.{suffix}"
+
+    producer = AIOKafkaProducer(bootstrap_servers=bootstrap)
+    await producer.start()
+    try:
+        await producer.send_and_wait(busy, b"already-there")
+
+        async def on_first(topic: str) -> None:
+            return None
+
+        source = demand_source_for(bootstrap)
+        with caplog.at_level("INFO", logger=handler_module.logger.name):
+            in_use, stop = await source.watch_idle_topics(
+                {busy, idle, missing}, on_first
+            )
+        try:
+            assert in_use == {busy, missing}
+            lines = [
+                record.getMessage()
+                for record in caplog.records
+                if record.getMessage().startswith("Boot subscription demand measure: ")
+            ]
+            assert lines == [
+                "Boot subscription demand measure: topics=3 retained=1 "
+                "unreadable=1 idle_watched=1 (OMN-24223)"
+            ]
         finally:
             await stop()
     finally:

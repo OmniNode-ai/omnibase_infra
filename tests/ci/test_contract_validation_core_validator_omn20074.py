@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from packaging.version import Version
 
 from scripts.ci.check_sibling_compatible_range import violations
 
@@ -182,8 +183,8 @@ def test_workflow_validates_at_the_locked_core_with_the_binds_ac_rules() -> None
     block = UV_LOCK.read_text(encoding="utf-8").split(
         'name = "omnibase-core"\nversion = "', 1
     )[1]
-    version = tuple(int(part) for part in block.split('"', 1)[0].split("."))
-    assert version >= CORE_WITH_BINDS_AC_RULES, version
+    version = Version(block.split('"', 1)[0])
+    assert version >= Version(".".join(map(str, CORE_WITH_BINDS_AC_RULES))), version
     manifest = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
     assert violations(manifest, "omnibase-core") == []
 

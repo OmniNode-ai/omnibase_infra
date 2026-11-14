@@ -1,0 +1,50 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24202
+title: "The ledger read command hides why it cannot pick the message bus"
+summary: "A work-ledger read refused because the lane declaration cannot be found now prints the refusal's reason (the declaration path and the variable to set) after the error name; a driver or broker refusal still prints no message."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24202-lane-selection-reason
+    statement: The work-ledger read refusal line carries the lane-selection reason and no driver or broker text.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a work-ledger read refused because the lane declaration cannot be found prints the reason after the error name, and the same test fails on the old command -- falsifier: uv run pytest tests/unit/models/test_work_ledger_read_refusal_lane_selection.py -q'
+      - id: AC2
+        statement: 'AC2: a refusal from the broker or driver still prints no message, so no credential can leak -- falsifier: uv run pytest tests/unit/models/test_work_ledger_read_refusal_lane_selection.py -q -k driver'
+      - id: AC3
+        statement: 'AC3: integrated: on lab host h053 the command with the config root unset prints the reason, and with it set returns the 2026-11-13T10:11:48Z ruling row -- falsifier: the printed line names only the error class, or the read with the setting returns no row'
+evidence_requirements:
+  - kind: tests
+    description: The refusal tests pass at the head and fail on the base model.
+    command: uv run pytest tests/unit/models/test_work_ledger_read_refusal_lane_selection.py tests/integration/cli/test_work_ledger_read_lane_selection_omn24202.py tests/unit/cli/test_work_ledger_query_client_omn20740.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24202-refusal-tests
+    description: The refusal tests and the existing work-ledger query client tests pass at the head.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/models/test_work_ledger_read_refusal_lane_selection.py tests/integration/cli/test_work_ledger_read_lane_selection_omn24202.py tests/unit/cli/test_work_ledger_query_client_omn20740.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24202-lane-selection-end-to-end
+    description: The command, the lane selection and the declaration reader run together with no lane declaration and the refusal line names the declaration path and the setting.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_work_ledger_read_lane_selection_omn24202.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24202-integration-proof-h053-read
+    description: On a lab host the read with the config root unset prints the refusal reason naming the declaration path and the variable.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: 'onex ledger query --help'
+        cwd: ${OMNI_HOME}/omnibase_infra

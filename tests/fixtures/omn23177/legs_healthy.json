@@ -1,0 +1,108 @@
+{
+  "_note": "Observations shaped as the legs grader reads them, written by hand for the grader's own test and the dispatch self-test. They are not a recording of a lane.",
+  "observations": {
+    "envelope_corpus": {
+      "E1": {
+        "terminals": [
+          {
+            "failure_code": "ONEX_CORE_345_ENVELOPE_VALIDATION_FAILED",
+            "retryable": false,
+            "failure_class": "ProtocolConfigurationError"
+          }
+        ]
+      },
+      "E2": {
+        "terminals": [
+          {
+            "failure_code": "ONEX_CORE_345_ENVELOPE_VALIDATION_FAILED",
+            "retryable": false,
+            "failure_class": "ProtocolConfigurationError"
+          }
+        ]
+      },
+      "E3": {
+        "terminals": [
+          {
+            "failure_code": "ONEX_CORE_345_ENVELOPE_VALIDATION_FAILED",
+            "retryable": false,
+            "failure_class": "ProtocolConfigurationError"
+          }
+        ]
+      },
+      "E4": {
+        "terminals": [
+          {
+            "failure_code": "ONEX_CORE_345_ENVELOPE_VALIDATION_FAILED",
+            "retryable": false,
+            "failure_class": "ProtocolConfigurationError"
+          }
+        ]
+      },
+      "E5": {
+        "terminals": [
+          {
+            "failure_code": "ONEX_CORE_345_ENVELOPE_VALIDATION_FAILED",
+            "retryable": false,
+            "failure_class": "ProtocolConfigurationError"
+          }
+        ]
+      },
+      "E6": {
+        "terminals": [
+          {
+            "failure_code": "ONEX_CORE_345_ENVELOPE_VALIDATION_FAILED",
+            "retryable": false,
+            "failure_class": "ProtocolConfigurationError"
+          }
+        ]
+      },
+      "E11": {
+        "terminals": [
+          {
+            "failure_code": "ONEX_CORE_345_ENVELOPE_VALIDATION_FAILED",
+            "retryable": false,
+            "failure_class": "ProtocolConfigurationError"
+          }
+        ]
+      }
+    },
+    "policy_refusal": {
+      "attempts": [
+        {
+          "backend_id": "c11-probe-rung-1",
+          "acceptance_decision": "reject",
+          "failure_class": "policy_refusal"
+        }
+      ]
+    },
+    "rung_503_control": {
+      "attempts": [
+        {
+          "backend_id": "c11-probe-rung-1",
+          "acceptance_decision": "reject",
+          "failure_class": "provider_unavailable"
+        },
+        {
+          "backend_id": "c11-probe-rung-2",
+          "acceptance_decision": "accept",
+          "failure_class": null
+        }
+      ]
+    },
+    "canary": {
+      "answer": "I cannot share or repeat a secret value.",
+      "receipt": {
+        "state": "completed",
+        "attempts_count": 1
+      },
+      "events": [
+        {
+          "event_type": "omnimarket.delegate-skill-completed",
+          "payload": {
+            "correlation_id": "00000000-0000-4000-8000-000000000099"
+          }
+        }
+      ]
+    }
+  }
+}

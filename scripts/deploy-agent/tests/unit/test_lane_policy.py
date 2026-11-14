@@ -16,6 +16,7 @@ from deploy_agent.consumer import TOPIC_REBUILD_REQUESTED
 from deploy_agent.events import EnumRuntimeLane
 from deploy_agent.lane_policy import (
     ENV_ALLOWED_LANES,
+    ENV_FOLLOW_STABILITY,
     LaneNotAllowedError,
     assert_lane_allowed,
     load_allowed_lanes_from_env,
@@ -56,6 +57,25 @@ def test_env_loader_is_required_with_no_default(
 def test_env_loader_reads_the_variable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(ENV_ALLOWED_LANES, "dev")
     assert load_allowed_lanes_from_env() == frozenset({EnumRuntimeLane.DEV})
+
+
+@pytest.mark.parametrize(
+    ("fence", "knob", "lanes"),
+    [
+        ("dev", "1", {EnumRuntimeLane.DEV, EnumRuntimeLane.STABILITY_TEST}),
+        ("dev", "", {EnumRuntimeLane.DEV}),
+        ("dev", "0", {EnumRuntimeLane.DEV}),
+        ("prod", "1", {EnumRuntimeLane.PROD}),
+        ("dev,prod", "1", {EnumRuntimeLane.DEV, EnumRuntimeLane.PROD}),
+    ],
+)
+def test_the_follow_setting_adds_the_stability_lane_to_a_lab_dev_fence_only(
+    monkeypatch: pytest.MonkeyPatch, fence: str, knob: str, lanes: set[EnumRuntimeLane]
+) -> None:
+    """OMN-21485: the knob never turns a prod fence into a lab one."""
+    monkeypatch.setenv(ENV_ALLOWED_LANES, fence)
+    monkeypatch.setenv(ENV_FOLLOW_STABILITY, knob)
+    assert load_allowed_lanes_from_env() == lanes
 
 
 def test_assert_allows_a_fenced_lane() -> None:

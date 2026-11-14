@@ -33,6 +33,7 @@ class ModelDevRollIncident(BaseModel):
     runtime_kept_revision: str | None = None
     health_probes: list[dict[str, JsonValue]]
     log_captures: list[ModelDevLogCapture] = Field(default_factory=list)
+    failed_phase: str | None = None
 
     @classmethod
     def from_guard_incident(

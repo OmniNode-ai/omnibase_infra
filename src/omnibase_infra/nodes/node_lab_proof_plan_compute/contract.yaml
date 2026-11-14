@@ -15,8 +15,7 @@
 # verbatim: "OK so it seems to me like we need to start using this for all PR's
 # not just one set change the runtime". The profile rows live in
 # config/lab_proof_profiles.yaml; this node renders the ones whose execution is
-# `node` (today: foundation_override, for omnibase_core, omnibase_spi and
-# omnibase_compat).
+# `node` (today: foundation_override, for omnibase_core and omnibase_spi).
 #
 # WHY THE BUNDLE FACTS ARE HERE. The proof boots the catalog's `local` bundle,
 # whose compose project, container names, image name and host ports are fixed
@@ -140,7 +139,6 @@ config:
     # Every foundation package and both consumers of them, imported inside the
     # runtime containers after the override.
     consumer_modules:
-      - "omnibase_compat"
       - "omnibase_core"
       - "omnibase_spi"
       - "omnibase_infra"

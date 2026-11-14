@@ -17,19 +17,15 @@ _ENV_KEY = "DEPLOY_AGENT_HMAC_SECRET"
 
 SIGNATURE_FIELD = "_signature"
 
+# OMN-24397: the label of the check value of the signing key. omnimarket's
+# node_deploy_agent_key_check_effect holds the same label and vector; both sides pin it.
+_KEY_CHECK_LABEL = b"deploy-agent-key-check-v1"
+
 
 def canonical_signing_body(envelope: dict[str, Any]) -> bytes:
-    """Return the exact bytes the signature is computed over.
+    """The exact bytes the signature covers: ONE definition for signer and verifier (OMN-16442).
 
-    ONE definition, used by both sides (OMN-16442). ``deploy-agent-trigger.sh``
-    used to carry its own copy of this rule in an embedded Python snippet, and a
-    unit test carried a THIRD copy that reproduced the snippet rather than
-    calling it -- so the test could not detect the snippet drifting away from
-    what this module accepts. It is a function now: the signer and the verifier
-    cannot disagree about the byte rule because there is only one.
-
-    ``sort_keys`` makes field order irrelevant; ``_signature`` is transport
-    metadata and is excluded so the rule is not self-referential.
+    ``sort_keys`` makes field order irrelevant; ``_signature`` is excluded.
     """
     body_dict = {k: v for k, v in envelope.items() if k != SIGNATURE_FIELD}
     return json.dumps(body_dict, sort_keys=True, separators=(",", ":")).encode()
@@ -40,6 +36,14 @@ def compute_signature(envelope: dict[str, Any], secret: str) -> str:
     return hmac.new(
         secret.encode(), canonical_signing_body(envelope), hashlib.sha256
     ).hexdigest()
+
+
+def hmac_key_check() -> str | None:
+    """One-way check value of the key in the environment (16 hex), or None without a key."""
+    secret = os.environ.get(_ENV_KEY, "")
+    if not secret:
+        return None
+    return hmac.new(secret.encode(), _KEY_CHECK_LABEL, hashlib.sha256).hexdigest()[:16]
 
 
 def sign_envelope(envelope: dict[str, Any], secret: str) -> dict[str, Any]:

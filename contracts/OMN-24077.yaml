@@ -1,0 +1,60 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24077
+title: "The dev runtime reads overlays from the overlays repository first"
+summary: "The development runtime found a node's overlay under the first of its two overlay roots, and that first root was a frozen private copy that shadowed 12 newer documents in the overlays repository (node_swarm_registry_compute named port 8002 there and 8100 in the repository). The compose files for the runtime-effects service and the folded omninode-runtime service now list the overlays repository root first and the frozen root second, so the repository copy of a document wins and the frozen root still serves a document the repository lacks."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24077-store-root-first
+    statement: ONEX_SKILL_OVERLAY_ROOTS in both dev compose files names /etc/onex/skill-overlays-store before /etc/onex/skill-overlays, so a node's overlay resolves to the overlays repository copy.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the development compose files list the overlays repository root before the frozen config root in ONEX_SKILL_OVERLAY_ROOTS, and a node's overlay resolved through that list equals the overlays repository copy -- falsifier: the compose render test that reads the variable and resolves node_swarm_registry_compute fails at the merge base"
+      - id: AC2
+        statement: "AC2: a draft change in the frozen repository deletes each shadowed overlay copy that nothing reads, and names each remaining copy with its reader -- falsifier: a copy listed as deleted still has a reader under tests or scripts of the frozen repository"
+      - id: AC3
+        statement: "AC3: integrated: after the development runtime rolls, node_swarm_registry_compute's overlay read inside the running runtime names the 8100 embedding entry -- falsifier: the in-runtime read names port 8002 or the runtime image revision predates the merge"
+evidence_requirements:
+  - kind: tests
+    description: The compose render overlay tests pass at the pushed head and the shadowed-overlay resolution tests fail at the base commit.
+    command: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k overlay
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24077-ac1
+    description: 'AC1: the rendered runtime-effects and omninode-runtime services list the store root first and a shadowed node overlay resolves to the store copy; at the base commit the same test resolves the frozen copy.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k overlay
+        cwd: .
+  - id: dod-omn24077-ac2
+    description: 'hosted proxy for AC2: the deletion is a draft pull request against the frozen repository, listed in the pull request body; this repository carries the compose change only.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k overlay
+        cwd: .
+  - id: dod-omn24077-ac3
+    description: 'hosted proxy for AC3: the compose render test passes here; the in-runtime read of node_swarm_registry_compute is taken after the deploy agent rolls the runtime and posted as a pull request comment naming the running image revision.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k overlay
+        cwd: .
+  - id: dod-omn24077-integration-proof
+    description: 'Run the compose render overlay tests on a lab host at the pushed head. Hosted CI cannot reach the lab, so only the local Done gate runs this unbound check.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-24077 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -n 0 --no-cov -k overlay

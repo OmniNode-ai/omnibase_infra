@@ -19,3 +19,12 @@ class ProtocolDevRollEvents(Protocol):
     def incident(
         self, guard_incident: Mapping[str, JsonValue], *, issuer: str
     ) -> None: ...
+
+    def preflight_failure(
+        self,
+        command: Mapping[str, JsonValue],
+        *,
+        error: str,
+        phase: str,
+        project: str,
+    ) -> None: ...

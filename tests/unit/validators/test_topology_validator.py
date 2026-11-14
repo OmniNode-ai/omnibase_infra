@@ -498,3 +498,31 @@ def test_main_exits_zero_on_clean_file(tmp_path: Path) -> None:
     }
     p = _write_yaml(tmp_path, data)
     assert main([str(p)]) == 0
+
+
+@pytest.mark.unit
+def test_overlay_slot_with_null_address_passes(tmp_path: Path) -> None:
+    """OMN-24017: an overlay-flagged running slot keeps its address fields null.
+
+    The address is read from the llm_endpoints overlay at run time, so the
+    public contract must not carry host/port/endpoint_url for the slot;
+    model_hf_id stays required.
+    """
+    data = {
+        "endpoints": [
+            {
+                "slot_id": "embeddings-201",
+                "host": None,
+                "port": None,
+                "endpoint_url": None,
+                "endpoint_from_overlay": True,
+                "url_env_var": "LLM_EMBEDDING_URL",
+                "role_env_alias": None,
+                "model_hf_id": "vendor/Embed",
+                "role": "embedding",
+                "status": "running",
+            }
+        ]
+    }
+    p = _write_yaml(tmp_path, data)
+    assert validate_topology_yaml(p) == []

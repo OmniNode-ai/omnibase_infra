@@ -14,12 +14,16 @@ node's other private facts already live in:
   lane identity, then the SASL environment a lab host or CI runner holds);
 * ``type: inmemory`` hosts the node in the caller's process and carries no transport.
 
-A missing overlay, an overlay with no ``event_bus``, a malformed block and a lane the declaration
-does not bind are refused with the overlay path. Nothing falls back to a default broker.
+The overlay is read from the roots ``ONEX_SKILL_OVERLAY_ROOTS`` declares first (the one overlay root
+resolver renders that list: store root, canonical overlays clone, declared roots), then from the
+workspace config root. A missing overlay, an overlay with no
+``event_bus``, a malformed block and a lane the declaration does not bind are refused with the
+overlay path. Nothing falls back to a default broker.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Final
 
@@ -53,6 +57,7 @@ from omnibase_infra.runtime.overlay.contract_env_ref import expand_contract_env_
 
 _EVENT_BUS_KEY: Final[str] = "event_bus"
 _KIND_NAMES: Final[tuple[str, str]] = ("kafka", "inmemory")
+_OVERLAY_ROOTS_ENV: Final[str] = "ONEX_SKILL_OVERLAY_ROOTS"
 
 
 def _workspace_root_from_environment() -> Path | None:
@@ -62,6 +67,21 @@ def _workspace_root_from_environment() -> Path | None:
         if value:
             return Path(value)
     return None
+
+
+def _declared_overlay_roots() -> tuple[str, ...]:
+    """The roots ``ONEX_SKILL_OVERLAY_ROOTS`` declares, in order: the selector every overlay reader takes.
+
+    The one overlay root resolver (omnimarket) is what renders that variable for a unit or a lane
+    (the overlay store root, then the canonical overlays clone, then any declared root), so this
+    handler reads the selector and builds no list of its own.
+    """
+    raw = expand_contract_env_refs(f"${{env.{_OVERLAY_ROOTS_ENV}}}")
+    return tuple(
+        str(Path(entry).expanduser())
+        for entry in raw.split(os.pathsep)
+        if entry.strip()
+    )
 
 
 class HandlerNodeBrokerResolve:
@@ -87,7 +107,9 @@ class HandlerNodeBrokerResolve:
 
     def handle(self, request: ModelNodeBrokerResolveRequest) -> ModelNodeBrokerBinding:
         """Read the node's overlay and resolve it to a binding, or raise with the overlay path."""
-        overlay_path = self._overlay_path(request)
+        overlay_path = self._roots_overlay(request)
+        if overlay_path is None:
+            overlay_path = self._overlay_path(request)
         declared = self._read_event_bus(request.overlay_key, overlay_path)
         if declared.type == EnumEventBusType.INMEMORY:
             return ModelNodeBrokerBinding(
@@ -96,6 +118,14 @@ class HandlerNodeBrokerResolve:
         return self._kafka_binding(
             str(declared.lane), request.workspace_root, overlay_path
         )
+
+    def _roots_overlay(self, request: ModelNodeBrokerResolveRequest) -> Path | None:
+        """The first overlay under the overlay roots, or None to fall back to the workspace root."""
+        for root in _declared_overlay_roots():
+            candidate = Path(root) / request.overlay_key / "overlay.yaml"
+            if candidate.is_file():
+                return candidate
+        return None
 
     def _overlay_path(self, request: ModelNodeBrokerResolveRequest) -> Path:
         relative = Path(

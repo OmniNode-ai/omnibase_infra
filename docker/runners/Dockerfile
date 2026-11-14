@@ -23,6 +23,13 @@ ARG OMNI_RUNNER_IMAGE_IDENTITY=unbound
 ARG OMNI_RUNNER_IMAGE_VERSION=0
 # Prebuilt shared CI env root baked into the image (matches ensure_ci_env.sh).
 ARG OMNI_CI_ENV_ROOT=/home/runner/.cache/omni/ci-envs
+# OMN-19998: CPython minor versions baked into the image as an Actions tool
+# cache (see the tool-cache block below) and the directory it lives in. A pool
+# opts in by pointing AGENT_TOOLSDIRECTORY at the directory in its compose
+# file; tests/ci/test_runner_python_toolcache_omn19998.py keeps the versions
+# equal to what the workflows ask for.
+ARG OMNI_TOOLCACHE_PYTHON_VERSIONS="3.12 3.13"
+ARG OMNI_TOOLCACHE_DIR=/opt/hostedtoolcache
 
 # Pinned digest for reproducible builds — update via: docker pull ubuntu:22.04
 FROM ubuntu:22.04@sha256:3ba65aa20f86a0fad9df2b2c259c613df006b2e6d0bfcc8a146afb8c525a9751 AS toolchain
@@ -36,6 +43,8 @@ ARG UV_VERSION
 ARG OMNI_RUNNER_IMAGE_IDENTITY
 ARG OMNI_RUNNER_IMAGE_VERSION
 ARG OMNI_CI_ENV_ROOT
+ARG OMNI_TOOLCACHE_PYTHON_VERSIONS
+ARG OMNI_TOOLCACHE_DIR
 # OMN-17477 -- multi-arch. Docker predeclares TARGETARCH as a global build arg
 # (`amd64` or `arm64`), but a build STAGE does not see a global ARG until it
 # redeclares it: without this line every `${TARGETARCH}` below expands to the
@@ -356,6 +365,41 @@ RUN groupadd --gid 1001 runner \
     && useradd --uid 1001 --gid runner --shell /bin/bash --create-home runner \
     && groupadd --force docker \
     && usermod -aG docker runner
+
+# OMN-19998 -- Actions tool cache preloaded with CPython. setup-python looks
+# for <tool cache>/Python/<x.y.z>/<arch> beside an `<arch>.complete` marker
+# and downloads CPython from GitHub when it finds none, which is what times
+# out on a runner that cannot reach GitHub quickly. This builds that layout
+# from the uv-managed builds (the same ones installed above), once, at image
+# build time, so a new runner starts with it on disk.
+#
+# WHY NOT UNDER _work/_tool, the default tool cache. Every pool's compose file
+# bind-mounts or tmpfs-mounts _work, and a mount hides whatever the image holds
+# at that path. The directory here is plain image content no mount covers. A
+# pool opts in with AGENT_TOOLSDIRECTORY=<this directory> plus a NAMED volume at
+# the same path: Docker fills an empty named volume from the image on its first
+# start, so the cache is preloaded and survives a recreate. The image's own
+# EXTERNALLY-MANAGED marker is removed from the copy: Actions tool-cache
+# Pythons do not carry it and a job may `pip install` into them.
+# `|| exit 1` per version: this shell has no -e, so a failed step inside the
+# loop would otherwise leave a silently incomplete cache.
+RUN export UV_PYTHON_INSTALL_DIR=/opt/uv-python \
+    && tc_arch_var="RUNNER_ARCH_${TARGETARCH}" && tc_arch="${!tc_arch_var}" \
+    && [ -n "${tc_arch}" ] || { echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1; } \
+    && for v in ${OMNI_TOOLCACHE_PYTHON_VERSIONS}; do \
+         { uv python install "${v}" \
+           && py="$(uv python find --managed-python "${v}")" \
+           && { "${py}" -m pip --version >/dev/null 2>&1 || "${py}" -m ensurepip; } \
+           && full="$("${py}" -c 'import platform; print(platform.python_version())')" \
+           && dest="${OMNI_TOOLCACHE_DIR}/Python/${full}" \
+           && mkdir -p "${dest}" \
+           && cp -a "$(dirname "$(dirname "${py}")")" "${dest}/${tc_arch}" \
+           && find "${dest}/${tc_arch}" -path '*/lib/python*/EXTERNALLY-MANAGED' -type f -delete \
+           && touch "${dest}/${tc_arch}.complete" \
+           && "${dest}/${tc_arch}/bin/python3" -c 'import sys; print(sys.version)'; \
+         } || exit 1; \
+       done \
+    && chown -R runner:runner "${OMNI_TOOLCACHE_DIR}"
 
 # Download and SHA256-verify the GitHub Actions runner binary.
 #

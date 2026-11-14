@@ -16,14 +16,14 @@ from packaging.requirements import Requirement
 from scripts.ci.check_sibling_compatible_range import violations
 
 ROOT = Path(__file__).resolve().parents[2]
-TAG = "dev-20261111183916-a85cb916d4c1"
-COMMIT = "a85cb916d4c1334b63877da178bbfbf3023f168a"
+TAG = "dev-20261113013358-a09066caf945"
+COMMIT = "a09066caf945cd79e13447d92ad42549f1019f78"
 # The published floor is the release that first ships every core module the infra
 # nodes import (OMN-21924: node_architecture_validator); the lock tracks the dev tag.
 VERSION = "0.47.62"
 # The floor the retained core recording was made against; the recording is not remade.
 RECORDED_FLOOR = "0.47.58"
-LOCKED_VERSION = "0.47.76"
+LOCKED_VERSION = "0.47.73.dev9+ga09066ca"
 GIT_URL = "https://github.com/OmniNode-ai/omnibase_core.git"
 
 
@@ -142,6 +142,11 @@ def test_ci_enforces_all_core_rules_and_keeps_cascade_identity_selection() -> No
         1
     ].split("- name:", 1)[0]
     assert "--package omnibase-core" in step
+    # The validator is the core this repository pins, read from pyproject.toml: a validator
+    # older than the pin cannot read a core that takes its version from git.
+    assert 'tomllib.load(open("pyproject.toml", "rb"))' in step
+    assert '"omnibase-core @ git+${CORE_REF}"' in step
+    assert "dev-2026" not in step
     assert "--rules" not in step
     assert "CORE_LINEAGE_RULES" not in step
     cascade = (ROOT / ".github/workflows/dependency-cascade.yml").read_text()

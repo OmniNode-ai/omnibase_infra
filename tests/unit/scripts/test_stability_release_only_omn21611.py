@@ -161,6 +161,14 @@ def _run_refresh(
     )
     if config_root is not None:
         env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(config_root)
+    # The refresh renders the embedding address from the llm_endpoints overlay and
+    # refuses without one (OMN-24119): a synthetic root, a documentation-range address.
+    overlay_root = tmp_path / "overlay-root"
+    (overlay_root / "llm_endpoints").mkdir(parents=True, exist_ok=True)
+    (overlay_root / "llm_endpoints" / "overlay.yaml").write_text(
+        "schema_version: 1\nendpoint_urls:\n  embeddings-201: http://192.0.2.50:8100\n"
+    )
+    env["ONEX_SKILL_OVERLAY_ROOTS"] = str(overlay_root)
     for key in ("ONEX_DEPLOY_REASON", "ONEX_DEPLOY_GRANT_ACK"):
         env.pop(key, None)
     if attributed:

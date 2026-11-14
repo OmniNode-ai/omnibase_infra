@@ -201,8 +201,19 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "handlers/handler_cost_estimator_build.py",
         "nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py",
         "nodes/node_setup_local_provision_effect/runtime_lane_env_overlay.py",
+        "models/contracts/enum_llm_endpoint_status.py",
+        "models/contracts/model_llm_endpoint_lane_overlay_binding.py",
+        "models/contracts/model_llm_endpoint_entry.py",
+        "models/contracts/model_llm_endpoint_contract.py",
+        "models/contracts/model_llm_endpoint_overlay.py",
+        "nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py",
+        "nodes/node_setup_local_provision_effect/runtime_overlay_revision.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
+        if module_name in sys.modules:
+            # Re-executing an already imported module would give its classes a second
+            # identity, so an exception raised by one copy fails isinstance on the other.
+            continue
         spec = importlib.util.spec_from_file_location(module_name, root / relative)
         if spec is None or spec.loader is None:
             raise RuntimeError(f"Cannot load dev boot effect: {relative}")
@@ -1843,6 +1854,16 @@ def _lane_env_overlay() -> dict[str, str]:
     return overlay
 
 
+def _llm_endpoint_env_overlay(
+    env: Mapping[str, str],
+) -> tuple[dict[str, str], str | None]:
+    """The dev lane's LLM endpoint env rendered from the llm_endpoints overlay (OMN-24025)."""
+    rendered: tuple[dict[str, str], str | None] = load_dev_boot_guard(
+        _LLM_ENV_MODULE
+    ).render_dev_lane(sys.modules[__name__], env)
+    return rendered
+
+
 class _ActiveDeployLane:
     """The lane of the job in flight, or ``None`` between jobs (OMN-19998).
 
@@ -1969,6 +1990,7 @@ def _assert_no_undecoded_ansi_c_quoting(env: Mapping[str, str]) -> None:
 #: ``${ONEX_LANE_OVERLAY_DIR}/${COMPOSE_PROJECT_NAME}.bifrost.yaml``. The overlays
 #: are private deployment config and no longer live in this repository.
 LANE_OVERLAY_DIR_ENV = "ONEX_LANE_OVERLAY_DIR"
+_LLM_ENV_MODULE = "nodes.node_setup_local_provision_effect.runtime_llm_endpoint_env"
 LANE_OVERLAY_RELATIVE_DIR = Path("config") / "lab" / "lane-overlays"
 
 
@@ -2058,6 +2080,12 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     # value the operator store holds for them; a key it leaves out keeps
     # whatever the store says, or stays unset.
     env.update(_lane_env_overlay())
+    # OMN-24025: the rendered LLM endpoint env wins over the operator store, like the lane
+    # fragment, and the compose mount reads the rewritten lane overlay directory.
+    llm_env, rendered_lane_overlay_dir = _llm_endpoint_env_overlay(env)
+    env.update(llm_env)
+    if rendered_lane_overlay_dir is not None:
+        env[LANE_OVERLAY_DIR_ENV] = rendered_lane_overlay_dir
     # OMN-18073: refuse before compose interpolation writes a provably-mangled
     # value into every container this deploy creates. Deliberately AFTER the
     # re-read above, so a mangled value arriving from the store is refused on
@@ -2610,12 +2638,6 @@ def settle_service_containers(
         _removal_wait_sleep(CONTAINER_REMOVAL_POLL_SECONDS)
 
 
-def _hit_removal_race(result: subprocess.CompletedProcess[str]) -> bool:
-    return result.returncode != 0 and REMOVAL_IN_PROGRESS in (
-        f"{result.stderr or ''}{result.stdout or ''}"
-    )
-
-
 def run_compose_recreate(
     argv: list[str],
     *,
@@ -2666,7 +2688,7 @@ def run_compose_recreate(
         if first.returncode == 0:
             return first
         settle()
-        if not _hit_removal_race(first):
+        if REMOVAL_IN_PROGRESS not in f"{first.stderr or ''}{first.stdout or ''}":
             return first
         logger.warning(
             "compose recreate of %s met a removal still in progress; settled "
@@ -3436,6 +3458,10 @@ class DeployExecutor:
         # OMN-21928: <repo>#<number>@<head sha> of the open pull request this
         # rebuild declares; rebuild_scope sets it from the signed command.
         self.declared_pr = ""
+        # OMN-21485: sibling repository -> the dev tag this rebuild stages in
+        # place of the sibling's newest one; rebuild_scope sets it from the
+        # signed command and _compose_build exports it to the staging script.
+        self.sibling_tags: dict[str, str] = {}
         # OMN-19220: ONE BUILD_DATE per rebuild, shared by every compose build
         # in it. Dockerfile.runtime declares ARG BUILD_DATE at the top of both
         # stages, so every RUN after it takes the value as build environment
@@ -3538,54 +3564,10 @@ class DeployExecutor:
 
     def validate_llm_endpoint_env_contract(self) -> None:
         """Fail runtime deploys when configured LLM endpoints drift from contract."""
-        script = f"{REPO_DIR}/scripts/check_llm_endpoint_env_contract.py"
-        venv_python = f"{REPO_DIR}/.venv/bin/python"
-        base_cmd = (
-            [venv_python, script]
-            if Path(venv_python).is_file()
-            else ["uv", "run", "--project", REPO_DIR, "python", script]
-        )
-
-        env_files: list[Path] = []
-        explicit_env_file = os.environ.get("OMNIBASE_ENV_FILE")
-        # OMN-19507: the store this agent was launched against, when the unit
-        # declares one, is the file its lane's compose reads. On .201 that is
-        # ~/.omnibase/.env itself; on another lab host (dev-200 on .200) the
-        # unit names the lane's own store, and ~/.omnibase/.env there is a
-        # workstation file the lane never reads, whose drift must not refuse
-        # the lane's deploy.
         operator_store = operator_env_file() or Path.home() / ".omnibase" / ".env"
-        fallback_candidates = [
-            operator_store,
-            Path(REPO_DIR) / ".env",
-        ]
-        candidates = (
-            [Path(explicit_env_file), *fallback_candidates]
-            if explicit_env_file
-            else fallback_candidates
+        load_dev_boot_guard(_LLM_ENV_MODULE).validate_env_contract(
+            sys.modules[__name__], operator_store, os.environ.get("OMNIBASE_ENV_FILE")
         )
-        for candidate in candidates:
-            if candidate.is_file() and candidate not in env_files:
-                env_files.append(candidate)
-        if explicit_env_file and not any(
-            f == Path(explicit_env_file) for f in env_files
-        ):
-            raise RuntimeError(
-                f"LLM endpoint env contract check failed: OMNIBASE_ENV_FILE does not exist: {explicit_env_file}"
-            )
-
-        commands = [base_cmd]
-        commands.extend([*base_cmd, "--env-file", str(path)] for path in env_files)
-        for cmd in commands:
-            result = _run(cmd, timeout=PHASE_TIMEOUTS[Phase.PREFLIGHT])
-            if result.returncode != 0:
-                source = "process environment"
-                if "--env-file" in cmd:
-                    source = cmd[cmd.index("--env-file") + 1]
-                raise RuntimeError(
-                    "LLM endpoint env contract check failed for "
-                    f"{source}: {result.stderr.strip() or result.stdout.strip()}"
-                )
 
     def self_update(
         self,
@@ -4648,6 +4630,7 @@ class DeployExecutor:
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         image_digest: str | None = None,
         declared_pr: str = "",
+        sibling_tags: Mapping[str, str] | None = None,
     ) -> list[str]:
         # OMN-16442: no self-update here. This method runs inside an accepted
         # job, after preflight/git/compose_gen/seed; a re-exec from this point
@@ -4661,6 +4644,9 @@ class DeployExecutor:
         # OMN-18057: residue is per-rebuild, not per-process.
         self.reset_deploy_observations()
         self.declared_pr = declared_pr
+        # OMN-21485: the per-sibling refs this rebuild stages instead of each
+        # sibling's newest dev tag; empty is the default follow.
+        self.sibling_tags = dict(sibling_tags or {})
 
         # prod deploys the stability-proven digest — it pulls the pinned image
         # and never rebuilds from a ref (the digest is the authority).
@@ -5458,27 +5444,27 @@ class DeployExecutor:
         omni_home: str,
         deploy_ref: str = "",
         sibling_fallback_ref: str = "",
+        sibling_tags: Mapping[str, str] | None = None,
     ) -> dict[str, str]:
-        """Stage sibling repos into the Docker build context for workspace mode.
-
-        Runs docker/runtime_build/stage_workspace.sh from the repo root so that
-        workspace/sibling-repos/ is populated before `docker compose build`.
-        Raises RuntimeError on failure.
-
-        OMN-16442: ``deploy_ref`` is the accepted command's own ``git_ref`` and
-        is exported as ``DEPLOY_REF`` for the staging script. The script's
-        OMN-17291 guard refuses to stage the AMBIENT host tree when
-        ``DEPLOY_REF`` is unset, and it was refusing correctly — the caller was
-        wrong. The command envelope carries the pin (``git_ref=origin/dev``,
-        resolved from ``DEPLOY_AGENT_TRACKING_REF``) and ``self_update`` had
-        already used it one step earlier, but it was dropped between the
-        consumer and the staging step, so the sibling build was asserted
-        against nothing. Measured live 2026-09-08 on command a5635af0:
-        ``Workspace staging failed (exit=5): ERROR: DEPLOY_REF unset``.
-
-        The guard STAYS. This passes the pin the operator supplied; it does not
-        weaken, skip, or opt out of the assertion. An empty ``deploy_ref`` is
-        """
+        # Stage sibling repos into the Docker build context for workspace mode.
+        #
+        # Runs docker/runtime_build/stage_workspace.sh from the repo root so that
+        # workspace/sibling-repos/ is populated before `docker compose build`.
+        # Raises RuntimeError on failure.
+        #
+        # OMN-16442: ``deploy_ref`` is the accepted command's own ``git_ref`` and
+        # is exported as ``DEPLOY_REF`` for the staging script. The script's
+        # OMN-17291 guard refuses to stage the AMBIENT host tree when
+        # ``DEPLOY_REF`` is unset, and it was refusing correctly — the caller was
+        # wrong. The command envelope carries the pin (``git_ref=origin/dev``,
+        # resolved from ``DEPLOY_AGENT_TRACKING_REF``) and ``self_update`` had
+        # already used it one step earlier, but it was dropped between the
+        # consumer and the staging step, so the sibling build was asserted
+        # against nothing. Measured live 2026-09-08 on command a5635af0:
+        # ``Workspace staging failed (exit=5): ERROR: DEPLOY_REF unset``.
+        #
+        # The guard STAYS. This passes the pin the operator supplied; it does not
+        # weaken, skip, or opt out of the assertion. An empty ``deploy_ref`` is
         # deliberately NOT substituted with a fallback ref — nothing is exported
         # and the script refuses in its own words, which is the correct outcome
         # for a caller that has no pin to offer.
@@ -5533,6 +5519,14 @@ class DeployExecutor:
                 "_stage_workspace: siblings fall back to %s where the requested "
                 "ref names no commit in them (OMN-17135)",
                 sibling_fallback_ref,
+            )
+        # OMN-21485: explicit per-sibling refs take precedence over the
+        # newest-dev-tag follow (stage_workspace.sh passes each as --repo-ref),
+        # so a build stages the exact tag its command named. Empty stages the
+        # follow, exactly as before.
+        if sibling_tags:
+            staging_env["DEPLOY_SIBLING_REFS"] = " ".join(
+                f"{repo}={tag}" for repo, tag in sorted(sibling_tags.items())
             )
         result = subprocess.run(
             ["bash", str(script)],
@@ -5594,7 +5588,7 @@ class DeployExecutor:
 
         Without this arg, Docker serves a cached layer even after git pull, so
         the running container silently ships pre-pull code (root cause: PR #1231).
-        OMNIBASE_COMPAT_REF and OMNIMARKET_REF are passed as full commit SHAs so the
+        OMNIMARKET_REF is passed as a full commit SHA so the
         uv cache mount (keyed on URL) misses and fetches fresh code every time main
         advances (OMN-10728 / OMN-11542; ONEX_CHANGE_CONTROL_REF went with OMN-16296).
 
@@ -5640,9 +5634,8 @@ class DeployExecutor:
         assert_release_build_promoted(selected_source, runtime_lane=runtime_lane)
 
         # OMN-16442: the sibling-repo fallback branch is the declared tracking
-        # ref, not a literal. It used to be "dev" for omnimarket and "main" for
-        # omnibase_compat — an asymmetry with no stated reason, on two repos
-        # that both integrate on `dev`.
+        # ref, not a literal. It used to be "dev" for omnimarket — an asymmetry
+        # with no stated reason, on a repo that integrates on `dev`.
         sibling_fallback = load_tracking_ref_from_env()
 
         if selected_source == BuildSource.WORKSPACE and stage_workspace:
@@ -5654,7 +5647,7 @@ class DeployExecutor:
             # staging script asserts the INFRA clone against.
             # OMN-17135: it is a pin on that ONE repository. The CI path
             # publishes an omnibase_infra commit SHA, which names no commit in
-            # omnibase_core / omnibase_compat / omnimarket, so passing it as
+            # omnibase_core / omnimarket, so passing it as
             # every sibling's ref made RT-1 abort on the first one and took
             # every CI-triggered rebuild red. Each sibling resolves the declared
             # tracking head instead, and the SHA it lands on is recorded.
@@ -5663,6 +5656,9 @@ class DeployExecutor:
                 omni_home,
                 git_ref,
                 load_tracking_remote_ref_from_env(),
+                # Passed only when a command named tags, so the default staging
+                # call keeps the shape every caller and fake of it already has.
+                **({"sibling_tags": self.sibling_tags} if self.sibling_tags else {}),
             )
             if self.sibling_source_refs:
                 logger.info(
@@ -5681,17 +5677,9 @@ class DeployExecutor:
             if omni_home
             else sibling_fallback
         )
-        compat_ref = resolved_refs.get("omnibase_compat") or (
-            self._resolve_plugin_ref(
-                f"{omni_home}/omnibase_compat", fallback=sibling_fallback
-            )
-            if omni_home
-            else sibling_fallback
-        )
         logger.info(
-            "_compose_build: BUILD_SOURCE=%s OMNIBASE_COMPAT_REF=%s OMNIMARKET_REF=%s",
+            "_compose_build: BUILD_SOURCE=%s OMNIMARKET_REF=%s",
             selected_source.value,
-            compat_ref[:12],
             omnimarket_ref[:12],
         )
 
@@ -5726,8 +5714,6 @@ class DeployExecutor:
             f"BUILD_DATE={build_date}",
             "--build-arg",
             f"RUNTIME_VERSION={runtime_version}",
-            "--build-arg",
-            f"OMNIBASE_COMPAT_REF={compat_ref}",
             "--build-arg",
             f"OMNIMARKET_REF={omnimarket_ref}",
         ]

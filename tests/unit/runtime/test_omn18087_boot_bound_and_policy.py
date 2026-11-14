@@ -61,6 +61,16 @@ def _compose(path: Path) -> dict[str, Any]:
     return loaded
 
 
+LAB_COMMAND_NODES = (
+    "node_start_path_census_compute",
+    "node_host_role_baseline_compute",
+    "node_host_drift_plugin_revision_compute",
+    "node_host_drift_plugin_revision_orchestrator",
+    "node_delegated_code_edit_orchestrator",
+    "node_delegation_routing_order_compute",
+)
+
+
 def test_dev_main_declares_the_boot_policy_and_memory_limit() -> None:
     boot = _contract().profiles["dev"].processes["main"].boot
 
@@ -76,6 +86,9 @@ def test_dev_main_declares_the_boot_policy_and_memory_limit() -> None:
     assert "work_ledger_query_effect" in rendered[
         "DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS"
     ].split(",")
+    for name in LAB_COMMAND_NODES:
+        assert name in boot.priority_contracts
+        assert name in rendered["DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS"].split(",")
 
 
 def test_dev_main_memory_limit_fits_the_four_kernel_figure() -> None:

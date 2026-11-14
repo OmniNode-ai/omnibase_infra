@@ -1,0 +1,40 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-23544"
+title: "Move the omnibase_infra imperative contract guard caller to the repaired shared check version"
+summary: "omnibase_infra's imperative-contract-guard.yml called the omnibase_core shared check at dev-20261105190003-87a6f5ddcbcc, a version whose validator checkout names an empty ref and so asks GitHub for the default branch on every run. This change moves that caller to dev-20261110125852-e6bc5e13e9e7, the omnibase_core dev tag that carries the repair and the version the omnimarket caller already uses. The repository keeps one tag for the guard caller, the omnibase_core hook revs in .pre-commit-config.yaml and the dependency-pins caller in ci.yml (tests/ci/test_imperative_contract_guard_caller_omn21004.py and tests/ci/test_dependency_pins_wired_omn22360.py hold them equal), so those move with it as a tag-only change. The dependency-pins shared check has no repair yet, so that caller still shows an empty checkout ref after the move."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-imperative-guard-pin-moved"
+    statement: "The omnibase_infra caller of the imperative contract guard names the repaired shared check version, and the other omnibase_core tag references in the repository move to the same tag with it."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the callers listed on the ticket are each classified as moved, not needing a move, or waiting on a source repair, and this pull request moves the omnibase_infra imperative contract guard caller -- falsifier: the caller still names dev-20261105190003-87a6f5ddcbcc at the head"
+      - id: "AC2"
+        statement: "AC2: integrated: a fresh head in the moved repository shows the checkout step of the moved check naming a 40-hex ref -- falsifier: a job-log read of that step shows a default-branch lookup"
+evidence_requirements:
+  - kind: "tests"
+    description: "The caller names the repaired version at the head; on the merge base it names the old one."
+    command: "grep -q 'imperative-contract-guard.yml@dev-20261110125852-e6bc5e13e9e7' .github/workflows/imperative-contract-guard.yml"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn23544-ac1-caller-pin"
+    description: "AC1 hosted probe. The caller names the repaired shared check version; the command fails on the merge base, where the caller names dev-20261105190003-87a6f5ddcbcc."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "grep -q 'imperative-contract-guard.yml@dev-20261110125852-e6bc5e13e9e7' .github/workflows/imperative-contract-guard.yml"
+        cwd: "."
+    binds_ac: ["AC1"]
+  - id: "dod-omn23544-ac2-hosted-proxy"
+    description: "Hosted proxy for AC2. The caller no longer names the old version anywhere in the workflow; the job-log read of the checkout step on a fresh head is not reachable from a hosted runner and is the step left after merge."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "! grep -q 'dev-20261105190003-87a6f5ddcbcc' .github/workflows/imperative-contract-guard.yml"
+        cwd: "."
+    binds_ac: ["AC2"]

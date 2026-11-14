@@ -8,6 +8,8 @@ import json
 import tomllib
 from pathlib import Path
 
+from packaging.version import Version
+
 from scripts.ci.check_sibling_compatible_range import violations
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -111,7 +113,7 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     assert len(core_packages) == 1
     core = core_packages[0]
     assert violations(tomllib.loads(pyproject), "omnibase-core") == []
-    assert tuple(int(part) for part in core["version"].split(".")) >= (0, 47, 44)
+    assert Version(core["version"]) >= Version("0.47.44")
     assert "git" in core["source"]
     assert "omnibase-spi" not in pins
     spi_packages = [p for p in locked["package"] if p["name"] == "omnibase-spi"]

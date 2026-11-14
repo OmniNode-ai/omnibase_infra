@@ -1,0 +1,52 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24218
+title: "The running system has no ledger source, so the commitment check fails every run"
+summary: "The dev lane compose binds the ledger read command, the ledger append command and the ledger host name on the runtime-effects service, and on omninode-runtime where primary dev folds the effects role, and mounts the lane declaration folder read-only, so node_commitment_check_scheduled_effect finds its ledger source."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24218-dev-runtime-ledger-source
+    statement: The dev runtime that runs the effects nodes must carry the ledger source variables and the lane declaration mount, and no other dev-lane service gains them.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the dev lane declaration binds the ledger read command, the ledger append command, the ledger host name and the lane declaration folder on the runtime-effects service only, and the test fails on the old declaration -- falsifier: uv run pytest tests/ci/test_dev_lane_ledger_source_binding.py -q'
+      - id: AC2
+        statement: 'AC2: no other dev lane service gains the ledger variables or the mount, and the mount is read-only -- falsifier: uv run pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -k other_service'
+      - id: AC3
+        statement: 'AC3: integrated: after the next roll, one commitment check result is read that is not failed, 9 minutes after the recreate -- falsifier: the schedule verdict still reads the job failed with the ledger source not bound'
+evidence_requirements:
+  - kind: tests
+    description: The binding tests pass at the head and fail on the base compose files.
+    command: uv run pytest tests/ci/test_dev_lane_ledger_source_binding.py tests/ci/test_compose_no_nested_expansion.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24218-binding-tests
+    description: The binding and nested-expansion tests pass at the head.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_lane_ledger_source_binding.py tests/ci/test_compose_no_nested_expansion.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24218-rendered-mount
+    description: The stack renders the lane declaration mount read-only from the lane overlay folder's parent, the hosted precondition of AC3's reading in the running runtime.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -k renders
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24218-container-holds-ledger-source
+    description: After the next dev deploy the dev runtime container holds the ledger read command variable, the precondition of AC3's commitment check result that is not failed. The probe prints no value.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" docker exec omninode-runtime sh -c 'test -n "$ONEX_LEDGER_BUS_READ_COMMAND"'
+        cwd: ${OMNI_HOME}/omnibase_infra
