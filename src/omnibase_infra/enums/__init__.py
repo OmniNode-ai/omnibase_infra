@@ -110,6 +110,9 @@ from omnibase_infra.enums.enum_eval_finding_category import EnumEvalFindingCateg
 from omnibase_infra.enums.enum_eval_finding_severity import EnumEvalFindingSeverity
 from omnibase_infra.enums.enum_eval_task_status import EnumEvalTaskStatus
 from omnibase_infra.enums.enum_eval_task_type import EnumEvalTaskType
+from omnibase_infra.enums.enum_event_bus_lost_broker_policy import (
+    EnumEventBusLostBrokerPolicy,
+)
 from omnibase_infra.enums.enum_execution_shape_violation import (
     EnumExecutionShapeViolation,
 )
@@ -180,6 +183,7 @@ __all__: list[str] = [
     "EnumConfirmationEventType",
     "EnumConsumerCoordinatorRejoinReason",
     "EnumConsumerGroupPurpose",
+    "EnumEventBusLostBrokerPolicy",
     "EnumContextSectionCategory",
     "EnumContractCheckType",
     "EnumContractType",
