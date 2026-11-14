@@ -29,6 +29,9 @@
 # values, so the two cannot drift apart.
 services:
   redpanda:
+    # The lane's own overlay pins this image (OMN-17427); repeated so this layer
+    # never inherits the dev lane's broker image.
+    image: redpandadata/redpanda:v24.2.7
     command: !override
       - redpanda
       - start

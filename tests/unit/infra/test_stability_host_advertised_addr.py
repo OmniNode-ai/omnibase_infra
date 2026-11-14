@@ -154,12 +154,15 @@ def test_layer_differs_from_the_lane_command_in_the_two_values_only() -> None:
     )
 
 
-def test_layer_overrides_nothing_but_the_redpanda_command() -> None:
+def test_layer_overrides_nothing_but_the_redpanda_command_and_image() -> None:
     loaded = _load(LAYER_FILE)
 
     assert set(loaded) == {"services"}
     assert set(loaded["services"]) == {"redpanda"}
-    assert set(loaded["services"]["redpanda"]) == {"command"}
+    redpanda = loaded["services"]["redpanda"]
+    assert set(redpanda) == {"command", "image"}
+    # The image repeats the lane's own pin so the layer never inherits the dev one.
+    assert redpanda["image"] == "redpandadata/redpanda:v24.2.7"
 
 
 def test_a_host_that_sets_no_value_is_refused_by_name() -> None:
