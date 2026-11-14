@@ -22,16 +22,6 @@
   prefix: ""
   opts: {}
   tables: [goal_trace_events, goal_traces]
-# OMN-21933: infra vendors skill_executions (node_projection_skill_lifecycle 0001-0002)
-# ahead of the omnimarket node contract. The node writes through the
-# tenant_projection binding, whose auto-wiring refuses a principal with no
-# declared privilege; 0002 grants tenant_projection_writer SELECT, INSERT, UPDATE.
-- ticket: OMN-21933
-  node: node_projection_skill_lifecycle
-  create: 0001_create_skill_executions.sql
-  prefix: ""
-  opts: {schema: public, access: write}
-  tables: [skill_executions]
 # OMN-24323: infra vendors experiment_arm_results (node_projection_experiment_result
 # 0000-0002) ahead of the omnimarket node contract. The node writes through the
 # tenant_projection binding; 0001 grants tenant_projection_writer SELECT, INSERT,
