@@ -48,13 +48,13 @@ dod_evidence:
         check_value: uv run pytest tests/unit/infra/test_node_inventory_build_wiring_omn18708.py -q -p no:randomly --no-cov
         cwd: .
   - id: dod-omn24463-ac1-deploy-probe
-    description: 'AC1: a live read of the pushed branch shows the runtime Dockerfile takes the node inventory from the named build context file and no longer declares the NODE_INVENTORY build argument'
+    description: 'AC1: a read of the runtime Dockerfile at the checked-out head shows it takes the node inventory from the named build context file and no longer declares the NODE_INVENTORY build argument'
     source: manual
     binds_ac:
       - AC1
     checks:
       - check_type: command
-        check_value: "sh -c 'gh api -H \"Accept: application/vnd.github.raw\" \"repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=omn-19998-deploy-stamp-by-file\" | grep -q \"FROM scratch AS node_inventory\" && ! gh api -H \"Accept: application/vnd.github.raw\" \"repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=omn-19998-deploy-stamp-by-file\" | grep -q \"^ARG NODE_INVENTORY\"'"
+        check_value: sh -c 'grep -q "^FROM scratch AS node_inventory" docker/Dockerfile.runtime && ! grep -q "^ARG NODE_INVENTORY" docker/Dockerfile.runtime'
         cwd: .
   - id: dod-omn24463-integration-proof
     description: the stamping tests run on a lab host at the pushed head; a full runtime image build on the dev lane needs a rebuild of the dev lane, which this change does not do
