@@ -855,12 +855,12 @@ BUILD_ARGS=(
     --build-arg "PROMOTION_CLASS=stability-candidate"
     --build-arg "NON_MAIN_LINEAGE=true"
     --build-arg "OMNI_HOME=${OMNI_HOME_RESOLVED}"
-    # Empty deliberately: the node inventory is a property of the image and
-    # cannot be known before the image exists, and an empty value skips the
-    # Dockerfile's verify guard. The two-pass stamping the declared lanes do
-    # (OMN-18708) is not reproduced here -- a slot's image is destroyed with
-    # the slot and is never promoted, so nothing downstream reads the stamp.
-    --build-arg "NODE_INVENTORY="
+    # No node inventory is passed deliberately: it is a property of the image
+    # and cannot be known before the image exists, and a build with no
+    # inventory context skips the Dockerfile's verify guard. The two-pass
+    # stamping the declared lanes do (OMN-18708) is not reproduced here -- a
+    # slot's image is destroyed with the slot and is never promoted, so nothing
+    # downstream reads the stamp.
 )
 
 log "building the runtime image from the snapshot, version ${RUNTIME_VERSION} (timeout ${BUILD_TIMEOUT}s) ..."
