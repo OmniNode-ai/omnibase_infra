@@ -43,6 +43,9 @@ from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_publish_receipt import (
     ModelPublishReceipt,
 )
+from omnibase_infra.models.event_bus.util_event_provenance_seam import (
+    dump_envelope_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -179,14 +182,13 @@ class MixinKafkaBroadcast:
                 so that all events for the same entity land on the same
                 partition.
         """
-        # Serialize envelope to JSON bytes
-        envelope_dict: object
+        # Serialize envelope to JSON bytes. OMN-23981: an envelope that carries
+        # no provenance leaves stamped with the deployment's overlay, or as it
+        # is (reading `unknown`) when the overlay is absent, partial or invalid.
         if hasattr(envelope, "model_dump"):
-            envelope_dict = envelope.model_dump(mode="json")
+            envelope_dict = dump_envelope_json(envelope)
         elif hasattr(envelope, "dict"):
             envelope_dict = envelope.dict()
-        elif isinstance(envelope, dict):
-            envelope_dict = envelope
         else:
             envelope_dict = envelope
 

@@ -1,0 +1,73 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23981
+title: "Events say where they came from: the runtime stamps provenance on the envelopes it publishes"
+summary: "The event envelope already carries optional provenance (omnibase_core#2314). This change makes the runtime fill it: the Kafka envelope publish seam copies the provenance the deployment's overlay declares (ONEX_PROVENANCE_LANE, ONEX_PROVENANCE_HOST, ONEX_PROVENANCE_INSTALL_SOURCE, ONEX_PROVENANCE_REVISION, and ONEX_PROVENANCE_LANE_KIND for lane other) onto an envelope that carries none. A deployment that has not set the full overlay, or sets an invalid one, stamps nothing and its events read unknown, never dev, so no deployment emits the new key until its overlay says so (readers on an older core refuse the key). The census of strays and the dev-bus read-back are not part of this change."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23981-runtime-stamps-provenance
+    statement: The runtime stamps its deployment's declared provenance on published envelopes and stamps nothing when the overlay is absent, partial or invalid.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the event envelope carries optional provenance (lane, lane kind, host, install source, revision) and an event without provenance reads lane unknown, never dev -- falsifier: uv run pytest tests/unit/models/events/test_model_event_envelope_provenance.py -q fails against the pre-change envelope file and passes on the branch'
+      - id: AC2
+        statement: 'AC2: a half-stamped provenance and a provenance-free envelope are each handled by their consumer models without breaking the wire -- falsifier: the seam tests in tests/unit/models/events/test_model_event_envelope_provenance.py fail when the model drops the host requirement or the optional default'
+      - id: AC3
+        statement: 'AC3: an event published by the running dev runtime after a branch install carries the provenance fields, and a first census lists every emitter that is neither dev nor stability -- falsifier: the event read back from the dev bus carries lane unknown or no provenance key, or the census lists no emitter while a seeded stray emitter runs (integrated: read in the running dev runtime)'
+evidence_requirements:
+  - kind: tests
+    description: The publish-seam tests pass at the head.
+    command: uv run pytest tests/unit/event_bus/test_publish_envelope_provenance_omn23981.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23981-ac1
+    description: 'AC1 as it holds in the runtime: the envelope model itself merged in omnibase_core#2314 and this repository pins a core that carries it; here the publish seam is shown to put the stamp on the wire for a dev deployment and to leave an unstamped envelope reading unknown, never dev.'
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_publish_envelope_provenance_omn23981.py -q -k "dev_runtime_event_carries_provenance_on_the_wire or no_overlay_event_reads_unknown_never_dev or dev_lane_stamps_dev"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23981-ac2
+    description: 'AC2 as it holds in the runtime: a half-stamped, blank or invalid overlay and a dict payload each publish without breaking the wire, and the bytes read back through the consumer model.'
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_publish_envelope_provenance_omn23981.py -q -k "half_stamped or blank_host or unknown_install_source or without_a_kind or a_dict_payload or already_carries"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23981-ac3-hosted
+    description: 'AC3, hosted proxy: the publish seam stamps the overlay on the wire bytes for a dev deployment; the dev-bus read-back and the census of strays are not done by this change and stay open on the ticket.'
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_publish_envelope_provenance_omn23981.py -q -k dev_runtime_event_carries_provenance_on_the_wire
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23981-deploy-source-readback
+    description: |-
+      Hosted-runner source-artifact readback: fetch the stamp handler at the evaluated published commit and confirm the handler class
+      and the publish seam's call into it are present. A missing file or symbol fails the command. No lab service, credentials or
+      broker is required. This checks the published source artifact and does not assert a live runtime rollout; the dev-bus read-back
+      is the integrated part of AC3 and stays open.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/handlers/handler_event_provenance_stamp/handler.py" | grep -c 'class HandlerEventProvenanceStamp' >/dev/null
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/event_bus/mixin_kafka_broadcast.py" | grep -c 'dump_envelope_json(envelope)' >/dev/null
+  - id: dod-omn23981-integration-proof
+    description: the stamp tests run on a lab host at the pushed head; the dev-bus read-back of AC3 needs the dev overlay set and a branch install on the dev runtime, which this change does not do
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/event_bus/test_publish_envelope_provenance_omn23981.py -q'
+        cwd: ${OMNI_HOME}/omnibase_infra
