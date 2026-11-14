@@ -256,7 +256,6 @@ readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     projection-savings-writer
     projection-tenant-credentials-writer
     projection-live-events-writer
-    onex-api
     cost-estimator-web
 )
 

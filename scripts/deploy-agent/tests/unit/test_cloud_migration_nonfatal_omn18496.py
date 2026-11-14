@@ -392,4 +392,5 @@ def test_restarted_services_report_only_ungated_consumers(
         scope, [], lambda *args: None, lane=EnumRuntimeLane.DEV
     )
     assert "omninode-runtime" in restarted
-    assert ("onex-api" in restarted) == (not failure)
+    # OMN-24476: onex-api left the dev lane, so no deploy restarts it either way.
+    assert "onex-api" not in restarted

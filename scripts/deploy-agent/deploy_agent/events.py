@@ -257,7 +257,6 @@ DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
     "projection-savings-writer",
     "projection-tenant-credentials-writer",
     "projection-live-events-writer",
-    "onex-api",
     # OMN-18114: the TENANT-domain projection carrier, for a reason that is the
     # OPPOSITE of the writers' reason above and is stated separately so the two
     # do not merge. That service IS declared in docker-compose.infra.yml, so
@@ -296,7 +295,7 @@ DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
 # out of the web front end's repository on the lab host and carries that
 # repository's revision (docker/docker-compose.dev-lane.yml spells the build).
 DEV_LANE_ONLY_TAG_REFERENCED_SERVICES: frozenset[str] = frozenset(
-    {"onex-api", "cost-estimator-web"}
+    {"cost-estimator-web"}
 )
 
 # The subset ``docker compose build`` can be handed. Derived, never a second

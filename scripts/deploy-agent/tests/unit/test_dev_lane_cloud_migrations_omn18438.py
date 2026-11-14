@@ -309,10 +309,23 @@ class TestExitZeroGating:
 
 
 class TestTheOverlayDeclaresThem:
-    def test_dev_lane_overlay_declares_both_services(self) -> None:
+    def test_dev_lane_overlay_declares_or_retires_both_services(self) -> None:
+        # OMN-24476: the overlay declares neither one-shot any more; the dev policy
+        # retires them by name, so the deploy agent's lane config filters them out
+        # of the preflight and no compose argv resolves them.
         text = DEV_LANE_OVERLAY.read_text(encoding="utf-8")
+        policy = (DEV_LANE_OVERLAY.parent / "runtime-policy.env").read_text(
+            encoding="utf-8"
+        )
+        retired = next(
+            line.split("=", 1)[1].split(",")
+            for line in policy.splitlines()
+            if line.startswith("DEV_RUNTIME_MAIN_RETIRED_SERVICES=")
+        )
         for service in DEV_LANE_ONLY_MIGRATION_SERVICES:
-            assert re.search(rf"^  {re.escape(service)}:$", text, re.M), (
-                f"{DEV_LANE_OVERLAY.name} declares no {service}; the preflight "
-                "would name a service compose cannot resolve and fail the whole up"
+            declared = re.search(rf"^  {re.escape(service)}:$", text, re.M)
+            assert declared or service in retired, (
+                f"{DEV_LANE_OVERLAY.name} declares no {service} and the dev policy "
+                "does not retire it; the preflight would name a service compose "
+                "cannot resolve and fail the whole up"
             )

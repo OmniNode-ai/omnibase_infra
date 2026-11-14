@@ -1,0 +1,48 @@
+schema_version: 1.0.0
+ticket_id: OMN-24476
+title: Remove the onex API container from the development lane
+summary: >-
+  The separate onex-api container and the two omninode_cloud migration one-shots only it read are removed from the dev lane (operator rulings 2026-11-10 and consent 2026-11-14T19:01:14Z). the dev-lane compose file and the two per-host dev overlay files no longer declare onex-api, cloud-migration-files, cloud-migration or the cloud_migrations volume; contracts/services/runtime_policy.contract.yaml retires the three by name (rendered into docker/runtime-policy.env) so the previous revision's containers are removed and no deploy-agent argv names them; onex-api leaves the dev-lane-only runtime and tag-referenced service lists in events.py and handler_runtime_deploy.sh; the boot guard's pin heal before the roll is deleted. The collaborator's own onex-api container, the hosted cloud API and production are untouched.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24476-no-dev-onex-api
+    statement: The dev lane compose model defines no onex-api service and the rolling update requests none.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the dev lane compose model defines no onex-api service and the rolling update requests none -- falsifier: pytest tests/unit/docker/test_dev_lane_has_no_onex_api_omn24476.py -q fails on the previous compose files"
+      - id: AC2
+        statement: "AC2: integrated: after one dev roll on the merged revision no onex-api container exists in the dev compose project and the runtime container id is unchanged by the removal -- falsifier: docker ps on the dev host lists an onex-api container, or the roll fails at an onex-api step"
+evidence_requirements:
+  - kind: tests
+    description: The removal test and the retirement policy tests.
+    command: pytest tests/unit/docker/test_dev_lane_has_no_onex_api_omn24476.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24476-ac1-no-dev-onex-api
+    description: >-
+      No dev-lane compose file declares onex-api or the cloud one-shots, the dev policy retires them by name and the committed policy env equals its render. The new test fails at the merge base, where the compose files declare them and the policy does not retire them.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: pytest tests/unit/docker/test_dev_lane_has_no_onex_api_omn24476.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24476-ac2-integrated
+    description: >-
+      Deploy check the hosted runner can run: the committed policy env retires the three services by name and renders from the contract. The runtime read after the roll (docker ps on the dev host, runtime container id and start time) is posted as a pull request comment naming the head and the revision running; it is not claimed by this check.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: grep -qE '^DEV_RUNTIME_MAIN_RETIRED_SERVICES=.*onex-api,cloud-migration-files,cloud-migration$' docker/runtime-policy.env
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen python scripts/render_runtime_policy_env.py --check-env-file docker/runtime-policy.env
+        cwd: ${OMNI_HOME}/omnibase_infra

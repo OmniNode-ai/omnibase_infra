@@ -204,10 +204,10 @@ class TestRuntimePhaseUnchangedNotRecreated:
         lane = _fixture_lane()
         lane.current_image = NEW_IMAGE
         for service, state in lane.running.items():
-            if service != "onex-api":
+            if service != "cost-estimator-web":
                 state["image"] = NEW_IMAGE
         _run_runtime_phase(lane)
-        assert lane.recreated == ["onex-api"]
+        assert lane.recreated == ["cost-estimator-web"]
 
 
 class TestRuntimePhaseRolling:
@@ -220,7 +220,9 @@ class TestRuntimePhaseRolling:
         # 19 containers in the recorded job; the hook-events writer (OMN-21288), the
         # infra-routing-decisions consumer (OMN-23072) and the intelligence API
         # (OMN-22391) are among them, and the runtime scope no longer names any.
-        assert len(lane.recreated) == 16
+        # OMN-24476: onex-api is retired from the dev lane too, so 15 remain.
+        assert len(lane.recreated) == 15
+        assert "onex-api" not in lane.recreated
         assert "infra-routing-decisions-consumer" not in lane.recreated
         assert "intelligence-api" not in lane.recreated
         assert "projection-claude-hook-events-writer" not in lane.recreated

@@ -183,37 +183,9 @@ def test_preflight_is_fail_closed_for_lanes_without_the_overlay() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
-def test_dev_lane_overlay_declares_both_services() -> None:
-    """The array names services; compose must declare them, or every up fails."""
-    text = DEV_LANE_COMPOSE.read_text(encoding="utf-8").replace("!override", "")
-    compose = yaml.safe_load(text) or {}
-    services = compose.get("services", {})
-
-    for service in CLOUD_ONESHOTS:
-        assert service in services, (
-            f"{DEV_LANE_COMPOSE.name} declares no {service}; "
-            f"{DEV_LANE_ARRAY} would name a service compose cannot resolve"
-        )
-
-
-@pytest.mark.unit
-def test_both_services_are_one_shots_in_compose() -> None:
-    """``restart: "no"`` is what makes the RT-6 readback treat them as one-shots.
-
-    ``omnibase_infra#3330`` partitions that readback by restart policy. A
-    service in this array that compose declares long-running would be certified
-    against the wrong assertion.
-    """
-    text = DEV_LANE_COMPOSE.read_text(encoding="utf-8").replace("!override", "")
-    compose = yaml.safe_load(text) or {}
-
-    for service in CLOUD_ONESHOTS:
-        restart = compose["services"][service].get("restart")
-        assert str(restart) == "no", (
-            f"{service} declares restart={restart!r}; the one-shot-aware RT-6 "
-            'readback keys on restart: "no"'
-        )
+# OMN-24476: the dev lane overlay no longer declares the two one-shots; the dev policy
+# retires them by name (tests/unit/docker/test_dev_lane_has_no_onex_api_omn24476.py), so
+# the two tests that required compose to declare them are gone with them.
 
 
 @pytest.mark.unit
