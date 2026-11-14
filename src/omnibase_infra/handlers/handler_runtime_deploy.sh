@@ -3115,9 +3115,8 @@ build_images() {
     # RUNTIME_SERVICES fan-out; see the override comment above its declaration).
     # OMN-17448: plus the dev-lane-only standalone projection writers, which
     # are declared in that lane's overlay and must be built for it.
-    # Held out of ``cmd`` so the NODE_INVENTORY build-arg can be inserted
-    # between the options and the service list on each of the two passes below
-    # (``docker compose build`` takes OPTIONS before SERVICEs).
+    # Held out of ``cmd``: each of the two passes below appends it (``docker
+    # compose build`` takes OPTIONS before SERVICEs).
 
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_VERSION=${runtime_version} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
     log_info "Build scope: ${build_scope[*]}"
@@ -3129,11 +3128,11 @@ build_images() {
     # Use timeout to prevent indefinite hangs after build completes (OMN-5462).
     # Exit code 124 = timeout fired; we treat this as success if images exist.
     #
-    # OMN-18708 -- PASS 1 of 2. Built with an EMPTY node inventory, because the
+    # OMN-18708 -- PASS 1 of 2. Built with NO node inventory, because the
     # inventory is a property of the image and cannot be known before the image
-    # exists. The empty value skips the Dockerfile's verify guard, so this pass
-    # behaves exactly as every build before this change did.
-    if timeout "${build_timeout}" "${cmd[@]}" --build-arg "NODE_INVENTORY=" "${build_scope[@]}"; then
+    # exists. No inventory context skips the Dockerfile's verify guard, so this
+    # pass behaves exactly as every build before this change did.
+    if timeout "${build_timeout}" "${cmd[@]}" "${build_scope[@]}"; then
         log_info "Image build complete (pass 1 of 2: no node inventory stamped yet)."
     elif [[ $? -eq 124 ]]; then
         log_warn "Build timed out after ${build_timeout}s — images may still be usable. Continuing."
@@ -3206,9 +3205,9 @@ stamp_node_inventory() {
     # a second time, inside the image, and refuses the build if what we stamp
     # disagrees -- so a stale or hand-edited value cannot survive this pass.
     #
-    # The second build is cheap: NODE_INVENTORY's ARG is declared at the very
-    # end of the runtime stage, so every COPY and apt layer is a cache hit and
-    # only the guard plus the metadata instructions re-execute.
+    # The second build is cheap: the inventory context is read by the last steps
+    # of the runtime stage, so every COPY and apt layer is a cache hit and only
+    # the guard plus the metadata instructions re-execute.
     #
     # FAIL-CLOSED. Every failure here fails the deploy. The sanctioned build
     # path always stamps, which is what lets a consumer read an ABSENT label as
@@ -3230,32 +3229,34 @@ stamp_node_inventory() {
     log_info "Reading the node inventory from ${image_ref}..."
 
     local inventory
-    if ! inventory="$(docker run --rm --entrypoint python "${image_ref}" \
-            -m omnibase_infra.runtime.node_inventory emit)"; then
-        log_error "The image's own discovery pass could not emit a node inventory (image=${image_ref})."
-        return 1
-    fi
-    if [[ -z "${inventory}" ]]; then
-        log_error "The image emitted an EMPTY node inventory. Refusing to stamp an empty label: it would assert the image ships no nodes."
-        return 1
-    fi
+    inventory="$(docker run --rm --entrypoint python "${image_ref}" \
+        -m omnibase_infra.runtime.node_inventory emit)" \
+        || { log_error "The image's own discovery pass could not emit a node inventory (image=${image_ref})."; return 1; }
+    [[ -n "${inventory}" ]] \
+        || { log_error "The image emitted an EMPTY node inventory. Refusing to stamp an empty label: it would assert the image ships no nodes."; return 1; }
+    log_info "Node inventory: ${#inventory} bytes. Rebuilding to stamp it."
 
-    local node_count
-    node_count="$(printf '%s' "${inventory}" | tr ',' '\n' | grep -c '"name":' || true)"
-    log_info "Node inventory: ${node_count} node(s), ${#inventory} bytes. Rebuilding to stamp it."
-
-    if timeout "${build_timeout}" "${_sni_cmd[@]}" \
-            --build-arg "NODE_INVENTORY=${inventory}" "${_sni_build_scope[@]}"; then
-        log_info "Node inventory stamped and verified inside the image."
-    else
-        local rc=$?
-        if [[ ${rc} -eq 124 ]]; then
-            log_error "Node inventory stamping pass timed out after ${build_timeout}s."
-        else
-            log_error "Node inventory stamping pass failed (exit ${rc}). The in-image verify guard refuses a stamped value that disagrees with the image's own discovery pass."
-        fi
+    # OMN-19998: the inventory is longer than one argument or environment value can be
+    # (128 KiB), so it goes to the build as a file: the named build context node_inventory
+    # (the Dockerfile guard reads it from a bind mount) and the label in a compose override.
+    local stamp_dir part rc=0
+    local -a stamp_cmd=()
+    stamp_dir="$(mktemp -d)" && mkdir "${stamp_dir}/context" || return 1
+    printf '%s\n' "${inventory}" > "${stamp_dir}/context/node_inventory.json"
+    jq -n --rawfile inventory "${stamp_dir}/context/node_inventory.json" --arg dir "${stamp_dir}/context" \
+        '{services: ($ARGS.positional | map({key: ., value: {build: {additional_contexts: {node_inventory: $dir}, labels: {"com.omninode.node_inventory": ($inventory | rtrimstr("\n"))}}}}) | from_entries)}' \
+        --args "${_sni_build_scope[@]}" > "${stamp_dir}/override.json" || rc=1
+    for part in "${_sni_cmd[@]}"; do
+        [[ "${part}" == build ]] && stamp_cmd+=(-f "${stamp_dir}/override.json")
+        stamp_cmd+=("${part}")
+    done
+    ((rc == 0)) && { timeout "${build_timeout}" "${stamp_cmd[@]}" "${_sni_build_scope[@]}" || rc=$?; }
+    rm -rf "${stamp_dir}"
+    if [[ ${rc} -ne 0 ]]; then
+        log_error "Node inventory stamping pass failed (exit ${rc}; 124 is the ${build_timeout}s timeout). The in-image verify guard refuses a stamped value that disagrees with the image's own discovery pass."
         return 1
     fi
+    log_info "Node inventory stamped and verified inside the image."
 }
 
 # =============================================================================

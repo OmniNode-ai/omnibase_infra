@@ -1,0 +1,49 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24463
+title: "The node inventory stamp reaches the build by file, not as one argument"
+summary: "The deploy handler's second build pass (stamp_node_inventory) handed the image's node inventory to docker compose as --build-arg NODE_INVENTORY=<value>. The inventory reached 222 KB on 2026-11-14 and Linux refuses one argument or one environment value over 128 KiB, so the stamping pass failed with Argument list too long and refresh_dev_lane.sh --execute could not finish a rebuild. The shell step now writes the inventory the image emitted to a file and a generated compose override that carries it as the named build context node_inventory (the Dockerfile's verify guard reads it from a bind mount) and as the build label com.omninode.node_inventory. Neither the build argument nor the Dockerfile ARG exists any more. The guard still refuses a value that disagrees with the image's own discovery pass."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24463-inventory-by-file
+    statement: The node inventory stamping pass hands the inventory to the build by file and label, never as an argument or an environment value.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the node inventory stamping pass hands the inventory to the build by file and succeeds for an inventory over 128 KiB, and the old argument route fails with the kernel''s argument-too-long error -- falsifier: pytest tests/scripts/test_stamp_node_inventory_by_file_omn19998.py -q in omnibase_infra'
+evidence_requirements:
+  - kind: tests
+    description: The stamping tests, the wiring tests and the verify CLI tests pass at the pushed head; the stamping tests fail on the merge base because the old argument route cannot exec a value over 128 KiB.
+    command: uv run pytest tests/scripts/test_stamp_node_inventory_by_file_omn19998.py tests/unit/infra/test_node_inventory_build_wiring_omn18708.py tests/unit/runtime/test_node_inventory_image_label_omn18708.py -q -p no:randomly --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24463-ac1
+    description: 'AC1: the real stamp_node_inventory shell function runs with an inventory over 128 KiB, a real executable stands in for docker, no argv element exceeds 128 KiB, and the old route fails with E2BIG'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_stamp_node_inventory_by_file_omn19998.py -q -p no:randomly --no-cov
+        cwd: .
+  - id: dod-omn24463-ac1-guard
+    description: 'AC1: the in-image guard reads an inventory over 128 KiB from a file and refuses a file that disagrees with the discovery pass'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_stamp_node_inventory_by_file_omn19998.py -q -p no:randomly --no-cov -k "dockerfile_guard"
+        cwd: .
+  - id: dod-omn24463-ac1-wiring
+    description: 'AC1: the Dockerfile declares the named context and the file guard, and the deploy script stamps by the generated override'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/infra/test_node_inventory_build_wiring_omn18708.py -q -p no:randomly --no-cov
+        cwd: .
