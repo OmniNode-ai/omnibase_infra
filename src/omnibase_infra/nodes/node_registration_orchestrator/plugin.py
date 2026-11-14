@@ -746,18 +746,44 @@ class ServiceRegistration:
             return
 
         try:
+            from omnibase_core.enums import EnumInjectionScope
             from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
                 HandlerRegistrationStoragePostgres,
+            )
+            from omnibase_infra.models.network_binding import (
+                load_network_binding_settings,
+            )
+            from omnibase_infra.models.registration_storage import (
+                DECLARED_SETTINGS_PATH,
+                ModelRegistrationStoragePostgresConfig,
             )
             from omnibase_infra.nodes.node_registration_storage_effect.registry.registry_infra_registration_storage import (
                 RegistryInfraRegistrationStorage,
             )
 
-            handler = HandlerRegistrationStoragePostgres(
-                container=config.container,
-                dsn=(os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip() or None,
+            # OMN-22131: the handler resolves its settings from the container;
+            # this wiring site binds them from the declared file plus the
+            # deployment's DSN or host.
+            storage_config = ModelRegistrationStoragePostgresConfig.from_file(
+                DECLARED_SETTINGS_PATH,
+                dsn=(os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip(),
+                host=(os.getenv("POSTGRES_HOST") or "").strip(),
+                port=load_network_binding_settings().postgres_port,
+                password="",
                 auto_create_schema=True,
             )
+            if config.container.service_registry is None:
+                raise RuntimeError("container has no service registry")
+            await config.container.service_registry.register_instance(
+                interface=ModelRegistrationStoragePostgresConfig,
+                instance=storage_config,
+                scope=EnumInjectionScope.GLOBAL,
+                metadata={
+                    "description": "PostgreSQL registration storage settings",
+                    "plugin_id": "registration",
+                },
+            )
+            handler = HandlerRegistrationStoragePostgres(config.container)
 
             # Eagerly initialize the pool and create the table now rather
             # than deferring to the first request. This ensures the
@@ -770,22 +796,20 @@ class ServiceRegistration:
             RegistryInfraRegistrationStorage.register_handler(config.container, handler)
 
             # Register in the container service registry for DI resolution
-            if config.container.service_registry is not None:
-                from omnibase_core.enums import EnumInjectionScope
-                from omnibase_infra.handlers.registration_storage.protocol_registration_persistence import (
-                    ProtocolRegistrationPersistence,
-                )
+            from omnibase_infra.handlers.registration_storage.protocol_registration_persistence import (
+                ProtocolRegistrationPersistence,
+            )
 
-                await config.container.service_registry.register_instance(
-                    # Why: Registry stores protocol contracts, not instantiable concrete implementations.
-                    interface=ProtocolRegistrationPersistence,  # type: ignore[type-abstract]  # Protocol used as DI key
-                    instance=handler,
-                    scope=EnumInjectionScope.GLOBAL,
-                    metadata={
-                        "description": "PostgreSQL registration storage handler",
-                        "plugin_id": "registration",
-                    },
-                )
+            await config.container.service_registry.register_instance(
+                # Why: Registry stores protocol contracts, not instantiable concrete implementations.
+                interface=ProtocolRegistrationPersistence,  # type: ignore[type-abstract]  # Protocol used as DI key
+                instance=handler,
+                scope=EnumInjectionScope.GLOBAL,
+                metadata={
+                    "description": "PostgreSQL registration storage handler",
+                    "plugin_id": "registration",
+                },
+            )
 
             self._registration_storage = handler
             logger.info(

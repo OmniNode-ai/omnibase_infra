@@ -41,6 +41,7 @@ from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelStorageQuery,
 )
 from tests.helpers.util_postgres import PostgresConfig, check_postgres_reachable
+from tests.helpers.util_registration_storage_postgres import container_binding
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -84,13 +85,14 @@ class TestRegistrationStoragePostgresUuidCast:
     ) -> AsyncGenerator[HandlerRegistrationStoragePostgres, None]:
         pg = _resolve_postgres_config()
         handler = HandlerRegistrationStoragePostgres(
-            container=MagicMock(spec=ModelONEXContainer),
-            host=pg["host"],
-            port=pg["port"],
-            database=pg["database"],
-            user=pg["user"],
-            password=pg["password"],
-            auto_create_schema=True,
+            container_binding(
+                host=pg["host"],
+                port=pg["port"],
+                database=pg["database"],
+                user=pg["user"],
+                password=pg["password"],
+                auto_create_schema=True,
+            )
         )
         yield handler
         await handler.shutdown()
