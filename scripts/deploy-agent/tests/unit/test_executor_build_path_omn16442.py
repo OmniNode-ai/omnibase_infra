@@ -203,6 +203,7 @@ def _install_recording_stage_script(repo: Path) -> Path:
         'python3 -c "import json,os,sys; '
         "json.dump({'DEPLOY_REF': os.environ.get('DEPLOY_REF'), "
         "'OMNI_HOME': os.environ.get('OMNI_HOME'), "
+        "'DEPLOY_SIBLING_REFS': os.environ.get('DEPLOY_SIBLING_REFS'), "
         "'ALLOW_UNPINNED_DEPLOY_SOURCE': "
         "os.environ.get('ALLOW_UNPINNED_DEPLOY_SOURCE')}, "
         f"open({str(record)!r}, 'w'))\"\n"
@@ -219,7 +220,7 @@ def test_dev_workspace_build_stages_with_the_envelopes_ref(
     repo.mkdir()
     record = _install_recording_stage_script(repo)
     monkeypatch.setattr(executor_mod, "REPO_DIR", str(repo))
-    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "omni_home"))
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "registry_root"))
     monkeypatch.delenv("ALLOW_UNPINNED_DEPLOY_SOURCE", raising=False)
     monkeypatch.setattr(
         executor_mod,
@@ -238,7 +239,7 @@ def test_dev_workspace_build_stages_with_the_envelopes_ref(
 
     staged = json.loads(record.read_text())
     assert staged["DEPLOY_REF"] == "origin/dev"
-    assert staged["OMNI_HOME"] == str(tmp_path / "omni_home")
+    assert staged["OMNI_HOME"] == str(tmp_path / "registry_root")
     # The OMN-17291 guard is satisfied by supplying the pin, never opted out of.
     assert staged["ALLOW_UNPINNED_DEPLOY_SOURCE"] is None
 
@@ -250,13 +251,58 @@ def test_workspace_build_without_a_ref_exports_nothing_and_lets_the_guard_refuse
     repo = tmp_path / "repo"
     repo.mkdir()
     record = _install_recording_stage_script(repo)
-    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "omni_home"))
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "registry_root"))
     monkeypatch.delenv("DEPLOY_REF", raising=False)
 
-    DeployExecutor._stage_workspace(str(repo), str(tmp_path / "omni_home"))
+    DeployExecutor._stage_workspace(str(repo), str(tmp_path / "registry_root"))
 
     staged = json.loads(record.read_text())
     assert staged["DEPLOY_REF"] is None
+
+
+def test_staging_exports_the_commands_sibling_tags_as_refs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-21485: sibling_tags name the exact tag the build stages.
+
+    A stability follow stages the tag the decision compared against, not the
+    newest dev tag, so the per-sibling refs must reach stage_workspace.sh as
+    ``DEPLOY_SIBLING_REFS`` in the ``repo=tag`` shape the script parses.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    record = _install_recording_stage_script(repo)
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "registry_root"))
+    monkeypatch.delenv("DEPLOY_SIBLING_REFS", raising=False)
+
+    DeployExecutor._stage_workspace(
+        str(repo),
+        str(tmp_path / "registry_root"),
+        sibling_tags={"omnimarket": "dev-20261013120000-aaaaaaaaaaaa"},
+    )
+
+    staged = json.loads(record.read_text())
+    assert staged["DEPLOY_SIBLING_REFS"] == "omnimarket=dev-20261013120000-aaaaaaaaaaaa"
+
+
+def test_staging_without_sibling_refs_exports_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No sibling_tags means the call adds no DEPLOY_SIBLING_REFS.
+
+    The ambient environment carries none here (delenv above), so the staging
+    script sees the newest-dev-tag follow, exactly as before OMN-21485.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    record = _install_recording_stage_script(repo)
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "registry_root"))
+    monkeypatch.delenv("DEPLOY_SIBLING_REFS", raising=False)
+
+    DeployExecutor._stage_workspace(str(repo), str(tmp_path / "registry_root"))
+
+    staged = json.loads(record.read_text())
+    assert staged["DEPLOY_SIBLING_REFS"] is None
 
 
 def test_rebuild_scope_threads_lane_and_ref_into_compose_build(
