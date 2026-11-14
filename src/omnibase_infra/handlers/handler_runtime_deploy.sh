@@ -3081,10 +3081,8 @@ build_images() {
     promotion_class="$(resolve_promotion_class "${build_source}")"
     local non_main_lineage
     non_main_lineage="$(resolve_non_main_lineage "${build_source}")"
-    local compat_ref="main"
     local omnimarket_ref="dev"
     if [[ -n "${omni_home}" ]]; then
-        compat_ref="$(read_repo_ref_or_main "$(sibling_source_path "${omni_home}" omnibase_compat)")"
         omnimarket_ref="$(read_repo_ref_or_main "$(sibling_source_path "${omni_home}" omnimarket)")"
     fi
 
@@ -3111,7 +3109,6 @@ build_images() {
         --build-arg "PROMOTION_CLASS=${promotion_class}"
         --build-arg "NON_MAIN_LINEAGE=${non_main_lineage}"
         --build-arg "OMNI_HOME=${omni_home}"
-        --build-arg "OMNIBASE_COMPAT_REF=${compat_ref}"
         --build-arg "OMNIMARKET_REF=${omnimarket_ref}"
     )
     # OMN-14873: scope the build to RUNTIME_BUILD_SERVICES (defaults to the full
@@ -3125,7 +3122,7 @@ build_images() {
     log_info "Building images with VCS_REF=${git_sha} RUNTIME_VERSION=${runtime_version} RUNTIME_SOURCE_HASH=${git_sha} COMPOSE_PROJECT=${compose_project}..."
     log_info "Build scope: ${build_scope[*]}"
     log_info "Build source: BUILD_SOURCE=${build_source} EXPECTED_BUILD_SOURCE=${expected_build_source} PROMOTION_CLASS=${promotion_class} NON_MAIN_LINEAGE=${non_main_lineage} OMNI_HOME=${omni_home}"
-    log_info "Plugin refs: OMNIBASE_COMPAT_REF=${compat_ref} OMNIMARKET_REF=${omnimarket_ref}"
+    log_info "Plugin refs: OMNIMARKET_REF=${omnimarket_ref}"
     log_info "Build timeout: ${build_timeout}s (set DOCKER_BUILD_TIMEOUT_SECONDS to override)"
     log_cmd "${cmd[*]}"
 
@@ -4423,10 +4420,8 @@ print_compose_commands() {
     promotion_class="$(resolve_promotion_class "${build_source}")"
     local non_main_lineage
     non_main_lineage="$(resolve_non_main_lineage "${build_source}")"
-    local compat_ref="main"
     local omnimarket_ref="dev"
     if [[ -n "${omni_home}" ]]; then
-        compat_ref="$(read_repo_ref_or_main "$(sibling_source_path "${omni_home}" omnibase_compat)")"
         omnimarket_ref="$(read_repo_ref_or_main "$(sibling_source_path "${omni_home}" omnimarket)")"
     fi
 
@@ -4450,7 +4445,6 @@ print_compose_commands() {
     log_info "    --build-arg PROMOTION_CLASS=${promotion_class} \\"
     log_info "    --build-arg NON_MAIN_LINEAGE=${non_main_lineage} \\"
     log_info "    --build-arg OMNI_HOME=${omni_home} \\"
-    log_info "    --build-arg OMNIBASE_COMPAT_REF=${compat_ref} \\"
     log_info "    --build-arg OMNIMARKET_REF=${omnimarket_ref}"
     log_info ""
     log_info "Restart runtime services:"

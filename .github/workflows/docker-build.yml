@@ -283,7 +283,7 @@ jobs:
         run: |
           echo "Asserting foundation package imports on the built image..."
           docker run --rm ${{ steps.build.outputs.imageid }} \
-            python -c "import omnibase_compat; import omnibase_core; import omnibase_infra; print(f'foundation import smoke OK: omnibase_compat={omnibase_compat.__version__}, omnibase_core={omnibase_core.__version__}')"
+            python -c "import omnibase_core; import omnibase_infra; print(f'foundation import smoke OK: omnibase_core={omnibase_core.__version__}')"
 
       - name: Verify torch is CPU-only
         if: github.ref != 'refs/heads/main'

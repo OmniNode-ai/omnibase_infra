@@ -128,7 +128,7 @@ def test_docker_profiles_exclude_the_script_only_host() -> None:
                     variant.variant_key,
                 )
                 checked += 1
-    assert checked == 5
+    assert checked == 4
 
 
 def test_runtime_profile_reuses_hosts_without_changing_script_profiles() -> None:
