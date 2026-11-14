@@ -1,0 +1,38 @@
+schema_version: 1.0.0
+ticket_id: OMN-19311
+title: 'D11 blocks staging delivery: both delivery gates refuse unless the newest D11 nightly verdict is a fresh success'
+summary: The sender lab-pass-gate job in deliver-dev-candidate-to-staging.yml reads the D11 workflow verdict through scripts/ci/lab_pass_receipt.py and refuses a failed, cancelled, stale, unreadable or absent newest run. omnibase_infra#4012 and #4723 carry the reader. This contract records the acceptance-criterion bindings a second lane accepted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19311-ac1-accepted-20261110t1945z:
+      - label: AC1
+        criterion_hash: d10676b9cadc6301502951b8f80dc6c94df847b5691357236411f9bcfbf20b9e
+        proposed_by: lane=dod-closeout-bind-2026-11-10T1945Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-10T1945Z-c0
+requirements:
+  - id: req-omn-19311-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC1: the D11 workflow-verdict reader refuses the replayed failure run 35832924275, a 27-hour-old success, no run, an unreadable surface and an instrument fault, and admits a fresh success. Four cases fail with the omnibase_infra#4723 reader change reverted.'
+    command: uv run pytest tests/ci/test_workflow_verdict_omn_d11.py::TestTheD11Verdict tests/ci/test_lab_pass_workflow_verdict_omn18866.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19311-ac1-accepted-20261110t1945z
+    description: 'AC1: the D11 workflow-verdict reader refuses the replayed failure run 35832924275, a 27-hour-old success, no run, an unreadable surface and an instrument fault, and admits a fresh success. Four cases fail with the omnibase_infra#4723 reader change reverted.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_workflow_verdict_omn_d11.py::TestTheD11Verdict tests/ci/test_lab_pass_workflow_verdict_omn18866.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
