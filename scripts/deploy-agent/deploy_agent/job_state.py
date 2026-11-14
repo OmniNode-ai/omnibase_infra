@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import tempfile
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -418,29 +419,35 @@ class JobStore:
     def is_duplicate(self, correlation_id: UUID) -> bool:
         return self._job_path(correlation_id).exists()
 
-    def has_active_job(self) -> bool:
+    def _jobs(self) -> Iterator[JobState]:
+        """Every readable job record; an unreadable file is skipped (OMN-21485)."""
         for path in self.state_dir.glob("*.json"):
             try:
-                job = JobState.model_validate_json(path.read_text())
-                if job.status in ("accepted", "in_progress"):
-                    return True
-            except Exception:  # noqa: BLE001
+                yield JobState.model_validate_json(path.read_text())
+            except (OSError, ValueError):
                 continue
-        return False
+
+    def has_active_job(self) -> bool:
+        return any(job.status in ("accepted", "in_progress") for job in self._jobs())
 
     def last_completed_at(self) -> datetime | None:
         """When the most recent job ended, or ``None`` when none has (OMN-19509)."""
-        latest: datetime | None = None
-        for path in self.state_dir.glob("*.json"):
-            try:
-                job = JobState.model_validate_json(path.read_text())
-            except Exception:  # noqa: BLE001
-                continue
-            if job.completed_at is not None and (
-                latest is None or job.completed_at > latest
-            ):
-                latest = job.completed_at
-        return latest
+        return max(
+            (j.completed_at for j in self._jobs() if j.completed_at), default=None
+        )
+
+    def latest_terminal_status(self, lane: str) -> str | None:
+        # OMN-21485: the lane's deploy receipt: the verdict of its newest terminal
+        # job (superseded and still-running records say nothing about whether the
+        # last deploy that RAN passed); None when the lane has none.
+        done = [
+            (j.completed_at, j.status)
+            for j in self._jobs()
+            if j.command.get("runtime_lane") == lane
+            and j.status in ("success", "failed")
+            and j.completed_at
+        ]
+        return max(done)[1] if done else None
 
     def load(self, correlation_id: UUID) -> JobState | None:
         path = self._job_path(correlation_id)
@@ -449,14 +456,8 @@ class JobStore:
         return JobState.model_validate_json(path.read_text())
 
     def load_active(self) -> JobState | None:
-        for path in self.state_dir.glob("*.json"):
-            try:
-                job = JobState.model_validate_json(path.read_text())
-                if job.status in ("accepted", "in_progress"):
-                    return job
-            except Exception:  # noqa: BLE001
-                continue
-        return None
+        active = ("accepted", "in_progress")
+        return next((job for job in self._jobs() if job.status in active), None)
 
     def job_covering(self, moment: datetime) -> JobState | None:
         """The one job that was running at ``moment``, or ``None``.
