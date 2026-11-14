@@ -303,16 +303,6 @@ def run_compose_up_steps(
     """
     env = execution._compose_env(extra_env)
     result = ModelSubprocessOutcome(returncode=0, stdout="", stderr="", timed_out=False)
-    if (
-        rolling
-        and lane is execution.EnumRuntimeLane.DEV
-        and any(step[-1] == execution.ONEX_API_SERVICE for step in steps)
-    ):
-        # OMN-23039: a pin that is already a broken image would stop this roll at onex-api.
-        guard = execution.load_dev_boot_guard("handler_onex_api_image_import_check")
-        healed = guard.heal_pin(execution._run, execution.operator_env_file())
-        if healed is not None:
-            logger.warning("onex-api pin heal before the roll: %s", healed)
     for step in steps:
         if rolling and lane is execution.EnumRuntimeLane.DEV:
             try:
@@ -446,6 +436,23 @@ def _all_healthy(
         return all(_healthy(c) for c in read_containers())
     except (OSError, ValueError, RuntimeError, execution.subprocess.SubprocessError):
         return False
+
+
+def retire_lane_services(
+    config: Any, retired: Collection[str], phase_by_service: Mapping[str, Any]
+) -> Any:
+    """``config`` with ``retired`` services disabled and their settle phases off.
+
+    A service the policy retires by name is never recreated, so the phase that
+    only builds or pins its image has nothing to deliver (OMN-24476).
+    """
+    phases = {phase_by_service[s] for s in retired if s in phase_by_service}
+    return config.model_copy(
+        update={
+            "disabled_services": config.disabled_services | frozenset(retired),
+            "disabled_phases": config.disabled_phases | frozenset(phases),
+        }
+    )
 
 
 def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> set[str]:
