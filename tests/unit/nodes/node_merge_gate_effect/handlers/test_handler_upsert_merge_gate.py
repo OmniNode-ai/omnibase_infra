@@ -92,24 +92,20 @@ class TestHandlerUpsertMergeGateSuccess:
 
         handler = HandlerUpsertMergeGate(pool)
         payload = make_gate_payload(decision="PASS")
-        correlation_id = uuid4()
-
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         assert result.success is True
         assert result.backend_id == "postgres"
-        # effective_cid = payload.correlation_id or correlation_id
-        # payload has its own correlation_id, so that takes precedence
         assert result.correlation_id == payload.correlation_id
         assert result.error is None
         assert result.error_code is None
         assert result.duration_ms >= 0
 
     @pytest.mark.asyncio
-    async def test_insert_uses_handler_correlation_id_when_payload_has_none(
+    async def test_insert_uses_correlation_id_added_to_payload_by_caller(
         self,
     ) -> None:
-        """When payload.correlation_id is None, handler's correlation_id is used."""
+        """Callers supply a missing correlation ID on the payload before dispatch."""
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(return_value={"was_insert": True})
         pool = create_mock_pool_with_conn(conn)
@@ -127,7 +123,8 @@ class TestHandlerUpsertMergeGateSuccess:
         )
         handler_cid = uuid4()
 
-        result = await handler.handle(payload, handler_cid)
+        payload = payload.model_copy(update={"correlation_id": handler_cid})
+        result = await handler.handle(payload)
 
         assert result.success is True
         assert result.correlation_id == handler_cid
@@ -141,7 +138,7 @@ class TestHandlerUpsertMergeGateSuccess:
 
         handler = HandlerUpsertMergeGate(pool)
         payload = make_gate_payload(decision="WARN")
-        result = await handler.handle(payload, uuid4())
+        result = await handler.handle(payload)
 
         assert result.success is True
         assert result.backend_id == "postgres"
@@ -203,7 +200,7 @@ class TestHandlerUpsertMergeGateQuarantine:
                 linear_api_key="test-key",
                 linear_team_id="team-123",
             )
-            result = await handler.handle(payload, uuid4())
+            result = await handler.handle(payload)
 
         assert result.success is True
         # Verify Linear API was called
@@ -225,7 +222,7 @@ class TestHandlerUpsertMergeGateQuarantine:
             "linear_graphql_project_tracker_adapter.httpx.AsyncClient"
         ) as mock_client_cls:
             handler = HandlerUpsertMergeGate(pool)
-            result = await handler.handle(payload, uuid4())
+            result = await handler.handle(payload)
 
         assert result.success is True
         mock_client_cls.assert_not_called()
@@ -245,7 +242,7 @@ class TestHandlerUpsertMergeGateQuarantine:
             "linear_graphql_project_tracker_adapter.httpx.AsyncClient"
         ) as mock_client_cls:
             handler = HandlerUpsertMergeGate(pool)
-            result = await handler.handle(payload, uuid4())
+            result = await handler.handle(payload)
 
         assert result.success is True
         # Linear should NOT have been called on update
@@ -261,7 +258,7 @@ class TestHandlerUpsertMergeGateQuarantine:
         payload = make_gate_payload(decision="QUARANTINE")
 
         handler = HandlerUpsertMergeGate(pool)
-        result = await handler.handle(payload, uuid4())
+        result = await handler.handle(payload)
 
         assert result.success is True
 
@@ -289,7 +286,7 @@ class TestHandlerUpsertMergeGateQuarantine:
                 linear_api_key="test-key",
                 linear_team_id="team-123",
             )
-            result = await handler.handle(payload, uuid4())
+            result = await handler.handle(payload)
 
         # Upsert succeeded even though Linear failed
         assert result.success is True
@@ -311,7 +308,7 @@ class TestHandlerUpsertMergeGateErrors:
         pool = create_mock_pool_with_conn(conn)
 
         handler = HandlerUpsertMergeGate(pool)
-        result = await handler.handle(make_gate_payload(), uuid4())
+        result = await handler.handle(make_gate_payload())
 
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.TIMEOUT_ERROR
@@ -325,7 +322,7 @@ class TestHandlerUpsertMergeGateErrors:
         pool = create_mock_pool_with_conn(conn)
 
         handler = HandlerUpsertMergeGate(pool)
-        result = await handler.handle(make_gate_payload(), uuid4())
+        result = await handler.handle(make_gate_payload())
 
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.CONNECTION_ERROR
@@ -339,7 +336,7 @@ class TestHandlerUpsertMergeGateErrors:
         pool = create_mock_pool_with_conn(conn)
 
         handler = HandlerUpsertMergeGate(pool)
-        result = await handler.handle(make_gate_payload(), uuid4())
+        result = await handler.handle(make_gate_payload())
 
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.AUTH_ERROR
@@ -353,7 +350,7 @@ class TestHandlerUpsertMergeGateErrors:
         pool = create_mock_pool_with_conn(conn)
 
         handler = HandlerUpsertMergeGate(pool)
-        result = await handler.handle(make_gate_payload(), uuid4())
+        result = await handler.handle(make_gate_payload())
 
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.UNKNOWN_ERROR
@@ -486,7 +483,7 @@ class TestHandlerUpsertMergeGateInjectedConfig:
                 linear_api_key="injected-key",
                 linear_team_id="injected-team",
             )
-            result = await handler.handle(payload, uuid4())
+            result = await handler.handle(payload)
 
         assert result.success is True
         mock_client.post.assert_called_once()
@@ -515,7 +512,7 @@ class TestHandlerUpsertMergeGateInjectedConfig:
             ) as mock_client_cls,
         ):
             handler = HandlerUpsertMergeGate(pool)
-            result = await handler.handle(payload, uuid4())
+            result = await handler.handle(payload)
 
         assert result.success is True
         mock_client_cls.assert_not_called()
