@@ -168,6 +168,9 @@ from omnibase_infra.models.node_announce.model_package_announce_result import (
 from omnibase_infra.models.runtime import ModelRuntimeNodeSelection
 from omnibase_infra.models.runtime_kernel_defaults import load_runtime_kernel_defaults
 from omnibase_infra.models.workspace import ModelWorkspaceConfigRootRequest
+from omnibase_infra.nodes.node_boot_wiring_deferral_compute import (
+    runtime_boot_wiring_deferral as boot_wiring_deferral,
+)
 from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
     ProtocolIntentEffect,
@@ -4094,9 +4097,25 @@ async def bootstrap() -> int:
                     dlq_tracking=_dlq_replay_tracking,
                 )
 
+                # OMN-21318: a contract whose subscribe topics are all idle is
+                # left unwired: its handlers are neither imported nor registered
+                # until its first request (the one the demand watch waits on).
+                _boot_deferral = await boot_wiring_deferral.plan_runtime_boot_wiring_deferral(
+                    filtered_manifest,
+                    policy=config.boot_subscriptions.policy,
+                    event_bus=event_bus,
+                    container=container,
+                    priority_contracts=resolve_topic_readiness_config().priority_contracts,
+                    result_appliers_by_contract=auto_wiring_result_appliers,
+                    dispatch_engine=dispatch_engine,
+                    environment=environment,
+                    materialized_explicit_dependencies=runtime_handler_dependencies,
+                    topology=deployment_topology,
+                )
+
                 # 5. Wire handlers into dispatch engine
-                auto_wiring_report = await wire_from_manifest(
-                    manifest=filtered_manifest,
+                _wired_report = await wire_from_manifest(
+                    manifest=_boot_deferral.wired_manifest,
                     dispatch_engine=dispatch_engine,
                     event_bus=event_bus,
                     environment=environment,
@@ -4106,6 +4125,7 @@ async def bootstrap() -> int:
                     materialized_explicit_dependencies=(runtime_handler_dependencies),
                     topology=deployment_topology,
                 )
+                auto_wiring_report = _boot_deferral.complete_report(_wired_report)
 
                 auto_wiring_duration = time.time() - auto_wiring_start
 
@@ -4563,29 +4583,14 @@ async def bootstrap() -> int:
             _attach_exclusions: list[ModelContractAttachExclusion] = []
             # OMN-18087: the runtime config contract declares which contracts
             # join at boot. ``in_use`` joins only the contracts whose topics
-            # hold a record on the broker and starts each of the rest on its
-            # first request; the in-memory bus has no broker to ask, so it
-            # joins every contract as before.
-            from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
-                HandlerKafkaTopicDemandSource,
-            )
-
-            _demand_source: HandlerKafkaTopicDemandSource | None = None
-            if config.boot_subscriptions.policy == "in_use" and isinstance(
-                event_bus, EventBusKafka
-            ):
-                _demand_source = HandlerKafkaTopicDemandSource(container)
-            logger.info(
-                "Boot subscription policy=%s demand_start=%s (OMN-18087, "
-                "correlation_id=%s)",
-                config.boot_subscriptions.policy,
-                _demand_source is not None,
-                correlation_id,
-            )
+            # hold a record on the broker; the planner (OMN-21318) left each of
+            # the rest unwired, and the watch below starts it on its first
+            # request. The in-memory bus has no broker to ask, so it joins
+            # every contract as before.
             _demand_watch_stops: list[Callable[[], Awaitable[None]]] = []
             auto_wired_subscriptions = await subscribe_wired_contract_topics(
-                manifest=auto_wiring_manifest_for_subscriptions,
-                report=auto_wiring_report,
+                manifest=_boot_deferral.wired_manifest,
+                report=_wired_report,
                 dispatch_engine=dispatch_engine,
                 event_bus=event_bus,
                 environment=environment,
@@ -4596,27 +4601,25 @@ async def bootstrap() -> int:
                 exclusions_out=_attach_exclusions,
                 core_runtime_topics=core_runtime_topics,
                 core_runtime_owners=core_runtime_owners,
-                demand_source=_demand_source,
-                demand_watch_stops_out=_demand_watch_stops,
+            )
+            await _boot_deferral.watch(
+                dispatch_engine=dispatch_engine,
+                event_bus=event_bus,
+                environment=environment,
+                provisioner=_cast("ProtocolTopicProvisioner | None", topic_provisioner),
+                readiness_config=resolve_topic_readiness_config(),
+                result_appliers_by_contract=auto_wiring_result_appliers,
+                exclusions_out=_attach_exclusions,
+                stops_out=_demand_watch_stops,
             )
             plugin_unsubscribe_callbacks.extend(_demand_watch_stops)
             boot_readiness_checks.report_roster_partition(
                 auto_wiring_report.results, _attach_results, _attach_exclusions
             )
-            _contract_attach_gate.exclude(tuple(_attach_exclusions))
-            _contract_attach_gate.record(tuple(_attach_results))
-            _gate_status = _contract_attach_gate.status()
-            logger.info(
-                "Contract-attach readiness gate: required=%d attached=%d "
-                "not_ready=%d failed=%d pending=%d excluded=%d ready=%s "
-                "(OMN-17372, correlation_id=%s)",
-                len(_gate_status.required_contracts),
-                len(_gate_status.attached_contracts),
-                len(_gate_status.not_ready_contracts),
-                len(_gate_status.failed_contracts),
-                len(_gate_status.pending_contracts),
-                len(_gate_status.excluded_contracts),
-                _gate_status.ready,
+            boot_readiness_checks.record_attach_gate(
+                _contract_attach_gate,
+                _attach_results,
+                _attach_exclusions,
                 correlation_id,
             )
             _attach_readiness = ModelRuntimeAttachReadiness.from_results(
