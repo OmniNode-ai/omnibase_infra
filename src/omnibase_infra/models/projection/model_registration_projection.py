@@ -92,6 +92,7 @@ class ModelRegistrationProjection(BaseModel):
         registered_at: Timestamp of initial registration
         updated_at: Timestamp of last projection update
         correlation_id: Correlation ID for distributed tracing
+        runtime_entity_id: Runtime that vouches for this node (None = no runtime parent)
 
     Example:
         >>> from datetime import datetime, UTC
@@ -290,6 +291,12 @@ class ModelRegistrationProjection(BaseModel):
     correlation_id: UUID | None = Field(
         default=None,
         description="Correlation ID for distributed tracing",
+    )
+
+    # Runtime parent (OMN-24495)
+    runtime_entity_id: UUID | None = Field(
+        default=None,
+        description="Runtime that vouches for this node; None if no runtime parent",
     )
 
     # Feature flags (OMN-5578)
