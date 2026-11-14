@@ -101,5 +101,10 @@ jobs:
         run: |
           # OMN-20934: lab_overlay cases read the private lane manifest and run
           # in the Lane Census Staleness job, which fetches the overlay.
+          # OMN-24428: the suite is 2300+ tests and ran about 8.5 minutes
+          # serial against this job's 10 minute limit, so a loaded runner
+          # cancelled it and failed CI Summary. It runs on parallel workers,
+          # one file per worker; the limit above is unchanged.
           uv run --project scripts/deploy-agent --extra dev \
-            pytest scripts/deploy-agent/tests -v --tb=short -m "not lab_overlay"
+            pytest scripts/deploy-agent/tests -v --tb=short -m "not lab_overlay" \
+            -n auto --dist loadfile
