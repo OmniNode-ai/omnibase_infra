@@ -10,7 +10,7 @@ from importlib.resources import files
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumEventBusLostBrokerPolicy, EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
@@ -24,6 +24,14 @@ class ModelEventBusRecoveryConfig(BaseModel):
     max_backoff_seconds: float = Field(gt=0)
     backoff_multiplier: float = Field(ge=1)
     attempt_timeout_seconds: float = Field(gt=0)
+    lost_broker_policy: EnumEventBusLostBrokerPolicy = Field(
+        default=EnumEventBusLostBrokerPolicy.REFUSE_READY,
+        description=(
+            "refuse_ready: a runtime serving other processes reports not ready, "
+            "fails publishes and keeps retrying Kafka; local_fallback: a runtime "
+            "declared single-process delivers in memory while Kafka recovers."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_bounds(self) -> ModelEventBusRecoveryConfig:
