@@ -73,6 +73,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.kafka]
 BROKER_IMAGE = "redpandadata/redpanda:v24.2.7"
 BROKER_READY_SECONDS = 90.0
 DEMAND_START_SECONDS = 60.0
+HANDLED_ONCE_SETTLE_SECONDS = 3.0
 BUS_ENVIRONMENT = "local"
 
 
@@ -184,9 +185,13 @@ async def _write_record(bootstrap: str, logical: str) -> None:
         await producer.stop()
 
 
+_HANDLED: list[object] = []
+"""Every envelope a deferred contract's handler was called with (cleared per test)."""
+
+
 class _FakeHandler:
     async def handle(self, envelope: object) -> None:
-        return None
+        _HANDLED.append(envelope)
 
 
 def _contract(
@@ -278,6 +283,7 @@ async def _prepare(bootstrap: str, names: _Names) -> None:
 async def test_golden_the_first_record_wires_the_deferred_contract_and_its_group_reads_it_once(
     broker_bootstrap: str, bus: EventBusKafka, tmp_path: Path
 ) -> None:
+    _HANDLED.clear()
     names = _Names()
     await _prepare(broker_bootstrap, names)
     provisioner = TopicProvisioner(
@@ -369,43 +375,16 @@ async def test_golden_the_first_record_wires_the_deferred_contract_and_its_group
                 )
             assert imported_modules.count("fake.deferred_module") == 1
 
-            group_id = compute_consumer_group_id(
-                ModelNodeIdentity(
-                    env=BUS_ENVIRONMENT,
-                    service="test-package",
-                    node_name="node_deferred",
-                    version="1.0.0",
-                ),
-                EnumConsumerGroupPurpose.CONSUME,
-            )
-            physical = apply_topic_namespace(names.deferred_subscribe)
-            committed: dict[int, int] = {}
+            # The record that started the contract is the first its group
+            # reads: its handler is called for it, once, and not again.
             deadline = time.monotonic() + DEMAND_START_SECONDS
-            admin = AIOKafkaAdminClient(bootstrap_servers=broker_bootstrap)
-            await admin.start()
-            try:
-                while time.monotonic() < deadline:
-                    try:
-                        offsets = await admin.list_consumer_group_offsets(group_id)
-                    except (KafkaError, OSError):
-                        offsets = {}
-                    committed = {
-                        tp.partition: int(offset.offset)
-                        for tp, offset in offsets.items()
-                        if tp.topic == physical
-                    }
-                    if committed.get(0, 0) >= 1:
-                        break
-                    await asyncio.sleep(0.25)
-                else:
-                    raise AssertionError(
-                        "the deferred contract's group never committed the "
-                        f"record that started it; committed={committed!r}"
-                    )
-            finally:
-                await admin.close()
-            # One record on one partition, read once from earliest.
-            assert committed == {0: 1}
+            while time.monotonic() < deadline and not _HANDLED:
+                await asyncio.sleep(0.25)
+            assert len(_HANDLED) == 1, (
+                "the deferred handler did not handle the first record"
+            )
+            await asyncio.sleep(HANDLED_ONCE_SETTLE_SECONDS)
+            assert len(_HANDLED) == 1, "the first record was handled more than once"
     finally:
         for stop in stops:
             await stop()
