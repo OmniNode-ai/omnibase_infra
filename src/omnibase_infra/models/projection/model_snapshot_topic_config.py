@@ -58,11 +58,14 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums.generated.enum_platform_topic import EnumPlatformTopic
 
-# Import from the leaf module (not the package) to avoid circular import:
-#   topics/__init__ -> platform_topic_suffixes -> _snapshot_kafka_config()
-#   -> model_snapshot_topic_config -> topics/__init__  (cycle!)
-from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_REGISTRATION_SNAPSHOTS
+# Read from the generated enum, not platform_topic_suffixes: that module builds
+# its spec registry from this model at import, so importing it here is a cycle
+# whenever this model is the first one loaded.
+SUFFIX_REGISTRATION_SNAPSHOTS: str = (
+    EnumPlatformTopic.EVT_REGISTRATION_SNAPSHOTS_V1.value
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.errors.error_infra import ProtocolConfigurationError
