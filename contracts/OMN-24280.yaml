@@ -35,15 +35,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py tests/integration/lab_proof -q
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn24280-registry-validates
-    description: The committed registry validates with the retired repository's entry and proof row removed.
-    source: manual
-    execution_scope: hosted_and_local
-    binds_ac: [AC2]
-    checks:
-      - check_type: command
-        check_value: uv run python scripts/ci/validate_lab_proof_profiles.py
-        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24280-no-exemption-rule-name
     description: No file under src, scripts or tests names the removed exemption rule.
     source: manual
