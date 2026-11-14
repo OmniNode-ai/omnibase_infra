@@ -1,0 +1,61 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24260
+title: "The stability lane follows the newest dev build the shared development copy ran successfully"
+summary: "The deploy agent keeps the stability lane on the newest omnimarket dev tag the dev lane has run, when the dev lane's own newest terminal deploy record is a success. The follow command carries the tag as sibling_tags and the executor stages exactly that tag. The dev unit sets DEPLOY_AGENT_FOLLOW_STABILITY=1, which adds the stability lane to a lab dev fence."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24260-stability-follows-dev-receipt
+    statement: "The stability follow rule takes the newest dev tag the dev lane ran with a passing deploy record, never a pinned sha and never the newest tag merely for being newest, and the build stages that tag."
+    acceptance:
+      - id: AC1
+        statement: "AC1: with the dev lane running a dev tag whose newest deploy record is a success and a newer dev tag existing, the deploy agent's follow rule names the older tag and its command carries it as sibling_tags -- falsifier: uv run --extra dev pytest tests/unit/test_stability_follows_dev_tag_omn19998.py -k \"newer_tag_exists\" in scripts/deploy-agent, which fails when the rule waits for the newest tag"
+      - id: AC2
+        statement: "AC2: a dev-lane deploy record that failed or is unread makes the follow rule refuse with dev_receipt_not_passed and creates no job -- falsifier: the same test file, -k \"receipt\", which fails when the failing control follows anyway"
+      - id: AC3
+        statement: "AC3: the unit declares DEPLOY_AGENT_FOLLOW_STABILITY=1 and lane_policy adds the stability lane to a lab dev fence only -- falsifier: uv run --extra dev pytest tests/unit/test_lane_policy.py tests/unit/test_deploy_agent_service_source.py in scripts/deploy-agent"
+      - id: AC4
+        statement: "AC4: integrated: after install on the h201 deploy agent, the stability runtime's build provenance names the omnimarket dev tag the dev lane ran, and /health and /ready read 200 nine minutes after its recreate -- falsifier: the provenance names an older revision, or health or ready is not 200 at nine minutes, read on the running stability runtime"
+evidence_requirements:
+  - kind: tests
+    description: "The follow rule, job store receipt, lane policy, unit source and executor staging tests pass at the head; the same tests are red against the merge base source."
+    command: "uv run --frozen --extra dev --directory scripts/deploy-agent pytest tests/unit/test_stability_follows_dev_tag_omn19998.py tests/unit/test_job_store_latest_terminal_status_omn21485.py tests/unit/test_lane_policy.py tests/unit/test_deploy_agent_service_source.py tests/unit/test_executor_build_path_omn16442.py -q -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24260-follow-rule-tests
+    description: "The follow rule and its receipt seam: follows an older tag while a newer exists, refuses a failed or unread dev record, reads the record from a real job store, and the command's tags reach the executor. Red at the merge base (collection error on the new names)."
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen --extra dev --directory scripts/deploy-agent pytest tests/unit/test_stability_follows_dev_tag_omn19998.py tests/unit/test_job_store_latest_terminal_status_omn21485.py -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24260-fence-setting-tests
+    description: "The unit declares the follow setting and protects it, and lane_policy adds the stability lane to a lab dev fence only; the staging script receives the command's tags as DEPLOY_SIBLING_REFS."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen --extra dev --directory scripts/deploy-agent pytest tests/unit/test_lane_policy.py tests/unit/test_deploy_agent_service_source.py tests/unit/test_executor_build_path_omn16442.py -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24260-agent-unit-shape
+    description: "The agent built the way the unit declares it (dev fence plus the follow setting) runs one stability rebuild for the tag dev ran, and the same fence without the setting runs none."
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen --extra dev --directory scripts/deploy-agent pytest tests/unit/test_stability_follows_dev_tag_omn19998.py -q -p no:randomly -k unit_shape"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24260-running-stability-health
+    description: "Lab observation, not graded by hosted CI: after the agent change is installed, the running stability runtime answers health. The URL is read from the environment of the host that runs the gate."
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: "test -n \"$STABILITY_HEALTH_URL\" && curl -fsS -o /dev/null \"$STABILITY_HEALTH_URL\""
+        cwd: ${OMNI_HOME}/omnibase_infra
