@@ -44,6 +44,8 @@ EXIT_REFUSED = 3
 EXIT_UV_ERROR = 4
 EXIT_COMMIT_FAILED = 5
 
+STAGE_DIR_PREFIX = ".atomic-stage."
+
 # Any failure of the commit must restore the venv: the file system, the probe
 # of the live footprint, a malformed journal or plan file.
 _RESTORE_ERRORS = (
@@ -268,6 +270,31 @@ def prune_git_checkouts(stage_dir: Path) -> list[Path]:
     return removed
 
 
+def sweep_stale_stages(venv_root: Path, *, keep: Path | None = None) -> list[Path]:
+    """Remove the earlier installs' `.atomic-stage.*` side folders (OMN-24508).
+
+    Must only run on the success path, under the venv's reconcile lock: the
+    sweep assumes no other install of this venv is using a stage. A symlink or
+    a non-directory is skipped, never followed; ``keep`` is never removed. A stage
+    that holds a journal is removed too: the run that follows it has already
+    verified and read back the live venv, so its previous packages are obsolete.
+    """
+    removed: list[Path] = []
+    if not venv_root.is_dir():
+        return removed
+    for child in sorted(venv_root.iterdir()):
+        if not child.name.startswith(STAGE_DIR_PREFIX):
+            continue
+        if keep is not None and child.name == keep.name:
+            continue
+        if child.is_symlink() or not child.is_dir():
+            continue
+        shutil.rmtree(child, ignore_errors=True)
+        removed.append(child)
+        _say(f"  swept stale stage {child}")
+    return removed
+
+
 def stage(
     python_bin: str,
     stage_dir: Path,
@@ -488,6 +515,8 @@ def run_command(
     if command == "finalize":
         prune_git_checkouts(stage_dir)
         shutil.rmtree(stage_dir, ignore_errors=True)
+        swept = sweep_stale_stages(stage_dir.parent)
+        _say(f"  swept {len(swept)} stale stage dir(s)")
         return EXIT_OK
     if command == "rollback":
         return rollback_stage(stage_dir)
