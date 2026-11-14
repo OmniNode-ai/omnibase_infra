@@ -1,0 +1,60 @@
+# docker-compose.stability-host-broker.yml
+# OMN-19998: per-host advertised broker addresses for the lab proof lane.
+#
+# A Kafka client bootstraps on one address and then connects to whatever the
+# broker's metadata advertises. The lane's own overlay advertises the addresses
+# of the host that first ran this lane, so a client that bootstraps on a second
+# host is redirected to the first host's broker. This layer is applied by a host
+# that serves the lane under its own address, after docker-compose.infra.yml and
+# the lane's own overlay (the one that declares STABILITY_TEST_REDPANDA_MEMORY):
+#
+#   docker compose -f docker/docker-compose.infra.yml \
+#     -f <the lane's own overlay> \
+#     -f docker/docker-compose.stability-host-broker.yml config
+#
+# It carries no address. Both values come from the host's own environment under
+# the lane-specific names below, supplied by the private host overlay (OMN-20923:
+# deployment configuration belongs to whoever runs the system), and a host that
+# sets neither is refused by name. A host that does not layer this file keeps
+# the lane's existing advertised addresses, unchanged.
+#
+# The names are lane-specific on purpose: OMN-12832 moved the advertised address
+# out of deploy-time interpolation because a shared name leaked from a shell and
+# re-pointed the broker. Every value keeps the internal:// listener at
+# redpanda:9092 / redpanda:8082, which the in-network clients use.
+#
+# A compose list cannot be patched per element, so `command` is replaced whole.
+# tests/unit/infra/test_stability_host_advertised_addr.py fails when this list
+# differs from the lane's own `command` in anything but the two advertised
+# values, so the two cannot drift apart.
+services:
+  redpanda:
+    command: !override
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - ${STABILITY_TEST_REDPANDA_MEMORY:-12G}
+      - --reserve-memory
+      - "0M"
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092,lan://0.0.0.0:19093
+      - --advertise-kafka-addr
+      - ${STABILITY_TEST_REDPANDA_ADVERTISED_KAFKA_ADDR:?set the host's advertised Kafka address (internal, external and lan listeners)}
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr
+      - ${STABILITY_TEST_REDPANDA_ADVERTISED_PANDAPROXY_ADDR:?set the host's advertised Pandaproxy address (internal and external listeners)}
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --set
+      - topic_partitions_per_shard=15000
