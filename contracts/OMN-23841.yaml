@@ -41,18 +41,21 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py tests/scripts/test_release_train_version_from_git_omn23841.py -q -n 0 -k "readme or cut_job_bumps"
+        check_value: uv run pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py tests/scripts/test_release_train_version_from_git_omn23841.py -q -n 0 -k "readme or cut_job_bumps or dynamic_version_tree_cuts"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
   - id: dod-omn23841-ac3-published-matches-notes
     description: >-
-      The newest omnibase-core version PyPI serves has a release heading with that version in the README that package publishes (info.description). This reads only public PyPI, so the hosted runner can run it, and it fails when the published version differs from the notes heading. It holds today for the static-version releases and is the check the next nightly cut after core's version becomes dynamic must keep passing.
+      The newest omnibase-core version PyPI serves has a release heading with that version in the README that package publishes (info.description). This reads only public PyPI, so the hosted runner can run it, and it fails when the published version differs from the notes heading. It holds today for the static-version releases and is the check the next nightly cut after core's version becomes dynamic must keep passing. A second check runs the test that the cut candidate follows the newest release tag, the version the notes heading names, which fails at the merge base where a dynamic tree is refused.
     source: manual
     checks:
       - check_type: command
         check_value: >-
           uv run python -c "import json, urllib.request; info = json.load(urllib.request.urlopen('https://pypi.org/pypi/omnibase-core/json'))['info']; version = info['version']; assert f'## v{version} (' in info['description'], version"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_release_train_version_from_git_omn23841.py -q -n 0 -k "candidate_follows_the_newest_tag"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
