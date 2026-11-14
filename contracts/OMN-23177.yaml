@@ -32,6 +32,15 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/scripts/test_c11_envelope_corpus.py tests/integration/ci/test_c11_delegation_legs_node_omn23177.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23177-dispatch-run
+    description: One workflow_dispatch run of the C11 workflow on this branch (head e3a25c244136573c924e0ddc4a623967ef195840) with check_delegation_legs=true and plant_canary_in_answer=true concluded failure; its legs step failed with the planted canary found in the answer. The check also requires the grader in the checked-out tree, which is absent at the merge base.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: grep -q 'def plant_canary_in_answer' src/omnibase_infra/handlers/handler_c11_delegation_legs.py && gh run view 43578975446 --repo OmniNode-ai/omnibase_infra --json conclusion --jq .conclusion | grep -qx failure
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23177-deploy
     description: Probe that reads the legs handler from GitHub at the checked-out commit and requires the grader and the planted-canary switch, and requires the workflow input that reaches them in the checked-out tree; all are absent at the merge base.
     source: manual
