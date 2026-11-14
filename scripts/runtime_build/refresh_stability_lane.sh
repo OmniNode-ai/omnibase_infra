@@ -277,7 +277,12 @@ readonly CORE_SERVICES=(omninode-runtime runtime-worker projection-api)
 # docker/Dockerfile.runtime, the same image the four core services build from,
 # not the release-only selector path that is still broken in workspace mode.
 readonly REFRESH_BUILD_SERVICES=(
-    "${CORE_SERVICES[@]}"
+    # OMN-23363 -- the opt-in SASL flip, beside the core services. One-shots on a
+    # pinned upstream image, so they cannot go stale; they are here so that every
+    # governed refresh re-asserts the flip and its readback, as refresh_dev_lane.sh
+    # does for OMN-18012. Without LANE_BROKER_AUTH_ENV_FILE on the host both exit 0
+    # and the broker stays PLAINTEXT.
+    "${CORE_SERVICES[@]}" lane-redpanda-scram-user lane-redpanda-sasl-enable
     projection-tenant-registry-writer
     projection-delegation-writer
     projection-registration-writer

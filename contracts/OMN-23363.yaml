@@ -1,0 +1,56 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23363
+title: "The lab proof lane's compose enables SASL on its Redpanda and gives the runtime family SASL client settings, as the dev lane does"
+summary: >-
+  The lab proof lane's compose overlay had no SASL step for its Redpanda, so the lane could not require per-machine broker logins (OMN-21616). Modelled on the dev lane (OMN-18012), the overlay gains two one-shots, lane-redpanda-scram-user (creates the lane's runtime SCRAM principal) and lane-redpanda-sasl-enable (makes it the superuser, flips enable_sasl, and proves that an unauthenticated client is refused and an authenticated one accepted); redpanda-partition-cap waits for them. Every broker client the lane runs (the runtime family, projection-api, the seven projection writers) and redpanda-partition-cap read KAFKA_SECURITY_PROTOCOL, KAFKA_SASL_* and RPK_USER/RPK_PASS from one host-local env file named by LANE_BROKER_AUTH_ENV_FILE. The overlay is shared by every host that runs the lane, and an empty-string default is not inert (apply_environment_overrides takes any set variable), so the file defaults to /dev/null: a host that sets nothing gets no auth variable on any service, and both one-shots exit 0 before any rpk call. Both are in the lane refresh's build scope so every governed refresh re-asserts the flip, and both are allowlisted in config/validation/stack_shape.yaml.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23363-stability-sasl
+    statement: >-
+      A stability lane can require SASL on its broker, opt-in per host, with every broker client carrying the lane's SASL client settings.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the lab proof lane's compose declares a one-shot SASL enable service for its Redpanda and passes SASL client settings to every runtime and projection-writer service that connects to the broker, and a test fails on a compose without them -- falsifier: uv run pytest tests/unit/docker/ -k stability_sasl -q in omnibase_infra
+      - id: AC2
+        statement: >-
+          AC2: on the lab host, after a refresh from a release that carries this change, the stability broker requires SASL -- falsifier: rpk cluster config get enable_sasl in the lab host's stability broker prints true
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Each of the twelve broker clients reads the host auth env file and sets no literal auth variable; the two one-shots are ordered scram-user then sasl-enable after a healthy broker and before the partition cap, and exit 0 before any rpk call without the auth file; sasl-enable sets the superuser, flips enable_sasl and carries both the unauthenticated-refused and authenticated-accepted checks.
+    command: uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn23363.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23363-ac1-clients-and-one-shots
+    description: >-
+      The ticket's falsifier. At the merge base no proof-lane service reads the auth env file and neither one-shot exists, so the parametrised client cases and the one-shot cases fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/ -k stability_sasl -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn23363-ac2-flip-declared
+    description: >-
+      Hosted stand-in for AC2: the sasl-enable one-shot sets enable_sasl true and reads it back, which is what rpk cluster config get enable_sasl reports on the lab host once a release carrying this change is refreshed and the one-shots are run. The lab readback is the lane proof and is not run by the hosted verifier. At the merge base the one-shot does not exist, so the test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn23363.py -q -n 0 -p no:cacheprovider -k flips_the_broker
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn23363-ac1-deploy-probe
+    description: >-
+      Deploy probe. The proof lane's refresh script GitHub serves at the checked-out commit carries the SASL one-shots in its build scope, which is what makes a governed refresh run the flip. The probe reads the file from GitHub at that commit and exits nonzero on a tree without them, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/refresh_stability_lane.sh?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'lane-redpanda-scram-user lane-redpanda-sasl-enable' | grep -qx 1"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
