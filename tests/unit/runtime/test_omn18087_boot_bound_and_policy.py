@@ -69,6 +69,7 @@ LAB_COMMAND_NODES = (
     "node_delegated_code_edit_orchestrator",
     "node_delegation_routing_order_compute",
 )
+ROLL_WINDOW_GATE_NODE = "node_dev_roll_window_gate_effect"
 
 
 def test_dev_main_declares_the_boot_policy_and_memory_limit() -> None:
@@ -89,6 +90,19 @@ def test_dev_main_declares_the_boot_policy_and_memory_limit() -> None:
     for name in LAB_COMMAND_NODES:
         assert name in boot.priority_contracts
         assert name in rendered["DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS"].split(",")
+
+
+def test_dev_main_boot_priority_names_the_roll_window_gate() -> None:
+    # The roll window gate holds every dev deploy command on one hold topic
+    # (OMN-24447); the boot policy and the rendered env must both name it.
+    boot = _contract().profiles["dev"].processes["main"].boot
+
+    assert boot is not None
+    assert ROLL_WINDOW_GATE_NODE in boot.priority_contracts
+    rendered = renderer.render_env(_contract())
+    assert ROLL_WINDOW_GATE_NODE in rendered[
+        "DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS"
+    ].split(",")
 
 
 def test_dev_main_memory_limit_fits_the_four_kernel_figure() -> None:
