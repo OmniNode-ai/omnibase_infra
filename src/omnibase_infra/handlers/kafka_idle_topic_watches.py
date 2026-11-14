@@ -21,7 +21,15 @@ This is a registry, not an ONEX handler: it defines no ``handler_type`` or
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable, Iterable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from aiokafka import AIOKafkaConsumer
+    from aiokafka.structs import TopicPartition
+
+logger = logging.getLogger(__name__)
 
 _WATCHES: list[set[str]] = []
 
@@ -57,4 +65,55 @@ class IdleTopicWatch:
         _WATCHES[:] = [watch for watch in _WATCHES if watch is not self._topics]
 
 
-__all__: list[str] = ["IdleTopicWatch", "idle_watched_topics"]
+async def nothing_to_stop() -> None:
+    """The stop of a demand split that left no watch running."""
+    return
+
+
+async def _start_one(start: Callable[[str], Awaitable[None]], topic: str) -> None:
+    try:
+        await start(topic)
+    except Exception:  # boundary: one topic's start never ends the watch
+        logger.exception("Demand start failed for topic %s (OMN-18087)", topic)
+
+
+async def watch_for_first_records(
+    consumer: AIOKafkaConsumer,
+    watched: list[TopicPartition],
+    on_first_physical_record: Callable[[str], Awaitable[None]],
+    poll_timeout_ms: int,
+) -> None:
+    """Start each watched topic on its first record; end when none is left."""
+    remaining = list(watched)
+    while remaining:
+        try:
+            batches = await consumer.getmany(timeout_ms=poll_timeout_ms)
+        except Exception:  # boundary: a dead watch must not strand contracts
+            logger.exception(
+                "Boot subscription demand watch failed; starting every "
+                "deferred contract now (OMN-18087)"
+            )
+            for topic in sorted({tp.topic for tp in remaining}):
+                await _start_one(on_first_physical_record, topic)
+            return
+        waiting = {tp.topic for tp in remaining}
+        arrived = sorted(
+            {tp.topic for tp, records in batches.items() if records} & waiting
+        )
+        if not arrived:
+            continue
+        # Pause rather than reassign: reassigning resets every remaining
+        # partition's position, and a record arriving in that gap is lost.
+        started = [tp for tp in remaining if tp.topic in arrived]
+        remaining = [tp for tp in remaining if tp.topic not in arrived]
+        consumer.pause(*started)
+        for topic in arrived:
+            await _start_one(on_first_physical_record, topic)
+
+
+__all__: list[str] = [
+    "IdleTopicWatch",
+    "idle_watched_topics",
+    "nothing_to_stop",
+    "watch_for_first_records",
+]

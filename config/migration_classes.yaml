@@ -547,3 +547,6 @@ migrations:
   forward/nodes/node_projection_delegation_budget_readings/0001_grant_omninode_runtime_delegation_budget_readings.sql: expand-only
   forward/nodes/node_projection_host_disk/0000_create_host_disk.sql: forward-only # CREATE UNIQUE INDEX on host_disk_class and host_disk_volume
   forward/nodes/node_projection_host_disk/0001_grant_omninode_runtime_host_disk.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the two host disk tables
+  forward/nodes/node_projection_experiment_result/0000_create_experiment_arm_results.sql: forward-only # CREATE TABLE and CREATE INDEX for the experiment arm results table
+  forward/nodes/node_projection_experiment_result/0001_grant_tenant_projection_writer_experiment_arm_results.sql: expand-only # GRANT SELECT, INSERT, UPDATE to tenant_projection_writer on the experiment arm results table
+  forward/nodes/node_projection_experiment_result/0002_force_rls_experiment_arm_results.sql: forward-only # FORCE ROW LEVEL SECURITY and the tenant isolation policy on the experiment arm results table

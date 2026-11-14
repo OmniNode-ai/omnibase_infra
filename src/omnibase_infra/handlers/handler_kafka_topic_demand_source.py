@@ -19,41 +19,60 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Collection
 
-from aiokafka import AIOKafkaConsumer
 from aiokafka.admin import AIOKafkaAdminClient
 from aiokafka.structs import TopicPartition
 
+from omnibase_core.container import ModelONEXContainer
+from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
+    ProtocolEventBusSubscriber,
+)
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.kafka_transport import create_offset_consumer
-from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.handlers.kafka_idle_topic_watches import IdleTopicWatch
+from omnibase_infra.handlers.kafka_idle_topic_watches import (
+    IdleTopicWatch,
+    nothing_to_stop,
+    watch_for_first_records,
+)
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
 
-_POLL_TIMEOUT_MS = 1000
 # Partitions per offset request; one request across a whole broker timed out on
 # the lab (measured by the topic-activity sampler, 2026-09-26).
 _OFFSET_CHUNK = 100
 
 
-async def _nothing_to_stop() -> None:
-    return None
+def _log_demand_measure(
+    topics: Collection[str], retained: Collection[str], readable: Collection[str]
+) -> None:
+    """Log the split's counts in one line (OMN-24223).
 
-
-async def _start_one(start: Callable[[str], Awaitable[None]], topic: str) -> None:
-    try:
-        await start(topic)
-    except Exception:  # boundary: one topic's start never ends the watch
-        logger.exception("Demand start failed for topic %s (OMN-18087)", topic)
+    A topic is retained (holds a record), unreadable (missing or not visible) or
+    idle and watched; ``retained + unreadable`` is the number in use. The line
+    starts with the words the boot log is searched for.
+    """
+    logger.info(
+        "Boot subscription demand measure: topics=%d retained=%d unreadable=%d "
+        "idle_watched=%d (OMN-24223)",
+        len(topics),
+        len(retained),
+        len(set(topics) - set(readable)),
+        len(set(readable) - set(retained)),
+    )
 
 
 class HandlerKafkaTopicDemandSource:
     """Measure and watch topics with one group-less, commit-free consumer."""
 
-    def __init__(self, config: ModelKafkaEventBusConfig) -> None:
-        self._config = config
+    def __init__(self, container: ModelONEXContainer) -> None:
+        # The registry uses the interface as a key, never as a constructor.
+        key: type[object] = ProtocolEventBusSubscriber
+        bus = container.get_service(key)
+        if not isinstance(bus, EventBusKafka):
+            raise TypeError("the demand split reads the Kafka bus's own broker")
+        self._config = bus.config
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -77,7 +96,7 @@ class HandlerKafkaTopicDemandSource:
                 "Boot subscription demand measure failed; every contract joins "
                 "at boot (OMN-18087)"
             )
-            return frozenset(topics), _nothing_to_stop
+            return frozenset(topics), nothing_to_stop
 
     async def _measure_and_watch(
         self,
@@ -115,7 +134,8 @@ class HandlerKafkaTopicDemandSource:
             # CancelledError out of this call, past the boundary above, and ends
             # the kernel (tenant-projection-writer restart loop on the laptop
             # profile, run 40881579955).
-            return frozenset(logical_of.values()), _nothing_to_stop
+            _log_demand_measure(logical_of, (), ())
+            return frozenset(logical_of.values()), nothing_to_stop
         consumer = create_offset_consumer(self._config)
         await consumer.start()
         low: dict[TopicPartition, int] = {}
@@ -144,9 +164,10 @@ class HandlerKafkaTopicDemandSource:
             if physical in with_records or physical not in readable
         )
         watched = [tp for tp in measured if tp.topic not in with_records]
+        _log_demand_measure(logical_of, with_records, readable)
         if not watched:
             await consumer.stop()
-            return in_use, _nothing_to_stop
+            return in_use, nothing_to_stop
 
         consumer.assign(watched)
         for tp in watched:
@@ -160,7 +181,12 @@ class HandlerKafkaTopicDemandSource:
             await idle.start(logical_of[physical], on_first_record)
 
         task = asyncio.create_task(
-            self._watch(consumer, watched, on_first_physical_record),
+            watch_for_first_records(
+                consumer,
+                watched,
+                on_first_physical_record,
+                self._config.consumer_poll_timeout_ms,
+            ),
             name="boot-subscription-demand-watch",
         )
 
@@ -185,38 +211,6 @@ class HandlerKafkaTopicDemandSource:
                 await consumer.stop()
 
         return in_use, stop
-
-    async def _watch(
-        self,
-        consumer: AIOKafkaConsumer,
-        watched: list[TopicPartition],
-        on_first_physical_record: Callable[[str], Awaitable[None]],
-    ) -> None:
-        remaining = list(watched)
-        while remaining:
-            try:
-                batches = await consumer.getmany(timeout_ms=_POLL_TIMEOUT_MS)
-            except Exception:  # boundary: a dead watch must not strand contracts
-                logger.exception(
-                    "Boot subscription demand watch failed; starting every "
-                    "deferred contract now (OMN-18087)"
-                )
-                for topic in sorted({tp.topic for tp in remaining}):
-                    await _start_one(on_first_physical_record, topic)
-                return
-            waiting = {tp.topic for tp in remaining}
-            arrived = sorted(
-                {tp.topic for tp, records in batches.items() if records} & waiting
-            )
-            if not arrived:
-                continue
-            # Pause rather than reassign: reassigning resets every remaining
-            # partition's position, and a record arriving in that gap is lost.
-            started = [tp for tp in remaining if tp.topic in arrived]
-            remaining = [tp for tp in remaining if tp.topic not in arrived]
-            consumer.pause(*started)
-            for topic in arrived:
-                await _start_one(on_first_physical_record, topic)
 
 
 __all__: list[str] = ["HandlerKafkaTopicDemandSource"]
