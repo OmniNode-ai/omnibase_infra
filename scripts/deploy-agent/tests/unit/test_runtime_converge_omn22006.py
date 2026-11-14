@@ -69,6 +69,7 @@ class _Lane:
         self.fail_up_for = ""
         self.not_running = ""
         self.not_healthy = ""
+        self.crash_looping = ""
         self.timed_out = ""
         self.events: list[str] = []
         self.phases: list[tuple[Phase, PhaseStatus]] = []
@@ -117,6 +118,9 @@ class _Lane:
         return _ok()
 
     def verify(self, services: list[str], **_: Any) -> tuple[bool, list[str]]:
+        if len(services) > 1 and self.crash_looping in services:
+            # A crash-looping container fails every census of the whole list.
+            return False, [self.crash_looping]
         if len(services) == 1:
             if services[0] == self.not_running:
                 return False, services
@@ -263,6 +267,31 @@ class TestRuntimePhaseRolling:
         issued = [a[-1] for a in lane.ups]
         assert issued[-1] == failed_service
         assert len(issued) < 19
+        assert (Phase.RUNTIME, PhaseStatus.SUCCESS) not in lane.phases
+
+    def test_runtime_phase_onex_api_failure_raises_typed_and_starts_nothing_after_it(
+        self,
+    ) -> None:
+        """OMN-24471: the 2026-11-14 incident, an onex-api that cannot become healthy.
+
+        onex-api is one of the nineteen services of the live fixture. Its health wait
+        fails and it crash-loops, so a census of the whole list also fails. The roll
+        stops with the onex-api step's own typed error (not the census's plain one),
+        and nothing is started or recreated after it.
+        """
+        lane = _fixture_lane()
+        lane.current_image = NEW_IMAGE
+        lane.not_healthy = "onex-api"
+        lane.crash_looping = "onex-api"
+        typed = executor_mod.load_dev_boot_guard().DevOnexApiStepFailedError
+        with pytest.raises(typed, match="onex-api"):
+            _run_runtime_phase(lane)
+        issued = [a[-1] for a in lane.ups]
+        # The order of the services is the compose model's, not this test's: the
+        # roll stops at onex-api wherever it falls, and issues nothing after it.
+        assert issued[-1] == "onex-api"
+        assert issued.count("onex-api") == 1
+        assert not any("--no-recreate" in a for a in lane.ups)
         assert (Phase.RUNTIME, PhaseStatus.SUCCESS) not in lane.phases
 
     def test_runtime_phase_rolling_does_not_replace_a_peer_while_boot_is_unhealthy(

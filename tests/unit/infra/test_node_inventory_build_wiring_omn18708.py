@@ -47,14 +47,20 @@ def deploy_script() -> str:
 
 
 class TestTheDockerfileStampsTheLabel:
-    def test_the_runtime_stage_declares_the_build_argument(
+    def test_the_inventory_is_a_named_context_not_a_build_argument(
         self, dockerfile: str
     ) -> None:
-        assert re.search(r'^ARG NODE_INVENTORY=""$', dockerfile, re.MULTILINE)
+        """OMN-19998: a build argument is one process argument and one
+        environment value, and 128 KiB is the most either can hold."""
+        assert re.search(r"^FROM scratch AS node_inventory$", dockerfile, re.MULTILINE)
+        assert not re.search(r"^ARG NODE_INVENTORY", dockerfile, re.MULTILINE)
+        assert not re.search(r"^LABEL com\.omninode\.node_inventory", dockerfile, re.M)
 
-    def test_the_label_is_stamped_from_that_argument(self, dockerfile: str) -> None:
-        assert f'LABEL {NODE_INVENTORY_LABEL}="${{NODE_INVENTORY}}"' in dockerfile, (
-            "the Dockerfile must stamp the inventory under the same label key the "
+    def test_the_label_key_is_the_one_the_readback_reads(
+        self, deploy_script: str
+    ) -> None:
+        assert f'labels: {{"{NODE_INVENTORY_LABEL}":' in deploy_script, (
+            "the build path must stamp the inventory under the same label key the "
             "readback reads, or an image inspection resolves nothing"
         )
 
@@ -62,10 +68,8 @@ class TestTheDockerfileStampsTheLabel:
         self, dockerfile: str
     ) -> None:
         """Without this, the label says whatever the build script was told to say."""
-        assert (
-            "python -m omnibase_infra.runtime.node_inventory verify "
-            '--expect "${NODE_INVENTORY}"' in dockerfile
-        )
+        assert 'main(["verify", "--expect", open(sys.argv[1]).read()])' in dockerfile
+        assert "/node_inventory/node_inventory.json" in dockerfile
 
     def test_the_argument_is_declared_after_every_copy_in_the_runtime_stage(
         self, dockerfile: str
@@ -83,7 +87,9 @@ class TestTheDockerfileStampsTheLabel:
             if line.startswith("FROM ") and " AS runtime" in line
         )
         arg_line = next(
-            i for i, line in enumerate(lines) if line.strip() == 'ARG NODE_INVENTORY=""'
+            i
+            for i, line in enumerate(lines)
+            if line.startswith("RUN --mount=type=bind,from=node_inventory")
         )
         later_copies = [
             i
@@ -93,15 +99,15 @@ class TestTheDockerfileStampsTheLabel:
 
         assert arg_line > runtime_stage_start
         assert not later_copies, (
-            f"instructions that create layers appear after ARG NODE_INVENTORY "
+            f"instructions that create layers appear after the inventory guard "
             f"(lines {[i + 1 for i in later_copies]}); the stamping pass would "
             "rebuild them"
         )
 
     def test_the_guard_has_no_force_or_skip_escape(self, dockerfile: str) -> None:
-        guard_block = dockerfile.split('ARG NODE_INVENTORY=""', 1)[1].split("LABEL", 1)[
-            0
-        ]
+        guard_block = dockerfile.split("RUN --mount=type=bind,from=node_inventory", 1)[
+            1
+        ].split("# The label itself", 1)[0]
 
         assert "--force" not in guard_block
         assert "--skip" not in guard_block
@@ -109,16 +115,16 @@ class TestTheDockerfileStampsTheLabel:
 
 
 class TestTheSanctionedBuildPathStampsIt:
-    def test_the_first_pass_builds_with_an_empty_inventory(
-        self, deploy_script: str
-    ) -> None:
+    def test_the_first_pass_builds_with_no_inventory(self, deploy_script: str) -> None:
         """The inventory is a property of the image and cannot precede it."""
-        assert '--build-arg "NODE_INVENTORY="' in deploy_script
+        assert '--build-arg "NODE_INVENTORY=' not in deploy_script
 
-    def test_the_second_pass_stamps_what_the_image_emitted(
+    def test_the_second_pass_stamps_what_the_image_emitted_by_file(
         self, deploy_script: str
     ) -> None:
-        assert '--build-arg "NODE_INVENTORY=${inventory}"' in deploy_script
+        """OMN-19998: never as ``--build-arg NODE_INVENTORY=${inventory}``."""
+        assert '--build-arg "NODE_INVENTORY=${inventory}"' not in deploy_script
+        assert '-f "${stamp_dir}/override.json"' in deploy_script
 
     def test_the_inventory_is_read_from_the_image_not_the_build_context(
         self, deploy_script: str
