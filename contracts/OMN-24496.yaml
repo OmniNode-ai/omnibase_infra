@@ -6,7 +6,7 @@ summary: >-
 is_seam_ticket: true
 interface_change: true
 interfaces_touched:
-  - models
+  - public_api
 requirements:
   - id: req-omn24496-heartbeat-mandatory
     statement: A runtime that cannot build its introspection service or start its heartbeat task refuses to start with a typed counted refusal and announces no node.
