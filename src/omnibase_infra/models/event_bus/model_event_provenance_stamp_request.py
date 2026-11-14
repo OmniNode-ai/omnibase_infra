@@ -4,11 +4,10 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, SkipValidation
 
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.models.event_bus.model_event_provenance_overlay import (
     ModelEventProvenanceOverlay,
 )
@@ -21,7 +20,7 @@ class ModelEventProvenanceStampRequest(BaseModel):
 
     # SkipValidation: the envelope is already a validated instance of some
     # parametrization of the generic; revalidating it would round-trip it.
-    envelope: Annotated[ModelEventEnvelope[Any], SkipValidation]
+    envelope: Annotated[BaseModel, SkipValidation]
     overlay: ModelEventProvenanceOverlay
 
 

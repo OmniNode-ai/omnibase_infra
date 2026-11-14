@@ -43,7 +43,7 @@ from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_publish_receipt import (
     ModelPublishReceipt,
 )
-from omnibase_infra.handlers.handler_event_provenance_stamp.handler import (
+from omnibase_infra.models.event_bus.util_event_provenance_seam import (
     dump_envelope_json,
 )
 

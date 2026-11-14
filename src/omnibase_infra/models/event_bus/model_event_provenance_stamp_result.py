@@ -4,11 +4,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation
-
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 
 
 class ModelEventProvenanceStampResult(BaseModel):
@@ -18,7 +16,7 @@ class ModelEventProvenanceStampResult(BaseModel):
 
     # SkipValidation: the envelope is already a validated instance of some
     # parametrization of the generic; revalidating it would round-trip it.
-    envelope: Annotated[ModelEventEnvelope[Any], SkipValidation]
+    envelope: Annotated[BaseModel, SkipValidation]
     stamped: bool = Field(description="True when this call put the provenance on.")
     reason: str = Field(
         description="stamped, already_stamped, or why the overlay stamped nothing."
