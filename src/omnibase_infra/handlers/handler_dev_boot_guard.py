@@ -438,19 +438,23 @@ def _all_healthy(
         return False
 
 
-def retire_lane_services(
-    config: Any, retired: Collection[str], phase_by_service: Mapping[str, Any]
-) -> Any:
+def retire_lane_services[LaneT: BaseModel](
+    config: LaneT, retired: Collection[str], phase_by_service: Mapping[str, StrEnum]
+) -> LaneT:
     """``config`` with ``retired`` services disabled and their settle phases off.
 
     A service the policy retires by name is never recreated, so the phase that
     only builds or pins its image has nothing to deliver (OMN-24476).
     """
+    current = config.model_dump(
+        mode="json", include={"disabled_services", "disabled_phases"}
+    )
     phases = {phase_by_service[s] for s in retired if s in phase_by_service}
     return config.model_copy(
         update={
-            "disabled_services": config.disabled_services | frozenset(retired),
-            "disabled_phases": config.disabled_phases | frozenset(phases),
+            "disabled_services": frozenset(current["disabled_services"])
+            | frozenset(retired),
+            "disabled_phases": frozenset(current["disabled_phases"]) | phases,
         }
     )
 
