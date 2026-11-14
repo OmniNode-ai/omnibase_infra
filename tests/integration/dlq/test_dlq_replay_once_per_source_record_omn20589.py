@@ -157,6 +157,7 @@ async def test_a_tick_two_subscribers_reject_settles_at_one_copy_per_round() -> 
         rate_limit_per_second=10_000.0,
         max_run_duration_seconds=5.0,
         idle_probe_seconds=0.05,
+        broadcast_topics=(),  # OMN-24177: this file replays the tick topic on purpose
     )
     aio_consumer = _AioConsumer(lane)
     consumer = DLQConsumer(config)
@@ -234,6 +235,7 @@ async def test_a_dry_run_after_a_live_replay_reports_the_sibling_and_records_not
         rate_limit_per_second=10_000.0,
         max_run_duration_seconds=5.0,
         idle_probe_seconds=0.05,
+        broadcast_topics=(),  # OMN-24177: this file replays the tick topic on purpose
         max_records_per_run=1,
     )
     aio_consumer = _AioConsumer(lane)
