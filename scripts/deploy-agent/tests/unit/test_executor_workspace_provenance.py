@@ -125,6 +125,43 @@ def test_stage_workspace_called_for_workspace_mode(
     assert omni_home == "/data/omninode/omni_home"
 
 
+@pytest.mark.parametrize(
+    ("tags", "expected"),
+    [
+        ({"omnimarket": "dev-20261013120000-aaaaaaaaaaaa"}, ["sibling_tags"]),
+        ({}, []),
+    ],
+)
+def test_compose_build_hands_the_commands_sibling_tags_to_staging(
+    monkeypatch: pytest.MonkeyPatch, tags: dict[str, str], expected: list[str]
+) -> None:
+    """OMN-21485: the staging call carries sibling_tags only when a command named some."""
+    monkeypatch.setenv("OMNI_HOME", "/srv/registry_root")
+    executor = DeployExecutor()
+    executor.sibling_tags = tags
+    seen: list[dict[str, object]] = []
+
+    def fake_stage(
+        repo_dir: str, registry: str, deploy_ref: str = "", fallback: str = "", **kw
+    ) -> dict[str, str]:
+        seen.append(kw)
+        return {}
+
+    monkeypatch.setattr("deploy_agent.executor._run", lambda cmd, timeout, **k: _ok())
+    monkeypatch.setattr(DeployExecutor, "_stage_workspace", staticmethod(fake_stage))
+
+    executor._compose_build(
+        Scope.RUNTIME,
+        "abc1234",
+        _noop_phase_update,
+        build_source=BuildSource.WORKSPACE,
+    )
+
+    assert list(seen[0]) == expected
+    if tags:
+        assert seen[0]["sibling_tags"] == tags
+
+
 def test_stage_workspace_not_called_for_release_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

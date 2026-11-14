@@ -1100,6 +1100,22 @@ services:
       # lane-intake handler by path from the clone root (parents[4]/src/omniclaude), so the
       # mount below is the whole clone, read-only.
       ONEX_TICKET_GUARD_PATH: /etc/onex/ticket-guard/plugins/onex/hooks/lib/ticket_creation_guard.py
+      #
+      # -- Ledger source (OMN-24218) ---------------------------------------------
+      # node_commitment_check_scheduled_effect reads and appends the ledger through
+      # commands these variables name (ledger_read and ledger_append of the runner's
+      # overlay), and node_work_state_projection_scheduled_effect reads it the same
+      # way. Unset, every tick failed "the commitment ledger source is not bound in
+      # the runtime" and the schedule verdict read the job failed. The read is the
+      # ledger query command over the bus (the container's own SCRAM login carries
+      # the identity); the append is the bus append command. Each command carries
+      # the workspace config root and registry root as its own `env` prefix, so no
+      # other reader in the container sees a config root it never had. The root
+      # holds only config/lab, mounted read-only below, where the lane declaration
+      # the broker address is resolved from lives.
+      ONEX_LEDGER_BUS_READ_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config OMNIBASE_PATH=/app onex ledger query --bus-lane dev --stdin
+      ONEX_LEDGER_BUS_APPEND_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config python -m omnimarket.work_ledger_bus.cli append --bus-lane dev --omnibase-path /app
+      ONEX_LEDGER_HOST_NAME: ${DEV_LANE_LEDGER_HOST_NAME:-dev-runtime}
     volumes:
       # Read-only; names OMNIDASH_ANALYTICS_DB_URL, rendered above as role_omnidash.
       - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
@@ -1117,6 +1133,10 @@ services:
       # above it. Derived from that one variable, outside any nested default, so the lane host
       # needs no new operator variable.
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}/../../..:/etc/onex/ticket-guard:ro
+      # The lane declaration folder (OMN-24218): ONEX_LANE_OVERLAY_DIR is the lane
+      # overlay folder under the workspace config root's config/lab, which the infra
+      # compose already requires, so its parent is config/lab. Read-only.
+      - ${ONEX_LANE_OVERLAY_DIR}/..:/etc/onex/workspace-config/config/lab:ro
     healthcheck:
       test:
         - CMD

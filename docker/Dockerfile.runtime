@@ -290,8 +290,8 @@ COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.jso
 # workspace mode installs omnibase_core and omnibase_spi from the staged local
 # trees (OMN-17427: spi used to come from the package index at an exact version;
 # each staged tree is a checkout of the sibling's newest dev-merge tag, and the
-# first-party source audit below proves it). omnibase_compat is no longer staged
-# (OMN-21284: it is being retired); workspace mode takes it from the lock.
+# first-party source audit below proves it). omnibase_compat is retired (OMN-21284)
+# and nothing installs it in either mode.
 # release mode installs from pinned remote sources (core stays
 # from omnibase_infra/uv.lock — correct for a release).
 #
@@ -343,10 +343,8 @@ COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.jso
 #
 # The shell conditional on BUILD_SOURCE is evaluated at build time so only one
 # branch ever runs; the other branch's install artifacts never enter the image.
-ARG OMNIBASE_COMPAT_REF="v0.5.5"
-ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/v0.5.5.tar.gz"
 #
-# OMN-14262: the spi workspace install (and compat's, until OMN-21284) ALSO uses
+# OMN-14262: the spi workspace install ALSO uses
 # the forced `uv pip uninstall` + `--no-cache --reinstall-package "<pkg> @ file://…"`
 # form (mirroring core above). A bare `uv pip install --no-deps <path>` no-ops
 # ("Audited 1 package") whenever the staged dev-tree version already equals the
@@ -410,8 +408,7 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
             --no-deps --no-sources --no-cache --reinstall-package omninode-intelligence \
             "omninode-intelligence @ file:///workspace/sibling-repos/omniintelligence" ); \
     else \
-        uv-with-retry pip install --no-deps \
-            "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"; \
+        echo "release mode: no sibling package is installed outside uv.lock"; \
     fi
 
 # Compute the provenance manifest. Workspace mode records sibling repo proofs;

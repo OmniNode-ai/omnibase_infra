@@ -9,12 +9,17 @@ that runs under a bare python3. It is the node-side successor of the shell
 functions ``staging_lock_field``, ``acquire_staging_lock``,
 ``release_staging_lock`` and ``promote_floor_with_venv``.
 
+Promote-floor also stamps the build marker (``.built-from`` with a copy of the
+uv.lock) so the core validator ``omnibase_core.validation.validator_venv_build_lock``
+can judge the venv against the lock it was built from (OMN-19998).
+
 Stdlib only, no package imports: it must run on a host outside any project
 venv, from the host's bare ``python3``.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -271,6 +276,55 @@ def promote_floor(
     return EXIT_OK
 
 
+BUILD_MARKER_NAME = ".built-from"
+BUILD_LOCK_COPY_NAME = ".built-from.uv.lock"
+
+
+def stamp_build_lock(venv: Path, uv_lock: Path) -> int:
+    """Stamp the dispatch venv with the uv.lock it was built from (OMN-19998).
+
+    The marker names the lock, its sha256 and the copy kept beside it; the core
+    validator ``omnibase_core.validation.validator_venv_build_lock`` reads it to
+    judge the venv against that lock.
+    """
+    venv = Path(venv)
+    uv_lock = Path(uv_lock)
+    try:
+        lock_bytes = uv_lock.read_bytes()
+    except OSError:
+        _say(f"FAILED: cannot read {uv_lock}; the build marker was not written")
+        return EXIT_FAILED
+    if not venv.is_dir():
+        _say(f"FAILED: {venv} is not a directory; the build marker was not written")
+        return EXIT_FAILED
+
+    lock_sha256 = hashlib.sha256(lock_bytes).hexdigest()
+    marker_text = (
+        f"lock_path={uv_lock.resolve()!s}\n"
+        f"lock_sha256={lock_sha256}\n"
+        f"lock_copy={BUILD_LOCK_COPY_NAME}\n"
+    )
+    # Each file is written to a temp name and replaced into place, copy first,
+    # marker second: a reader never sees a marker whose copy is missing.
+    copy_tmp = venv / f"{BUILD_LOCK_COPY_NAME}.tmp{os.getpid()}"
+    marker_tmp = venv / f"{BUILD_MARKER_NAME}.tmp{os.getpid()}"
+    try:
+        copy_tmp.write_bytes(lock_bytes)
+        marker_tmp.write_text(marker_text, encoding="utf-8")
+        copy_tmp.replace(venv / BUILD_LOCK_COPY_NAME)
+        marker_tmp.replace(venv / BUILD_MARKER_NAME)
+    except OSError:
+        for leftover in (copy_tmp, marker_tmp):
+            try:
+                leftover.unlink()
+            except OSError:
+                pass
+        _say(f"FAILED: cannot write the build marker into {venv}")
+        return EXIT_FAILED
+    _say(f"dispatch venv: build marker written (lock sha256 {lock_sha256[:12]})")
+    return EXIT_OK
+
+
 def run_promotion_command(
     command: str,
     *,
@@ -303,12 +357,15 @@ def run_promotion_command(
                 "promote_floor requires venv, uv_lock, workspace_root and floor" + "\n"
             )
             return EXIT_FAILED
-        return promote_floor(
+        result = promote_floor(
             Path(venv),
             Path(uv_lock),
             Path(workspace_root),
             Path(floor),
             changed=changed,
         )
+        if result != EXIT_OK:
+            return result
+        return stamp_build_lock(Path(venv), Path(uv_lock))
     sys.stderr.write(f"unknown promotion command: {command}\n")
     return EXIT_FAILED
