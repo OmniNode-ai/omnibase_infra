@@ -20,6 +20,7 @@ import logging
 import random
 import time
 from collections.abc import Callable
+from typing import TypeVar
 from uuid import UUID
 
 from omnibase_core.enums import EnumCoreErrorCode
@@ -58,6 +59,8 @@ from omnibase_infra.protocols.protocol_node_introspection import (
 from omnibase_infra.topics import SUFFIX_NODE_INTROSPECTION
 
 logger = logging.getLogger(__name__)
+
+_ServiceT = TypeVar("_ServiceT")
 
 
 class RuntimeHeartbeatRequiredError(RuntimeHostError):
@@ -157,8 +160,8 @@ class HandlerRuntimeIntrospectionStartup:
         *,
         runtime_name: str,
         correlation_id: UUID,
-        build: Callable[[], ProtocolNodeIntrospection],
-    ) -> ProtocolNodeIntrospection:
+        build: Callable[[], _ServiceT],
+    ) -> _ServiceT:
         """Build the introspection service, refusing to start without one.
 
         Args:

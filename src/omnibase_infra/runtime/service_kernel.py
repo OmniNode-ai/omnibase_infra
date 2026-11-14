@@ -4319,7 +4319,7 @@ async def bootstrap() -> int:
             return ServiceNodeIntrospection.from_contract_dir(
                 contracts_dir=_registration_contract_dir,
                 event_bus=event_bus,
-                node_name=config.name,
+                node_name=config.name or "",
                 environment=environment,
             )
 
