@@ -3,8 +3,8 @@
 #
 # plugin-pin-cascade.yml
 #
-# Triggered by repository_dispatch (event-type: plugin-release) from app repos
-# (omniclaude, omniintelligence, omnimemory) after each PyPI release.
+# Run by workflow_dispatch only; the repository_dispatch trigger was removed in
+# OMN-24206.
 # Updates Dockerfile.runtime pins for the released plugin and opens a PR.
 #
 # Ticket: OMN-5375 (origin), OMN-18596 (downstream pin-bump PRs on publish)
@@ -17,12 +17,14 @@
 # change rendered as a 100-file dev..main diff). Both now follow the
 # dependency-cascade.yml convention: a validated ticket in the head ref, title
 # and body, and a base read from the checkout rather than written here.
+#
+# OMN-24206: RULING 2026-11-09T21:54:25Z lane=orchestrator-31d9: the release-time
+# plugin-release trigger is removed; the cascade runs only by workflow_dispatch,
+# when a change needs a newer plugin pin.
 
 name: Plugin Pin Cascade
 
 on:
-  repository_dispatch:
-    types: [plugin-release]
   workflow_dispatch:
     inputs:
       package:
