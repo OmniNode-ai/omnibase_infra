@@ -63,6 +63,8 @@ ASSERTION_SCRIPT = "assert_evidence_artifact.py"
 # artifact on a fully green run. With it, removing coverage costs a visible,
 # reviewed edit to a test file.
 EXPECTED_EVIDENCE_IDS: tuple[str, ...] = (
+    # OMN-23177: the C11 delegation-legs record (dispatch only).
+    "c11-delegation-legs",
     # OMN-19175: the C11 negative-paths record.
     "c11-negative-paths",
     # OMN-19195: the C12 provider-catalogue record.
