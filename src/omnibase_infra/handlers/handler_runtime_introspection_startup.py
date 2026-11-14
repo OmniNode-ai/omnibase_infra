@@ -139,7 +139,7 @@ class HandlerRuntimeIntrospectionStartup:
         count = self._refusal_counts.get(reason, 0) + 1
         self._refusal_counts[reason] = count
         refusal = ModelRuntimeHeartbeatRefusal(
-            runtime_name=runtime_name,
+            runtime_label=runtime_name,
             reason=reason,
             detail=detail,
             correlation_id=correlation_id,

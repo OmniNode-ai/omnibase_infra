@@ -164,7 +164,7 @@ def make_request(
 def make_refusal(**overrides: Any) -> ModelRuntimeHeartbeatRefusal:
     """Build one valid refusal, with fields overridden per test."""
     values: dict[str, Any] = {
-        "runtime_name": "runtime-a",
+        "runtime_label": "runtime-a",
         "reason": EnumRuntimeHeartbeatRefusalReason.HEARTBEAT_START_FAILED,
         "detail": "RuntimeError: boom",
         "correlation_id": uuid4(),
@@ -224,7 +224,7 @@ class TestBuildRequiredService:
 
         refusal = exc_info.value.refusal
         assert refusal.reason is (EnumRuntimeHeartbeatRefusalReason.RUNTIME_NAME_EMPTY)
-        assert refusal.runtime_name == runtime_name
+        assert refusal.runtime_label == runtime_name
         assert refusal.count == 1
         build.assert_not_called()
         assert (

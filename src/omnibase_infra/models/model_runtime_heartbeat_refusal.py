@@ -23,7 +23,7 @@ class ModelRuntimeHeartbeatRefusal(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    runtime_name: str = Field(..., description="Name of the runtime that was refused")
+    runtime_label: str = Field(..., description="Label of the runtime that was refused")
     reason: EnumRuntimeHeartbeatRefusalReason = Field(
         ..., description="Why the runtime refused to start"
     )
