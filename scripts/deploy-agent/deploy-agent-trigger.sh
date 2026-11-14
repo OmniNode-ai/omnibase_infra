@@ -48,6 +48,8 @@
 #       [--build-source release|workspace] \
 #       [--image-digest sha256:...] \
 #       [--service <name>]... \
+#       [--overlay-ref <40-hex overlays revision> (dev only; needs the two rollback flags)] \
+#       [--rollback-actor <who> --rollback-reason <why>] \
 #       [--reason "manual trigger by operator"] \
 #       [--requested-by claude] \
 #       [--correlation-id <uuid>] \

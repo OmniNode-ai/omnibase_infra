@@ -207,6 +207,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/contracts/model_llm_endpoint_contract.py",
         "models/contracts/model_llm_endpoint_overlay.py",
         "nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py",
+        "nodes/node_setup_local_provision_effect/runtime_overlay_revision.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
         if module_name in sys.modules:
@@ -2637,12 +2638,6 @@ def settle_service_containers(
         _removal_wait_sleep(CONTAINER_REMOVAL_POLL_SECONDS)
 
 
-def _hit_removal_race(result: subprocess.CompletedProcess[str]) -> bool:
-    return result.returncode != 0 and REMOVAL_IN_PROGRESS in (
-        f"{result.stderr or ''}{result.stdout or ''}"
-    )
-
-
 def run_compose_recreate(
     argv: list[str],
     *,
@@ -2693,7 +2688,7 @@ def run_compose_recreate(
         if first.returncode == 0:
             return first
         settle()
-        if not _hit_removal_race(first):
+        if REMOVAL_IN_PROGRESS not in f"{first.stderr or ''}{first.stdout or ''}":
             return first
         logger.warning(
             "compose recreate of %s met a removal still in progress; settled "
