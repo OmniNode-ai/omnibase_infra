@@ -6406,11 +6406,9 @@ class DeployExecutor:
 
         # Verify containers actually reached running state — docker compose up exits 0
         # even when containers land in Created state (hit twice in production, 01:33 + 04:48).
-        logger.info(
-            "Verifying %d container(s) reached running state: %s",
-            len(expected),
-            expected,
-        )
+        # OMN-24471: a failed onex-api step is raised as itself, never re-verified here.
+        expected = load_dev_boot_guard().roll_expected(expected, roll_error)
+        logger.info("Verifying %d container(s): %s", len(expected), expected)
         ok, stuck = verify_containers_up(
             expected, timeout_s=CONTAINER_VERIFY_TIMEOUT_SECONDS, lane=lane
         )

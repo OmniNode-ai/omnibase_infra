@@ -126,6 +126,33 @@ class DevCompanionLaneFailedError(RuntimeError):
     """
 
 
+class DevOnexApiStepFailedError(DevBootFailedError):
+    """The onex-api step of a dev roll stopped the job.
+
+    onex-api is not the runtime (it is not in DEV_BOOT_SERVICES), so its
+    failure fails the job and is reported, but it is not by itself a reason to
+    replace a runtime that is up and healthy (OMN-24471). The guard still
+    restores the retained family when the runtime is unhealthy or absent.
+    """
+
+    def __init__(self, message: str, service: str) -> None:
+        super().__init__(message)
+        self.service = service
+
+
+def roll_expected(expected: list[str], roll_error: RuntimeError | None) -> list[str]:
+    """The services the executor verifies after a roll stopped at ``roll_error``.
+
+    A failed onex-api step is raised as itself: the step already waited on that
+    service, and verifying or starting it again would let a crash-looping
+    container replace the typed error with a census error, which recovers as a
+    runtime failure (OMN-24471).
+    """
+    if isinstance(roll_error, DevOnexApiStepFailedError):
+        return [service for service in expected if service != roll_error.service]
+    return expected
+
+
 def _roll_events_module(execution: ModuleType) -> ModuleType:
     """The dev roll events composition root, loaded by the agent's own effect loader."""
     return execution.load_dev_boot_guard(
@@ -193,6 +220,15 @@ def _safe(text: str) -> str:
     )[:2000]
 
 
+def _step_failed(
+    service: str, execution: ModuleType, message: str
+) -> DevBootFailedError:
+    """OMN-24471: a failed onex-api step stays distinguishable from a runtime step's."""
+    if service == execution.ONEX_API_SERVICE:
+        return DevOnexApiStepFailedError(message, service)
+    return DevBootFailedError(message)
+
+
 def run_runtime_roll_step(
     argv: list[str],
     timeout: int,
@@ -222,19 +258,25 @@ def run_runtime_roll_step(
             env=execution._compose_env(extra_env),
         )
     except execution.subprocess.TimeoutExpired as exc:
-        raise DevBootFailedError(
-            f"Runtime roll stopped at {service}: compose up timed out"
+        raise _step_failed(
+            service,
+            execution,
+            f"Runtime roll stopped at {service}: compose up timed out",
         ) from exc
     if result.returncode != 0:
-        raise DevBootFailedError(
+        raise _step_failed(
+            service,
+            execution,
             f"Runtime roll stopped at {service}: "
-            f"{_safe(result.stderr) or 'compose health wait failed'}"
+            f"{_safe(result.stderr) or 'compose health wait failed'}",
         )
     if not execution.verify_containers_up(
         [service], timeout_s=execution.CONTAINER_VERIFY_TIMEOUT_SECONDS, lane=lane
     )[0]:
-        raise DevBootFailedError(
-            f"Runtime roll stopped at {service}: container did not reach running state"
+        raise _step_failed(
+            service,
+            execution,
+            f"Runtime roll stopped at {service}: container did not reach running state",
         )
     return ModelSubprocessOutcome(
         returncode=int(result.returncode),
@@ -1030,19 +1072,24 @@ class HandlerDevBootGuard:
                     execution=self.execution,
                 )
                 kept_revision: str | None = None
+                left_running = False
                 if (
-                    isinstance(exc, DevCompanionLaneFailedError)
+                    isinstance(
+                        exc, (DevCompanionLaneFailedError, DevOnexApiStepFailedError)
+                    )
                     and not unchanged
                     and _all_healthy(
                         lambda: _dev_containers(self), execution=self.execution
                     )
                 ):
-                    # OMN-21645: the companion lane failed after the new
-                    # runtime was replaced and verified. Rolling that healthy
-                    # family back recreates the runtime a second time and ends
-                    # every in-flight run with runtime_shutdown. A capture that
-                    # refuses leaves kept_revision unset, so the retained
-                    # family is restored as before.
+                    # OMN-21645 (the gateway companion lane) and OMN-24471
+                    # (the onex-api step): neither failure is the runtime's,
+                    # and both can arrive after the new runtime was replaced
+                    # and verified. Rolling that healthy family back recreates
+                    # the runtime a second time and ends every in-flight run
+                    # with runtime_shutdown. A capture that refuses leaves
+                    # kept_revision unset, so the retained family is restored
+                    # as before.
                     try:
                         captured = self._capture()
                         self.point.hold(captured)
@@ -1054,8 +1101,19 @@ class HandlerDevBootGuard:
                         self.execution.subprocess.SubprocessError,
                     ):
                         kept_revision = None
+                    # OMN-24471: onex-api is not the runtime. A runtime that is
+                    # up and healthy is left running even when the family
+                    # cannot become the recovery point (a partial roll reads as
+                    # mixed revisions): a restore here is the recreate the
+                    # onex-api failure never justified. The failure stays
+                    # failed and reported; the next roll rolls the rest.
+                    left_running = kept_revision is None and isinstance(
+                        exc, DevOnexApiStepFailedError
+                    )
                 if kept_revision is not None:
                     incident["runtime_kept_revision"] = kept_revision
+                elif left_running:
+                    incident["runtime_left_running"] = True
                 elif not unchanged:
                     self._restore()
                 incident["recovery_skipped_healthy"] = unchanged
