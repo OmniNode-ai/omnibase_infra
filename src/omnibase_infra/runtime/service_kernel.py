@@ -139,14 +139,12 @@ from omnibase_infra.errors import (
 # Import from infra for type safety until core Part 1 merges; runtime bus
 # selection in select_event_bus() handles the core→infra fallback.
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-from omnibase_infra.event_bus.event_bus_kafka import (
-    EventBusKafka,
-    EventBusRecovering,
-)
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.handlers import boot_readiness_checks
+from omnibase_infra.handlers.event_bus_recovering import EventBusRecovering
 from omnibase_infra.handlers.handler_package_announcer import (
     build_registered_events,
     run_boot_step0,
