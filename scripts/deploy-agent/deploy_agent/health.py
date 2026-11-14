@@ -16,6 +16,7 @@ from deploy_agent.accept_backlog import (
     EnumAcceptBacklogStatus,
     ModelAcceptBacklogVerdict,
 )
+from deploy_agent.auth import hmac_key_check
 from deploy_agent.job_state import JobState, JobStore
 from deploy_agent.lab_overlay import load_latest_record, load_record
 from deploy_agent.loaded_code import loaded_code_sha_if_recorded
@@ -170,8 +171,7 @@ async def _health_handler(request: web.Request) -> web.Response:
         except Exception:  # noqa: BLE001
             continue
     if completed_jobs:
-        completed_jobs.sort(key=lambda pair: pair[0], reverse=True)
-        latest = completed_jobs[0][1]
+        latest = max(completed_jobs, key=lambda pair: pair[0])[1]
         last_result = {
             "correlation_id": str(latest.correlation_id),
             "status": latest.status,
@@ -187,8 +187,6 @@ async def _health_handler(request: web.Request) -> web.Response:
                 latest.settling_stage.value if latest.settling_stage else None
             ),
         }
-
-    pending_publish = len(store.get_pending_publish())
 
     # OMN-18636 AC4. An accept queue that nothing has drained past the declared
     # bound means this process is not serving its own socket -- which, to every
@@ -213,8 +211,12 @@ async def _health_handler(request: web.Request) -> web.Response:
             "uptime_seconds": int(time.monotonic() - _start_time),
             "active_job": active_job,
             "last_result": last_result,
-            "pending_publish_count": pending_publish,
+            "pending_publish_count": len(store.get_pending_publish()),
             "accept_backlog": backlog,
+            # OMN-24397. A one-way check value of the signing key, never the key: a
+            # sender compares it with its own before sending, because the agent drops
+            # a command signed with another key without saying so. None: no key set.
+            "hmac_key_check": hmac_key_check(),
         },
         status=status_code,
     )

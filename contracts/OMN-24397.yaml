@@ -1,0 +1,74 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24397
+title: The dev deploy agent health page carries a check value of its signing key
+summary: The agent's /health payload gains hmac_key_check, a one-way check value (hmac_sha256 of the signing key under the label deploy-agent-key-check-v1, cut to 16 hex characters) of the key in DEPLOY_AGENT_HMAC_SECRET, and null when no key is set. A sender reads it before sending and learns that its key differs from the agent's before a command is lost. The golden vector (fixture-key gives 6dce9bc99db04417) is held in the agent test and in the signing node's test (omnimarket tests/nodes/node_deploy_agent_key_check_effect/key_check_vector.json). auth.py and health.py are baselined files that only shrink; the change keeps both at their base code-line count (58 and 273).
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn24397-health-field
+    statement: The health payload carries the check value of the key in the agent's environment and never the key.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the agent health payload carries hmac_key_check equal to the golden check value for the key in its environment, and null when no key is set -- falsifier: pytest scripts/deploy-agent/tests/unit/test_health_key_check.py -q"
+      - id: AC2
+        statement: "AC2: the key itself and any prefix of it never appear in the health payload -- falsifier: pytest scripts/deploy-agent/tests/unit/test_health_key_check.py -k never_exposes -q"
+  - id: req-omn24397-golden-vector
+    statement: Both sides of the check hold the same golden vector, each against its own implementation.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the golden vector in the agent test equals the vector the signing node's test holds, so a change on either side fails a test -- falsifier: pytest scripts/deploy-agent/tests/unit/test_auth_key_check.py -q"
+  - id: req-omn24397-integrated
+    statement: The dev agent serves the check value on its health route after it loads this change.
+    acceptance:
+      - id: AC4
+        statement: "AC4: integrated: the dev agent on h201, after it loads this change, serves hmac_key_check on its health route, read with curl against port 8098 -- falsifier: curl the dev agent health route and read hmac_key_check as a 16 character hex string"
+evidence_requirements:
+  - kind: tests
+    description: The agent's health and key check tests of this change.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_health_key_check.py scripts/deploy-agent/tests/unit/test_auth_key_check.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24397-ac1-health-field
+    description: The health payload carries hmac_key_check equal to the golden value for the key in the environment and null when no key or an empty key is set; the same tests fail when the label is changed.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_health_key_check.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24397-ac2-never-exposes
+    description: With a key that begins with a character no payload text carries, no prefix of the key, from one character to the whole key, appears in the health response body.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_health_key_check.py -k never_exposes -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24397-ac3-golden-vector
+    description: The agent's test holds the vector fixture-key, deploy-agent-key-check-v1, 6dce9bc99db04417 against the agent's function and against the recipe spelled in the test. The signing node holds the same vector in omnimarket tests/nodes/node_deploy_agent_key_check_effect/key_check_vector.json against its own function, so a change on either side turns a test red.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auth_key_check.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24397-ac4-integrated
+    description: Hosted-runner deploy probe reads the agent's auth module from GitHub at the checked-out commit and requires the check value function, so a checkout without the change fails it. The running reading (curl of the dev agent health route on h201 port 8098 once it loads the merged change) is cited in a pull request comment.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/auth.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'def hmac_key_check' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra
