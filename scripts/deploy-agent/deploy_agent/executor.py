@@ -3463,6 +3463,10 @@ class DeployExecutor:
         # OMN-21928: <repo>#<number>@<head sha> of the open pull request this
         # rebuild declares; rebuild_scope sets it from the signed command.
         self.declared_pr = ""
+        # OMN-21485: sibling repository -> the dev tag this rebuild stages in
+        # place of the sibling's newest one; rebuild_scope sets it from the
+        # signed command and _compose_build exports it to the staging script.
+        self.sibling_tags: dict[str, str] = {}
         # OMN-19220: ONE BUILD_DATE per rebuild, shared by every compose build
         # in it. Dockerfile.runtime declares ARG BUILD_DATE at the top of both
         # stages, so every RUN after it takes the value as build environment
@@ -4631,6 +4635,7 @@ class DeployExecutor:
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         image_digest: str | None = None,
         declared_pr: str = "",
+        sibling_tags: Mapping[str, str] | None = None,
     ) -> list[str]:
         # OMN-16442: no self-update here. This method runs inside an accepted
         # job, after preflight/git/compose_gen/seed; a re-exec from this point
@@ -4644,6 +4649,9 @@ class DeployExecutor:
         # OMN-18057: residue is per-rebuild, not per-process.
         self.reset_deploy_observations()
         self.declared_pr = declared_pr
+        # OMN-21485: the per-sibling refs this rebuild stages instead of each
+        # sibling's newest dev tag; empty is the default follow.
+        self.sibling_tags = dict(sibling_tags or {})
 
         # prod deploys the stability-proven digest — it pulls the pinned image
         # and never rebuilds from a ref (the digest is the authority).
@@ -5441,27 +5449,27 @@ class DeployExecutor:
         omni_home: str,
         deploy_ref: str = "",
         sibling_fallback_ref: str = "",
+        sibling_tags: Mapping[str, str] | None = None,
     ) -> dict[str, str]:
-        """Stage sibling repos into the Docker build context for workspace mode.
-
-        Runs docker/runtime_build/stage_workspace.sh from the repo root so that
-        workspace/sibling-repos/ is populated before `docker compose build`.
-        Raises RuntimeError on failure.
-
-        OMN-16442: ``deploy_ref`` is the accepted command's own ``git_ref`` and
-        is exported as ``DEPLOY_REF`` for the staging script. The script's
-        OMN-17291 guard refuses to stage the AMBIENT host tree when
-        ``DEPLOY_REF`` is unset, and it was refusing correctly — the caller was
-        wrong. The command envelope carries the pin (``git_ref=origin/dev``,
-        resolved from ``DEPLOY_AGENT_TRACKING_REF``) and ``self_update`` had
-        already used it one step earlier, but it was dropped between the
-        consumer and the staging step, so the sibling build was asserted
-        against nothing. Measured live 2026-09-08 on command a5635af0:
-        ``Workspace staging failed (exit=5): ERROR: DEPLOY_REF unset``.
-
-        The guard STAYS. This passes the pin the operator supplied; it does not
-        weaken, skip, or opt out of the assertion. An empty ``deploy_ref`` is
-        """
+        # Stage sibling repos into the Docker build context for workspace mode.
+        #
+        # Runs docker/runtime_build/stage_workspace.sh from the repo root so that
+        # workspace/sibling-repos/ is populated before `docker compose build`.
+        # Raises RuntimeError on failure.
+        #
+        # OMN-16442: ``deploy_ref`` is the accepted command's own ``git_ref`` and
+        # is exported as ``DEPLOY_REF`` for the staging script. The script's
+        # OMN-17291 guard refuses to stage the AMBIENT host tree when
+        # ``DEPLOY_REF`` is unset, and it was refusing correctly — the caller was
+        # wrong. The command envelope carries the pin (``git_ref=origin/dev``,
+        # resolved from ``DEPLOY_AGENT_TRACKING_REF``) and ``self_update`` had
+        # already used it one step earlier, but it was dropped between the
+        # consumer and the staging step, so the sibling build was asserted
+        # against nothing. Measured live 2026-09-08 on command a5635af0:
+        # ``Workspace staging failed (exit=5): ERROR: DEPLOY_REF unset``.
+        #
+        # The guard STAYS. This passes the pin the operator supplied; it does not
+        # weaken, skip, or opt out of the assertion. An empty ``deploy_ref`` is
         # deliberately NOT substituted with a fallback ref — nothing is exported
         # and the script refuses in its own words, which is the correct outcome
         # for a caller that has no pin to offer.
@@ -5516,6 +5524,14 @@ class DeployExecutor:
                 "_stage_workspace: siblings fall back to %s where the requested "
                 "ref names no commit in them (OMN-17135)",
                 sibling_fallback_ref,
+            )
+        # OMN-21485: explicit per-sibling refs take precedence over the
+        # newest-dev-tag follow (stage_workspace.sh passes each as --repo-ref),
+        # so a build stages the exact tag its command named. Empty stages the
+        # follow, exactly as before.
+        if sibling_tags:
+            staging_env["DEPLOY_SIBLING_REFS"] = " ".join(
+                f"{repo}={tag}" for repo, tag in sorted(sibling_tags.items())
             )
         result = subprocess.run(
             ["bash", str(script)],
@@ -5646,6 +5662,9 @@ class DeployExecutor:
                 omni_home,
                 git_ref,
                 load_tracking_remote_ref_from_env(),
+                # Passed only when a command named tags, so the default staging
+                # call keeps the shape every caller and fake of it already has.
+                **({"sibling_tags": self.sibling_tags} if self.sibling_tags else {}),
             )
             if self.sibling_source_refs:
                 logger.info(
