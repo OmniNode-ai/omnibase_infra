@@ -813,11 +813,18 @@ case "${ONEX_MIGRATION_LANE}" in
     # on this lane name tenant_projection_writer and role_omnidash, neither a
     # superuser nor BYPASSRLS, and the table is owned by postgres, so the
     # policy binds the writer here rather than being bypassed.
+    # OMN-24341: the arm also releases node_projection_skill_lifecycle 0002, which adds
+    # skill_executions.tenant_id and puts FORCE ROW LEVEL SECURITY and a tenant policy on
+    # the table. The skill lifecycle writer inserts tenant_id, so while the id is fenced
+    # every write is refused with UndefinedColumnError. The baseline fence entry stays;
+    # the release is consulted only on ONEX_MIGRATION_LANE=dev. Authority: the OPERATOR-CONSENT
+    # row of 2026-09-14T12:11:31Z (tenant row-level security on TENANT-class migrations, lab first).
     LANE_RELEASED_NODE_MIGRATION_IDS="\
 node:node_projection_registration:0002_node_service_registry_tenant_rls.sql
 node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_isolation.sql
 node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql
-node:node_projection_delegation:0041_delegation_budget_state_rls_tenant_isolation.sql"
+node:node_projection_delegation:0041_delegation_budget_state_rls_tenant_isolation.sql
+node:node_projection_skill_lifecycle:0002_grant_tenant_projection_writer_skill_executions.sql"
     ;;
   "")
     LANE_RELEASED_NODE_MIGRATION_IDS=""
@@ -830,9 +837,7 @@ esac
 
 is_lane_released_node_migration() {
   candidate="$1"
-  if [ -z "${LANE_RELEASED_NODE_MIGRATION_IDS}" ]; then
-    return 1
-  fi
+  # An empty release set holds one empty line, which equals no id, so no guard is needed (OMN-24341).
   printf '%s\n' "${LANE_RELEASED_NODE_MIGRATION_IDS}" | grep -Fxq "${candidate}"
 }
 # ---- END operator fence — node migration ids (OMN-15336) ----
