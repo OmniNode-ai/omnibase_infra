@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from omnibase_infra.enums import EnumEventBusLostBrokerPolicy
 from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -34,6 +35,8 @@ def make_bus() -> EventBusRecovering:
             max_backoff_seconds=4,
             backoff_multiplier=2,
             attempt_timeout_seconds=1,
+            # These tests exercise a runtime declared single-process.
+            lost_broker_policy=EnumEventBusLostBrokerPolicy.LOCAL_FALLBACK,
         ),
         local_bus=local_bus,
         local_start=local_bus.start,
@@ -486,7 +489,17 @@ def test_runtime_overlay_replaces_policy_and_nonfinite_delays_are_refused() -> N
         "backoff_multiplier": 3,
         "attempt_timeout_seconds": 10,
     }
-    assert ModelEventBusConfig(recovery=override).recovery.model_dump() == override
+    assert ModelEventBusConfig(recovery=override).recovery.model_dump() == {
+        **override,
+        "lost_broker_policy": EnumEventBusLostBrokerPolicy.REFUSE_READY,
+    }
+    declared = ModelEventBusConfig(
+        recovery={**override, "lost_broker_policy": "local_fallback"}
+    )
+    assert (
+        declared.recovery.lost_broker_policy
+        is EnumEventBusLostBrokerPolicy.LOCAL_FALLBACK
+    )
     for value in (float("inf"), float("nan"), 0, -1):
         with pytest.raises(ValueError):
             ModelEventBusRecoveryConfig(
