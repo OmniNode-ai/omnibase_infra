@@ -1,0 +1,69 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24509
+title: "The second-host stability broker layer is applied by the refresh and its addresses are stored"
+summary: >-
+  The stability lane's compose file list applies the per-host advertised broker layer after the lane's own overlay whenever a host supplies its advertised address, so a client that bootstraps on a second host is handed that host's address. The host's two addresses are stored in the overlays repository for the stability refresh node; a host that supplies none keeps the lane's file list unchanged.
+is_seam_ticket: true
+interface_change: false
+interfaces_touched:
+  - "overlay caps STABILITY_TEST_REDPANDA_ADVERTISED_KAFKA_ADDR and STABILITY_TEST_REDPANDA_ADVERTISED_PANDAPROXY_ADDR to compose_files.sh resolve_compose_file_args"
+requirements:
+  - id: req-omn24509-layer-applied
+    statement: >-
+      A host that declares its advertised broker addresses has them applied to the stability lane by the refresh, and no other host or lane is changed.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the stability lane's compose file list gains docker-compose.stability-host-broker.yml after the lane overlay whenever the host declares its advertised Kafka address, and a render with h051's values shows h051's addresses -- falsifier: pytest tests/scripts/test_stability_host_broker_layer_applied.py -q fails when the layer is declared and not applied
+      - id: AC2
+        statement: >-
+          AC2: the h051 overlay of the stability refresh node carries both advertised-address values and the overlays test reads them -- falsifier: pytest tests/test_stability_refresh_h051_overlays.py -q in the overlays repository fails with the values removed
+      - id: AC3
+        statement: >-
+          AC3: integrated: on h051 the stability refresh plan (dry run) run from the branch names the host broker layer file and h051's advertised address -- falsifier: the same dry run with the overlay values removed names no layer
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The resolver lists the layer after the lane overlay when either address variable is set on the stability project, lists it for no other project, keeps the two-file list when neither is set.
+    command: uv run --frozen pytest tests/scripts/test_stability_host_broker_layer_applied.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24509-ac1-layer-applied
+    description: >-
+      The ticket's falsifier. On the unchanged resolver the layer is never listed, so the applied-layer cases and the control fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_stability_host_broker_layer_applied.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn24509-ac1-deploy-probe
+    description: >-
+      Deploy probe. The resolver file GitHub serves at the checked-out commit names the layer file, which is what a host running the refresh reads. The probe reads the file at that commit, counts the references and exits nonzero on a tree without them, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/compose_files.sh?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'docker-compose.stability-host-broker.yml' | grep -qx 1"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn24509-ac2-overlay-values
+    description: >-
+      The overlay side of the seam spells the same two variable names and the same listener shape; this repository's test spells the names it applies. The overlays test fails with a value removed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_stability_host_broker_layer_applied.py -q -n 0 -p no:cacheprovider -k "failing_control or half_declaration"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn24509-ac3-hosted-stand-in
+    description: >-
+      Hosted stand-in for AC3, which is read on h051 from the branch. The resolver lists the layer after the lane overlay for the stability project and for no other project, which is what the refresh's compose calls read.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_stability_host_broker_layer_applied.py -q -n 0 -p no:cacheprovider -k "lists_the_host_broker_layer or no_other_lane"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
