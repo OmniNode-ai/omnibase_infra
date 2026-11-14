@@ -5,12 +5,29 @@ summary: "The release-train-cuts-omnimarket ruling is carried by config/release_
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn20715-ac1-accepted-20261114t1545z:
+      - label: AC1
+        criterion_hash: 25a41e9b4339e4c48d67ae41dba1d49b315b2ab09eec773f26f9d3bbc5ddef06
+        proposed_by: lane=dod-closeout-bind-2026-11-14T1545Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-14T1545Z-c2
+    dod-omn20715-ac2-accepted-20261114t1545z:
+      - label: AC2
+        criterion_hash: 4fc2bc3c645cddf1c9879e79b7e3bc2fc4eb902551ae7ac08d812753ff5737aa
+        proposed_by: lane=dod-closeout-bind-2026-11-14T1545Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-14T1545Z-c2
 requirements:
   - id: "req-omn20715-wire-release-train-nightly-tests"
     statement: "tests/scripts/test_release_train_nightly.py is run by name by a ci.yml test-parallel step and by a pre-commit hook that fires on the policy, the train, its workflow and the test."
     acceptance:
       - id: "AC1"
         statement: "AC1: ci.yml test-parallel has a step running tests/scripts/test_release_train_nightly.py and .pre-commit-config.yaml has a check-only hook running it, firing on the policy file, the train script, the nightly workflow and the test itself -- falsifier: uv run pytest tests/scripts/test_release_train_nightly.py -q -k EnforcedInCIAndPrecommit fails at the merge base, where neither the step nor the hook exists"
+  - id: "req-omn-20715-criteria"
+    statement: "The ticket's labelled acceptance criteria."
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance."
 evidence_requirements:
   - kind: "tests"
     description: "The wiring tests pass at the head and fail at the merge base."
@@ -28,3 +45,19 @@ dod_evidence:
         check_value: "uv run pytest tests/scripts/test_release_train_nightly.py -q -k EnforcedInCIAndPrecommit"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
+  - id: "dod-omn20715-ac1-accepted-20261114t1545z"
+    description: "AC1: the shipped omnimarket policy row loads as mode cut on its existing lab-evidence premise and its note carries no release-on-merge claim. Fails with the policy change of omnibase_infra#4708 reverted."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: 'uv run pytest -q -p no:randomly "tests/scripts/test_release_train_nightly.py::TestOmnimarketIsArmedOnItsLabPremise::test_the_shipped_row_is_cut_on_its_existing_lab_premise" "tests/scripts/test_release_train_nightly.py::TestOmnimarketIsArmedOnItsLabPremise::test_the_note_no_longer_claims_release_on_merge_races_the_train"'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn20715-ac2-accepted-20261114t1545z"
+    description: "AC2: the shipped omnimarket policy with unreleased source work and a PASS lab receipt decides CUT, and the nightly workflow opens the release PR against the decided base. Fails with the policy change of omnibase_infra#4708 reverted."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: 'uv run pytest -q -p no:randomly "tests/scripts/test_release_train_nightly.py::TestOmnimarketIsArmedOnItsLabPremise::test_unreleased_source_work_with_a_pass_premise_opens_a_release_pr_decision" "tests/scripts/test_release_train_nightly.py::TestWorkflowShape::test_the_workflow_opens_the_release_pr_against_the_decided_base"'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
