@@ -1,6 +1,6 @@
 ticket: OMN-16442
 title: The manual deploy trigger is built from the command contract
-note: History moved from the module docstring of scripts/deploy-agent/deploy_agent/trigger.py so the file stays within its shrink-only size ratchet.
+note: History moved from the module docstring of scripts/deploy-agent/deploy_agent/trigger.py so the file stays within its shrink-only size ratchet. The trigger and that module were retired by OMN-24414 and the signed command is now built and published by node_branch_deploy_command_effect (omnimarket).
 what_broke: |
   `deploy-agent-trigger.sh` used to hand-write the command JSON in an embedded
   Python snippet:

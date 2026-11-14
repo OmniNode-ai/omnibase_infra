@@ -32,6 +32,9 @@ topics:
   # OMN-23176: the C16 workflow runs the pinned-backend probe through the generic
   # node CLI, which publishes the check command on its local runtime bus.
   - onex.cmd.platform.c16-pinned-backend-check.v1
+  # OMN-23177: the C11 workflow runs the delegation-legs probe through the generic
+  # node CLI, which publishes the check command on its local runtime bus.
+  - onex.cmd.platform.c11-delegation-legs-check.v1
   # OMN-17427: cli_node publishes the reconcile command before waiting for its
   # terminal event, exactly as for the CI live-contact node above.
   - onex.cmd.platform.hotpatch-ledger-reconcile.v1

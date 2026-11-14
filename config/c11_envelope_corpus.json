@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "origin": "malformed-and-injected-tasks eval, input digest 718019077e24, run 1 on h201, 2026-10-23; the raw bytes stay in the lane's event ledger at command offsets 58878-58890, so these bodies are rebuilt from the eval's one-line defect descriptions, not copied from it",
+  "envelopes": [
+    {
+      "id": "E1",
+      "defect": "missing prompt",
+      "envelope": {
+        "event_type": "omnimarket.delegate-skill",
+        "correlation_id": "00000000-0000-4000-8000-000000000001",
+        "payload": {
+          "task_type": "test",
+          "source": "external-client",
+          "max_tokens": 32
+        }
+      }
+    },
+    {
+      "id": "E2",
+      "defect": "missing payload",
+      "envelope": {
+        "event_type": "omnimarket.delegate-skill",
+        "correlation_id": "00000000-0000-4000-8000-000000000002"
+      }
+    },
+    {
+      "id": "E3",
+      "defect": "prompt is an integer",
+      "envelope": {
+        "event_type": "omnimarket.delegate-skill",
+        "correlation_id": "00000000-0000-4000-8000-000000000003",
+        "payload": {
+          "prompt": 12345,
+          "task_type": "test",
+          "source": "external-client",
+          "max_tokens": 32
+        }
+      }
+    },
+    {
+      "id": "E4",
+      "defect": "wrong types on prompt, task_type and max_tokens",
+      "envelope": {
+        "event_type": "omnimarket.delegate-skill",
+        "correlation_id": "00000000-0000-4000-8000-000000000004",
+        "payload": {
+          "prompt": [
+            "a"
+          ],
+          "task_type": 7,
+          "source": "external-client",
+          "max_tokens": "many"
+        }
+      }
+    },
+    {
+      "id": "E5",
+      "defect": "extra field exec",
+      "envelope": {
+        "event_type": "omnimarket.delegate-skill",
+        "correlation_id": "00000000-0000-4000-8000-000000000005",
+        "payload": {
+          "prompt": "Reply with the single word: alive.",
+          "task_type": "test",
+          "source": "external-client",
+          "max_tokens": 32,
+          "exec": "rm -rf /"
+        }
+      }
+    },
+    {
+      "id": "E6",
+      "defect": "task_type shell_exec",
+      "envelope": {
+        "event_type": "omnimarket.delegate-skill",
+        "correlation_id": "00000000-0000-4000-8000-000000000006",
+        "payload": {
+          "prompt": "Reply with the single word: alive.",
+          "task_type": "shell_exec",
+          "source": "external-client",
+          "max_tokens": 32
+        }
+      }
+    },
+    {
+      "id": "E11",
+      "defect": "empty prompt",
+      "envelope": {
+        "event_type": "omnimarket.delegate-skill",
+        "correlation_id": "00000000-0000-4000-8000-000000000011",
+        "payload": {
+          "prompt": "",
+          "task_type": "test",
+          "source": "external-client",
+          "max_tokens": 32
+        }
+      }
+    }
+  ]
+}

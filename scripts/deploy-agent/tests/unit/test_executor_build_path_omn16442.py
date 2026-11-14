@@ -8,7 +8,8 @@ source on the dev lane:
 
 1. ``assert_release_build_promoted`` applied the PROD promotion-lineage
    assertion (clean tree AND HEAD ancestor-of/equal-to ``origin/main``)
-   lane-blind, and ``trigger.py`` defaulted ``--build-source`` to ``release``.
+   lane-blind, and the operator trigger (since retired) defaulted ``--build-source``
+   to ``release``.
    Command ``c73cc38a`` was refused on DIRTY_TREE, and would have been refused
    on NOT_PROMOTED next: a dev head is by construction not an ancestor of a
    release-synced ``origin/main``, so release-mode on the dev lane can never
@@ -38,7 +39,6 @@ from uuid import uuid4
 import pytest
 from deploy_agent import agent as agent_mod
 from deploy_agent import executor as executor_mod
-from deploy_agent import trigger as trigger_mod
 from deploy_agent.agent import DeployAgent
 from deploy_agent.events import (
     DEV_LANE_BUILD_SERVICES,
@@ -439,90 +439,3 @@ async def test_agent_hands_the_commands_git_ref_to_rebuild_scope(
 
     assert fake_executor.rebuild_kwargs["git_ref"] == "origin/dev"
     assert fake_executor.rebuild_kwargs["lane"] == EnumRuntimeLane.DEV
-
-
-# ---------------------------------------------------------------------------
-# The trigger's default build source is derived from the lane
-# ---------------------------------------------------------------------------
-
-
-def test_trigger_default_build_source_is_workspace_on_dev() -> None:
-    assert (
-        trigger_mod._resolve_build_source(None, EnumRuntimeLane.DEV)
-        is BuildSource.WORKSPACE
-    )
-
-
-def test_trigger_default_build_source_is_release_off_the_dev_lane() -> None:
-    assert (
-        trigger_mod._resolve_build_source(None, EnumRuntimeLane.STABILITY_TEST)
-        is BuildSource.RELEASE
-    )
-    assert (
-        trigger_mod._resolve_build_source(None, EnumRuntimeLane.PROD)
-        is BuildSource.RELEASE
-    )
-
-
-def test_trigger_has_no_literal_build_source_default() -> None:
-    """Every lane has a named entry: the map is the default, not a fallback."""
-    assert set(trigger_mod.DEFAULT_BUILD_SOURCE_FOR_LANE) == set(EnumRuntimeLane)
-
-
-def test_trigger_refuses_release_on_the_dev_lane_naming_the_lane() -> None:
-    with pytest.raises(trigger_mod.TriggerRefusedError) as excinfo:
-        trigger_mod._resolve_build_source("release", EnumRuntimeLane.DEV)
-
-    message = str(excinfo.value)
-    assert "release" in message
-    assert "dev" in message
-    assert "origin/main" in message
-
-
-def test_trigger_honours_an_explicit_build_source_where_it_can_be_satisfied() -> None:
-    assert (
-        trigger_mod._resolve_build_source("workspace", EnumRuntimeLane.DEV)
-        is BuildSource.WORKSPACE
-    )
-    assert (
-        trigger_mod._resolve_build_source("workspace", EnumRuntimeLane.STABILITY_TEST)
-        is BuildSource.WORKSPACE
-    )
-    assert (
-        trigger_mod._resolve_build_source("release", EnumRuntimeLane.STABILITY_TEST)
-        is BuildSource.RELEASE
-    )
-
-
-def test_trigger_dev_command_defaults_to_a_workspace_payload(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """End to end through main(): no --build-source, dev lane, dry run."""
-    monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
-    monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", "dev")
-    monkeypatch.setenv(trigger_mod.ENV_HMAC_SECRET, "unit-test-signing-key")
-
-    exit_code = trigger_mod.main(["--dry-run"])
-
-    assert exit_code == 0
-    out = capsys.readouterr().out
-    assert "build_source:   workspace" in out
-    assert '"build_source": "workspace"' in out
-    assert '"git_ref": "origin/dev"' in out
-
-
-def test_trigger_dev_release_request_refuses_before_signing(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
-    monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", "dev")
-    monkeypatch.setenv(trigger_mod.ENV_HMAC_SECRET, "unit-test-signing-key")
-
-    exit_code = trigger_mod.main(["--build-source", "release", "--dry-run"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "REFUSED" in captured.err
-    assert "dev" in captured.err
-    # Refused before signing: nothing about a command was printed.
-    assert "payload (sig masked)" not in captured.out

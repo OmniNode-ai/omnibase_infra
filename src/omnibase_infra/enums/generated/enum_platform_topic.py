@@ -22,6 +22,7 @@ class EnumPlatformTopic(str, Enum):
     """
     CMD_API_FIXTURE_RECORD_V1 = contract_topic_value('nodes/node_api_fixture_record_effect/contract.yaml', 'platform', 'CMD_API_FIXTURE_RECORD_V1')  # onex.cmd.platform.api-fixture-record.v1
     CMD_ARCHITECTURE_VALIDATE_V1 = contract_topic_value('nodes/node_architecture_validator/contract.yaml', 'platform', 'CMD_ARCHITECTURE_VALIDATE_V1')  # onex.cmd.platform.architecture-validate.v1
+    CMD_C11_DELEGATION_LEGS_CHECK_V1 = contract_topic_value('nodes/node_c11_delegation_legs_effect/contract.yaml', 'platform', 'CMD_C11_DELEGATION_LEGS_CHECK_V1')  # onex.cmd.platform.c11-delegation-legs-check.v1
     CMD_C16_PINNED_BACKEND_CHECK_V1 = contract_topic_value('nodes/node_c16_pinned_backend_effect/contract.yaml', 'platform', 'CMD_C16_PINNED_BACKEND_CHECK_V1')  # onex.cmd.platform.c16-pinned-backend-check.v1
     CMD_CI_LIVE_CONTACT_CHECK_V1 = contract_topic_value('nodes/node_ci_live_contact_effect/contract.yaml', 'platform', 'CMD_CI_LIVE_CONTACT_CHECK_V1')  # onex.cmd.platform.ci-live-contact-check.v1
     CMD_HOTPATCH_LEDGER_RECONCILE_V1 = contract_topic_value('nodes/node_hotpatch_ledger_reconcile_effect/contract.yaml', 'platform', 'CMD_HOTPATCH_LEDGER_RECONCILE_V1')  # onex.cmd.platform.hotpatch-ledger-reconcile.v1
@@ -34,6 +35,7 @@ class EnumPlatformTopic(str, Enum):
     CMD_TOPIC_CATALOG_QUERY_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'CMD_TOPIC_CATALOG_QUERY_V1')  # onex.cmd.platform.topic-catalog-query.v1
     EVT_API_FIXTURE_RECORDED_V1 = contract_topic_value('nodes/node_api_fixture_record_effect/contract.yaml', 'platform', 'EVT_API_FIXTURE_RECORDED_V1')  # onex.evt.platform.api-fixture-recorded.v1
     EVT_ARCHITECTURE_VALIDATED_V1 = contract_topic_value('nodes/node_architecture_validator/contract.yaml', 'platform', 'EVT_ARCHITECTURE_VALIDATED_V1')  # onex.evt.platform.architecture-validated.v1
+    EVT_C11_DELEGATION_LEGS_CHECKED_V1 = contract_topic_value('nodes/node_c11_delegation_legs_effect/contract.yaml', 'platform', 'EVT_C11_DELEGATION_LEGS_CHECKED_V1')  # onex.evt.platform.c11-delegation-legs-checked.v1
     EVT_C16_PINNED_BACKEND_CHECKED_V1 = contract_topic_value('nodes/node_c16_pinned_backend_effect/contract.yaml', 'platform', 'EVT_C16_PINNED_BACKEND_CHECKED_V1')  # onex.evt.platform.c16-pinned-backend-checked.v1
     EVT_CI_LIVE_CONTACT_CHECKED_V1 = contract_topic_value('nodes/node_ci_live_contact_effect/contract.yaml', 'platform', 'EVT_CI_LIVE_CONTACT_CHECKED_V1')  # onex.evt.platform.ci-live-contact-checked.v1
     EVT_CONTRACT_DEREGISTERED_V1 = contract_topic_value('nodes/node_contract_registry_reducer/contract.yaml', 'platform', 'EVT_CONTRACT_DEREGISTERED_V1')  # onex.evt.platform.contract-deregistered.v1
