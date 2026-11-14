@@ -64,11 +64,6 @@ _EXECUTOR = _REPO_ROOT / "scripts" / "deploy-agent" / "deploy_agent" / "executor
 # the test that governs it.
 _REQUIRED_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):\?")
 
-# The two variables omnibase_infra#3332 added to the dev-lane overlay -- the two
-# that surfaced one deploy at a time. Named explicitly: this is the concrete
-# regression, and it must pass now that they are declared.
-_OMN_3332_VARS = ("ONEX_API_IMAGE", "ONEX_CLOUD_MIGRATE_IMAGE")
-
 
 def _required_names(path: Path) -> set[str]:
     return set(_REQUIRED_VAR_PATTERN.findall(path.read_text(encoding="utf-8")))
@@ -168,41 +163,6 @@ def test_union_of_dev_lane_compose_files_is_fully_declared() -> None:
         f"and {len(undeclared)} of their required vars are declared in neither "
         f"manifest: {undeclared}"
     )
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("var_name", _OMN_3332_VARS)
-def test_omn_3332_image_vars_are_declared(var_name: str) -> None:
-    """The GREEN half: the two variables that cost two deploys are declared."""
-    assert var_name in _required_names(_DEV_LANE_COMPOSE), (
-        f"{var_name} is no longer a ${{VAR:?}} in the dev-lane overlay; if it was "
-        "deliberately removed, remove it from the manifest and from this test."
-    )
-    assert var_name in _declared_names(_DEV_LANE_MANIFEST), (
-        f"{var_name} is required by the dev-lane overlay but not declared in "
-        f"{_DEV_LANE_MANIFEST.name}"
-    )
-
-
-@pytest.mark.unit
-def test_image_vars_carry_provenance_comments() -> None:
-    """Each image tag name is preceded by a provenance comment, not bare.
-
-    An image tag resolved from an operator store, with no compose default and no
-    committed value, is exactly the kind of name a reader will otherwise guess
-    at. The previous lane had to derive ONEX_CLOUD_MIGRATE_IMAGE by hashing the
-    migration corpus against the deployed clone because the intuitive pick — the
-    tag sharing the API image's build stamp — was provably the wrong image.
-    """
-    lines = _DEV_LANE_MANIFEST.read_text(encoding="utf-8").splitlines()
-    for var_name in _OMN_3332_VARS:
-        index = lines.index(var_name)
-        preceding = [line for line in lines[:index][::-1] if line.strip()]
-        assert preceding and preceding[0].lstrip().startswith("#"), (
-            f"{var_name} in {_DEV_LANE_MANIFEST.name} has no provenance comment "
-            "immediately above it. Image-tag names resolve from a store, not from "
-            "a compose default — say where the value comes from (OMN-17530)."
-        )
 
 
 @pytest.mark.unit

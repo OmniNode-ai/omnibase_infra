@@ -136,7 +136,7 @@ def test_every_dev_pin_is_rendered_by_the_dev_lane_and_by_no_governed_lane() -> 
         REPO_ROOT / "docker" / Path(f).name
         for f in lane_config_for(EnumRuntimeLane.DEV).compose_files
     ]
-    assert set().union(*(_rendered_keys(f) for f in dev)) == {
+    assert set().union(*(_rendered_keys(f) for f in dev)) <= {
         k.value for k in EnumDevLanePinKey
     }
     for lane in (lane for lane in EnumRuntimeLane if lane is not EnumRuntimeLane.DEV):

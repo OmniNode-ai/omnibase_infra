@@ -63,8 +63,7 @@ HOSTNAME_ON_HOST = "omnibook"
 COMPOSE_PROJECT = "omnibase-infra-dev-105"
 NETWORK = "omnibase-infra-dev-105-network"
 
-#: The declared block. 61090 (onex-api) is published by a disabled service, so
-#: it is reserved and never bound; it is still in the block.
+#: The declared block: the ports the overlay publishes.
 EXPECTED_PUBLISHED_PORTS = {
     "43085",  # runtime main
     "43086",  # runtime effects
@@ -74,7 +73,6 @@ EXPECTED_PUBLISHED_PORTS = {
     "43092",  # skill lifecycle consumer
     "43093",  # context audit consumer
     "43006",  # phoenix
-    "43090",  # onex-api (disabled here, reserved)
     "43436",  # Postgres
     "43379",  # Valkey
     "43192",  # Redpanda Kafka (external listener)
