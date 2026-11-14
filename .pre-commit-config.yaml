@@ -243,7 +243,7 @@ repos:
   #     its hook repository exports.
   #   - detect-secrets has no hook id in the omnibase_core hook repository.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261105190003-87a6f5ddcbcc
+    rev: dev-20261110125852-e6bc5e13e9e7
     hooks:
       - id: canonical-file-shape
         args: [--rules, file-shape]
@@ -296,7 +296,7 @@ repos:
   # lab has a typed route packaged with this core, and the routes only shrink. CI twin:
   # the last steps of job public-runner-placement in .github/workflows/ci.yml read this rev.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261105190003-87a6f5ddcbcc
+    rev: dev-20261110125852-e6bc5e13e9e7
     hooks:
       - id: check-public-lab-selection
         args: [--repo, omnibase_infra, --visibility, public]
@@ -329,7 +329,7 @@ repos:
   # no suppression marker. CI twin job node-boundary-imports in
   # .github/workflows/ci.yml reads this rev from here.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261105190003-87a6f5ddcbcc
+    rev: dev-20261110125852-e6bc5e13e9e7
     hooks:
       # OMN-17427: a whole-repo import-graph scan (~12s) run on every commit is
       # the commit path's second-largest fixed cost, and ci.yml's
@@ -351,7 +351,7 @@ repos:
   # suppression marker. .github/workflows/direct-model-call.yml reads this rev
   # from here. Server-side backstop: OMN-20299.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261105190003-87a6f5ddcbcc
+    rev: dev-20261110125852-e6bc5e13e9e7
     hooks:
       # OMN-17427: the gate always scans the whole repository (a new call site can
       # be a new caller of an old one), ~40s on every commit; direct-model-call.yml
@@ -368,7 +368,7 @@ repos:
   # sourced from omnibase_core. Rev bumped to OMN-13026 (transport-mock-lint
   # hook added); OMN-13281 wires receipt-honesty to this block.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261105190003-87a6f5ddcbcc
+    rev: dev-20261110125852-e6bc5e13e9e7
     hooks:
       - id: check-stub-implementations
         require_serial: true
@@ -394,7 +394,7 @@ repos:
   # shared baseline at omnibase_core/src/omnibase_core/validation/baselines/canonical_inference_baseline.json;
   # baseline is burn-down only. Suppression: # canonical-inference-ok: <reason>
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261105190003-87a6f5ddcbcc
+    rev: dev-20261110125852-e6bc5e13e9e7
     hooks:
       - id: check-canonical-inference
         require_serial: true
@@ -405,7 +405,7 @@ repos:
   # shared baseline at omnibase_core/src/omnibase_core/validation/baselines/url_authority_baseline.json.
   # Baseline is burn-down only. Suppress with: # url-authority-ok: <reason>
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261105190003-87a6f5ddcbcc
+    rev: dev-20261110125852-e6bc5e13e9e7
     hooks:
       - id: check-url-authority
         require_serial: true
@@ -421,7 +421,7 @@ repos:
   # job in .github/workflows/ci.yml (registered in scripts/ci/ci_summary_gate.py
   # STRICT_GATE_JOBS); this local hook is dev-ergonomics.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261105190003-87a6f5ddcbcc
+    rev: dev-20261110125852-e6bc5e13e9e7
     hooks:
       - id: no-noncanonical-lifecycle-classes
         require_serial: true
@@ -551,7 +551,7 @@ repos:
   # last TOPIC_* literals. The file holds DLQ builders only and the gate now fails
   # closed on any reintroduced literal — A5-full is complete.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261105190003-87a6f5ddcbcc
+    rev: dev-20261110125852-e6bc5e13e9e7
     hooks:
       # OMN-18691 adds ONE path to this exclude: docker/docker-compose.ci-bus.yml.
       # Read the reason before adding a second — an allowlist entry is never a way
@@ -588,7 +588,7 @@ repos:
   # no-bare-feature-flags comes from omnibase_core (omnibase_core#1936, OMN-20919,
   # OCC retirement S8). A separate block keeps no-hardcoded-topics on the rev above.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261105190003-87a6f5ddcbcc
+    rev: dev-20261110125852-e6bc5e13e9e7
     hooks:
       - id: no-bare-feature-flags
         require_serial: true
@@ -2470,7 +2470,7 @@ repos:
   # architecture-handshakes/validator-requirements.yaml, ratcheted by this
   # repo's own architecture-handshakes/validator-requirements-baseline.yaml.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dev-20261105190003-87a6f5ddcbcc
+    rev: dev-20261110125852-e6bc5e13e9e7
     hooks:
       - id: validate-validator-requirements
         require_serial: true
