@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-23177
+title: The C11 probe grades a committed envelope corpus, a policy-refusal leg, a 503 control and a planted canary
+summary: The C11 workflow graded four HTTP negative paths and nothing about the delegation command path. A contract-backed node, node_c11_delegation_legs_effect, reads config/c11_envelope_corpus.json (E1-E6 and E11, each owed the ONEX_CORE_345 refusal) and grades four recorded legs with expectations declared in config/c11_delegation_legs.yaml - the corpus refusals, a policy refusal that makes exactly one attempt, a 503 on rung 1 that moves to rung 2, and a planted canary that appears in no answer, receipt or event. The workflow step runs only on workflow_dispatch, over a committed observation file; a live driver that records lane observations is a later change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23177-c11-delegation-legs
+    statement: The committed envelope corpus and the legs grader refuse every defect they declare, and a canary planted in an answer exits non-zero.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the committed envelope corpus and the assertions pass their own test -- falsifier: uv run pytest tests/scripts/test_c11_envelope_corpus.py -q'
+      - id: AC2
+        statement: 'AC2: one workflow_dispatch run with the canary planted in an answer exits non-zero, run id in the PR body -- falsifier: gh run view <run id> --json conclusion with uv run pytest tests/scripts/test_c11_envelope_corpus.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The corpus loader and the four leg graders over the healthy observations and single-field mutations of them, the planted canary, and the packaged node run through onex node
+    command: uv run --frozen pytest tests/scripts/test_c11_envelope_corpus.py tests/integration/ci/test_c11_delegation_legs_node_omn23177.py tests/ci/test_ci_evidence_policy.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23177-unit
+    description: The corpus holds exactly E1-E6 and E11; a missing terminal, an untyped or retryable refusal, a policy refusal that retries or climbs, a 503 that does not move, a missing observation and a canary in the answer, receipt or event each grade red, and the planted canary makes the node fail. At the merge base the test file and the grader are absent.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_c11_envelope_corpus.py tests/integration/ci/test_c11_delegation_legs_node_omn23177.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23177-deploy
+    description: Probe that reads the legs handler from GitHub at the checked-out commit and requires the grader and the planted-canary switch, and requires the workflow input that reaches them in the checked-out tree; all are absent at the merge base.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_c11_delegation_legs.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d > /tmp/omn23177_handler.py && grep -q 'def grade_legs' /tmp/omn23177_handler.py && grep -q 'def plant_canary_in_answer' /tmp/omn23177_handler.py && grep -q 'plant_canary_in_answer' .github/workflows/chain-canary-c11-negative-paths.yml
+        cwd: ${OMNI_HOME}/omnibase_infra

@@ -38,5 +38,7 @@ lanes:
     # terminal topics (2 more specs).
     # OMN-23176 adds the c16-pinned-backend-check command and -checked
     # terminal topics (2 more specs).
-    repo_specs: 223
+    # OMN-23177 adds the c11-delegation-legs-check command and -checked
+    # terminal topics (2 more specs).
+    repo_specs: 225
     repo_specs_measured_at: "bf76c6681c90088fb9ca6dbca626d226c327c529"

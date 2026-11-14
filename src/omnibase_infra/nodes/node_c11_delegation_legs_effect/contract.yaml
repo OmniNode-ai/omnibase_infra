@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_c11_delegation_legs_effect
+contract_name: node_c11_delegation_legs_effect
+node_name: node_c11_delegation_legs_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: "OMN-23177: grade the committed envelope corpus, the policy-refusal leg, the 503 control and the planted canary of the C11 probe."
+input_model:
+  name: ModelC11DelegationLegsRequest
+  module: omnibase_infra.models.model_c11_delegation_legs_request
+  description: "The legs config path, the recorded observations file, an optional record path and the planted-canary switch."
+output_model:
+  name: ModelC11DelegationLegsResult
+  module: omnibase_infra.models.model_c11_delegation_legs_result
+  description: "Outcome PASS, FAIL or COULD_NOT_RUN with reasons and per-leg evidence; only PASS is success."
+event_bus:
+  subscribe_topics: ["onex.cmd.platform.c11-delegation-legs-check.v1"]
+  publish_topics: ["onex.evt.platform.c11-delegation-legs-checked.v1"]
+terminal_event: "onex.evt.platform.c11-delegation-legs-checked.v1"
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: c11_delegation_legs.check
+      handler:
+        name: HandlerC11DelegationLegs
+        module: omnibase_infra.handlers.handler_c11_delegation_legs
+      event_model:
+        name: ModelC11DelegationLegsRequest
+        module: omnibase_infra.models.model_c11_delegation_legs_request
+      output_events: [ModelC11DelegationLegsResult]
+capabilities:
+  - name: c11_delegation_legs.check
+    description: "Red when a corpus envelope is not refused with the declared code, a policy refusal makes more than one attempt, a 503 does not move to rung 2, or the planted canary appears in an answer, receipt or event."
+metadata:
+  ticket: OMN-23177
+  author: OmniNode Team
+  description: "Scenario R9 of the delegation readiness suite."
+  tags: [effect, ci, delegation]
