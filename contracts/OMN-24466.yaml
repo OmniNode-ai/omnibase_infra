@@ -1,0 +1,56 @@
+schema_version: 1.0.0
+ticket_id: OMN-24466
+title: A shared runtime that loses its broker reports not ready and refuses to send instead of falling back to private delivery
+summary: A new recovery.lost_broker_policy (refuse_ready by default; local_fallback only for a runtime declared single-process in its overlay) makes a shared runtime that lost its broker report readiness 503 with liveness 200, refuse publishes with InfraUnavailableError, keep its subscriptions and attach them when the broker returns.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn24466-recovery
+    statement: A new recovery.lost_broker_policy (refuse_ready by default; local_fallback only for a runtime declared single-process in its overlay) makes a shared runtime that lost its broker report readiness 503 with liveness 200, refuse publishes with InfraUnavailableError, keep its subscriptions and attach them when the broker returns.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a broker loss in a shared runtime gives not-ready and retries, and no publish or subscription reaches the in-memory bus -- falsifier: pytest tests/unit/runtime/test_runtime_bus_lost_broker_refuses_ready.py -k never_in_memory -q'
+      - id: AC2
+        statement: 'AC2: the shipped contract refuses readiness on loss and a runtime overlay can declare single-process to keep local delivery -- falsifier: pytest tests/unit/runtime/test_runtime_bus_lost_broker_refuses_ready.py -k shipped_contract -q'
+      - id: AC3
+        statement: 'AC3: one subscription join failing after the broker returns leaves the others attached, and the bus stays not ready until it attaches -- falsifier: pytest tests/unit/runtime/test_runtime_bus_lost_broker_refuses_ready.py -k one_failed_join -q'
+      - id: AC4
+        statement: 'AC4: integrated: with the change running in the dev runtime, a broker loss shows readiness 503 and no in-memory delivery -- falsifier: read the dev runtime readiness and log after a broker loss and find it ready or delivering in memory'
+evidence_requirements:
+  - kind: tests
+    description: The recovery tests pass at the pushed head.
+    command: uv run pytest tests/unit/runtime/test_runtime_bus_lost_broker_refuses_ready.py tests/unit/runtime/test_runtime_bus_recovery.py -q -n 0 --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24466-tests
+    description: AC1 to AC3 proven by the named tests; AC4 is read on the dev runtime after the deploy agent rolls the branch revision and named in the pull request.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+      - AC3
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_runtime_bus_lost_broker_refuses_ready.py tests/unit/runtime/test_runtime_bus_recovery.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24466-deploy-conditions
+    description: 'Deploy probe the hosted runner can run: src/omnibase_infra/contracts/runtime_event_bus_recovery.yaml at the checked-out commit holds the string ''lost_broker_policy''; it does not exist at the merge base, so the probe fails there.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/contracts/runtime_event_bus_recovery.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "lost_broker_policy" > /dev/null'
+        cwd: .
+  - id: dod-omn24466-integration-proof
+    description: AC4 is read on the dev runtime on h201 after the declared deploy; the host, revision and observation are named in the pull request.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: uv run onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane write-carry3-6803 -- uv run pytest tests/unit/runtime/test_runtime_bus_lost_broker_refuses_ready.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
