@@ -86,7 +86,7 @@ def publish(job: BaseModel, execution: ModuleType) -> BaseModel | None:
             correlation_id=record["correlation_id"],
             runtime_lane=record["command"]["runtime_lane"],
             scope=record["command"]["scope"],
-            status=record["status"],
+            job_outcome=record["status"],
             phase_results=record["phase_results"],
             not_started=record.get("not_started") or "",
             first_error=(record.get("errors") or [""])[0],
