@@ -122,6 +122,18 @@ x-lane-overlay-mount: &lane-overlay-mount
   read_only: true
   bind:
     create_host_path: false
+# OMN-24562: stability builds the runtime on omnimarket's composed image, as the dev
+# lane does (OMN-21279, docker-compose.dev-lane.yml). The infra image carries no
+# omnimarket and no BIFROST_BASE_CONTRACT_PATH, so a kernel built from it alone
+# fails boot with "BIFROST_BASE_CONTRACT_PATH is unset or blank". The build-only
+# service below is the infra half; nothing runs from it.
+x-composed-runtime-build: &lane_composed_runtime_build
+  context: ../workspace/sibling-repos/omnimarket
+  dockerfile: Dockerfile.runtime
+  additional_contexts:
+    infra-runtime: "service:composed-runtime-base-image"
+  args:
+    INFRA_RUNTIME_IMAGE: infra-runtime
 services:
   postgres:
     container_name: omnibase-infra-stability-test-postgres
@@ -228,7 +240,20 @@ services:
     restart: "no"
   intelligence-migration:
     container_name: omnibase-infra-stability-test-intelligence-migration
+  # OMN-24562: the build-only infra half of the composed runtime image (mirrors
+  # dev-lane-infra-runtime-image). A one-shot of config/validation/stack_shape.yaml; scale 0: `up` never starts a container for it.
+  composed-runtime-base-image:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    restart: "no"
+    profiles: ["runtime", "full"]
+    scale: 0
   omninode-runtime:
+    build: *lane_composed_runtime_build
     container_name: omninode-stability-test-runtime
     restart: unless-stopped
     depends_on:
@@ -345,6 +370,7 @@ services:
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/main"
       - "com.omninode.runtime.id=stability-test-main"
   runtime-effects:
+    build: *lane_composed_runtime_build
     # OMN-21288, 2026-10-20 ruling: effects run as nodes inside the one runtime.
     profiles: !override ["folded-effects"]
     container_name: omninode-stability-test-runtime-effects
@@ -441,6 +467,7 @@ services:
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/effects"
       - "com.omninode.runtime.id=stability-test-effects"
   projection-api:
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-api
     restart: unless-stopped
     environment:
@@ -455,6 +482,7 @@ services:
       - "com.omninode.ticket=OMN-11542"
       - "com.omninode.service=projection-api"
   runtime-worker:
+    build: *lane_composed_runtime_build
     container_name: omninode-stability-test-runtime-worker
     restart: unless-stopped
     depends_on:
@@ -628,12 +656,7 @@ services:
   # writers do carry it (as `${ONEX_ENVIRONMENT:-local}`), pinned to the lane
   # value here rather than left to a host default.
   projection-tenant-registry-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-tenant-registry-writer
     profiles: ["runtime", "full"]
     networks:
@@ -692,12 +715,7 @@ services:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-17562"
   projection-delegation-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-delegation-writer
     profiles: ["runtime", "full"]
     networks:
@@ -746,12 +764,7 @@ services:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-17562"
   projection-registration-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-registration-writer
     profiles: ["runtime", "full"]
     networks:
@@ -799,12 +812,7 @@ services:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-17562"
   projection-savings-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-savings-writer
     profiles: ["runtime", "full"]
     networks:
@@ -853,12 +861,7 @@ services:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-17562"
   projection-tenant-credentials-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-tenant-credentials-writer
     profiles: ["runtime", "full"]
     networks:
@@ -907,12 +910,7 @@ services:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-17562"
   projection-live-events-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-live-events-writer
     profiles: ["runtime", "full"]
     networks:
@@ -980,6 +978,7 @@ services:
   # as DEV_. The base service is the declaration; this stanza is this lane's
   # policy, the same split the three shared kernels above already use.
   tenant-projection-writer:
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-tenant-projection-writer
     profiles: !override ["runtime", "full"]
     restart: unless-stopped
