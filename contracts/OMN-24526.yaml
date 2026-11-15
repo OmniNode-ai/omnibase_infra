@@ -40,3 +40,10 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_handler_node_broker_resolve.py tests/unit/handlers/test_handler_node_broker_resolve_overlay_roots.py tests/unit/handlers/test_handler_node_broker_resolve_default_overlay.py -q --no-cov -p no:cacheprovider
         cwd: .
+  - id: dod-omn24526-deploy-conditions
+    description: 'Deploy probe the hosted runner can run: src/omnibase_infra/handlers/handler_node_broker_resolve.py at the checked-out commit holds the string ''run_node_default''; it does not exist at the merge base, so the probe fails there.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_node_broker_resolve.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "run_node_default" > /dev/null'
+        cwd: .

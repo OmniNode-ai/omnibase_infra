@@ -67,7 +67,7 @@ _OVERLAY_ROOTS_ENV: Final[str] = "ONEX_SKILL_OVERLAY_ROOTS"
 _DEFAULT_OVERLAY_KEY: Final[str] = "run_node_default"
 
 
-class _MissingOrNoKeyOverlayError(ModelNodeBrokerResolutionError):
+class MissingOrNoKeyOverlayError(ModelNodeBrokerResolutionError):
     """The overlay file does not exist, or it holds no ``event_bus`` key.
 
     ``_read_event_bus`` raises this for those two cases only; a node whose own overlay
@@ -137,7 +137,7 @@ class HandlerNodeBrokerResolve:
         overlay_path = self._locate_overlay(overlay_key, request.workspace_root)
         try:
             declared = self._read_event_bus(overlay_key, overlay_path)
-        except _MissingOrNoKeyOverlayError as node_refusal:
+        except MissingOrNoKeyOverlayError as node_refusal:
             # The node's own overlay did not answer; one shared overlay may. If the
             # default overlay does not answer either, the node's original refusal stands.
             default_path = self._locate_overlay(
@@ -146,7 +146,7 @@ class HandlerNodeBrokerResolve:
             try:
                 declared = self._read_event_bus(_DEFAULT_OVERLAY_KEY, default_path)
                 overlay_path = default_path
-            except _MissingOrNoKeyOverlayError:
+            except MissingOrNoKeyOverlayError:
                 raise node_refusal
         if declared.type == EnumEventBusType.INMEMORY:
             return ModelNodeBrokerBinding(
@@ -190,7 +190,7 @@ class HandlerNodeBrokerResolve:
     def _read_event_bus(
         self, node_id: str, overlay_path: Path
     ) -> ModelNodeEventBusOverlay:
-        """The overlay's ``event_bus``; ``_MissingOrNoKeyOverlayError`` for a
+        """The overlay's ``event_bus``; ``MissingOrNoKeyOverlayError`` for a
         missing file or key only."""
         refusal = (
             f"{node_id} declares no event_bus in its contract overlay {overlay_path}"
@@ -200,7 +200,7 @@ class HandlerNodeBrokerResolve:
             "the broker address stays in the lane declaration."
         )
         if not overlay_path.is_file():
-            raise _MissingOrNoKeyOverlayError(
+            raise MissingOrNoKeyOverlayError(
                 f"{refusal}: the file does not exist. {declaration}",
                 overlay_path=str(overlay_path),
             )
@@ -217,7 +217,7 @@ class HandlerNodeBrokerResolve:
                 overlay_path=str(overlay_path),
             )
         if _EVENT_BUS_KEY not in raw:
-            raise _MissingOrNoKeyOverlayError(
+            raise MissingOrNoKeyOverlayError(
                 f"{refusal}: the file has no event_bus key. {declaration}",
                 overlay_path=str(overlay_path),
             )
