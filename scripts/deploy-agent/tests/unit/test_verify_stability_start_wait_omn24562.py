@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -135,7 +136,7 @@ class _StartingLane:
             if "--all" not in cmd:
                 return _completed(cmd)
             by_label = "label=com.docker.compose.service=omninode-runtime" in cmd
-            by_name = f"name=^/{self.runtime_name}$" in cmd
+            by_name = f"name=^/{re.escape(self.runtime_name)}$" in cmd
             lookup_matches = by_label if self.lane is EnumRuntimeLane.DEV else by_name
             if lookup_matches and self.resolve_container:
                 return _completed(cmd, stdout=f"{RUNTIME_CONTAINER_ID}\n")
@@ -398,8 +399,18 @@ def test_a_stability_container_name_resolves_by_name_after_the_label_misses() ->
     assert found == ""
     assert [cmd[-1] for cmd in seen] == [
         f"label=com.docker.compose.service={name}",
-        f"name=^/{name}$",
+        f"name=^/{re.escape(name)}$",
     ]
+
+
+@pytest.mark.unit
+def test_only_the_stability_lane_tries_the_container_name() -> None:
+    """Prod gets the one label read, and a name's regex dots are escaped."""
+    _, prod_seen = _lookup(EnumRuntimeLane.PROD, "omninode-runtime", "")
+    assert len(prod_seen) == 1
+    assert not any(a.startswith("name=") for a in prod_seen[0])
+    _, seen = _lookup(EnumRuntimeLane.STABILITY_TEST, "a.b", "")
+    assert seen[-1][-1] == "name=^/a\\.b$"
 
 
 @pytest.mark.unit

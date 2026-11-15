@@ -7319,19 +7319,21 @@ class DeployExecutor:
         return check, timed_out
 
     def _compose_service_container(self, lane: EnumRuntimeLane, service: str) -> str:
-        """A dev SERVICE or another lane's CONTAINER-named target to its one id."""
+        """Resolve one compose service on this lane to its container id, or ``""``.
+
+        By compose's labels; only stability, whose targets are CONTAINER names,
+        also tries the exact name. More than one match reads as unresolved.
+        """
         label = "label=com.docker.compose"
-        selectors = [f"{label}.service={service}"]
-        if lane is not EnumRuntimeLane.DEV:
-            selectors.append(f"name=^/{service}$")
         project = f"{label}.project={lane_config_for(lane).compose_project}"
+        selectors = [f"{label}.service={service}"]
+        if lane is EnumRuntimeLane.STABILITY_TEST:
+            selectors.append(f"name=^/{re.escape(service)}$")
         try:
             for selector in selectors:
                 argv = ["docker", "ps", "--all", "-q", "--no-trunc"]
-                result = _run(
-                    [*argv, "--filter", project, "--filter", selector],
-                    timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS,
-                )
+                argv += ["--filter", project, "--filter", selector]
+                result = _run(argv, timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS)
                 ids = result.stdout.split() if result.returncode == 0 else []
                 if ids:
                     return ids[0] if len(ids) == 1 else ""

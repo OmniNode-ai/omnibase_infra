@@ -109,12 +109,13 @@ dod_evidence:
       - check_type: test_passes
         check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_verify_stability_start_wait_omn24562.py tests/unit/test_verify_honours_declared_start_omn19374.py tests/unit/test_verify_force_recreate_omn18640.py tests/unit/test_auto_rollback.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn24562-ac10-start-wait-probe
-    description: Hosted stand-in for AC10, which is read on h201 after the agent is installed from this branch. The check reads the executor file GitHub serves on the pull request branch and fails at the merge base, where the stability lane is not in the start-wait fence.
+  - id: dod-omn24562-ac10-h201-job-record-verification
+    description: 'AC10: reads the stability-follow job record on h201 (the deploy agent state file /data/omninode/deploy-agent/state/jobs-dev/<job id>*.json) and exits 0 only when exactly one record matches the job id prefix in STABILITY_FOLLOW_JOB_ID, its phase_results.verification is success and its status is success (a job rolled back to the retained image ends failed). It is read-only, prints no secret, needs no agent pin change, and exits non-zero when the variable is unset, no record matches, or verification or the job is anything other than success. The hosted runner cannot reach h201, so the item is local_done_gate and runs on h201 after the agent is installed from this branch.'
     source: manual
+    execution_scope: local_done_gate
     binds_ac:
       - AC10
     checks:
       - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=omn-24562-stability-start-wait\" --jq .content | base64 -d | grep -q 'lane in VERIFY_START_WAIT_LANES'"
+        check_value: "python3 -c 'import glob, json, sys; hits = glob.glob(\"/data/omninode/deploy-agent/state/jobs-dev/\" + sys.argv[1] + \"*.json\"); rec = json.load(open(hits[0])) if len(hits) == 1 else {}; sys.exit(0 if rec.get(\"phase_results\", {}).get(\"verification\") == \"success\" and rec.get(\"status\") == \"success\" else 1)' \"${STABILITY_FOLLOW_JOB_ID:?set STABILITY_FOLLOW_JOB_ID to the stability-follow job id}\""
         cwd: ${OMNI_HOME}/omnibase_infra
