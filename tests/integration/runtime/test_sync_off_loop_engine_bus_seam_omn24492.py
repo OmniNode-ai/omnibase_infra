@@ -47,7 +47,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
 )
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
 BLOCK_SECONDS = 0.6
 HEARTBEAT_INTERVAL_SECONDS = 0.01
@@ -55,9 +55,7 @@ GOLDEN_MAX_GAP_SECONDS = 0.25
 CONTROL_MIN_GAP_SECONDS = 0.48
 DELIVERY_TIMEOUT_SECONDS = 10.0
 
-_THIS_MODULE = (
-    "tests.unit.runtime.auto_wiring.test_sync_off_loop_engine_bus_seam_omn24492"
-)
+_THIS_MODULE = "tests.integration.runtime.test_sync_off_loop_engine_bus_seam_omn24492"
 _PATCH_IMPORT_HANDLER = (
     "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class"
 )
