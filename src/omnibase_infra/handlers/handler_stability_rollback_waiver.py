@@ -18,11 +18,16 @@ Read from the guard's own probe of every runtime target, never from a caller:
 
 * every target passes: ``healthy``. A missing point is a defect (image unreadable,
   no unique container). The deploy is refused.
-* a target failed outright and none timed out: ``unhealthy``. There is no healthy
-  state to restore, so the deploy runs and the agent records that it ran without
-  a point.
-* any probe timeout, probe error or no target at all: ``unknown``. The lane may be
-  serving. Refused.
+* every target failed outright, none timed out, and Docker reads every target
+  container past its declared start window and not serving (``unhealthy``,
+  ``absent`` or ``not-running``): ``unhealthy``. There is no healthy state to
+  restore, so the deploy runs and the agent records that it ran without a point.
+* a target passes, or a failing target is Docker-healthy: ``degraded``. The lane is
+  still serving. Refused.
+* a failing target Docker still reads ``starting`` (inside its declared start
+  period): ``starting``. Refused.
+* any probe timeout, probe error, unreadable Docker state or no target at all:
+  ``unknown``. The lane may be serving. Refused.
 
 Every lane the guard covers may be waived, which today is only the stability lane.
 Prod and dev are not guarded here and are never probed.
@@ -38,6 +43,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -56,7 +62,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-LaneReading = Literal["healthy", "unhealthy", "unknown"]
+LaneReading = Literal["healthy", "unhealthy", "degraded", "starting", "unknown"]
+
+# Docker states (runtime_health_wait.sh runtime_health_state) of a container that is
+# past its declared start window and not serving.
+_DOWN_STATES = frozenset({"unhealthy", "absent", "not-running"})
 
 _GUARDED_SCOPES = frozenset({"runtime", "full"})
 _UNGUARDED_LANES = frozenset({"prod", "dev"})
@@ -68,6 +78,23 @@ class _HealthCheck(Protocol):
 
     @property
     def detail(self) -> str: ...
+
+
+def read_docker_state(container: str) -> str:
+    """Docker's ``runtime_health_state`` of ``container``; ``""`` when unreadable.
+
+    ``starting`` is Docker inside the container's declared start period;
+    ``unhealthy`` is the healthcheck failing past it. The reading is the deploy
+    agent's own (``deploy_agent.executor._runtime_health_helper``, its helper file
+    and its probe bound), taken from the agent process that loaded this module
+    through ``executor.load_dev_boot_guard``. Outside that process nothing is
+    readable, so the lane reads ``unknown`` and the waiver is refused.
+    """
+    executor = sys.modules.get("deploy_agent.executor")
+    reader = getattr(executor, "_runtime_health_helper", None)
+    if reader is None:
+        return ""
+    return str(reader("runtime_health_state", container))
 
 
 class _RuntimeProbe(Protocol):
@@ -83,34 +110,48 @@ def classify_readings(
     if not readings:
         return "unknown", "lane declares no runtime targets"
     for status, detail in readings:
-        if status not in ("pass", "fail"):
+        if status not in ("pass", "fail", "serving", "starting"):
             return "unknown", detail or f"probe status {status}"
-    failures = [
-        detail or "probe failed" for status, detail in readings if status == "fail"
-    ]
-    if failures:
-        return "unhealthy", "; ".join(failures)
-    return "healthy", ""
+    statuses = {status for status, _ in readings}
+    details = "; ".join(detail for status, detail in readings if status != "pass")
+    if statuses == {"pass"}:
+        return "healthy", ""
+    if "starting" in statuses:
+        return "starting", details
+    if statuses != {"fail"}:
+        return "degraded", details or "a runtime target is serving"
+    return "unhealthy", details
 
 
 def take_readings(
-    targets: Sequence[tuple[str, int]], probe: _RuntimeProbe
+    targets: Sequence[tuple[str, int]],
+    probe: _RuntimeProbe,
+    state: Callable[[str], str],
 ) -> list[tuple[str, str]]:
     """Probe every target with the guard's own probe: ``(status, detail)`` each.
 
-    A timeout reads ``timeout`` and a probe error reads ``error``; neither is a
-    definitive answer, so :func:`classify_readings` reads the lane ``unknown``.
+    A failed probe counts as ``fail`` only when Docker (``state``, the
+    ``runtime_health_state`` reading of the container) reads it past its declared
+    start window and not serving; ``starting`` reads ``starting``, ``healthy``
+    reads ``serving`` and any other state reads ``unknown``. A timeout reads
+    ``timeout`` and a probe error reads ``error``; neither is a definitive answer,
+    so :func:`classify_readings` reads the lane ``unknown``.
     """
     readings: list[tuple[str, str]] = []
     try:
         for container, port in targets:
             check, timed_out = probe(service=container, port=port)
+            detail = f"{container}: {check.detail or 'probe failed'}"
             if timed_out is not None:
                 readings.append(("timeout", f"{container}: probe timed out"))
+            elif check.status != "fail":
+                readings.append((check.status, detail))
             else:
-                readings.append(
-                    (check.status, f"{container}: {check.detail or 'probe failed'}")
+                docker = state(container)
+                status = {"starting": "starting", "healthy": "serving"}.get(
+                    docker, "fail" if docker in _DOWN_STATES else "unknown"
                 )
+                readings.append((status, f"{detail} (docker {docker or 'unread'})"))
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         readings.append(("error", f"probe error: {exc}"))
     return readings
@@ -144,6 +185,7 @@ def admit_rollback_point[Point](
     targets: Sequence[tuple[str, int]],
     probe: _RuntimeProbe,
     capture: Callable[[], Point | None],
+    state: Callable[[str], str] | None = None,
 ) -> Point | None:
     """The point a deploy runs under, or ``None`` when none is needed or it is waived.
 
@@ -154,7 +196,7 @@ def admit_rollback_point[Point](
     point = capture()
     if point is not None:
         return point
-    readings = take_readings(targets, probe)
+    readings = take_readings(targets, probe, state or read_docker_state)
     admitted, waived, reading, detail, refusal = decide_waiver(
         lane=lane, scope=scope, point_retained=False, readings=readings
     )

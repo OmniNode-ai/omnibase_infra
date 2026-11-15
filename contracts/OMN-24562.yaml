@@ -1,7 +1,7 @@
-schema_version: "1.0.0"
+schema_version: 1.0.0
 ticket_id: OMN-24562
-title: "The deploy agent's stability follow job takes the embedding address from the overlay"
-summary: "Two stability follow jobs of the lab dev deploy agent (agent/stability-follow-tag, 2026-11-15T10:56Z and 11:41Z) failed the LLM endpoint env contract check: the operator settings store on the lab host still names the removed embedding server (port 8002) while the llm_endpoints overlay names the staying one (port 8100). OMN-24025 rendered the overlay address for the dev lane's jobs and OMN-24119 for the stability refresh script, but the agent's own stability job was left fenced out, so its compose environment and its guard read the store. The render now covers the stability job of a dev-fenced agent; a prod job still takes nothing from it."
+title: The deploy agent's stability follow job takes the embedding address from the overlay
+summary: 'Two stability follow jobs of the lab dev deploy agent (agent/stability-follow-tag, 2026-11-15T10:56Z and 11:41Z) failed the LLM endpoint env contract check: the operator settings store on the lab host still names the removed embedding server (port 8002) while the llm_endpoints overlay names the staying one (port 8100). OMN-24025 rendered the overlay address for the dev lane''s jobs and OMN-24119 for the stability refresh script, but the agent''s own stability job was left fenced out, so its compose environment and its guard read the store. The render now covers the stability job of a dev-fenced agent; a prod job still takes nothing from it.'
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -69,20 +69,20 @@ requirements:
     acceptance:
       - id: AC18
         statement: 'AC18: a stability command carries an open pull request declaration with its rollback declaration, prod refuses one, and the first-party policy admits the stability lane -- falsifier: scripts/deploy-agent/tests/unit/test_open_pr_declaration_omn21928.py or tests/unit/validation/test_first_party_open_pr_context_omn21928.py fails at the merge base'
-  - id: req-omn24562-stability-rollback-waiver
-    statement: The deploy agent runs a stability runtime deploy that has no retained rollback point only when its own probe reads every runtime target of the lane down with no timeout, records on the job that it ran without one, and never applies the waiver to the prod lane.
-    acceptance:
-      - id: AC4
-        statement: 'AC4: a stability runtime deploy with no retained rollback point runs when the guard probe reads the lane UNHEALTHY, and the job records it ran without one -- falsifier: python -m pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py -k unhealthy_lane_without_point fails at the merge base'
-      - id: AC5
-        statement: 'AC5: a stability runtime deploy with no retained rollback point is refused when the probe reads the lane HEALTHY or UNKNOWN (a timeout or a probe error) -- falsifier: the healthy and unknown tests in the same file pass only with the refusal'
-      - id: AC6
-        statement: 'AC6: the waiver is never granted to the prod or dev lane and probes nothing for them -- falsifier: the prod and dev control test fails at the head'
   - id: req-omn24562-stability-own-open-pr
     statement: The stability lane builds a declared open pull request only when it is the one its live code-ref pin declares; any other declaration on that lane, or any declaration with no live pin, is refused before the build.
     acceptance:
       - id: AC22
         statement: 'AC22: a stability build declaring a different open pull request, another head of the pinned one, or any declaration with no live pin is refused in the preflight, and the follow''s own declaration is admitted -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_follow_builds_pinned_head_omn24562.py -k "different_declared_open_pr or no_live_pin or preflight_refuses" fails at the merge base'
+  - id: req-omn24562-stability-rollback-waiver
+    statement: The deploy agent runs a stability runtime deploy that has no retained rollback point only when its own probe reads every runtime target of the lane failed with no timeout and Docker reads every target container unhealthy or gone after its declared start window, records that it ran without one, and never applies the waiver to the prod or dev lane.
+    acceptance:
+      - id: AC19
+        statement: 'AC19: a stability runtime deploy with no retained rollback point runs when every runtime target fails the guard probe and Docker reads each target container unhealthy or absent, and the job records it ran without one -- falsifier: pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py -k unhealthy_lane_without_point fails at the merge base'
+      - id: AC20
+        statement: 'AC20: the deploy is refused when the lane is degraded-serving (a target passes, or a failing target is Docker-healthy) or still starting (Docker reads a target starting inside its start period), or the probe times out or errors -- falsifier: the degraded_serving and still_starting tests in the same file fail when the waiver ignores the Docker state'
+      - id: AC21
+        statement: 'AC21: the waiver is never granted to the prod or dev lane and probes nothing for them -- falsifier: the prod and dev control test fails at the head'
 evidence_requirements:
   - kind: tests
     description: The stability compose-environment and guard tests pass at the pushed head and fail at the merge base, where the render is fenced to the dev lane.
@@ -133,7 +133,7 @@ dod_evidence:
       - AC5
     checks:
       - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=omn-24562-stability-retire-folded-effects\" --jq .content | base64 -d | grep -qF 'if \"runtime-effects\" in retired:'"
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=omn-24562-stability-retire-folded-effects" --jq .content | base64 -d | grep -qF 'if "runtime-effects" in retired:'
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-ac6-h201-job-record-runtime-phase
     description: 'AC6: reads the stability-follow job record on h201 (the deploy agent state file /data/omninode/deploy-agent/state/jobs-dev/<job id>*.json, field phase_results.runtime) and exits 0 only when exactly one record matches the job id prefix in STABILITY_FOLLOW_JOB_ID and its phase_results.runtime is success. It is read-only, prints no secret, needs no agent pin change, and exits non-zero when the variable is unset, no record matches, or the runtime phase is anything other than success. The hosted runner cannot reach h201, so the item is local_done_gate and runs on h201 after the agent is installed from this branch.'
@@ -143,7 +143,7 @@ dod_evidence:
       - AC6
     checks:
       - check_type: command
-        check_value: "python3 -c 'import glob, json, sys; hits = glob.glob(\"/data/omninode/deploy-agent/state/jobs-dev/\" + sys.argv[1] + \"*.json\"); sys.exit(0 if len(hits) == 1 and json.load(open(hits[0]))[\"phase_results\"][\"runtime\"] == \"success\" else 1)' \"${STABILITY_FOLLOW_JOB_ID:?set STABILITY_FOLLOW_JOB_ID to the stability-follow job id}\""
+        check_value: python3 -c 'import glob, json, sys; hits = glob.glob("/data/omninode/deploy-agent/state/jobs-dev/" + sys.argv[1] + "*.json"); sys.exit(0 if len(hits) == 1 and json.load(open(hits[0]))["phase_results"]["runtime"] == "success" else 1)' "${STABILITY_FOLLOW_JOB_ID:?set STABILITY_FOLLOW_JOB_ID to the stability-follow job id}"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-integration-proof-fold-policy
     description: The committed runtime policy, read through the handler's own folded-service computation, retires runtime-effects for the stability lane and nothing for a lane that folds nothing.
@@ -173,7 +173,7 @@ dod_evidence:
       - AC10
     checks:
       - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=omn-24562-stability-start-wait\" --jq .content | base64 -d | grep -q 'lane in VERIFY_START_WAIT_LANES'"
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=omn-24562-stability-start-wait" --jq .content | base64 -d | grep -q 'lane in VERIFY_START_WAIT_LANES'
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-ac11-stability-build-project
     description: The build command of a stability job runs under the stability compose project, dev still builds under its own, the stability lane disables autoheal and keeps the services it runs by name, and the executor builds under the lane's compose project.
@@ -258,17 +258,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn24562-rollback-waiver
-    description: 'AC4, AC5 and AC6: UNHEALTHY allows and records, HEALTHY refuses, UNKNOWN refuses, prod and dev never waived; the existing rollback tests still pass'
-    source: manual
-    binds_ac:
-      - AC4
-      - AC5
-      - AC6
-    checks:
-      - check_type: command
-        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -p no:randomly --no-cov
-        cwd: .
   - id: dod-omn24562-ac22-stability-own-open-pr
     description: 'AC22: the stability lane refuses a declared open PR that is not its live pin''s own, in the preflight before the build, and admits the follow''s own declaration.'
     source: manual
@@ -277,4 +266,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_follow_builds_pinned_head_omn24562.py scripts/deploy-agent/tests/unit/test_open_pr_declaration_omn21928.py -q -p no:randomly --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac19-ac21-rollback-waiver
+    description: 'AC19, AC20 and AC21: an UNHEALTHY lane past its start window is waived and recorded; a degraded-serving, still-starting, HEALTHY or UNKNOWN lane is refused; prod and dev are never waived; the existing rollback tests still pass.'
+    source: manual
+    binds_ac:
+      - AC19
+      - AC20
+      - AC21
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -p no:randomly --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
