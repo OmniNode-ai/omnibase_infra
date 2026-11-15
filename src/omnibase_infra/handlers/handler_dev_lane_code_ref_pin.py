@@ -46,7 +46,7 @@ import tempfile
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
@@ -208,3 +208,20 @@ def followed_branch(
         pin.expires_at.isoformat(),
     )
     return pin.branch
+
+
+def follow(repo: str, tag: str, state_dir: Path) -> dict[str, Any]:
+    """The fields that make a rebuild a stability follow of ``tag`` (OMN-24562).
+
+    ``sibling_tags`` names the dev tag the build stages for ``repo``. While a pin is
+    live in ``state_dir`` the rebuild also carries the pin's head as its ``git_ref``:
+    the agent runs the pinned code, but a job's build reads the compose files of the
+    deploy-source clone, which the job resets to its ``git_ref``. Without the pinned
+    head the build read the tracking branch's compose files and ignored the change the
+    pin installed.
+    """
+    fields: dict[str, Any] = {"sibling_tags": {repo: tag}}
+    pin = read_active_pin(state_dir, datetime.now(UTC))
+    if pin is not None:
+        fields["git_ref"] = pin.head
+    return fields
