@@ -549,10 +549,9 @@ class DeployAgent:
         # a lab dev agent whose fence admits it; its seams and its last verdict.
         self._stability_follow_attempted: set[str] = set()
         self._stability_follow_last_verdict: EnumStabilityFollowVerdict | None = None
-        self._stability_read_running_ref: Callable[[str], str | None] = lambda repo: (
-            read_running_ref(
-                _runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST), repo
-            )
+        self._stability_read_running_ref = load_dev_boot_guard().healthy_ref_reader(
+            _runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST),
+            read_running_ref,
         )
         # OMN-20864: the restore of a lane with no running runtime, and its seams.
         self._idle_restore_last_attempt: datetime | None = None

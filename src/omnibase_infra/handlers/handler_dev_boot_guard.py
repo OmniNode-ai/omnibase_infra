@@ -17,6 +17,7 @@ import json
 import logging
 import math
 import re
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
@@ -586,6 +587,47 @@ def lane_runtime_containers(
     if effects_target == main or "runtime-effects" in disabled_services:
         return (main,)
     return (main, f"{main}-effects")
+
+
+def running_ref_if_healthy(
+    container: str,
+    repository: str,
+    read_ref: Callable[[str, str], str | None],
+) -> str | None:
+    """``read_ref``'s answer for a healthy runtime, ``""`` for an unhealthy one (OMN-24562).
+
+    A runtime that failed its boot is parked and still answers ``docker exec`` with
+    the provenance of the image it was built from, so the stability follow read it
+    as running the tag it had just built and never rebuilt it. An unhealthy runtime
+    runs no revision: ``""`` names no tag and no commit that contains one. ``None``
+    stays what docker could not answer.
+    """
+    try:
+        shown = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+                container,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=DOCKER_READ_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if shown.returncode == 0 and shown.stdout.strip() == "unhealthy":
+        return ""
+    return read_ref(container, repository)
+
+
+def healthy_ref_reader(
+    container: str, read_ref: Callable[[str, str], str | None]
+) -> Callable[[str], str | None]:
+    """The repository -> running ref reader of ``container``, unhealthy reading ``""``."""
+    return lambda repository: running_ref_if_healthy(container, repository, read_ref)
 
 
 def read_lane_presence(
