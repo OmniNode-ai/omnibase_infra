@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from omnibase_infra.enums import EnumEventBusLostBrokerPolicy
 from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -33,6 +34,8 @@ def make_bus() -> EventBusRecovering:
             max_backoff_seconds=4,
             backoff_multiplier=2,
             attempt_timeout_seconds=1,
+            # These tests exercise a runtime declared single-process.
+            lost_broker_policy=EnumEventBusLostBrokerPolicy.LOCAL_FALLBACK,
         ),
         local_bus=local_bus,
         local_start=local_bus.start,
