@@ -11,6 +11,9 @@ from typing import cast
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from omnibase_infra.models.model_action_archive_cache_config import (
+    ModelActionArchiveCacheConfig,
+)
 from omnibase_infra.observability.runner_health.model_dns_cache_config import (
     ModelDnsCacheConfig,
 )
@@ -102,6 +105,7 @@ class ModelRunnerFleetConfig(BaseModel):
             "Optional; absent in configs predating the git-transport egress work."
         ),
     )
+    action_archive_cache: ModelActionArchiveCacheConfig | None = None  # OMN-24299
     dns_cache: ModelDnsCacheConfig | None = Field(
         default=None,
         description=(
@@ -184,12 +188,8 @@ class ModelRunnerFleetConfig(BaseModel):
         return self
 
     def primary_host(self) -> ModelRunnerFleetHost:
-        """The host the scalar fields describe.
-
-        Raises rather than inventing a row: a config with an inventory that
-        omits its own primary host is refused at validation, so reaching here
-        without one is a programming error, not a state to paper over.
-        """
+        """The host the scalar fields describe; raises if the inventory omits it
+        (refused at validation, so reaching here is a programming error)."""
         for host in self.hosts:
             if host.host == self.runner_host:
                 return host
@@ -198,14 +198,12 @@ class ModelRunnerFleetConfig(BaseModel):
     def declared_total(self, runner_class: str) -> int:
         """Summed declared runner count across hosts carrying ``runner_class``.
 
-        Summed PER CLASS and never across the whole inventory. Capacity is not
-        fungible -- a verify-class runner cannot pick up an action-class job --
-        so a total that mixed classes would tell the router's degraded floor
-        that capacity exists which can never satisfy the jobs the floor guards.
-
-        A class nothing declares returns 0. That is the honest answer and it is
-        also the safe one: a floor computed from 0 never reads a missing fleet
-        as healthy.
+        Summed PER CLASS and never across the whole inventory: capacity is not
+        fungible (a verify-class runner cannot pick up an action-class job), so a
+        mixed total would tell the router's degraded floor that capacity exists
+        which can never satisfy the jobs it guards. A class nothing declares
+        returns 0, the honest and safe answer: a floor computed from 0 never
+        reads a missing fleet as healthy.
         """
         if not self.hosts:
             # Pre-inventory config: one host, all classes, the scalar count.

@@ -186,6 +186,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",
         "models/model_dev_lane_code_ref_pin.py",
         "handlers/handler_dev_lane_code_ref_pin.py",
+        "nodes/node_deploy_job_reading_effect/runtime_deploy_job_reading.py",
         "models/model_onex_api_image_import_request.py",
         "models/model_onex_api_image_import_verdict.py",
         "handlers/handler_onex_api_image_import_check.py",
@@ -207,6 +208,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/contracts/model_llm_endpoint_contract.py",
         "models/contracts/model_llm_endpoint_overlay.py",
         "nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py",
+        "nodes/node_setup_local_provision_effect/runtime_overlay_revision.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
         if module_name in sys.modules:
@@ -1010,8 +1012,9 @@ def active_dev_instance() -> str:
 
 
 def _folded_dev_services(lane: EnumRuntimeLane) -> set[str]:
+    policy = _load_runtime_policy_env()  # one snapshot for the profiles and the map
     services: set[str] = load_dev_boot_guard().folded_dev_services(
-        _load_runtime_policy_env(), lane_folded_profiles(lane)
+        policy, lane_folded_profiles(lane, policy), LANE_POLICY_PREFIX.get(lane, "")
     )
     return services
 
@@ -1020,13 +1023,14 @@ def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
     if lane is EnumRuntimeLane.DEV:
         config = DEV_INSTANCE_LANE_CONFIGS[_DevInstanceSelection.name]
-        if retired := _folded_dev_services(lane):
-            config = config.model_copy(
-                update={"disabled_services": config.disabled_services | retired}
-            )
     else:
         config = _LANE_CONFIGS[lane]
-    if "effects" in lane_folded_profiles(lane):
+    if retired := _folded_dev_services(lane):
+        config = load_dev_boot_guard().retire_lane_services(
+            config, retired, {ONEX_API_SERVICE: EnumInstancePhase.ONEX_API_PIN}
+        )
+    # One policy snapshot decides both: a folded effects role is one the lane retires.
+    if "runtime-effects" in retired:
         # The effects port is published by main once the role is folded, so the
         # effects health target reads main's container (OMN-22930 on primary dev).
         targets = list(config.runtime_health_targets)
@@ -2637,12 +2641,6 @@ def settle_service_containers(
         _removal_wait_sleep(CONTAINER_REMOVAL_POLL_SECONDS)
 
 
-def _hit_removal_race(result: subprocess.CompletedProcess[str]) -> bool:
-    return result.returncode != 0 and REMOVAL_IN_PROGRESS in (
-        f"{result.stderr or ''}{result.stdout or ''}"
-    )
-
-
 def run_compose_recreate(
     argv: list[str],
     *,
@@ -2693,7 +2691,7 @@ def run_compose_recreate(
         if first.returncode == 0:
             return first
         settle()
-        if not _hit_removal_race(first):
+        if REMOVAL_IN_PROGRESS not in f"{first.stderr or ''}{first.stdout or ''}":
             return first
         logger.warning(
             "compose recreate of %s met a removal still in progress; settled "
@@ -3463,6 +3461,10 @@ class DeployExecutor:
         # OMN-21928: <repo>#<number>@<head sha> of the open pull request this
         # rebuild declares; rebuild_scope sets it from the signed command.
         self.declared_pr = ""
+        # OMN-21485: sibling repository -> the dev tag this rebuild stages in
+        # place of the sibling's newest one; rebuild_scope sets it from the
+        # signed command and _compose_build exports it to the staging script.
+        self.sibling_tags: dict[str, str] = {}
         # OMN-19220: ONE BUILD_DATE per rebuild, shared by every compose build
         # in it. Dockerfile.runtime declares ARG BUILD_DATE at the top of both
         # stages, so every RUN after it takes the value as build environment
@@ -3553,15 +3555,6 @@ class DeployExecutor:
             self.container_residue.append(
                 ModelContainerResidue(service=service, state=state, exit_code=exit_code)
             )
-
-    def _mark_residue_recovered(self, recovered: set[str]) -> None:
-        """Flip residue entries whose service came up under recovery."""
-        self.container_residue = [
-            item.model_copy(update={"recovered": True})
-            if item.service in recovered
-            else item
-            for item in self.container_residue
-        ]
 
     def validate_llm_endpoint_env_contract(self) -> None:
         """Fail runtime deploys when configured LLM endpoints drift from contract."""
@@ -4631,6 +4624,7 @@ class DeployExecutor:
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         image_digest: str | None = None,
         declared_pr: str = "",
+        sibling_tags: Mapping[str, str] | None = None,
     ) -> list[str]:
         # OMN-16442: no self-update here. This method runs inside an accepted
         # job, after preflight/git/compose_gen/seed; a re-exec from this point
@@ -4644,6 +4638,9 @@ class DeployExecutor:
         # OMN-18057: residue is per-rebuild, not per-process.
         self.reset_deploy_observations()
         self.declared_pr = declared_pr
+        # OMN-21485: the per-sibling refs this rebuild stages instead of each
+        # sibling's newest dev tag; empty is the default follow.
+        self.sibling_tags = dict(sibling_tags or {})
 
         # prod deploys the stability-proven digest — it pulls the pinned image
         # and never rebuilds from a ref (the digest is the authority).
@@ -5441,27 +5438,27 @@ class DeployExecutor:
         omni_home: str,
         deploy_ref: str = "",
         sibling_fallback_ref: str = "",
+        sibling_tags: Mapping[str, str] | None = None,
     ) -> dict[str, str]:
-        """Stage sibling repos into the Docker build context for workspace mode.
-
-        Runs docker/runtime_build/stage_workspace.sh from the repo root so that
-        workspace/sibling-repos/ is populated before `docker compose build`.
-        Raises RuntimeError on failure.
-
-        OMN-16442: ``deploy_ref`` is the accepted command's own ``git_ref`` and
-        is exported as ``DEPLOY_REF`` for the staging script. The script's
-        OMN-17291 guard refuses to stage the AMBIENT host tree when
-        ``DEPLOY_REF`` is unset, and it was refusing correctly — the caller was
-        wrong. The command envelope carries the pin (``git_ref=origin/dev``,
-        resolved from ``DEPLOY_AGENT_TRACKING_REF``) and ``self_update`` had
-        already used it one step earlier, but it was dropped between the
-        consumer and the staging step, so the sibling build was asserted
-        against nothing. Measured live 2026-09-08 on command a5635af0:
-        ``Workspace staging failed (exit=5): ERROR: DEPLOY_REF unset``.
-
-        The guard STAYS. This passes the pin the operator supplied; it does not
-        weaken, skip, or opt out of the assertion. An empty ``deploy_ref`` is
-        """
+        # Stage sibling repos into the Docker build context for workspace mode.
+        #
+        # Runs docker/runtime_build/stage_workspace.sh from the repo root so that
+        # workspace/sibling-repos/ is populated before `docker compose build`.
+        # Raises RuntimeError on failure.
+        #
+        # OMN-16442: ``deploy_ref`` is the accepted command's own ``git_ref`` and
+        # is exported as ``DEPLOY_REF`` for the staging script. The script's
+        # OMN-17291 guard refuses to stage the AMBIENT host tree when
+        # ``DEPLOY_REF`` is unset, and it was refusing correctly — the caller was
+        # wrong. The command envelope carries the pin (``git_ref=origin/dev``,
+        # resolved from ``DEPLOY_AGENT_TRACKING_REF``) and ``self_update`` had
+        # already used it one step earlier, but it was dropped between the
+        # consumer and the staging step, so the sibling build was asserted
+        # against nothing. Measured live 2026-09-08 on command a5635af0:
+        # ``Workspace staging failed (exit=5): ERROR: DEPLOY_REF unset``.
+        #
+        # The guard STAYS. This passes the pin the operator supplied; it does not
+        # weaken, skip, or opt out of the assertion. An empty ``deploy_ref`` is
         # deliberately NOT substituted with a fallback ref — nothing is exported
         # and the script refuses in its own words, which is the correct outcome
         # for a caller that has no pin to offer.
@@ -5516,6 +5513,14 @@ class DeployExecutor:
                 "_stage_workspace: siblings fall back to %s where the requested "
                 "ref names no commit in them (OMN-17135)",
                 sibling_fallback_ref,
+            )
+        # OMN-21485: explicit per-sibling refs take precedence over the
+        # newest-dev-tag follow (stage_workspace.sh passes each as --repo-ref),
+        # so a build stages the exact tag its command named. Empty stages the
+        # follow, exactly as before.
+        if sibling_tags:
+            staging_env["DEPLOY_SIBLING_REFS"] = " ".join(
+                f"{repo}={tag}" for repo, tag in sorted(sibling_tags.items())
             )
         result = subprocess.run(
             ["bash", str(script)],
@@ -5577,7 +5582,7 @@ class DeployExecutor:
 
         Without this arg, Docker serves a cached layer even after git pull, so
         the running container silently ships pre-pull code (root cause: PR #1231).
-        OMNIBASE_COMPAT_REF and OMNIMARKET_REF are passed as full commit SHAs so the
+        OMNIMARKET_REF is passed as a full commit SHA so the
         uv cache mount (keyed on URL) misses and fetches fresh code every time main
         advances (OMN-10728 / OMN-11542; ONEX_CHANGE_CONTROL_REF went with OMN-16296).
 
@@ -5623,9 +5628,8 @@ class DeployExecutor:
         assert_release_build_promoted(selected_source, runtime_lane=runtime_lane)
 
         # OMN-16442: the sibling-repo fallback branch is the declared tracking
-        # ref, not a literal. It used to be "dev" for omnimarket and "main" for
-        # omnibase_compat — an asymmetry with no stated reason, on two repos
-        # that both integrate on `dev`.
+        # ref, not a literal. It used to be "dev" for omnimarket — an asymmetry
+        # with no stated reason, on a repo that integrates on `dev`.
         sibling_fallback = load_tracking_ref_from_env()
 
         if selected_source == BuildSource.WORKSPACE and stage_workspace:
@@ -5637,7 +5641,7 @@ class DeployExecutor:
             # staging script asserts the INFRA clone against.
             # OMN-17135: it is a pin on that ONE repository. The CI path
             # publishes an omnibase_infra commit SHA, which names no commit in
-            # omnibase_core / omnibase_compat / omnimarket, so passing it as
+            # omnibase_core / omnimarket, so passing it as
             # every sibling's ref made RT-1 abort on the first one and took
             # every CI-triggered rebuild red. Each sibling resolves the declared
             # tracking head instead, and the SHA it lands on is recorded.
@@ -5646,6 +5650,9 @@ class DeployExecutor:
                 omni_home,
                 git_ref,
                 load_tracking_remote_ref_from_env(),
+                # Passed only when a command named tags, so the default staging
+                # call keeps the shape every caller and fake of it already has.
+                **({"sibling_tags": self.sibling_tags} if self.sibling_tags else {}),
             )
             if self.sibling_source_refs:
                 logger.info(
@@ -5664,17 +5671,9 @@ class DeployExecutor:
             if omni_home
             else sibling_fallback
         )
-        compat_ref = resolved_refs.get("omnibase_compat") or (
-            self._resolve_plugin_ref(
-                f"{omni_home}/omnibase_compat", fallback=sibling_fallback
-            )
-            if omni_home
-            else sibling_fallback
-        )
         logger.info(
-            "_compose_build: BUILD_SOURCE=%s OMNIBASE_COMPAT_REF=%s OMNIMARKET_REF=%s",
+            "_compose_build: BUILD_SOURCE=%s OMNIMARKET_REF=%s",
             selected_source.value,
-            compat_ref[:12],
             omnimarket_ref[:12],
         )
 
@@ -5709,8 +5708,6 @@ class DeployExecutor:
             f"BUILD_DATE={build_date}",
             "--build-arg",
             f"RUNTIME_VERSION={runtime_version}",
-            "--build-arg",
-            f"OMNIBASE_COMPAT_REF={compat_ref}",
             "--build-arg",
             f"OMNIMARKET_REF={omnimarket_ref}",
         ]
@@ -6205,9 +6202,7 @@ class DeployExecutor:
     def _retire_folded_dev_services(
         self, lane: EnumRuntimeLane, config: ModelLaneConfig | None = None
     ) -> None:
-        """Retire each primary dev container whose role main now carries; keep volumes."""
-        if lane is not EnumRuntimeLane.DEV:
-            return  # Other dev instances fold nothing (lane_folded_profiles).
+        """Retire each lane container whose role main now carries; keep volumes."""
         config = lane_config_for(lane) if config is None else config
         project = f"label=com.docker.compose.project={config.compose_project}"
         containers: list[str] = []
@@ -6249,7 +6244,7 @@ class DeployExecutor:
         config = lane_config_for(lane)
         profile = "core" if scope == Scope.CORE else "runtime"
         requested_services = _requested_services_for_up(scope, services, lane=lane)
-        if lane is EnumRuntimeLane.DEV and services and not requested_services:
+        if services and not requested_services:
             # A retired-role-only request must never start the whole profile.
             on_phase_update(phase, PhaseStatus.SUCCESS)
             return
@@ -6403,11 +6398,9 @@ class DeployExecutor:
 
         # Verify containers actually reached running state — docker compose up exits 0
         # even when containers land in Created state (hit twice in production, 01:33 + 04:48).
-        logger.info(
-            "Verifying %d container(s) reached running state: %s",
-            len(expected),
-            expected,
-        )
+        # OMN-24471: a failed onex-api step is raised as itself, never re-verified here.
+        expected = load_dev_boot_guard().roll_expected(expected, roll_error)
+        logger.info("Verifying %d container(s): %s", len(expected), expected)
         ok, stuck = verify_containers_up(
             expected, timeout_s=CONTAINER_VERIFY_TIMEOUT_SECONDS, lane=lane
         )
@@ -6449,7 +6442,14 @@ class DeployExecutor:
                 timeout_s=CONTAINER_RECOVERY_VERIFY_TIMEOUT_SECONDS,
                 lane=lane,
             )
-            self._mark_residue_recovered(set(stuck) - set(still_stuck))
+            # Flip residue entries whose service came up under recovery.
+            recovered = set(stuck) - set(still_stuck)
+            self.container_residue = [
+                item.model_copy(update={"recovered": True})
+                if item.service in recovered
+                else item
+                for item in self.container_residue
+            ]
             if not ok:
                 detail = f"Containers still not running after docker start recovery: {still_stuck}"
                 if compose_up_error:
@@ -7635,13 +7635,6 @@ class DeployRolledBackError(VerificationFailedError):
         )
 
 
-def _retention_ref(image_ref: str, lane: EnumRuntimeLane) -> str:
-    repo = image_ref.split("@", 1)[0]
-    if repo.rfind(":") > repo.rfind("/"):
-        repo = repo.rsplit(":", 1)[0]
-    return f"{repo}:rollback-{lane.value}"
-
-
 def _tag_image(image_id: str, image_ref: str) -> None:
     result = _run(
         ["docker", "tag", image_id, image_ref],
@@ -7714,7 +7707,10 @@ def capture_rollback_point(
                     container,
                 )
                 return None
-            retain_ref = _retention_ref(image_ref, lane)
+            retain_repo = image_ref.split("@", 1)[0]
+            if retain_repo.rfind(":") > retain_repo.rfind("/"):
+                retain_repo = retain_repo.rsplit(":", 1)[0]
+            retain_ref = f"{retain_repo}:rollback-{lane.value}"
             if retain_ref in retention and retention[retain_ref] != image_id:
                 logger.warning(
                     "Cannot capture rollback for %s: conflicting image ids for %s",

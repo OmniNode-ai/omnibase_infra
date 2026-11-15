@@ -19,7 +19,7 @@ WHAT THIS IS
 THE FOUR CLAUSES
     clean_machine    every OmniNode distribution the run imported came from the
                      package index, the working directory is not inside a git
-                     work tree, and no source tree of any of the five
+                     work tree, and no source tree of any of the four
                      distributions exists under the scanned roots.
     customer_key     the key reached the product through the customer surface
                      and nothing else: ``onex secret set`` read it on stdin,
@@ -188,9 +188,8 @@ KEYED_THROTTLE_RETRIES: Final[int] = 2
 KEYED_THROTTLE_BACKOFF_S: Final[tuple[int, ...]] = (45, 90)
 KEYED_THROTTLED_PREFIX: Final[str] = "keyed_throttled_"
 
-#: The five distributions a delegation imports.
+#: The four distributions a delegation imports.
 ONEX_DISTRIBUTIONS: Final[tuple[str, ...]] = (
-    "omnibase_compat",
     "omnibase_core",
     "omnibase_infra",
     "omnibase_spi",

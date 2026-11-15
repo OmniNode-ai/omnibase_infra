@@ -255,7 +255,7 @@ def test_deploy_agent_transport_topics_and_group(
     prefix: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import kafka
-    from deploy_agent import agent, consumer, publisher, trigger
+    from deploy_agent import agent, consumer, publisher
     from deploy_agent.events import EnumRuntimeLane
     from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
 
@@ -266,11 +266,6 @@ def test_deploy_agent_transport_topics_and_group(
     factory = MagicMock(return_value=producer)
     monkeypatch.setattr(kafka, "KafkaProducer", factory)
     monkeypatch.setattr(publisher, "KafkaProducer", factory)
-    trigger.publish_signed_command({"correlation_id": "test"}, config)
-    assert (
-        producer.send.call_args.args[0]
-        == prefix + "onex.cmd.deploy.rebuild-requested.v1"
-    )
     assert publisher.publish_result({"correlation_id": "test"}, config)
     assert (
         producer.send.call_args.args[0]

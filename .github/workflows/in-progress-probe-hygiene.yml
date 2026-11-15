@@ -125,7 +125,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           CONTRACT_REPOS: >-
-            omniclaude omnibase_compat omnibase_core omnibase_infra omnibase_spi
+            omniclaude omnibase_core omnibase_infra omnibase_spi
             omnidash omnidash-v2 omniintelligence omnimarket omnimemory
           CONTRACT_REPOS_PRIVATE: ${{ vars.ONEX_CONTRACT_REPOS_PRIVATE }}
         run: |

@@ -103,6 +103,21 @@ evidence_artifacts:
       - c11-negative-paths.json
     rationale: >-
       One row per negative path (wrong key, absent key, wrong tenant, malformed) with the expectation declared in the grader, the observed status and code, and the positive control taken in the same invocation. A zero-byte record is the case that matters: four refusals are exactly what an unreachable endpoint produces, so the control row is what makes an all-refused result readable as a failure rather than a proof.
+  # --- chain-canary-c11-negative-paths.yml: the delegation legs (OMN-23177) --
+  #
+  # Dispatch only. The step's exit code is the verdict; the record shows each
+  # leg's outcome and, for the canary leg, whether the canary was planted. An
+  # absent record beside a green run would claim the corpus, the one-attempt
+  # and 503 legs and the canary scan were graded with nothing behind the claim.
+  - id: c11-delegation-legs
+    workflow: .github/workflows/chain-canary-c11-negative-paths.yml
+    job: c11-negative-paths
+    producer_step: "Grade the delegation legs over the committed observations"
+    artifact_name: c11-delegation-legs
+    required_paths:
+      - c11-delegation-legs.json
+    rationale: >-
+      One row per leg (envelope corpus, policy refusal, 503 control, canary) with its outcome and reason, and whether the canary was planted in the answer. A leg with no observation is recorded as a failure, and a canary scan over no surface is a failure, so an empty record is exactly the state that must not read green.
   # --- chain-canary-c12-provider-catalogue.yml: the C12 verdict (OMN-19195) --
   #
   # As with C11, the probe's EXIT CODE is the verdict and this record is how a

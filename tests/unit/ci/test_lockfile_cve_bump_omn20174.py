@@ -4,7 +4,7 @@
 """OMN-20174: uv.lock resolves msgpack and dnspython past their advisories.
 
 The Lockfile CVE Scan blocks on msgpack 1.2.1 (GHSA-j586-36cw-2gc2, fixed in
-1.2.3) and dnspython 2.8.0 (GHSA-45c3-73f7-pv4m, fixed in 2.9.0). These tests
+1.2.3) and dnspython 2.8.0 (GHSA-45c3-73f7-pv4m, fixed in 2.9.0) and 2.9.0 (GHSA-vvf4-9x63-8xvv, fixed in 2.9.2). These tests
 read the real uv.lock and fail while either package is locked below its fixed
 floor.
 """
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXED_FLOORS = {
     "msgpack": (1, 2, 3),
-    "dnspython": (2, 9, 0),
+    "dnspython": (2, 9, 2),
     "pyasn1": (0, 6, 5),
 }
 

@@ -81,6 +81,10 @@ def _config(**overrides: object) -> ModelDlqReplayEngineConfig:
         "max_replay_count": 5,
         "max_run_duration_seconds": 2.0,
         "idle_probe_seconds": 0.05,
+        # OMN-24177: the runtime tick topic is now declared never replayed. This file
+        # measures the once-per-source dedupe of a replay, with the tick topic as the
+        # source the storm was measured on, so the policy is switched off here.
+        "broadcast_topics": (),
     }
     fields.update(overrides)
     return ModelDlqReplayEngineConfig.model_validate(fields)

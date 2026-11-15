@@ -290,8 +290,8 @@ COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.jso
 # workspace mode installs omnibase_core and omnibase_spi from the staged local
 # trees (OMN-17427: spi used to come from the package index at an exact version;
 # each staged tree is a checkout of the sibling's newest dev-merge tag, and the
-# first-party source audit below proves it). omnibase_compat is no longer staged
-# (OMN-21284: it is being retired); workspace mode takes it from the lock.
+# first-party source audit below proves it). omnibase_compat is retired (OMN-21284)
+# and nothing installs it in either mode.
 # release mode installs from pinned remote sources (core stays
 # from omnibase_infra/uv.lock — correct for a release).
 #
@@ -343,10 +343,8 @@ COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.jso
 #
 # The shell conditional on BUILD_SOURCE is evaluated at build time so only one
 # branch ever runs; the other branch's install artifacts never enter the image.
-ARG OMNIBASE_COMPAT_REF="v0.5.5"
-ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/v0.5.5.tar.gz"
 #
-# OMN-14262: the spi workspace install (and compat's, until OMN-21284) ALSO uses
+# OMN-14262: the spi workspace install ALSO uses
 # the forced `uv pip uninstall` + `--no-cache --reinstall-package "<pkg> @ file://…"`
 # form (mirroring core above). A bare `uv pip install --no-deps <path>` no-ops
 # ("Audited 1 package") whenever the staged dev-tree version already equals the
@@ -410,8 +408,7 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
             --no-deps --no-sources --no-cache --reinstall-package omninode-intelligence \
             "omninode-intelligence @ file:///workspace/sibling-repos/omniintelligence" ); \
     else \
-        uv-with-retry pip install --no-deps \
-            "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"; \
+        echo "release mode: no sibling package is installed outside uv.lock"; \
     fi
 
 # Compute the provenance manifest. Workspace mode records sibling repo proofs;
@@ -583,6 +580,15 @@ print(f'foundation import smoke OK: omnibase_core={omnibase_core.__version__}')"
 RUN find /app/.venv -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \
     find /app/.venv -name "*.pyc" -delete 2>/dev/null || true && \
     find /app/.venv -name "*.pyo" -delete 2>/dev/null || true
+
+# ============================================================================
+# Node inventory context (OMN-18708, OMN-19998)
+# ============================================================================
+# An empty default for the named build context the sanctioned build path
+# replaces with a directory holding node_inventory.json (compose
+# build.additional_contexts). An ad hoc build that passes none reads this empty
+# stage and carries no inventory.
+FROM scratch AS node_inventory
 
 # ============================================================================
 # Runtime Stage - Minimal production image
@@ -1079,13 +1085,19 @@ EXPOSE 8085
 # consumer reproduces with `perl -pe 's/\r\n/\n/g; s/\r/\n/g' contract.yaml
 # | shasum -a 256` and no Python at all.
 #
-# WHY THE ARG IS PLACED HERE, at the end of the stage. A Dockerfile cannot turn
-# a RUN step's output into a LABEL, so the value has to arrive as a build
-# argument. An ARG invalidates the build cache for every instruction after it,
-# so declaring it here means the two-pass build the sanctioned path performs
-# (build -> run `emit` inside the result -> rebuild stamping what it printed)
-# re-executes only this guard and the metadata instructions below it. Every
-# COPY and every apt layer is a cache hit on the second pass.
+# WHY THE VALUE ARRIVES AS A FILE AND A COMPOSE LABEL, NOT AS A BUILD ARGUMENT
+# (OMN-19998). It used to arrive as ARG NODE_INVENTORY. The full inventory
+# grew past 128 KiB (222 KB on 2026-11-14), and one process argument or
+# environment value cannot be longer than 128 KiB on Linux, so the stamping
+# pass died with "Argument list too long" on the build client and would have
+# died again in the RUN below, where a build argument is an environment value
+# and `--expect "${NODE_INVENTORY}"` is one argument. The sanctioned build path
+# now writes the value to a file and hands it over twice, neither through an
+# argument nor the environment: as the named build context `node_inventory`
+# (the guard reads the file from a bind mount) and as the label value in a
+# generated compose override (compose sends it to the builder directly). The
+# bind mount's content is part of the step's cache key, so the second pass
+# re-runs this guard and only the guard, and a changed inventory re-runs it.
 #
 # WHY THE GUARD IS NOT CEREMONY. Without it the label would say whatever the
 # build script was told to say, which is a claim the build CONTEXT made about
@@ -1105,20 +1117,22 @@ EXPOSE 8085
 # triple for any node in both, because both compute the hash with the same
 # function over the same file.
 #
-# UNSTAMPED BUILDS. NODE_INVENTORY defaults to empty and an empty value skips
-# the guard, so an ad hoc `docker compose build` that passes no inventory still
-# works and simply carries no inventory. That is the honest outcome: the
+# UNSTAMPED BUILDS. An empty node_inventory context skips the guard, so an ad
+# hoc `docker compose build` that passes no inventory still works and simply
+# carries no inventory. That is the honest outcome: the
 # readback distinguishes an ABSENT label from an empty one and refuses both, so
 # no consumer is ever handed an empty inventory as if it were an answer. The
 # sanctioned build path (onex-runtime-deploy) always stamps.
-ARG NODE_INVENTORY=""
-RUN set -eu; \
-    if [ -n "${NODE_INVENTORY}" ]; then \
-      python -m omnibase_infra.runtime.node_inventory verify --expect "${NODE_INVENTORY}"; \
+RUN --mount=type=bind,from=node_inventory,target=/node_inventory \
+    set -eu; \
+    if [ -s /node_inventory/node_inventory.json ]; then \
+      python -c 'import sys; from omnibase_infra.runtime.node_inventory import main; raise SystemExit(main(["verify", "--expect", open(sys.argv[1]).read()]))' /node_inventory/node_inventory.json; \
     else \
-      echo "NODE_INVENTORY not supplied; image carries no node inventory label (OMN-18708)"; \
+      echo "node inventory not supplied; image carries no node inventory label (OMN-18708)"; \
     fi
-LABEL com.omninode.node_inventory="${NODE_INVENTORY}"
+# The label itself is not declared here: a Dockerfile cannot turn a file into a
+# LABEL, so the sanctioned build path supplies com.omninode.node_inventory as a
+# compose build label (see stamp_node_inventory in handler_runtime_deploy.sh).
 
 # OMN-15217: semantic health check.
 #

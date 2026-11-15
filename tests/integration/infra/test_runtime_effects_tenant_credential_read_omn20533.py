@@ -63,6 +63,8 @@ _STORE_VAR = "DEV_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON"
 _HOUSE_VAR = "DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON"
 _IDENTITY_PREFIX = "RUNTIME_EFFECTS_INFISICAL_"
 _NAMESPACE = "tenant_inference_credentials"
+#: The Infisical folder the cloud API writes a tenant's provider key to.
+_TENANT_CREDENTIAL_FOLDER = "/tenant-inference-credentials"
 
 # OMN-22930 (T8): primary dev folds the effects role into main, so main
 # resolves the tenant refs the retired runtime-effects service resolved. Its
@@ -144,13 +146,15 @@ def test_the_rule_is_declared_on_dev_effects_and_on_the_main_that_folds_it() -> 
 
 
 def test_the_rule_reads_the_folder_onex_api_writes() -> None:
+    # OMN-24476: the dev lane no longer runs onex-api, so its compose file no
+    # longer declares the folder onex-api writes (INFISICAL_TENANT_CREDENTIAL_SECRET_PATH).
+    # The writer is the cloud API; the folder it writes is the one this module's
+    # docstring names, pinned here as the one fact the rule must keep reading.
     rule = (
         _contract().profiles["dev"].processes["effects"].secret_resolver_namespaces[0]
     )
-    onex_api_env = _compose("docker-compose.dev-lane.yml")["services"]["onex-api"][
-        "environment"
-    ]
-    write_folder = onex_api_env["INFISICAL_TENANT_CREDENTIAL_SECRET_PATH"]
+    write_folder = _TENANT_CREDENTIAL_FOLDER
+    assert "onex-api" not in _compose("docker-compose.dev-lane.yml")["services"]
     assert rule.source_type == "infisical"
     assert rule.source_path_template == f"{write_folder}/{{ref}}"
 

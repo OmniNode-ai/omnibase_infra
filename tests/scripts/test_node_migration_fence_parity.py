@@ -587,6 +587,12 @@ FENCED_LOCAL_IDENTITY_RLS_IDS = (
 FENCED_SKILL_LIFECYCLE_RLS_IDS = (
     "node:node_projection_skill_lifecycle:0002_grant_tenant_projection_writer_skill_executions.sql",
 )
+# OMN-24323: only the FORCE RLS step on experiment_arm_results waits for an
+# operator release; the create (0000) and the writer grant (0001) apply on every
+# lane. This fence addition carries no lane release.
+FENCED_EXPERIMENT_RESULT_RLS_IDS = (
+    "node:node_projection_experiment_result:0002_force_rls_experiment_arm_results.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -608,6 +614,7 @@ EXPECTED_FENCE = (
     + FENCED_LOCAL_ALERTS_RLS_IDS
     + FENCED_LOCAL_IDENTITY_RLS_IDS
     + FENCED_SKILL_LIFECYCLE_RLS_IDS
+    + FENCED_EXPERIMENT_RESULT_RLS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -742,6 +749,10 @@ DEV_LANE_VALUE = "dev"
 # puts the tenant boundary on delegation_judge_verdict_events, the last
 # TENANT-classified relation the dev lane left without one. Its 2026-09-08
 # refusal was a writer defect, fixed by OMN-17627, not a property of the SQL.
+# OMN-24341: node_projection_skill_lifecycle 0002 joined this arm. The skill lifecycle
+# writer inserts skill_executions.tenant_id, which that migration adds; fenced, every
+# write is refused. It stays in the BASELINE fence like the others; the release rests on
+# the OPERATOR-CONSENT row of 2026-09-14T12:11:31Z (tenant row-level security, lab first).
 LANE_RELEASED_IDS = (
     "node:node_projection_registration:0002_node_service_registry_tenant_rls.sql",
     "node:node_projection_delegation:"
@@ -750,6 +761,8 @@ LANE_RELEASED_IDS = (
     "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
     "node:node_projection_delegation:"
     "0041_delegation_budget_state_rls_tenant_isolation.sql",
+    "node:node_projection_skill_lifecycle:"
+    "0002_grant_tenant_projection_writer_skill_executions.sql",
 )
 
 BASE_COMPOSE_RELPATH = "docker/docker-compose.infra.yml"
@@ -985,13 +998,14 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         + FENCED_LOCAL_ALERTS_RLS_IDS
         + FENCED_LOCAL_IDENTITY_RLS_IDS
         + FENCED_SKILL_LIFECYCLE_RLS_IDS
+        + FENCED_EXPERIMENT_RESULT_RLS_IDS
     ), (
         "the OMN-19978 usage_by_model_day, OMN-19790 delegation_eval_items, "
         "OMN-20154 provider_quota_state, OMN-19793 eval-run, OMN-20242 "
         "delegation_dispositions, OMN-20613 budget_applied_events, OMN-19987 "
         "run_trace, OMN-19988 local_environment, OMN-20169 capability-map, "
-        "OMN-19991 local_alerts, OMN-19986 local_identity and OMN-21933 "
-        "skill_executions RLS holds are not the expected ids"
+        "OMN-19991 local_alerts, OMN-19986 local_identity, OMN-21933 "
+        "skill_executions and OMN-24323 experiment_arm_results RLS holds are not the expected ids"
     )
 
 
@@ -1252,6 +1266,8 @@ def test_dev_lane_releases_exactly_the_ruled_set() -> None:
         "0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql",
         "node:node_projection_delegation:"
         "0041_delegation_budget_state_rls_tenant_isolation.sql",
+        "node:node_projection_skill_lifecycle:"
+        "0002_grant_tenant_projection_writer_skill_executions.sql",
     }, "the dev-lane release carries ids no operator ruling names"
 
 

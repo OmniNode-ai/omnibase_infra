@@ -137,10 +137,6 @@ required:
                       refused exactly as a stability-test build is.
 
 options:
-  --with-gateway      start the slot's onex-api and mint its tenant. The image
-                      is pinned to its local digest and its topic-namespace
-                      transform is verified before tenant bootstrap. Enabled
-                      by default; this flag remains accepted for old callers.
   --descriptor-out <path>
                       where to write the slot descriptor JSON. Default:
                       .onex_state/prepr/slot-<n>/descriptor.json under the repo.
@@ -165,7 +161,6 @@ SLOT=""
 ORIGINAL_ARGS=("$@")
 WORKTREE=""
 REASON="${ONEX_DEPLOY_REASON:-}"
-WITH_GATEWAY=1
 DESCRIPTOR_OUT=""
 STAGING_ROOT=""
 BUILD_TIMEOUT=3600
@@ -185,7 +180,6 @@ while [[ $# -gt 0 ]]; do
         --boot-timeout)    shift || usage; [[ $# -gt 0 ]] || usage; BOOT_TIMEOUT="$1" ;;
         --lock-timeout)    shift || usage; [[ $# -gt 0 ]] || usage; LOCK_TIMEOUT="$1" ;;
         --composed-omnimarket) shift || usage; [[ $# -gt 0 ]] || usage; COMPOSED_OMNIMARKET="$1" ;;
-        --with-gateway)    WITH_GATEWAY=1 ;;
         --plan-only)       PLAN_ONLY=1 ;;
         -h|--help)         usage ;;
         *) printf '[prepr-verify-lane] unknown option: %s\n' "$1" >&2; usage ;;
@@ -335,12 +329,12 @@ if [[ "${PLAN_ONLY}" == "1" ]]; then
     # Every value reaches the script through argv, so a branch name carrying a
     # quote or a backslash cannot alter the Python source.
     "${PY}" - "${SIBLING_PINS}" "${SLOT}" "${COMPOSE_PROJECT}" "${TARGET_REPO}" "${TARGET_COMMIT}" \
-        "${TARGET_BRANCH}" "${STAGING_ROOT}" "${TOPIC_NAMESPACE}" "${DB_SLOT}" "${WITH_GATEWAY}" <<'PYPLAN'
+        "${TARGET_BRANCH}" "${STAGING_ROOT}" "${TOPIC_NAMESPACE}" "${DB_SLOT}" <<'PYPLAN'
 import json, sys
 pins, *v = sys.argv[1:]
-keys = ("slot", "compose_project", "target_repo", "target_commit", "target_branch", "staging_root", "topic_namespace", "db_slot", "with_gateway")
+keys = ("slot", "compose_project", "target_repo", "target_commit", "target_branch", "staging_root", "topic_namespace", "db_slot")
 plan = dict(zip(keys, v))
-print(json.dumps({"plan_only": True, **plan, "slot": int(v[0]), "with_gateway": bool(int(v[-1])),
+print(json.dumps({"plan_only": True, **plan, "slot": int(v[0]), "with_gateway": False,
     "siblings": {r: {"tag": t, "commit": c} for r, t, c in map(str.split, pins.splitlines())}}, indent=2))
 PYPLAN
     exit 0
@@ -727,42 +721,12 @@ export EXPECTED_BUILD_SOURCE=workspace
 export OMNI_HOME="${OMNI_HOME_RESOLVED}"
 export GIT_SHA="${TARGET_COMMIT}"
 
-if [[ "${WITH_GATEWAY}" == "1" ]]; then
-    # These sentinels belong to this compose project only. They never rotate
-    # a provider credential or change the dev gateway's admin gate.
-    "${PY}" - "${COMPOSE_ENV}" <<'PYSENTINELS'
-import pathlib, secrets, sys
-with pathlib.Path(sys.argv[1]).open("a", encoding="utf-8") as stream:
-    for name in ("TENANT_BOOTSTRAP_ADMIN_SECRET", "TENANT_OFFBOARD_ADMIN_SECRET"):
-        stream.write(f"{name}={secrets.token_hex(32)}\n")
-PYSENTINELS
-fi
-
 # The slot's own credentials, exported for the same precedence reason. Read
 # from the 0600 file rather than passed on any command line.
 set -a
 # shellcheck disable=SC1090
 source "${COMPOSE_ENV}"
 set +a
-
-if [[ "${WITH_GATEWAY}" == "1" ]]; then
-    # Resolve the operator's tag once. All subsequent compose calls use the
-    # same immutable local image even if a shared tag moves during the build.
-    ONEX_API_IMAGE="$(docker image inspect --format '{{.Id}}' "${ONEX_API_IMAGE:?ONEX_API_IMAGE must be set}")" \
-        || fail "${EXIT_PROVENANCE_MISMATCH}" "the gateway image is not present locally."
-    [[ "${ONEX_API_IMAGE}" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "${EXIT_PROVENANCE_MISMATCH}" "the gateway image did not resolve to an immutable digest."
-    export ONEX_API_IMAGE
-    docker run --rm --network none -i -e KAFKA_TOPIC_NAMESPACE \
-        --entrypoint python3 "${ONEX_API_IMAGE}" - <<'PYIMAGE' \
-        || fail "${EXIT_PROVENANCE_MISMATCH}" "the pinned gateway image lacks the slot's namespace transform."
-import os
-from topic_namespace import apply_topic_namespace, strip_topic_namespace
-topic = "onex.cmd.omnimarket.delegation-requested.v1"
-physical = apply_topic_namespace(topic)
-assert physical == os.environ["KAFKA_TOPIC_NAMESPACE"] + "." + topic
-assert strip_topic_namespace(physical) == topic
-PYIMAGE
-fi
 
 # OMN-20932: the slot mounts its compose project's Bifrost overlay from
 # ${ONEX_LANE_OVERLAY_DIR}, resolved by the same helper every lane deploy uses
@@ -787,9 +751,8 @@ SLOT_SERVICES=(
     projection-registration-writer projection-savings-writer
     projection-tenant-credentials-writer projection-live-events-writer
 )
-# Every slot service that is BUILT from Dockerfile.runtime, which is all of
-# them but onex-api (image-referenced, see --with-gateway). Each one carries
-# its own `build:` in the layered files and so its own image tag
+# Every slot service is BUILT from Dockerfile.runtime. Each one carries its
+# own `build:` in the layered files and so its own image tag
 # (<project>-<service>:latest), so building only omninode-runtime left the
 # other ten with no image and `up` then tried to build them itself, with none
 # of the workspace build args: the first slot boot (2026-09-24) died there on
@@ -797,10 +760,6 @@ SLOT_SERVICES=(
 # context and one arg set, so after the first the rest are cache hits.
 SLOT_BUILD_SERVICES=("${SLOT_SERVICES[@]}")
 PROFILES=(--profile prepr)
-if [[ "${WITH_GATEWAY}" == "1" ]]; then
-    PROFILES+=(--profile prepr-gateway)
-    SLOT_SERVICES+=(onex-api)
-fi
 
 # -----------------------------------------------------------------------------
 # 8. BUILD, under the pool-wide build lock.
@@ -855,12 +814,12 @@ BUILD_ARGS=(
     --build-arg "PROMOTION_CLASS=stability-candidate"
     --build-arg "NON_MAIN_LINEAGE=true"
     --build-arg "OMNI_HOME=${OMNI_HOME_RESOLVED}"
-    # Empty deliberately: the node inventory is a property of the image and
-    # cannot be known before the image exists, and an empty value skips the
-    # Dockerfile's verify guard. The two-pass stamping the declared lanes do
-    # (OMN-18708) is not reproduced here -- a slot's image is destroyed with
-    # the slot and is never promoted, so nothing downstream reads the stamp.
-    --build-arg "NODE_INVENTORY="
+    # No node inventory is passed deliberately: it is a property of the image
+    # and cannot be known before the image exists, and a build with no
+    # inventory context skips the Dockerfile's verify guard. The two-pass
+    # stamping the declared lanes do (OMN-18708) is not reproduced here -- a
+    # slot's image is destroyed with the slot and is never promoted, so nothing
+    # downstream reads the stamp.
 )
 
 log "building the runtime image from the snapshot, version ${RUNTIME_VERSION} (timeout ${BUILD_TIMEOUT}s) ..."
@@ -913,7 +872,6 @@ pool_build_lock_release
 log "rendering and verifying the slot configuration (piped, never written) ..."
 
 VERIFY_ARGS=(--rendered - --slot "${SLOT}")
-[[ "${WITH_GATEWAY}" == "1" ]] && VERIFY_ARGS+=(--expect-gateway)
 if ! compose "${PROFILES[@]}" config --format json 2>/dev/null \
         | "${PY}" "${SCRIPT_DIR}/prepr_verify_rendered_slot.py" "${VERIFY_ARGS[@]}"; then
     fail "${EXIT_PROVENANCE_MISMATCH}" \
@@ -947,14 +905,6 @@ if ! compose --profile prepr-migrate run --rm --no-deps intelligence-migration; 
   test this is a FINDING. Record it as the slot's verdict."
 fi
 
-if [[ "${WITH_GATEWAY}" == "1" ]]; then
-    log "applying the gateway's existing cloud migration corpus to the slot database ..."
-    compose --profile prepr-migrate run --rm --no-deps cloud-migration-files \
-        || fail "${EXIT_PROVISION_FAILED}" "the slot cloud migration corpus could not be staged."
-    compose --profile prepr-migrate run --rm --no-deps cloud-migration \
-        || fail "${EXIT_PROVISION_FAILED}" "the slot cloud migration failed."
-fi
-
 log "starting the slot's services ..."
 # --no-build: every image was built in step 8 with the workspace args. A
 # service `up` finds unbuilt is a defect in that list, and building it here
@@ -976,23 +926,6 @@ while [[ $(date +%s) -lt ${deadline} ]]; do
     sleep 15
 done
 [[ "${ready}" == "1" ]] || fail "${EXIT_BOOT_FAILED}" "the slot runtime did not become ready on port ${MAIN_PORT} within ${BOOT_TIMEOUT}s."
-
-if [[ "${WITH_GATEWAY}" == "1" ]]; then
-    # Probe the gateway's own transform, using the same environment it serves
-    # requests with. An old image must fail before bootstrap emits any event.
-    docker exec -i "onex-api-prepr-${SLOT}" python3 - <<'PYNAMESPACE' \
-        || fail "${EXIT_PROVENANCE_MISMATCH}" "the gateway image does not implement this slot's topic namespace."
-import os
-from topic_namespace import apply_topic_namespace, strip_topic_namespace
-topic = "onex.cmd.omnimarket.delegation-requested.v1"
-physical = apply_topic_namespace(topic)
-assert physical == os.environ["KAFKA_TOPIC_NAMESPACE"] + "." + topic
-assert strip_topic_namespace(physical) == topic
-PYNAMESPACE
-    COMPOSE_PROJECT="${COMPOSE_PROJECT}" LAB_TENANT_SLUG="onex-${DB_SLOT}" \
-        bash "${REPO_ROOT}/scripts/smoke/smoke_delegation.sh" --target compose --tenant-lifecycle mint \
-        || fail "${EXIT_BOOT_FAILED}" "the slot gateway did not mint its tenant."
-fi
 
 RUNNING_IMAGE_DIGEST="$(docker inspect --format '{{index .Image}}' \
     "omninode-prepr-${SLOT}-runtime" 2>/dev/null || echo "")"
@@ -1028,8 +961,7 @@ mkdir -p "$(dirname "${DESCRIPTOR_OUT}")"
         "${TOPIC_NAMESPACE}" "${DB_SLOT}" "${KAFKA_ENV_TOKEN}" "${VALKEY_INDEX}"
     printf '  "ports": {"runtime_main": %s, "runtime_effects": %s, "gateway": %s, "projection_api": %s},\n' \
         "${MAIN_PORT}" "${EFFECTS_PORT}" "${GATEWAY_PORT}" "${PROJECTION_API_PORT}"
-    printf '  "gateway_started": %s,\n' "$([[ "${WITH_GATEWAY}" == "1" ]] && echo true || echo false)"
-    printf '  "gateway_image_digest": "%s",\n' "${ONEX_API_IMAGE}"
+    printf '  "gateway_started": false,\n'
     printf '  "staging_root": "%s",\n' "${STAGING_ROOT}"
     printf '  "reason": %s\n' "$("${PY}" -c 'import json,sys;print(json.dumps(sys.argv[1]))' "${REASON}")"
     printf '}\n'

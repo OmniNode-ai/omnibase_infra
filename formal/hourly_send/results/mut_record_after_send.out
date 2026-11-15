@@ -1,0 +1,96 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 91 and seed 8246672076456044111 with 2 workers on 32 cores with 1820MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-42-generic amd64, Eclipse Adoptium 17.0.21 x86_64, MSBDiskFPSet, DiskStateQueue).
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module HourlySend
+Starting... (2026-11-14 05:38:02)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-14 05:38:02.
+Error: Invariant NoKeyDoubleSend is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ readable = TRUE
+/\ cur = (t1 :> nil)
+/\ snap = (t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil))
+/\ now = 0
+/\ pc = (t1 :> "idle")
+/\ tok = (t1 :> 0)
+/\ faulted = FALSE
+/\ rec = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<>>
+/\ w2pc = "idle"
+
+State 2: <Decide line 158, col 5 to line 164, col 75 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1)
+/\ snap = (t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil))
+/\ now = 0
+/\ pc = (t1 :> "decided")
+/\ tok = (t1 :> 0)
+/\ faulted = FALSE
+/\ rec = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<>>
+/\ w2pc = "idle"
+
+State 3: <Send line 179, col 5 to line 186, col 63 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1)
+/\ snap = (t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil))
+/\ now = 0
+/\ pc = (t1 :> "sent")
+/\ tok = (t1 :> 0)
+/\ faulted = FALSE
+/\ rec = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<[by |-> t1, key |-> k1, st |-> 0]>>
+/\ w2pc = "idle"
+
+State 4: <Crash line 215, col 5 to line 217, col 85 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1)
+/\ snap = (t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil))
+/\ now = 0
+/\ pc = (t1 :> "idle")
+/\ tok = (t1 :> 0)
+/\ faulted = FALSE
+/\ rec = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<[by |-> t1, key |-> k1, st |-> 0]>>
+/\ w2pc = "idle"
+
+State 5: <Decide line 158, col 5 to line 164, col 75 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1)
+/\ snap = (t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil))
+/\ now = 0
+/\ pc = (t1 :> "decided")
+/\ tok = (t1 :> 0)
+/\ faulted = FALSE
+/\ rec = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<[by |-> t1, key |-> k1, st |-> 0]>>
+/\ w2pc = "idle"
+
+State 6: <Send line 179, col 5 to line 186, col 63 of module HourlySend>
+/\ readable = TRUE
+/\ cur = (t1 :> k1)
+/\ snap = (t1 :> (k1 :> nil @@ k2 :> nil @@ "ow" :> nil))
+/\ now = 0
+/\ pc = (t1 :> "sent")
+/\ tok = (t1 :> 0)
+/\ faulted = FALSE
+/\ rec = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ w2snap = (k1 :> nil @@ k2 :> nil @@ "ow" :> nil)
+/\ sends = <<[by |-> t1, key |-> k1, st |-> 0], [by |-> t1, key |-> k1, st |-> 0]>>
+/\ w2pc = "idle"
+
+1172 states generated, 668 distinct states found, 394 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 5 and the 95th percentile is 5).
+Finished in 00s at (2026-11-14 05:38:02)
+exit=12

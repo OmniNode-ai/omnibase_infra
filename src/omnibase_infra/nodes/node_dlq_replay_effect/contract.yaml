@@ -40,7 +40,7 @@ contract_version:
 node_version:
   major: 1
   minor: 5
-  patch: 5
+  patch: 6
 node_type: "EFFECT_GENERIC"
 descriptor:
   node_archetype: effect
@@ -230,6 +230,22 @@ quarantine:
     invariant: >
       Re-entry is explicit and owner-driven. The replay node never auto-promotes quarantined messages back into replay.
 
+# OMN-24177 (node_version 1.5.6): the replay policy the runtime reads from
+# this contract (replay_policy.load_replay_policy). The runtime tick topic
+# is read by every consumer group: a node that failed every tick filled the
+# shared topic with replayed ticks -- 39,960 skip lines in 4.5 minutes on the
+# dev runtime on 2026-11-14. A replay would re-send the record to all groups,
+# each of which skips it, and the next tick supersedes it, so such a record is
+# never replayed and is quarantined instead. Every other replay carries the
+# per-target bound below: at most max_replays replays per (original topic,
+# target consumer group) in any window of window_seconds; the next record for
+# that pair is quarantined instead.
+replay_policy:
+  broadcast_topics:
+    - "onex.intent.platform.runtime-tick.v1"
+  target_replay_bound:
+    max_replays: 50
+    window_seconds: 60
 # Metadata
 metadata:
   description: >

@@ -391,6 +391,11 @@ jobs:
       - name: Check no localhost env fallbacks (OMN-10732)
         run: uv run pre-commit run no-env-fallbacks --all-files
 
+      # OMN-24480: the count of files that read or write the old ledger file may only fall; the hook
+      # of the same id runs omnimarket's census node at a pinned commit against this checkout.
+      - name: Ledger file census ratchet (OMN-24480)
+        run: uv run pre-commit run ledger-file-census-ratchet --all-files
+
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py
 
@@ -1662,7 +1667,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 188b29aae85680a30347aaa29f04773490c1a752 # .github/sibling-pins.yaml
+          ref: ebb006955dd0301ecbd29974fa321682c359f5f8 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -1896,14 +1901,6 @@ jobs:
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout omnibase_compat (sibling)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/omnibase_compat
-          ref: 65aed95fa710748654e37d5c15c5446e779fdf52 # .github/sibling-pins.yaml
-          path: omnibase_compat
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       # OMN-23235: a hosted runner has no preinstalled uv. The composite below installs it
       # too, but it is checked out under a subdirectory here, so the uv-availability
       # hook cannot resolve it; this explicit step puts uv on PATH for the steps after it.
@@ -1953,7 +1950,7 @@ jobs:
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
           attempt=1
           max_attempts=5
-          until uv pip install --no-deps -e ../omnibase_compat -e ../omnimemory -e ../omniintelligence; do
+          until uv pip install --no-deps -e ../omnimemory -e ../omniintelligence; do
             status=$?
             if [ "${attempt}" -ge "${max_attempts}" ]; then
               echo "::error::uv pip install schema-handshake sibling deps failed after ${attempt} attempt(s)"
@@ -4460,7 +4457,7 @@ jobs:
   # (1c9566e2c249) from the 14-tag bound until 2026-11-16 and nothing else; the migration
   # ticket OMN-22867 bumps that rev and deletes this input in the same change.
   dependency-pins:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261105190003-87a6f5ddcbcc
+    uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261110125852-e6bc5e13e9e7
     with:
       omnibase-core-ref: dev-20261109032923-9f0af2b9bd43
     permissions:
@@ -4786,14 +4783,6 @@ jobs:
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout omnibase_compat (sibling)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/omnibase_compat
-          ref: 65aed95fa710748654e37d5c15c5446e779fdf52 # .github/sibling-pins.yaml
-          path: omnibase_compat
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       # OMN-23235: a hosted runner has no preinstalled uv. The composite below installs it
       # too, but it is checked out under a subdirectory here, so the uv-availability
       # hook cannot resolve it; this explicit step puts uv on PATH for the steps after it.
@@ -4841,7 +4830,7 @@ jobs:
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
           attempt=1
           max_attempts=5
-          until uv pip install --no-deps -e ../omnibase_compat -e ../omnimemory -e ../omniintelligence; do
+          until uv pip install --no-deps -e ../omnimemory -e ../omniintelligence; do
             status=$?
             if [ "${attempt}" -ge "${max_attempts}" ]; then
               echo "::error::uv pip install sibling deps failed after ${attempt} attempt(s)"

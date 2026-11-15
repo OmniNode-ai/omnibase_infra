@@ -6,8 +6,8 @@ OMN-12424 found that uv keys its git source cache on the resolved commit of a
 moving ref (``@dev`` / ``@main``), so a rebuild under the persistent BuildKit
 cache mount reinstalled a stale wheel. The fix was ``--refresh-package`` on the
 one moving-ref install the image carried. OMN-21279 removed that install (the
-image no longer carries omnimarket), leaving omnibase_compat installed from a
-SHA-pinned, immutable archive tarball. This guard keeps it that way: a new
+image no longer carries omnimarket). omnibase_compat is retired: it is
+no longer installed into the image at all. This guard keeps it that way: a new
 ``git+https://github.com/OmniNode-ai/...`` install in the image would bring the
 staleness bug back, so it is refused rather than refreshed.
 """
@@ -41,13 +41,10 @@ def test_dockerfile_runtime_exists() -> None:
 
 
 @pytest.mark.unit
-def test_compat_install_is_a_sha_pinned_archive(dockerfile_text: str) -> None:
-    # Positive control: the immutable tarball install the guard relies on exists.
-    assert re.search(
-        r"pip install --no-deps\s+\"https://github\.com/OmniNode-ai/omnibase_compat/"
-        r"archive/\$\{OMNIBASE_COMPAT_REF\}\.tar\.gz\"",
-        dockerfile_text,
-    )
+def test_no_compat_install_in_the_image(dockerfile_text: str) -> None:
+    # omnibase_compat is retired; no install of it may remain.
+    assert "omnibase_compat" not in dockerfile_text
+    assert "OMNIBASE_COMPAT" not in dockerfile_text
 
 
 @pytest.mark.unit

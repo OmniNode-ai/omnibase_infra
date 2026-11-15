@@ -429,3 +429,20 @@ def test_dev_unit_restarts_after_an_external_sigterm() -> None:
 
     assert "Restart=on-failure" in directives
     assert "RestartForceExitStatus=SIGTERM" in directives
+
+
+def test_dev_lane_unit_keeps_the_stability_lane_on_dev_tags() -> None:
+    """OMN-21485: the dev fence stays dev alone; the follow setting adds the stability lane.
+
+    The setting is named in the protected-environment list too, so an operator
+    env file sourced by the launcher cannot switch the follow off or on.
+    """
+    text = (_DEPLOY_DIR / "deploy-agent-dev.service").read_text()
+    lines = [ln.strip() for ln in text.splitlines()]
+
+    assert "Environment=DEPLOY_AGENT_ALLOWED_LANES=dev" in lines
+    assert "Environment=DEPLOY_AGENT_FOLLOW_STABILITY=1" in lines
+    protected = next(
+        ln for ln in lines if ln.startswith('Environment="DEPLOY_AGENT_ENV_PROTECTED=')
+    )
+    assert "DEPLOY_AGENT_FOLLOW_STABILITY" in protected.split()

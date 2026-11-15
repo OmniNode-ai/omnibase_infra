@@ -38,6 +38,7 @@ from omnibase_infra.handlers.handler_registration_from_announcement.handler impo
 )
 from omnibase_infra.handlers.handler_runtime_introspection_startup import (
     HandlerRuntimeIntrospectionStartup,
+    RuntimeHeartbeatRequiredError,
 )
 from omnibase_infra.models.dispatch.model_injected_request import (
     ModelInjectedRequest,
@@ -364,11 +365,16 @@ class TestStartupHandlerWithoutAnnouncements:
             )
 
     @pytest.mark.asyncio
-    async def test_heartbeat_failure_is_logged_not_raised(self) -> None:
+    async def test_heartbeat_failure_refuses_the_start(self) -> None:
+        # OMN-24496: the heartbeat is mandatory; a failure to start it is a
+        # typed refusal, no longer logged and skipped.
         service = make_service()
         service.start_heartbeat_task.side_effect = RuntimeError("no loop")
         handler = HandlerRuntimeIntrospectionStartup()
-        await handler.start_heartbeat(uuid4(), service=service, config=make_config())
+        with pytest.raises(RuntimeHeartbeatRequiredError):
+            await handler.start_heartbeat(
+                uuid4(), service=service, config=make_config()
+            )
         service.start_heartbeat_task.assert_awaited_once()
 
 
@@ -604,7 +610,10 @@ async def test_optional_startup_failures_preserve_boot(failure: Exception) -> No
     assert not result.published
     assert result.last_introspection_time == previous
     service.start_heartbeat_task.side_effect = failure
-    await handler.start_heartbeat(uuid4(), service=service, config=make_config())
+    # OMN-24496: an optional publish failure preserves boot, a heartbeat that
+    # cannot start does not (the heartbeat is mandatory).
+    with pytest.raises(RuntimeHeartbeatRequiredError):
+        await handler.start_heartbeat(uuid4(), service=service, config=make_config())
     service.start_heartbeat_task.assert_awaited_once()
 
 
