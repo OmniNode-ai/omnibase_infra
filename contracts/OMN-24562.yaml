@@ -13,6 +13,15 @@ requirements:
         statement: 'AC4: for the stability lane the agent''s lane configuration disables the runtime-effects service, the runtime phase retires its old container with a stop and a remove that carry no volume flag, removes nothing when none exists, and prod retires nothing -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_retires_folded_effects_omn24562.py -q fails when the retirement call in the runtime phase or the census branch of _retire_folded_dev_services is deleted'
       - id: AC5
         statement: 'AC5: the pull request branch''s executor.py carries the guard line `if "runtime-effects" in retired:` (in lane_config_for, where a lane that retires the effects role reads the effects health target from main), a line the merge base does not carry -- falsifier: that line is absent from the branch''s executor.py, or present at the merge base 6deccc76f9768b2be6b4ba8939eb0a9d52cd1082'
+  - id: req-omn24562-stability-rollback-waiver
+    statement: The deploy agent runs a stability runtime deploy that has no retained rollback point only when its own probe reads every runtime target of the lane failed with no timeout and Docker reads every target container unhealthy or gone after its declared start window, records that it ran without one, and never applies the waiver to the prod or dev lane.
+    acceptance:
+      - id: AC19
+        statement: 'AC19: a stability runtime deploy with no retained rollback point runs when every runtime target fails the guard probe and Docker reads each target container unhealthy or absent, and the job records it ran without one -- falsifier: pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py -k unhealthy_lane_without_point fails at the merge base'
+      - id: AC20
+        statement: 'AC20: the deploy is refused when the lane is degraded-serving (a target passes, or a failing target is Docker-healthy) or still starting (Docker reads a target starting inside its start period), or the probe times out or errors -- falsifier: the degraded_serving and still_starting tests in the same file fail when the waiver ignores the Docker state'
+      - id: AC21
+        statement: 'AC21: the waiver is never granted to the prod or dev lane and probes nothing for them -- falsifier: the prod and dev control test fails at the head'
 evidence_requirements:
   - kind: tests
     description: Stability lane retirement of the folded effects container and its runtime-phase call site, with a positive control that the services the lane still runs stay requested.
@@ -55,4 +64,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/handlers/test_handler_dev_boot_guard_stability_fold_omn24562.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac19-ac21-rollback-waiver
+    description: 'AC19, AC20 and AC21: an UNHEALTHY lane past its start window is waived and recorded; a degraded-serving, still-starting, HEALTHY or UNKNOWN lane is refused; prod and dev are never waived; the existing rollback tests still pass.'
+    source: manual
+    binds_ac:
+      - AC19
+      - AC20
+      - AC21
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -p no:randomly --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
