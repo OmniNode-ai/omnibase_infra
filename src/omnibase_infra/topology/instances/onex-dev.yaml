@@ -385,6 +385,7 @@ databases:
               - infra_routing_decisions
               - pr_landing_workflow_state
               - session_phase_state
+              - work_state_panel_state
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
         login: true

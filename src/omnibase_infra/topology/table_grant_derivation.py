@@ -89,9 +89,7 @@ PRUNE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
 # (OMN-23055, node_gate_store_effect/0001). Each is declared as a separate
 # PRUNE_PRIVILEGES grant beside the derived one, so no grant carries a
 # non-canonical privilege set; expire with the gate store bridge.
-PRUNED_RELATIONS: frozenset[tuple[str, str]] = frozenset(
-    {("omninode_internal", "gate_store_reservations")}
-)
+PRUNED_RELATIONS = frozenset({("omninode_internal", "gate_store_reservations")})
 
 # Mirrors ``_projection_operation_bindings``. PLATFORM_CATALOG is absent by
 # design: that domain requires a caller-supplied read/write binding, so a
@@ -164,6 +162,7 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = tuple(
         ("floor_fill_state", "113_create_floor_fill_state.sql"),
         ("code_eval_trial_state", "114_create_code_eval_trial_state.sql"),
         ("branch_deploy_state", "116_create_branch_deploy_state.sql"),
+        ("work_state_panel_state", "117_create_work_state_panel_state.sql"),
         ("infra_routing_decisions", "080_create_infra_routing_decisions.sql"),
     )
 )

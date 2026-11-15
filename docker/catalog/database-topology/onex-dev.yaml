@@ -426,6 +426,7 @@ databases:
               - infra_routing_decisions
               - pr_landing_workflow_state
               - session_phase_state
+              - work_state_panel_state
             privileges:
               - INSERT
               - SELECT
@@ -490,5 +491,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 74ddc1f2aed66a262fca3d8d865c39b6fce50c688a67a840ddc96a4c89b4adbe
+  sha256: fef8f20603d1adae29bb0226fcc5f00872b6977cbfd482469746b4242644ec2d
 topology_instance: onex-dev

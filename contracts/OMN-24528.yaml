@@ -1,0 +1,53 @@
+schema_version: 1.0.0
+ticket_id: OMN-24528
+title: Table and grant for the board panel row
+summary: Forward migration 117 creates public.work_state_panel_state keyed on projector with the StateStoreAdapter column shape, and STATE_IO_TABLE_DECLARATIONS declares it so every shipped topology instance grants it to the runtime role.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24528-panel-row-table
+    statement: The first board panel's row has a table and a grant.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: forward migration 117 creates work_state_panel_state keyed on projector with the adapter''s columns, its two partial indexes and the updated_at trigger -- falsifier: pytest tests/unit/db/test_migration_117_work_state_panel_state_omn19998.py -q'
+      - id: AC2
+        statement: 'AC2: the runtime role is granted work_state_panel_state in every shipped profile and the rendered catalogs agree -- falsifier: python scripts/generate_application_database_table_grants.py --check'
+      - id: AC3
+        statement: 'AC3: integrated: the table exists on the running lab database with the migration''s columns -- falsifier: select the column names of work_state_panel_state on the lab database; a missing table or column fails it'
+evidence_requirements:
+  - kind: tests
+    description: The migration shape test passes at the head; the real-Postgres tests are in CI.
+    command: uv run --frozen pytest tests/unit/db/test_migration_117_work_state_panel_state_omn19998.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24528-ac1
+    description: 'Migration shape: columns, key, indexes, trigger, idempotent CREATE.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/db/test_migration_117_work_state_panel_state_omn19998.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn24528-ac2
+    description: Grant derivation and catalogs in sync for the new table.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/topology/test_work_state_panel_state_grant_omn19998.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn24528-ac3
+    description: The real-Postgres test applies the migration and drives the adapter; the running lab database reading is not yet taken (see the pull request).
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_117_work_state_panel_state_omn19998.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
