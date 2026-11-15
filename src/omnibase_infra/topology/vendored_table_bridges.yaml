@@ -26,3 +26,13 @@
   prefix: ""
   opts: {schema: public}
   tables: [experiment_arm_results]
+# OMN-19998: infra vendors the four eval results tables (node_projection_eval_results
+# 0000-0002) ahead of the omnimarket node contract. The node writes through the
+# tenant_projection binding; 0001 grants tenant_projection_writer on them and the FORCE
+# RLS step (0002) is fenced for the operator release.
+- ticket: OMN-19998 # omnimarket OMN-24171
+  node: node_projection_eval_results
+  create: 0000_create_eval_results_tables.sql
+  prefix: ""
+  opts: {schema: public}
+  tables: [eval_item_scores, eval_item_traces, eval_run_closes, eval_run_rates]

@@ -110,6 +110,8 @@ requirements:
     statement: The recorder contract test gives each loopback request the handler's default timeout, so a CI worker that stalls one answer for a second no longer turns the capture into capture_failed and reds Tests, CI Tests Gate, Test-Failure Ratchet Gate and CI Summary on the pull request.
   - id: req-omn19998-lane-liveness-folded-effects
     statement: The lane liveness probe does not demand the effects container on a lane whose runtime policy folds the effects role into main, so a serving primary dev lane no longer reads red on runtime_containers; a policy that does not fold effects still requires it.
+  - id: req-omn19998-eval-results-writer-grants
+    statement: Every shipped topology profile must grant the tenant projection writer the four eval results tables (eval_item_scores, eval_item_traces, eval_run_closes, eval_run_rates) ahead of the omnimarket node contract, with the node's three migrations vendored, ledgered, classed and the row-security step fenced, so the omnimarket Event Chain Gate stops failing collection with a missing SELECT on public.eval_item_scores.
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -204,6 +206,9 @@ evidence_requirements:
   - kind: tests
     description: The folded-lane case runs the real health gate over a census with no effects container and the shipped policy, and expects green; the control runs it under a policy that does not fold effects and expects red naming the effects container.
     command: uv run pytest tests/ci/test_dev_lane_liveness.py -q -n 0 --no-cov
+  - kind: tests
+    description: The four eval results tables are granted to the tenant projection writer on every profile and the three migrations are vendored; on the merge base no profile grants them and the vendored directory is absent.
+    command: uv run --frozen pytest tests/integration/topology/test_eval_results_grants_omn19998.py -q -n 0 --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1436,6 +1441,33 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_dev_lane_liveness.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn19998-eval-results-grants
+    description: Every shipped profile grants the tenant projection writer SELECT, INSERT and UPDATE on the four eval results tables. The new test file is absent at the merge base, so the command fails there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/topology/test_eval_results_grants_omn19998.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn19998-eval-results-vendored
+    description: The three eval results migrations are vendored. The directory is absent at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/topology/test_eval_results_grants_omn19998.py -q -n 0 --no-cov -k vendored
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn19998-eval-results-control
+    description: The control case reports a profile without the four grants as an empty grant set for the tenant projection writer.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/topology/test_eval_results_grants_omn19998.py -q -n 0 --no-cov -k control
         cwd: .
     binds_ac:
       - AC1
