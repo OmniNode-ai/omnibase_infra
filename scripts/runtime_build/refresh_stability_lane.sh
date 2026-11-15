@@ -304,7 +304,8 @@ readonly REFRESH_BUILD_SERVICES=(
     # It builds from docker/Dockerfile.runtime -- the same image as the four
     # core services -- so the open OMN-14262 BUILD_SOURCE selector mismatch
     # that scopes this array does not reach it.
-    tenant-projection-writer
+    tenant-projection-writer composed-runtime-base-image
+    # OMN-24562: composed-runtime-base-image, on the line above, is the build-only infra half of the composed runtime image that the stability overlay builds the kernel, worker, projection api and writers on, as the dev lane does. Scale 0, so up starts nothing.
 )
 # OMN-18061: the ROLLBACK set is the DEPLOYED set, not the core four.
 #

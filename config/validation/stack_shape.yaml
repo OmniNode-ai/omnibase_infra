@@ -54,6 +54,7 @@ one_shots:
   - redpanda-sasl-enable
   - redpanda-scram-user
   - redpanda-settings
+  - composed-runtime-base-image
   - "*-labwork-user"
   - "*-sasl-enable"
   - "*-scram-user"

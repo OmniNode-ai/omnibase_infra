@@ -42,6 +42,13 @@ requirements:
         statement: 'AC11: the build command of a stability job runs under the stability compose project and the stability lane configuration disables autoheal -- falsifier: scripts/deploy-agent/tests/unit/test_stability_build_project_omn24562.py fails at the merge base'
       - id: AC12
         statement: 'AC12: integrated: after the agent is installed from the integration branch, one stability-follow job on h201 builds the omninode-runtime image of the stability project at the job time and names no autoheal -- falsifier: the image list of h201 shows that image older than the job, or the job record errors name autoheal'
+  - id: req-omn24562-stability-composed-build
+    statement: The stability lane builds the runtime, worker, projection api and projection writers on omnimarket's composed image, as the dev lane does, so the kernel boots with BIFROST_BASE_CONTRACT_PATH set; the dev build is unchanged.
+    acceptance:
+      - id: AC13
+        statement: 'AC13: the stability overlay renders every runtime-profile service on the composed omnimarket build and the stability build names the overlay and those services, while the dev build argv is unchanged -- falsifier: scripts/deploy-agent/tests/unit/test_stability_composed_build_omn24562.py or tests/unit/docker/test_stability_composed_runtime_image_omn24562.py fails at the merge base'
+      - id: AC14
+        statement: 'AC14: integrated: after the agent is installed from the integration branch, one stability-follow job on h201 ends with outcome success and the stability omninode-runtime container reports healthy -- falsifier: the job record shows another outcome, or the container restarts with BIFROST_BASE_CONTRACT_PATH unset'
   - id: req-omn24562-stability-rollback-waiver
     statement: The deploy agent runs a stability runtime deploy that has no retained rollback point only when its own probe reads every runtime target of the lane down with no timeout, records on the job that it ran without one, and never applies the waiver to the prod lane.
     acceptance:
@@ -155,6 +162,28 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: grep -q 'disabled_services=frozenset({"autoheal"})' scripts/deploy-agent/deploy_agent/executor.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac13-stability-composed-build
+    description: The stability overlay builds on the composed image, the stability build argv names the overlay and the composed services under the stability project, and the dev build is unchanged.
+    source: manual
+    binds_ac:
+      - AC13
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_stability_composed_runtime_image_omn24562.py tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_composed_build_omn24562.py tests/unit/test_dev_lane_composed_build_omn21279.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac14-stability-follow-green
+    description: Hosted stand-in for AC14, which is read on h201 after the agent is installed from the integration branch. The overlay on the branch carries the composed build anchor; the merge base has none.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC14
+    checks:
+      - check_type: command
+        check_value: grep -q 'x-composed-runtime-build' docker/docker-compose.stability-t*.yml
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-rollback-waiver
     description: 'AC4, AC5 and AC6: UNHEALTHY allows and records, HEALTHY refuses, UNKNOWN refuses, prod and dev never waived; the existing rollback tests still pass'
