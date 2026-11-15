@@ -1,0 +1,68 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24508
+title: "The venv installer removes the leftover side folders of earlier stopped installs"
+summary: >-
+  The node-skill package installer stages an install in a side folder named .atomic-stage.<random> in the venv root and removes it when the install finishes. A run that is stopped or fails leaves it behind (nine folders, about 900 MB, on one lab host). The installer's finalize step, which runs only on the success path under the venv's exclusive reconcile lock, now also removes every other .atomic-stage folder in the venv root; a failed install keeps its own stage.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24508-stage-sweep
+    statement: >-
+      After a good install the venv root holds no side folder of an earlier stopped install, and a failed install keeps the stage it needs.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the installer's finalize step removes every other leftover .atomic-stage folder beside its own -- falsifier: pytest tests/scripts/test_venv_atomic_stage_sweep.py -q fails on the unchanged installer
+      - id: AC2
+        statement: >-
+          AC2: a failed install keeps its own stage folder and removes no sibling -- falsifier: the same test file, case failed_install_keeps_stage
+      - id: AC3
+        statement: >-
+          AC3: integrated: on h051 the dispatch venv holds no .atomic-stage folder after the installer's next good install, and held nine before -- falsifier: ls -d on the dispatch venv's .atomic-stage.* before and after
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Finalize removes nine sibling stage folders and its own, leaves other children and a symlink's target alone, the failure path removes no sibling, the runtime command line does the same, and the installer's template matches the engine's prefix.
+    command: uv run --frozen pytest tests/scripts/test_venv_atomic_stage_sweep.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24508-ac1-finalize-sweeps
+    description: >-
+      The ticket's falsifier. On the unchanged engine finalize removes only its own stage, so the sweep cases fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_venv_atomic_stage_sweep.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn24508-ac1-deploy-probe
+    description: >-
+      Deploy probe. The engine file GitHub serves at the checked-out commit defines the sweep, which is what the installer runs. The probe reads the file at that commit and exits nonzero on a tree without the sweep, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/venv_atomic_install/atomic_venv_install.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'def sweep_stale_stages' | grep -qx 1"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn24508-ac2-failure-keeps-stage
+    description: >-
+      A sweep run on the failure path removes siblings, which fails the keep case.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_venv_atomic_stage_sweep.py -q -n 0 -p no:cacheprovider -k "failed_install_keeps_stage"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn24508-ac3-hosted-stand-in
+    description: >-
+      Hosted stand-in for AC3, which is read on h051. The runtime command line removes the leftovers the same way the installer's finalize call does.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_venv_atomic_stage_sweep.py -q -n 0 -p no:cacheprovider -k "runtime_cli"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
