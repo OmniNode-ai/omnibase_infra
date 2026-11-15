@@ -798,13 +798,9 @@ class ModelLaneConfig(BaseModel):
     non-dev lanes layer their overlay (``docker-compose.<lane>.yml``) on top so
     the overlay's container names, project, and host port bindings win.
 
-    OMN-19522 adds four fields, each defaulting to what every lane did before,
+    OMN-19522 adds three fields, each defaulting to what every lane did before,
     so only a config that sets them behaves differently:
 
-    * ``build_project`` -- the project ``docker compose build`` runs under.
-      Compose names a built image ``<project>-<service>``, so a lane that brings
-      its runtime up under its own project must build under it too, or the up
-      finds no image and builds a second one without the build args.
     * ``main_runtime_container`` override -- the container whose image records
       the running build (the lineage fence reads it). On the .201 dev lane the
       first health target's service name is also its container name; on a lane
@@ -823,7 +819,6 @@ class ModelLaneConfig(BaseModel):
     compose_project: str
     postgres_container: str
     runtime_health_targets: tuple[tuple[str, int], ...]
-    build_project: str = COMPOSE_PROJECT
     runtime_container: str = ""
     disabled_phases: frozenset[EnumInstancePhase] = frozenset()
     disabled_services: frozenset[str] = frozenset()
@@ -879,6 +874,10 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
             ("omninode-stability-test-runtime", 18085),
             ("omninode-stability-test-runtime-effects", 18086),
         ),
+        # OMN-24562: the stability overlay disables autoheal by profile and
+        # carries no container_name for it, so naming it in the runtime up
+        # creates ``omnibase-infra-autoheal``, the dev lane's container.
+        disabled_services=frozenset({"autoheal"}),
     ),
     EnumRuntimeLane.PROD: ModelLaneConfig(
         lane=EnumRuntimeLane.PROD,
@@ -937,7 +936,6 @@ def dev_instance_lane_config(
             f"{repo_dir}/{spec.compose_overlay}",
         ),
         compose_project=spec.compose_project,
-        build_project=spec.compose_project,
         postgres_container=spec.postgres_container,
         runtime_health_targets=(
             ("omninode-runtime", spec.health_ports.main),
@@ -1016,10 +1014,11 @@ def active_dev_instance() -> str:
 
 def _folded_dev_services(lane: EnumRuntimeLane) -> set[str]:
     policy = _load_runtime_policy_env()  # one snapshot for the profiles and the map
-    services: set[str] = load_dev_boot_guard().folded_dev_services(
-        policy, lane_folded_profiles(lane, policy), LANE_POLICY_PREFIX.get(lane, "")
+    return set(
+        load_dev_boot_guard().folded_dev_services(
+            policy, lane_folded_profiles(lane, policy), LANE_POLICY_PREFIX.get(lane, "")
+        )
     )
-    return services
 
 
 def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
@@ -5706,9 +5705,11 @@ class DeployExecutor:
             "compose",
             *compose_file_args,
             "-p",
-            # OMN-19522: the lane's build project, which is COMPOSE_PROJECT on
-            # every lane but one that brings its runtime up under its own.
-            lane_config_for(runtime_lane).build_project,
+            # OMN-24562: compose names a built image ``<project>-<service>`` and
+            # the runtime up runs --no-build under the lane's own project, so the
+            # build runs under it too (it ran under the default project: the
+            # stability up found stale images, or none).
+            lane_config_for(runtime_lane).compose_project,
             "--profile",
             profile,
             "build",

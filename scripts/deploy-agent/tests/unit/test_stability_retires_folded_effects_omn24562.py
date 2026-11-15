@@ -43,7 +43,7 @@ def _committed_policy(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_stability_disables_only_the_folded_effects_service() -> None:
     config = lane_config_for(EnumRuntimeLane.STABILITY_TEST)
-    assert config.disabled_services == frozenset({"runtime-effects"})
+    assert config.disabled_services == frozenset({"runtime-effects", "autoheal"})
     requested = _requested_services_for_up(
         Scope.RUNTIME, [], lane=EnumRuntimeLane.STABILITY_TEST
     )
