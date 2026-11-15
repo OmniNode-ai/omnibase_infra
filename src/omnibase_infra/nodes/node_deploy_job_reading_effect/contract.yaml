@@ -40,11 +40,20 @@ settings:
   piece_name: deploy-agent-job
   max_age_seconds: 7200
   excluded_lanes: [prod]
+  # OMN-24562: the alarm rows. A failed job and a pin inside the window before its expiry
+  # each write one STATUS row with src=alarm that names its owner and the owner's action.
+  pin_alarm_window_hours: 6
+  pin_alarm_check_interval_seconds: 300
+  # The agent's state directory, where its code-ref pin record lives (the pin handler's variable).
+  pin_state_dir_env: DEPLOY_AGENT_STATE_DIR
+  alarm_owner: orchestrator-31d9-swarm
+  alarm_job_owner_line: read the job's failing step on the h201 deploy agent and open or hand the fix to the integrator lane that owns the pin
+  alarm_pin_owner_line: the integrator lane that owns the pin lands or re-registers its unmerged fixes before expires_at; the orchestrator lands the open PRs
   # The deploy phases in pipeline order; the first one that failed is the failing step.
   phase_order: [preflight, git, compose_gen, seed, core, runtime, verification]
 capabilities:
   - name: deploy.job_reading
-    description: Publish each deploy job's terminal outcome as a ledger reading row, so a failed job reads NOT_WORKING with its failing step where an owner reads it.
+    description: Publish each deploy job's terminal outcome as a ledger reading row, so a failed job reads NOT_WORKING with its failing step where an owner reads it, and write an alarm row with an owner line for a failed job and for a code-ref pin within six hours of its expiry.
 metadata:
   ticket: OMN-24617
   author: OmniNode Team
