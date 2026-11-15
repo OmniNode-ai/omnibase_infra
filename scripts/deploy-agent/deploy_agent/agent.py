@@ -346,6 +346,7 @@ BRANCH_INSTALL_APPLY_TIMEOUT_SECONDS = 900
 #: tree the job just built), so a change to it needs no release of the omnibase_infra
 #: package the agent venv holds.
 BRANCH_INSTALL_ENTRY = f"{REPO_DIR}/src/omnibase_infra/nodes/node_dev_roll_events_effect/runtime_dev_branch_install_reapply.py"
+JOB_READING_RUNTIME = "nodes.node_deploy_job_reading_effect.runtime_deploy_job_reading"
 BRANCH_INSTALL_EXIT_NOT_WHOLE = 4
 
 #: OMN-18200 AC5. The k3s ``onex-lab`` overlay re-apply, ON by default.
@@ -677,10 +678,6 @@ class DeployAgent:
         with self._settle_guard:
             future = self._settle_future
         return future is not None and not future.done()
-
-    def _hand_to_settle(self, settle: Callable[[], None]) -> None:
-        with self._settle_guard:
-            self._settle_future = self._settle_pool.submit(settle)
 
     def drain_settle(self, timeout: float | None = None) -> bool:
         """Wait for every settle submitted so far. True when none is in flight.
@@ -2316,7 +2313,8 @@ class DeployAgent:
             # the job thread, so the next command's compose job can start while
             # this one's overlay applies. The terminal event is published by the
             # settle, after the pin, exactly as OMN-18572 shaped it.
-            self._hand_to_settle(settle)
+            with self._settle_guard:
+                self._settle_future = self._settle_pool.submit(settle)
             self._state = "idle"
             return
 
@@ -2443,6 +2441,7 @@ class DeployAgent:
                 job.result_publish_pending = True
                 self.job_store._save(job)
                 logger.warning("Publish failed for %s, marked pending", cid)
+            load_dev_boot_guard(JOB_READING_RUNTIME).publish(job, sys.modules[__name__])
 
         # OMN-18636 AC5. Nothing further runs for this job, so it stops
         # reporting itself as settling. A flag that is only ever set makes every
