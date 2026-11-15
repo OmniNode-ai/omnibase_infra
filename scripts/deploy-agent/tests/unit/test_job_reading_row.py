@@ -257,7 +257,7 @@ def test_row_is_appended_through_the_reading_writers_append_command(
     assert cells["failing_step"] == "verification"
     assert cells["deploy_lane"] == STABILITY
     # a retry of the same job is the same request
-    again = _handler().request_id(_request(job))
+    again = handler_mod._request_id(_request(job))
     assert again == result.append_key
 
 
@@ -334,7 +334,7 @@ def test_publish_terminal_hands_the_settled_job_to_the_reading() -> None:
         if isinstance(call, ast.Call)
     ]
     assert "publish_result" in calls
-    reading = "load_dev_boot_guard(JOB_READING).publish"
+    reading = "self._job_reading"
     assert reading in calls
     assert calls.index(reading) > calls.index("publish_result")
 

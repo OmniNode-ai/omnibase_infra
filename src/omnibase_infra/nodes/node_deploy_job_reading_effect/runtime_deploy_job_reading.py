@@ -109,7 +109,10 @@ def publish(job: BaseModel, execution: ModuleType) -> BaseModel | None:
 
 
 _pin_last_check: list[float] = []
+_pin_settings: list[dict[str, JsonValue]] = []
 _PIN_HANDLER = "omnibase_infra.handlers.handler_dev_lane_code_ref_pin"
+#: Until the contract has been read once, the throttle holds the check this long between tries.
+_PIN_RETRY_SECONDS = 300.0
 
 
 def check_pin(*, force: bool = False) -> BaseModel | None:
@@ -117,14 +120,20 @@ def check_pin(*, force: bool = False) -> BaseModel | None:
 
     Called from the agent's idle tick, so it runs on a schedule with no job. The pin record is
     read from the agent's own state directory (the pin handler's ``DEPLOY_AGENT_STATE_DIR``),
-    through the pin handler the agent loaded before this module. Throttled to the contract's
-    ``pin_alarm_check_interval_seconds`` (``force`` skips the throttle). Returns the handler's
-    result, or ``None`` when throttled, when no pin is live or on an unreadable record.
+    through the pin handler the agent loaded before this module. The contract is read and
+    parsed once per process; the check is throttled to its
+    ``pin_alarm_check_interval_seconds`` (``force`` skips the throttle), and the throttle is
+    stamped before any read, so a failing read logs once per interval, not once per tick.
+    Returns the handler's result, or ``None`` when throttled, when no pin is live or on an
+    unreadable record.
     """
     try:
-        settings = _contract_settings(_PACKAGE_ROOT.parents[1] / NODE / "contract.yaml")
-        interval = settings["pin_alarm_check_interval_seconds"]
         tick = time.monotonic()
+        interval = (
+            _pin_settings[0]["pin_alarm_check_interval_seconds"]
+            if _pin_settings
+            else _PIN_RETRY_SECONDS
+        )
         if (
             not force
             and _pin_last_check
@@ -133,6 +142,11 @@ def check_pin(*, force: bool = False) -> BaseModel | None:
         ):
             return None
         _pin_last_check[:] = [tick]
+        if not _pin_settings:
+            _pin_settings[:] = [
+                _contract_settings(_PACKAGE_ROOT.parents[1] / NODE / "contract.yaml")
+            ]
+        settings = _pin_settings[0]
         pin_handler = sys.modules[_PIN_HANDLER]
         handler = handler_module.HandlerDeployJobReading(
             settings=settings, environ=os.environ

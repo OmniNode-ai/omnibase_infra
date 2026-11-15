@@ -13,6 +13,19 @@ requirements:
         statement: "AC8: a fixture failed job on the dev lane and one on the stability lane each yield an alarm row with src=alarm, alarm=deploy-job-failed, the failing step, owner and owner_line, and a prod job, a successful job and a running job yield none -- falsifier: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q fails at the pushed head's parent"
       - id: AC9
         statement: "AC9: a live pin 6 hours or less from its expiry yields an alarm row with alarm=pin-near-expiry, the pin's owner and branch and the hours left, a pin further out yields none, and the agent's idle tick calls the check on a schedule -- falsifier: the pin cases of test_job_alarm_row.py fail with the idle-tick call or the window removed"
+  - id: req-omn24562-review-fixes
+    statement: The pin-expiry check and the terminal reading publish are contained and gated, and the pin alarm appends are never refused.
+    acceptance:
+      - id: AC10
+        statement: "AC10: a prod agent never runs the pin check: an agent whose allowed lanes lack DEV never loads the job reading or calls check_pin -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
+      - id: AC11
+        statement: "AC11: a load or call error in the pin check or the terminal publish is logged and never raised, so the agent's loop and the job's clear_settling continue -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
+      - id: AC12
+        statement: "AC12: across a simulated pin hour of twelve 300 s ticks an append that refuses a different row under a reused request id refuses nothing and holds one row per pin, and the next clock hour writes a new row -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
+      - id: AC13
+        statement: "AC13: the contract is read and parsed once per process and a failing read logs once per interval -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
+      - id: AC14
+        statement: "AC14: the alarm owner is the item lane OMN-24562 and no owner line names one host -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -41,5 +54,50 @@ dod_evidence:
         check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: grep -q 'load_dev_boot_guard(JOB_READING).check_pin' scripts/deploy-agent/deploy_agent/agent.py
+        check_value: grep -q 'self._job_reading, "check_pin"' scripts/deploy-agent/deploy_agent/agent.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-fix-lane-gate
+    description: The pin-expiry check is gated to a dev agent; a prod agent never loads the job reading module for it.
+    source: manual
+    binds_ac:
+      - AC10
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider -k "test_a_prod_agent_never_runs_the_pin_check or test_a_dev_agent_runs_the_pin_check_off_the_event_loop"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-fix-load-error
+    description: A job reading load error is contained in the agent's one guarded entry.
+    source: manual
+    binds_ac:
+      - AC11
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider -k "test_a_pin_check_load_error_does_not_stop_the_agent or test_a_terminal_publish_error_does_not_skip_the_rest or test_the_terminal_publish_goes_through_the_guard_before_clear_settling"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-fix-request-ids
+    description: Each distinct pin alarm row has its own request id and the hour's rows are identical.
+    source: manual
+    binds_ac:
+      - AC12
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider -k "test_a_simulated_pin_hour_has_no_refused_append_and_one_row_per_pin or test_the_next_clock_hour_writes_a_new_row"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-fix-parse-once
+    description: The pin check parses the contract once and stamps its throttle before the read.
+    source: manual
+    binds_ac:
+      - AC13
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider -k "test_the_contract_is_parsed_once_and_a_failed_read_logs_once_per_interval"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-fix-owner-line
+    description: The alarm owner names the item lane and no single host.
+    source: manual
+    binds_ac:
+      - AC14
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider -k "test_the_alarm_owner_is_the_item_lane_and_names_no_host"
         cwd: ${OMNI_HOME}/omnibase_infra
