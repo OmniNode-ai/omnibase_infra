@@ -138,8 +138,10 @@ class _RaisingSyncHandler:
 
     def __init__(self, raised: Exception) -> None:
         self._raised = raised
+        self.raised_on_thread: int | None = None
 
     def handle(self, payload: object) -> object:
+        self.raised_on_thread = threading.get_ident()
         raise self._raised
 
 
@@ -415,6 +417,10 @@ class TestErrorChainPreservesExceptionIdentity:
             await callback(_make_envelope({}))
 
         assert excinfo.value is raised
+        # The error crossed the thread boundary: it was raised on a worker
+        # thread, not on the event loop thread.
+        assert handler.raised_on_thread is not None
+        assert handler.raised_on_thread != threading.get_ident()
 
     @pytest.mark.asyncio
     async def test_error_chain_handle_async_raises_same_exception_object(self) -> None:

@@ -5,8 +5,7 @@ summary: >-
   The runtime's dispatch callback (_make_dispatch_callback in runtime/auto_wiring/handler_wiring.py) called a handler's entry method directly on the asyncio event loop at three call sites. A handler whose entry method is a plain function therefore froze the loop (heartbeats, readiness endpoint) for as long as it ran; on 2026-11-14 two scheduled jobs froze the dev runtime for about 70 seconds every 5 minutes. The entry method is now classified once at wiring time: a plain function runs on a worker thread through asyncio.to_thread (context variables copied, the same exception object propagates), and an async def entry method or handle_async stays on the loop unchanged. No new setting and no new constant; the worker threads are the loop's default executor, the one the dispatch engine already uses for its sync dispatchers.
 is_seam_ticket: true
 interface_change: false
-interfaces_touched:
-  - public_api
+interfaces_touched: []
 requirements:
   - id: req-omn24492-sync-entry-off-loop
     statement: The runtime wiring runs a handler whose entry method is a plain function on a worker thread, so the event loop keeps serving heartbeats and its own endpoints while it runs, and leaves a handler with an async entry method or handle_async on the loop.
@@ -47,7 +46,7 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_handler_wiring_sync_off_loop.py -k heartbeat -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn24492-ac3-error-chain
-    description: An error raised by a plain handle on the worker thread arrives at the caller of the dispatch callback as the same exception object at the first call site and at the fallback envelope call site; an error raised by handle_async is unchanged.
+    description: An error raised by a plain handle on the worker thread arrives at the caller of the dispatch callback as the same exception object, raised on a worker thread rather than the loop thread, at the first call site and at the fallback envelope call site; an error raised by handle_async is unchanged.
     source: manual
     binds_ac:
       - AC3
