@@ -16,12 +16,6 @@
   prefix: gate_store_
   opts: {}
   tables: [state, reservations, safety, steps]
-- ticket: OMN-23341
-  node: node_projection_goal_trace
-  create: 0000_create_goal_trace_events.sql
-  prefix: ""
-  opts: {}
-  tables: [goal_trace_events, goal_traces]
 # OMN-24323: infra vendors experiment_arm_results (node_projection_experiment_result
 # 0000-0002) ahead of the omnimarket node contract. The node writes through the
 # tenant_projection binding; 0001 grants tenant_projection_writer SELECT, INSERT,
