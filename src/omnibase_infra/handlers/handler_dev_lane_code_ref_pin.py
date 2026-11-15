@@ -208,3 +208,21 @@ def followed_branch(
         pin.expires_at.isoformat(),
     )
     return pin.branch
+
+
+def pinned_head(
+    env: Mapping[str, str], *, clock: Callable[[], datetime] | None = None
+) -> str:
+    """The live pin's registered head, or ``""`` when no pin is live (OMN-24562).
+
+    A pin moves the agent's own code; the compose files, Dockerfiles and staging
+    scripts a build reads come from the deploy-source clone, which a job resets to
+    its ``git_ref``. A stability follow that builds a pinned change (an overlay
+    build anchor, a build-only service) builds the pinned head, or the build reads
+    the tracking branch's compose files and ignores the change.
+    """
+    state_dir = env.get(ENV_STATE_DIR, "").strip()
+    if not state_dir:
+        return ""
+    pin = read_active_pin(Path(state_dir), (clock or (lambda: datetime.now(UTC)))())
+    return "" if pin is None else pin.head

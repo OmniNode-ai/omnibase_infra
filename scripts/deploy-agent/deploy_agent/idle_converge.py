@@ -987,8 +987,9 @@ def decide_stability_follow(
 
 
 # The one rebuild a stability follow runs: the stability lane, workspace-built at
-# the tracking ref, staging ``tag`` for ``repository`` in place of its newest dev
-# tag (``sibling_tags`` -> ``DEPLOY_SIBLING_REFS``); other siblings stage newest.
+# the tracking ref (at the live code-ref pin's head while one is registered,
+# OMN-24562), staging ``tag`` for ``repository`` in place of its newest dev tag
+# (``sibling_tags`` -> ``DEPLOY_SIBLING_REFS``); other siblings stage newest.
 def stability_follow_command(tag: str, repository: str) -> ModelRebuildRequested:
     return ModelRebuildRequested(
         correlation_id=uuid4(),
@@ -996,5 +997,5 @@ def stability_follow_command(tag: str, repository: str) -> ModelRebuildRequested
         scope=Scope.RUNTIME,
         runtime_lane=EnumRuntimeLane.STABILITY_TEST,
         build_source=BuildSource.WORKSPACE,
-        sibling_tags={repository: tag},
+        **load_dev_boot_guard().stability_follow_fields(repository, tag),
     )

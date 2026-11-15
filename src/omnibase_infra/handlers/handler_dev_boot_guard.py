@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import re
 import subprocess
 import sys
@@ -558,6 +559,22 @@ def healthy_ref_reader(
 ) -> Callable[[str], str | None]:
     """The repository -> running ref reader of ``container``, unhealthy reading ``""``."""
     return lambda repository: running_ref_if_healthy(container, repository, read_ref)
+
+
+def stability_follow_fields(repository: str, tag: str) -> dict[str, Any]:
+    """The fields that make a rebuild a stability follow of ``tag`` (OMN-24562).
+
+    ``sibling_tags`` names the dev tag the build stages for ``repository``. While a
+    code-ref pin is live the rebuild also carries the pin's head as its ``git_ref``:
+    the agent runs the pinned code, but a job's build reads the compose files of the
+    deploy-source clone, which the job resets to its ``git_ref``. Without the pinned
+    head the build read the tracking branch's compose files and ignored the change
+    the pin installed.
+    """
+    from omnibase_infra.handlers.handler_dev_lane_code_ref_pin import pinned_head
+
+    head = pinned_head(os.environ)
+    return {"sibling_tags": {repository: tag}, **({"git_ref": head} if head else {})}
 
 
 def read_lane_presence(
