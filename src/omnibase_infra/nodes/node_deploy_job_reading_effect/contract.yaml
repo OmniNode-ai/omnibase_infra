@@ -28,7 +28,12 @@ handler_routing:
 settings:
   append_command_env: ONEX_LEDGER_BUS_APPEND_COMMAND
   host_name_env: ONEX_LEDGER_HOST_NAME
+  # The deploy agent holds its broker login under a prefixed name (the variable named by
+  # sasl_prefix_env gives the prefix); the append command reads the unprefixed names.
+  sasl_prefix_env: KAFKA_SASL_ENV_PREFIX
+  sasl_login_names: [KAFKA_SASL_USERNAME, KAFKA_SASL_PASSWORD]
   append_timeout_seconds: 30
+  error_cell_chars: 160
   row_lane: deploy-agent
   row_actor: deploy-agent:job-reading
   piece: "11"
