@@ -507,6 +507,27 @@ def test_literal_sequence_name_resolves_table_and_column_with_underscores() -> N
 
 
 @pytest.mark.unit
+def test_one_grant_naming_several_sequences_delivers_each(tmp_path: Path) -> None:
+    (tmp_path / "0000_create.sql").write_text(
+        "CREATE TABLE public.alpha (\n    projection_cursor BIGSERIAL\n);\n"
+        "CREATE TABLE public.beta (\n    projection_cursor BIGSERIAL\n);\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "0001_grant.sql").write_text(
+        "GRANT USAGE\n    ON SEQUENCE public.alpha_projection_cursor_seq,\n"
+        "                public.beta_projection_cursor_seq\n    TO a_writer;\n",
+        encoding="utf-8",
+    )
+
+    delivered = delivered_sequences(tmp_path)
+
+    for table in ("alpha", "beta"):
+        assert (
+            SequenceKey("a_writer", "public", table, "projection_cursor") in delivered
+        ), table
+
+
+@pytest.mark.unit
 def test_undelivered_sequence_count_is_exactly_the_ratchet_bound() -> None:
     """The sequence bound bites in both directions, like the table one."""
     missing = undelivered_sequences(REPO_ROOT)

@@ -26,3 +26,12 @@
   prefix: ""
   opts: {schema: public}
   tables: [experiment_arm_results]
+# OMN-24174: infra vendors the four eval results stores (node_projection_eval_results
+# 0000-0002) ahead of the omnimarket node contract. 0001 grants tenant_projection_writer;
+# the FORCE RLS step (0002) is fenced for the operator release.
+- ticket: OMN-24174
+  node: node_projection_eval_results
+  create: 0000_create_eval_results_tables.sql
+  prefix: eval_
+  opts: {schema: public}
+  tables: [item_scores, item_traces, run_closes, run_rates]

@@ -338,7 +338,7 @@ _IDENTITY_COLUMN_RE = re.compile(
 # rather than merely filtered out of it.
 _SEQUENCE_GRANT_RE = re.compile(
     r"GRANT\s+[A-Za-z][A-Za-z ,\n\r\t]*?\s+ON\s+SEQUENCE\s+"
-    r"(?P<sequence>[^\s;]+)\s+TO\s+(?P<role>[A-Za-z0-9_\"]+)",
+    r"(?P<sequence>[^\s;,]+(?:\s*,\s*[^\s;,]+)*)\s+TO\s+(?P<role>[A-Za-z0-9_\"]+)",
     re.IGNORECASE,
 )
 
@@ -668,7 +668,7 @@ def delivered_sequences(corpus_root: Path) -> dict[SequenceKey, list[str]]:
 
       * the dynamic ``pg_get_serial_sequence('public.t', 'c')`` form the proven
         fix uses, issued from a DO block via ``EXECUTE format(...)``;
-      * a literal ``GRANT USAGE ON SEQUENCE <name> TO <role>``, resolved back to
+      * a literal ``GRANT USAGE ON SEQUENCE <name>[, <name>...] TO <role>``, each name resolved back to
         a ``(table, column)`` pair by the default ``<table>_<column>_seq``
         naming convention.
 
@@ -682,32 +682,32 @@ def delivered_sequences(corpus_root: Path) -> dict[SequenceKey, list[str]]:
 
         for match in _SEQUENCE_GRANT_RE.finditer(text):
             role = _unquote(match.group("role"))
-            target = match.group("sequence")
-            resolved = _PG_GET_SERIAL_SEQUENCE_RE.search(target)
-            if resolved is not None:
-                schema, table = _split_relation(resolved.group("relation"))
-                column = resolved.group("column").lower()
-            else:
-                schema, sequence = _split_relation(target)
-                bare = _unquote(sequence)
-                if not bare.endswith("_seq"):
-                    continue
-                candidates = [
-                    (table, column)
-                    for candidate_schema, table in columns
-                    if candidate_schema == schema
-                    for column in columns[(candidate_schema, table)]
-                    if bare == f"{table}_{column}_seq"
-                ]
-                if len(candidates) == 1:
-                    table, column = candidates[0]
+            for target in re.split(r"\s*,\s*", match.group("sequence")):
+                resolved = _PG_GET_SERIAL_SEQUENCE_RE.search(target)
+                if resolved is not None:
+                    schema, table = _split_relation(resolved.group("relation"))
+                    column = resolved.group("column").lower()
                 else:
-                    table, _, column = bare[: -len("_seq")].rpartition("_")
-                if not table or not column:
-                    continue
-            delivered.setdefault(
-                SequenceKey(role, schema, table, column.lower()), []
-            ).append(sql_path.name)
+                    schema, sequence = _split_relation(target)
+                    bare = _unquote(sequence)
+                    if not bare.endswith("_seq"):
+                        continue
+                    candidates = [
+                        (table, column)
+                        for candidate_schema, table in columns
+                        if candidate_schema == schema
+                        for column in columns[(candidate_schema, table)]
+                        if bare == f"{table}_{column}_seq"
+                    ]
+                    if len(candidates) == 1:
+                        table, column = candidates[0]
+                    else:
+                        table, _, column = bare[: -len("_seq")].rpartition("_")
+                    if not table or not column:
+                        continue
+                delivered.setdefault(
+                    SequenceKey(role, schema, table, column.lower()), []
+                ).append(sql_path.name)
 
         # The DO-block form: `EXECUTE format('GRANT USAGE ON SEQUENCE %s TO
         # <role>', v_seq)` where v_seq came from pg_get_serial_sequence. The
