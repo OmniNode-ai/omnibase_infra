@@ -458,12 +458,15 @@ def retire_lane_services[LaneT: BaseModel](
     )
 
 
-def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> set[str]:
+def folded_dev_services(
+    policy: Mapping[str, str], folded: frozenset[str], prefix: str = "DEV"
+) -> set[str]:
     """Retirement uses the same contract mapping as the compose gates.
 
     A lane that folds nothing (any other dev instance) retires nothing. On the
     lane that folds, the services main carries with no profile of its own
-    (``DEV_RUNTIME_MAIN_RETIRED_SERVICES``) are retired with the folded ones.
+    (``<prefix>_RUNTIME_MAIN_RETIRED_SERVICES``) are retired with the folded
+    ones; a lane that declares none (stability) retires only the mapped ones.
     """
     if not folded:
         return set()
@@ -483,7 +486,9 @@ def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> se
         raise RuntimeError(f"fold policy maps no service for {sorted(missing)}")
     retired = {
         service.strip()
-        for service in policy.get("DEV_RUNTIME_MAIN_RETIRED_SERVICES", "").split(",")
+        for service in policy.get(f"{prefix}_RUNTIME_MAIN_RETIRED_SERVICES", "").split(
+            ","
+        )
         if service.strip()
     }
     if any(not re.fullmatch(r"[a-z][a-z0-9-]*", service) for service in retired):

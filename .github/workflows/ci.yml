@@ -1667,7 +1667,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 9c73a4c1510a79e32989b03b24664b61491febc8 # .github/sibling-pins.yaml
+          ref: ebb006955dd0301ecbd29974fa321682c359f5f8 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -1901,14 +1901,6 @@ jobs:
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout omnibase_compat (sibling)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/omnibase_compat
-          ref: 65aed95fa710748654e37d5c15c5446e779fdf52 # .github/sibling-pins.yaml
-          path: omnibase_compat
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       # OMN-23235: a hosted runner has no preinstalled uv. The composite below installs it
       # too, but it is checked out under a subdirectory here, so the uv-availability
       # hook cannot resolve it; this explicit step puts uv on PATH for the steps after it.
@@ -1958,7 +1950,7 @@ jobs:
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
           attempt=1
           max_attempts=5
-          until uv pip install --no-deps -e ../omnibase_compat -e ../omnimemory -e ../omniintelligence; do
+          until uv pip install --no-deps -e ../omnimemory -e ../omniintelligence; do
             status=$?
             if [ "${attempt}" -ge "${max_attempts}" ]; then
               echo "::error::uv pip install schema-handshake sibling deps failed after ${attempt} attempt(s)"
@@ -4791,14 +4783,6 @@ jobs:
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout omnibase_compat (sibling)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/omnibase_compat
-          ref: 65aed95fa710748654e37d5c15c5446e779fdf52 # .github/sibling-pins.yaml
-          path: omnibase_compat
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       # OMN-23235: a hosted runner has no preinstalled uv. The composite below installs it
       # too, but it is checked out under a subdirectory here, so the uv-availability
       # hook cannot resolve it; this explicit step puts uv on PATH for the steps after it.
@@ -4846,7 +4830,7 @@ jobs:
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
           attempt=1
           max_attempts=5
-          until uv pip install --no-deps -e ../omnibase_compat -e ../omnimemory -e ../omniintelligence; do
+          until uv pip install --no-deps -e ../omnimemory -e ../omniintelligence; do
             status=$?
             if [ "${attempt}" -ge "${max_attempts}" ]; then
               echo "::error::uv pip install sibling deps failed after ${attempt} attempt(s)"
