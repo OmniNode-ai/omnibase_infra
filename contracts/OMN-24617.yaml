@@ -67,6 +67,9 @@ dod_evidence:
       - check_type: command
         check_value: grep -q 'load_dev_boot_guard(JOB_READING_RUNTIME).publish(' scripts/deploy-agent/deploy_agent/agent.py
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/agent.py?ref=omn-24617-job-reading-row' --jq .content | base64 -d | grep -q 'load_dev_boot_guard(JOB_READING_RUNTIME).publish('
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24617-integration-proof
     description: >-
       The handler runs against a real stand-in append executable: a failed dev job's NOT_WORKING row, request id and job id reach the command's argv and stdin, and a prod job writes nothing.
