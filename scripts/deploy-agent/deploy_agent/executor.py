@@ -875,10 +875,6 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
             ("omninode-stability-test-runtime", 18085),
             ("omninode-stability-test-runtime-effects", 18086),
         ),
-        # OMN-24562: the stability overlay disables autoheal by profile and
-        # carries no container_name for it, so naming it in the runtime up
-        # creates ``omnibase-infra-autoheal``, the dev lane's container.
-        disabled_services=frozenset({"autoheal"}),
     ),
     EnumRuntimeLane.PROD: ModelLaneConfig(
         lane=EnumRuntimeLane.PROD,
