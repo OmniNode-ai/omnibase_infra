@@ -211,17 +211,23 @@ class TestTheTwoListsCannotDrift:
 class TestOnexApiIsRecreateOnlyNotBuild:
     """AC5. Stated in a test, not left to be discovered on the lane."""
 
-    def test_onex_api_is_declared_tag_referenced(self) -> None:
-        assert "onex-api" in DEV_LANE_ONLY_TAG_REFERENCED_SERVICES
+    def test_onex_api_is_no_longer_a_dev_lane_service(self) -> None:
+        # OMN-24476: the separate onex-api container left the dev lane.
+        assert "onex-api" not in DEV_LANE_ONLY_TAG_REFERENCED_SERVICES
+        assert "onex-api" not in DEV_LANE_ONLY_RUNTIME_SERVICES
 
     def test_a_tag_referenced_service_is_excluded_from_the_build_set(self) -> None:
         assert "onex-api" not in DEV_LANE_ONLY_BUILDABLE_SERVICES
 
-    def test_it_is_still_in_the_recreate_set(self) -> None:
-        # The RECREATE is the point: a container that is never recreated never
-        # reads a new environment, and onex-api carries the lane's broker
-        # credentials and eleven fail-closed variables.
-        assert "onex-api" in services_for_scope(Scope.RUNTIME, lane=EnumRuntimeLane.DEV)
+    def test_it_is_not_in_the_recreate_set(self) -> None:
+        assert "onex-api" not in services_for_scope(
+            Scope.RUNTIME, lane=EnumRuntimeLane.DEV
+        )
+        # The tag-referenced page still is: a container never recreated never
+        # reads a new environment.
+        assert "cost-estimator-web" in services_for_scope(
+            Scope.RUNTIME, lane=EnumRuntimeLane.DEV
+        )
 
     def test_the_buildable_set_is_the_array_minus_the_tag_referenced_ones(
         self,

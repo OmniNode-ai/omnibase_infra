@@ -256,7 +256,6 @@ readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     projection-savings-writer
     projection-tenant-credentials-writer
     projection-live-events-writer
-    onex-api
     cost-estimator-web
 )
 
@@ -521,19 +520,18 @@ readonly RUNTIME_MIGRATION_ONESHOTS=(
 # BOTH are one-shots, so both are in the wait set. A one-shot that is started
 # and never waited on lets the runtime restart race an unapplied corpus, which
 # is the failure OMN-13220 fixed for intelligence-migration.
+# OMN-24476: the dev lane declares no omninode_cloud one-shots any more (the onex-api
+# container and the two one-shots only it read are removed), so both arrays are empty
+# and the refresh names no cloud service that compose cannot resolve.
 readonly DEV_LANE_ONLY_MIGRATION_SERVICES=(
-    cloud-migration-files
-    cloud-migration
 )
 readonly DEV_LANE_ONLY_MIGRATION_ONESHOTS=(
-    cloud-migration-files
-    cloud-migration
 )
 # OMN-18496: only these services depend on the cloud corpus. Keep this set
 # aligned with the dev overlay's cloud-migration dependencies; companions use
 # the required runtime migrations above, not omninode_cloud.
+# OMN-24476: empty, onex-api is removed from the dev lane.
 readonly DEV_LANE_CLOUD_DB_SERVICES=(
-    onex-api
 )
 # OMN-18496: runtime family deployed and verified, but a dev-lane cloud migration
 # one-shot failed and DEV_LANE_CLOUD_DB_SERVICES were stopped. Distinct from

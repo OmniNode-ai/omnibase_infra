@@ -196,6 +196,13 @@ def test_preflight_failure_preserves_last_successful_record(
             "verify_oneshots_completed",
             lambda *args, **kwargs: (False, ["cloud-migration"]),
         )
+        # OMN-24476 emptied the dev lane's cloud one-shots; restore them for
+        # this case so the recorded-failure path stays exercised.
+        monkeypatch.setattr(
+            executor_mod,
+            "DEV_LANE_ONLY_MIGRATION_SERVICES",
+            ("cloud-migration-files", "cloud-migration"),
+        )
     else:
         monkeypatch.setattr(
             executor_mod,
