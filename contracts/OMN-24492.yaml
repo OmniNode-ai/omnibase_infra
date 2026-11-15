@@ -56,13 +56,14 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_handler_wiring_sync_off_loop.py -k error_chain -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn24492-ac4-hosted-neighbours
-    description: The hosted half of AC4. The dispatch callback tests that wire handlers of every kind still pass with plain handlers on a worker thread, the same behaviour the running readiness sampler reads on the rolled runtime.
+    description: >-
+      The hosted half of AC4. The seam test (wiring, real dispatch engine, real in-memory bus: a 0.6 second plain handler runs off the loop, the loop gap stays under 0.25 seconds; with the old direct call it reads at least 0.48 seconds) and the dispatch callback tests that wire handlers of every kind still pass with plain handlers on a worker thread, the same behaviour the running readiness sampler reads on the rolled runtime.
     source: manual
     binds_ac:
       - AC4
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_handler_wiring_sync_off_loop.py tests/unit/runtime/auto_wiring/test_handler_wiring_handle_async_dispatch.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_handler_wiring_sync_off_loop.py tests/unit/runtime/auto_wiring/test_sync_off_loop_engine_bus_seam_omn24492.py tests/unit/nodes/node_entry_method_placement_compute tests/unit/runtime/auto_wiring/test_handler_wiring_handle_async_dispatch.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn24492-integration-proof
     description: Hosted CI cannot reach the lab, so only the local Done gate runs this unbound check. The pushed head ran the auto_wiring unit tests on a lab host through the lab work runner and exited 0. The running reading (the rolled dev runtime on h201 and a 20 minute readiness sampler file) is read from the lab receipt comment on the ticket.
