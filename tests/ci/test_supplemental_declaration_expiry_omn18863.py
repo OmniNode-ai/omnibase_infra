@@ -124,8 +124,6 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "gate_store_safety": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "gate_store_state": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "gate_store_steps": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
-    "goal_trace_events": "omnimarket OMN-20034 (node_projection_goal_trace)",
-    "goal_traces": "omnimarket OMN-20034 (node_projection_goal_trace)",
     "experiment_arm_results": "omnimarket OMN-24286 (node_projection_experiment_result)",
 }
 
