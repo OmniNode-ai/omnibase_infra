@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.capabilities import ModelContractCapabilities
@@ -61,6 +61,7 @@ class ModelNodeIntrospectionEvent(BaseModel):
         reason: Why this introspection event was emitted.
         correlation_id: Required correlation ID for tracing and idempotency.
         timestamp: Event timestamp (must be timezone-aware).
+        runtime_id: Runtime that vouches for this node (OMN-24529), or None.
         node_role: Optional role descriptor (registry, adapter, etc).
         metadata: Additional node metadata.
         network_id: Network/cluster identifier.
@@ -161,6 +162,23 @@ class ModelNodeIntrospectionEvent(BaseModel):
         Delegates to shared utility for consistent validation across all models.
         """
         return validate_timezone_aware_datetime(v)
+
+    runtime_id: UUID | None = Field(
+        default=None,
+        description="Runtime that vouches for this node (OMN-24529); "
+        "None for a runtime's own event and for every event written before "
+        "the field existed",
+    )
+
+    @model_validator(mode="after")
+    def validate_runtime_id_is_not_self(self) -> ModelNodeIntrospectionEvent:
+        """A node cannot be its own runtime parent (OMN-24529)."""
+        if self.runtime_id is not None and self.runtime_id == self.node_id:
+            raise ValueError(
+                "runtime_id must differ from node_id (a node cannot be its own "
+                "runtime parent)"
+            )
+        return self
 
     # Optional registration fields
     node_role: str | None = Field(
