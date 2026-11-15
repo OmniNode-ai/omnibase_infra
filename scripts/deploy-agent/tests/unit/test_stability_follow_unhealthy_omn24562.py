@@ -12,7 +12,7 @@ from __future__ import annotations
 import subprocess
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from deploy_agent.executor import load_dev_boot_guard
@@ -70,7 +70,7 @@ def test_a_healthy_runtime_reads_its_provenance() -> None:
 
 
 def test_the_reader_the_agent_installs_answers_by_repository() -> None:
-    reader = load_dev_boot_guard().healthy_ref_reader(CONTAINER, _read_ref)
+    reader = load_dev_boot_guard().healthy_ref_reader(lambda: CONTAINER, _read_ref)
     with _docker_says("unhealthy\n"):
         assert reader("omnimarket") == ""
     with _docker_says("healthy\n"):
@@ -95,3 +95,52 @@ def test_control_follow_leaves_a_healthy_lane_on_the_tag_alone() -> None:
         decide_stability_follow(_inputs(TAG.sha)).verdict
         is EnumStabilityFollowVerdict.UP_TO_DATE
     )
+
+
+def _bad_stability_policy(lane: object) -> str:
+    from deploy_agent.executor import EnumRuntimeLane
+
+    if lane is EnumRuntimeLane.STABILITY_TEST:
+        raise ValueError("stability fold policy unreadable")
+    return "omninode-runtime"
+
+
+def _new_agent(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+    from deploy_agent import agent as agent_mod
+
+    monkeypatch.setenv("ONEX_LANE_LOCK_DIR", str(tmp_path / "lane-locks"))
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
+    monkeypatch.setattr(agent_mod, "STATE_DIR", tmp_path / "agent-state")
+    return agent_mod.DeployAgent(skip_self_update=True)
+
+
+def test_a_dev_agent_starts_with_a_bad_stability_fold_policy(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from deploy_agent import agent as agent_mod
+
+    resolve = Mock(side_effect=_bad_stability_policy)
+    monkeypatch.setattr(agent_mod, "_runtime_container_for_lane", resolve)
+    agent = _new_agent(tmp_path, monkeypatch)
+    # Built in __init__, resolved on no lane until the stability follow reads it.
+    resolve.assert_not_called()
+    # The stability lane alone fails: its read is unanswered, nothing raises.
+    assert agent._stability_read_running_ref("omnimarket") is None
+
+
+def test_the_agent_s_stability_reader_reads_the_stability_runtime(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from deploy_agent import agent as agent_mod
+    from deploy_agent.executor import EnumRuntimeLane
+
+    read_ref = Mock(return_value=TAG.sha)
+    monkeypatch.setattr(agent_mod, "read_running_ref", read_ref)
+    agent = _new_agent(tmp_path, monkeypatch)
+    container = agent_mod._runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST)
+    with _docker_says("unhealthy\n"):
+        assert agent._stability_read_running_ref("omnimarket") == ""
+    read_ref.assert_not_called()
+    with _docker_says("healthy\n"):
+        assert agent._stability_read_running_ref("omnimarket") == TAG.sha
+    read_ref.assert_called_once_with(container, "omnimarket")
