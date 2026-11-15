@@ -11,8 +11,10 @@ Golden chain: at boot the in-use contract's handler module is imported and the
 deferred contract's is not (its wiring row is DEFERRED, its attach exclusion
 DEMAND_DEFERRED); the first record on the deferred contract's subscribe topic
 imports the module exactly once and its consumer group joins from earliest, so
-that record is the first one its group reads. Error chain: a broker that
-cannot be measured defers nothing — every contract wires at boot.
+that record is the first one its group reads. Error chain: topics the broker
+cannot show count as in use, so nothing defers; a FAILED first-request wiring
+retries within its attempt budget and shows the readiness gate not ready until
+it attaches; a broker that cannot be read at all refuses the boot.
 """
 
 from __future__ import annotations
@@ -21,14 +23,20 @@ import asyncio
 import socket
 import time
 import uuid
-from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from collections.abc import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Iterator,
+    Sequence,
+)
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from aiokafka import AIOKafkaProducer
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-from aiokafka.errors import KafkaError
+from aiokafka.errors import KafkaConnectionError, KafkaError
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.docker_client import DockerClient
 
@@ -40,12 +48,16 @@ from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.model_contract_attach_exclusion import (
     ModelContractAttachExclusion,
 )
+from omnibase_infra.event_bus.model_contract_attach_result import (
+    ModelContractAttachResult,
+)
 from omnibase_infra.event_bus.model_topic_readiness_config import (
     ModelTopicReadinessConfig,
 )
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
 from omnibase_infra.handlers.boot_wiring_deferral import (
+    DeferredContractWirer,
     make_deferred_contract_wirer,
     plan_boot_wiring_deferral,
 )
@@ -64,10 +76,24 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRouting,
     ModelHandlerRoutingEntry,
 )
+from omnibase_infra.runtime.auto_wiring.report import (
+    EnumWiringOutcome,
+    ModelContractWiringResult,
+)
+from omnibase_infra.runtime.health.contract_attach_readiness_gate import (
+    ContractAttachReadinessGate,
+    derive_required_contract_names,
+)
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.models.model_contract_attach_gate_status import (
+    ModelContractAttachGateStatus,
+)
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 from omnibase_infra.utils import compute_consumer_group_id
-from tests.helpers.kafka_demand_source_container import demand_source_over_bus
+from tests.helpers.kafka_demand_source_container import (
+    demand_source_for,
+    demand_source_over_bus,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.kafka]
 
@@ -260,6 +286,29 @@ def _recorder(imported_modules: list[str]) -> Callable[[str, str], type[_FakeHan
     return _recording_import
 
 
+def _fail_first_wirer(
+    wirer: DeferredContractWirer, calls: list[str]
+) -> DeferredContractWirer:
+    """A wirer whose first call returns a FAILED row; every later call delegates.
+
+    A FAILED wiring row is not structural (OMN-21318): the demand start forgets
+    it and its attempt budget retries, so the same first record still wires.
+    """
+
+    async def wire(contract: ModelDiscoveredContract) -> ModelContractWiringResult:
+        calls.append(contract.name)
+        if len(calls) == 1:
+            return ModelContractWiringResult(
+                contract_name=contract.name,
+                package_name=contract.package_name,
+                outcome=EnumWiringOutcome.FAILED,
+                reason="the first request found the contract unprepared",
+            )
+        return await wirer(contract)
+
+    return wire
+
+
 @pytest.fixture(autouse=True)
 def _lane_declares_on_demand(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The lane's overlay row declares on_demand (OMN-21318); a control removes it."""
@@ -391,7 +440,144 @@ async def test_golden_the_first_record_wires_the_deferred_contract_and_its_group
             await stop()
 
 
-async def test_error_chain_a_broker_that_cannot_be_measured_defers_nothing(
+async def test_error_chain_a_failed_first_request_shows_not_ready_then_attaches_on_the_real_broker(
+    broker_bootstrap: str,
+    bus: EventBusKafka,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _HANDLED.clear()
+    names = _Names()
+    await _prepare(broker_bootstrap, names)
+    provisioner = TopicProvisioner(
+        bootstrap_servers=broker_bootstrap, contracts_root=tmp_path
+    )
+    manifest = _manifest(names)
+    engine = MessageDispatchEngine()
+    demand_source = demand_source_over_bus(bus)
+    exclusions: list[ModelContractAttachExclusion] = []
+    stops: list[Callable[[], Awaitable[None]]] = []
+    imported_modules: list[str] = []
+    wire_calls: list[str] = []
+    gate = ContractAttachReadinessGate(derive_required_contract_names(manifest))
+    if not gate.required_contract_names:
+        # The contracts' topics stopped being command topics: the gate then
+        # requires nothing, so pin the requirement to the deferred contract
+        # for the chain this test follows.
+        gate = ContractAttachReadinessGate({"node_deferred"})
+    gate_snapshots: list[ModelContractAttachGateStatus] = []
+
+    def on_attempt(results: Sequence[ModelContractAttachResult]) -> None:
+        gate.record(results)
+        gate_snapshots.append(gate.status())
+
+    # The failed first request must retry within the same first record's
+    # attempt budget, not a minute later.
+    monkeypatch.setattr(handler_wiring, "DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS", 0)
+
+    try:
+        with patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._import_handler_class",
+            side_effect=_recorder(imported_modules),
+        ):
+            # The boot order the kernel follows, with the gate folded in: the
+            # watch reports every attach attempt to it, FAILED ones included.
+            readiness = ModelTopicReadinessConfig(max_concurrent_contract_attach=1)
+            deferral = await plan_boot_wiring_deferral(
+                manifest,
+                demand_source=demand_source,
+                readiness_config=readiness,
+                result_appliers_by_contract=None,
+                wire=_fail_first_wirer(
+                    make_deferred_contract_wirer(
+                        manifest=manifest,
+                        dispatch_engine=engine,
+                        event_bus=bus,
+                        environment=BUS_ENVIRONMENT,
+                        container=None,
+                        result_appliers_by_contract=None,
+                        materialized_explicit_dependencies=None,
+                        topology=None,
+                        wiring=handler_wiring,
+                    ),
+                    wire_calls,
+                ),
+                wiring=handler_wiring,
+            )
+            assert deferral.deferred_names == frozenset({"node_deferred"})
+            wired_report = await wire_from_manifest(
+                deferral.wired_manifest,
+                engine,
+                event_bus=bus,
+                environment=BUS_ENVIRONMENT,
+                subscribe_immediately=False,
+            )
+            engine.freeze()
+            await subscribe_wired_contract_topics(
+                manifest=deferral.wired_manifest,
+                report=wired_report,
+                dispatch_engine=engine,
+                event_bus=bus,
+                environment=BUS_ENVIRONMENT,
+                provisioner=provisioner,
+                readiness_config=readiness,
+                exclusions_out=exclusions,
+            )
+            await deferral.watch(
+                dispatch_engine=engine,
+                event_bus=bus,
+                environment=BUS_ENVIRONMENT,
+                provisioner=provisioner,
+                exclusions_out=exclusions,
+                stops_out=stops,
+                on_attempt=on_attempt,
+            )
+
+            await _write_record(broker_bootstrap, names.deferred_subscribe)
+            deadline = time.monotonic() + DEMAND_START_SECONDS
+            while time.monotonic() < deadline:
+                if len(wire_calls) >= 2:
+                    break
+                await asyncio.sleep(0.25)
+            else:
+                raise AssertionError(
+                    "a FAILED first-request wiring was never retried; "
+                    f"wire_calls={wire_calls!r}"
+                )
+
+            # The retried wiring attaches before the group joins from earliest,
+            # so the same first record reaches the handler once the gate is
+            # ready again; anything asserted after it arrived is settled.
+            deadline = time.monotonic() + DEMAND_START_SECONDS
+            while time.monotonic() < deadline and not _HANDLED:
+                await asyncio.sleep(0.25)
+            shown = [snapshot.summary_line() for snapshot in gate_snapshots]
+            assert any(
+                not snapshot.ready and "node_deferred" in snapshot.failed_contracts
+                for snapshot in gate_snapshots
+            ), (
+                "the FAILED first request never showed the gate not ready; "
+                f"statuses={shown!r}"
+            )
+            assert gate.status().ready is True, (
+                "the retried wiring never attached; "
+                f"status={gate.status().summary_line()!r}"
+            )
+            assert imported_modules.count("fake.deferred_module") == 1
+            assert len(_HANDLED) == 1, (
+                "the deferred handler did not handle the first record"
+            )
+            await asyncio.sleep(HANDLED_ONCE_SETTLE_SECONDS)
+            assert len(_HANDLED) == 1, "the first record was handled more than once"
+            assert wire_calls == ["node_deferred", "node_deferred"], (
+                "the failed first request was retried the wrong number of times"
+            )
+    finally:
+        for stop in stops:
+            await stop()
+
+
+async def test_error_chain_topics_the_broker_cannot_show_defer_nothing(
     broker_bootstrap: str, bus: EventBusKafka
 ) -> None:
     names = _Names()
@@ -424,3 +610,21 @@ async def test_error_chain_a_broker_that_cannot_be_measured_defers_nothing(
         )
     assert report.total_wired == 2
     assert set(imported_modules) == {"fake.module", "fake.deferred_module"}
+
+
+async def test_error_chain_an_unreachable_broker_refuses_the_boot() -> None:
+    names = _Names()
+    manifest = _manifest(names)
+    # Nothing listens on the port: the demand measure cannot read the broker
+    # at all, and the boot is refused instead of deferring anything.
+    demand_source = demand_source_for(f"127.0.0.1:{_free_port()}")
+    with pytest.raises(KafkaConnectionError):
+        async with asyncio.timeout(60):
+            await plan_boot_wiring_deferral(
+                manifest,
+                demand_source=demand_source,
+                readiness_config=ModelTopicReadinessConfig(),
+                result_appliers_by_contract=None,
+                wire=None,
+                wiring=handler_wiring,
+            )

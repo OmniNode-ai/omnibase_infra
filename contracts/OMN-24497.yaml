@@ -15,11 +15,15 @@ requirements:
       - id: AC2
         statement: "AC2: the first record on a deferred node's topic wires its handlers once and its group reads that record once from the earliest offset, on the in-memory fake and on a real broker -- falsifier: a second wiring, no join, a join from latest, or a handler not called exactly once in the real-broker test"
       - id: AC3
-        statement: "AC3: a first-request wiring that fails or raises attaches nothing and does not stop the runtime, and an unmeasurable broker defers nothing -- falsifier: an exception escaping the start, a join after a failed wiring, or a deferred contract when every topic is unreadable"
+        statement: "AC3: a first-request wiring that fails or raises attaches nothing, does not stop the runtime, is retried, and shows not ready on the readiness gate until it attaches; a broker that cannot be read refuses the boot -- falsifier: an exception escaping the start, a join after a failed wiring, a failed activation never retried or absent from the gate's failed list, or a boot that continues over an unreadable broker"
       - id: AC4
         statement: "AC4: on a lab boot of the branch the wiring phase is shorter than the 22.96 s measured on the dev runtime -- falsifier: wiring seconds not below 22.96 s for the same image"
       - id: AC5
         statement: "AC5: integrated: after the dev runtime runs the merged revision its Auto-wiring complete line shows fewer wired contracts, /health/detailed shows required_contracts equal to attached_contracts, and one message sent to a deferred node is handled once -- falsifier: wired not lower, required not equal to attached, or the message handled zero or two times when read in the running runtime"
+      - id: AC6
+        statement: "AC6: a strict boot (ONEX_WIRING_STRICT_MODE or the strict dispatcher coverage flag) refuses a broken deferred handler, and a deferred orchestrator without its dispatcher, on the in-memory fake and through the kernel's bootstrap -- falsifier: the strict boot passes with a deferred contract whose handler cannot be prepared"
+      - id: AC7
+        statement: "AC7: setting ONEX_CORE_RUNTIME_TOPICS keeps only the contracts that subscribe to those topics out of the deferral and does not turn the deferral off -- falsifier: every idle contract wired at boot when the setting is set"
 evidence_requirements:
   - kind: tests
     description: The deferral unit tests, the node tests and the real-broker test.
@@ -51,7 +55,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-ac3-error-chain
     description: >-
-      A FAILED row, a raising wiring step and an unmeasurable broker each attach nothing, escape nothing and defer nothing.
+      A FAILED row and a raising wiring step each attach nothing, escape nothing, retry, and show not ready on the real readiness gate until the retry attaches; a broker that cannot be read refuses the boot (named break: the retry loop removed leaves the gate failed forever; the demand source's old fallback returns every topic in use instead of raising).
     source: manual
     binds_ac:
       - AC3
@@ -81,3 +85,23 @@ dod_evidence:
       - check_type: command
         check_value: ssh "$DEPLOY_PROBE_HOST" "docker exec omninode-runtime python -c 'import omnibase_infra.handlers.boot_wiring_deferral' && curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8085/health | grep -x 200"
         cwd: .
+  - id: dod-ac6-strict-boot
+    description: >-
+      Strict mode runs the deferred contracts' preparation: a broken deferred handler and a deferred orchestrator without its dispatcher refuse the boot, in the unit test and through the real bootstrap (named break: verify_strict returns at once; the strict test then sees no raise).
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21318_deferred_handler_wiring.py tests/unit/runtime/test_service_kernel_deferred_wiring_omn21318.py -q -p no:cacheprovider -k "strict"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-ac7-core-runtime-topics
+    description: >-
+      With a core-runtime topic set, only the contract that subscribes to it stays wired; the other idle contract still defers (named break: the old all-or-nothing condition returns).
+    source: manual
+    binds_ac:
+      - AC7
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn21318_deferred_handler_wiring.py -q -p no:cacheprovider -k "core_runtime"
+        cwd: ${OMNI_HOME}/omnibase_infra

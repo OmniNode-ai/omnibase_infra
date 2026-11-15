@@ -360,10 +360,12 @@ async def test_nothing_idle_starts_no_watch(
     await stop()
 
 
-async def test_unmeasurable_broker_keeps_every_topic_on_the_boot_path(
+async def test_error_chain_an_unreadable_broker_refuses_the_boot(
     broker: dict[str, tuple[int, int]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """OMN-21318: an unmeasurable broker stops the boot instead of masking it."""
+
     def refuse(**_: object) -> FakeAdmin:
         raise RuntimeError("broker unreachable")
 
@@ -372,9 +374,9 @@ async def test_unmeasurable_broker_keeps_every_topic_on_the_boot_path(
     async def on_first(topic: str) -> None:
         raise AssertionError("nothing is watched")
 
-    in_use, stop = await _source().watch_idle_topics({BUSY, IDLE}, on_first)
-    assert in_use == {BUSY, IDLE}
-    await stop()
+    with pytest.raises(RuntimeError, match="broker unreachable"):
+        await _source().watch_idle_topics({BUSY, IDLE}, on_first)
+    assert FakeConsumer.instances == []
 
 
 async def test_dead_watch_starts_every_deferred_topic(

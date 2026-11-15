@@ -4128,6 +4128,7 @@ async def bootstrap() -> int:
                     materialized_explicit_dependencies=(runtime_handler_dependencies),
                     topology=deployment_topology,
                 )
+                await _boot_deferral.verify_strict(_wired_report)
                 auto_wiring_report = _boot_deferral.complete_report(_wired_report)
 
                 auto_wiring_duration = time.time() - auto_wiring_start
@@ -4590,7 +4591,6 @@ async def bootstrap() -> int:
             # the rest unwired, and the watch below starts it on its first
             # request. The in-memory bus has no broker to ask, so it joins
             # every contract as before.
-            _demand_watch_stops: list[Callable[[], Awaitable[None]]] = []
             auto_wired_subscriptions = await subscribe_wired_contract_topics(
                 manifest=_boot_deferral.wired_manifest,
                 report=_wired_report,
@@ -4611,9 +4611,9 @@ async def bootstrap() -> int:
                 environment=environment,
                 provisioner=_cast("ProtocolTopicProvisioner | None", topic_provisioner),
                 exclusions_out=_attach_exclusions,
-                stops_out=_demand_watch_stops,
+                stops_out=plugin_unsubscribe_callbacks,
+                on_attempt=_contract_attach_gate.record,
             )
-            plugin_unsubscribe_callbacks.extend(_demand_watch_stops)
             boot_readiness_checks.report_roster_partition(
                 auto_wiring_report.results, _attach_results, _attach_exclusions
             )
