@@ -33,7 +33,7 @@ dod_evidence:
       - AC3
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_reconcile_workspace_venvs -q -n 0 --no-cov -p no:cacheprovider
+        check_value: uv run pytest tests/unit/nodes/node_reconcile_workspace_venvs tests/integration/handlers/test_hook_venv_extras_omn24524.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
   - id: dod-omn24524-deploy-conditions
     description: 'Deploy probe the hosted runner can run: the handler at the checked-out commit holds the string ''_installed_extras''; it does not exist at the merge base, so the probe fails there.'
