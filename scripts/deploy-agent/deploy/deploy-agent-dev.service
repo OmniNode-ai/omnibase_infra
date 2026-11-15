@@ -244,6 +244,28 @@ Environment=KAFKA_ENVIRONMENT=dev
 Environment=KAFKA_SECURITY_PROTOCOL=SASL_PLAINTEXT
 Environment=KAFKA_SASL_MECHANISM=SCRAM-SHA-256
 Environment=KAFKA_SASL_ENV_PREFIX=DEV_
+# OMN-24611: the key file must also PARSE -- refuse the start when it does not.
+#
+# The EnvironmentFile= above is required-to-exist (no leading `-`), but that is
+# not required-to-parse. Three broken-file shapes leave DEPLOY_AGENT_HMAC_SECRET
+# unset or empty in the environment systemd hands ExecStartPre (EnvironmentFile=
+# applies to ExecStartPre), each measured with real systemd:
+#
+#   1. an empty-valued line (`DEPLOY_AGENT_HMAC_SECRET=`) sets the name to the
+#      EMPTY string;
+#   2. a wrong-named line (`DEPLOY_AGENT_HMAC=...`) sets only the wrong name --
+#      the real one is never set at all;
+#   3. an unparseable line (not `NAME=value` at all) sets nothing.
+#
+# In every case the launcher then sources the operator env store and this agent
+# silently runs on the SHARED signing key -- exactly what the unit's own key
+# file exists to prevent. The launcher is a baselined file that cannot grow the
+# check, so the unit refuses the start itself: exit 2 when the name is unset or
+# empty, printing only the NAME to stderr, never a value. It is ordered BEFORE
+# the port preflight below and runs before the launcher sources the store.
+# `$$` is systemd's escape for a literal `$`, so /bin/sh evaluates the test
+# against the environment systemd already assembled.
+ExecStartPre=/bin/sh -c 'test -n "$${DEPLOY_AGENT_HMAC_SECRET:-}" || { echo "deploy-agent-dev: DEPLOY_AGENT_HMAC_SECRET is unset or empty in the key file, refusing to start (OMN-24611)" >&2; exit 2; }'
 ExecStartPre=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/preflight_port_free.sh 8098
 ExecStart=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/deploy-agent-launch.sh
 Restart=on-failure

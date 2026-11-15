@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-24611
 title: The dev deploy agent signs with its own dev-only key
-summary: The dev deploy agent unit (deploy-agent-dev.service) reads its signing key from its own file, EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env (one DEPLOY_AGENT_HMAC_SECRET line holding the secret store's DEPLOY_AGENT_DEV_HMAC_SECRET), and lists DEPLOY_AGENT_HMAC_SECRET in DEPLOY_AGENT_ENV_PROTECTED so the launcher's source of the operator store and the executor's store re-read never put the shared value back. The live agent's unit and drop-in are not touched; auth.py, the launcher and the compose files do not change (the launcher and auth.py are baselined files that only shrink).
+summary: The dev deploy agent unit (deploy-agent-dev.service) reads its signing key from its own file, EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env (one DEPLOY_AGENT_HMAC_SECRET line holding the secret store's DEPLOY_AGENT_DEV_HMAC_SECRET), and lists DEPLOY_AGENT_HMAC_SECRET in DEPLOY_AGENT_ENV_PROTECTED so the launcher's source of the operator store and the executor's store re-read never put the shared value back. The live agent's unit and drop-in are not touched; The dev unit also declares one ExecStartPre that refuses the start (exit 2, the name only, never a value) when DEPLOY_AGENT_HMAC_SECRET is unset or empty in the environment its key file gives it, before the launcher sources the operator store, so a key file that is empty, wrong-named or unparseable no longer lets the dev agent run on the shared key. The launcher (a baselined file that only shrinks), auth.py and the compose files do not change.
 is_seam_ticket: true
 interface_change: true
 interfaces_touched:
@@ -44,6 +44,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24611-ac1-launcher-refuses
+    description: A key file that is empty, wrong-named or unparseable leaves the name unset or empty; the unit's ExecStartPre refuses the start (exit 2) before the launcher sources the store, and without it the same three files start the agent on the shared or an empty value (the failing control).
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "start_check" -q
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24611-ac2-store-entry-named
     description: The generation itself is the omnimarket pull request of this ticket (its contract entry and test). Here, the environment example names the dev-only entry DEPLOY_AGENT_DEV_HMAC_SECRET, read at the checked-out commit.
