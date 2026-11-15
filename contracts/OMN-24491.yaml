@@ -1,0 +1,74 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24491
+title: "The runtime runs blocking job functions on a worker thread so one slow job cannot freeze it"
+summary: >-
+  The auto-wired dispatch callback runs a handler whose entry method is a plain function on a worker thread, so a job that blocks on the network, a database or a command no longer freezes the runtime's single event loop. A handler with an async entry method or handle_async stays on the loop unchanged, and an error raised on the worker reaches the dispatch path as the same error.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24491-sync-off-loop
+    statement: >-
+      A plain-function handler entry method runs on a worker thread, an async entry method is unchanged, and the event loop keeps ticking while a plain function blocks.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the runtime wiring runs a handler whose entry method is a plain function on a worker thread, and leaves a handler with an async entry method or handle_async unchanged -- falsifier: pytest tests/unit/runtime/auto_wiring/test_handler_wiring_sync_off_loop.py -k entry_method -q
+      - id: AC2
+        statement: >-
+          AC2: while a plain-function handler blocks for 0.6 seconds, the event loop heartbeat gap stays under 0.25 seconds, and the same test with the old direct call reads a gap of at least 0.48 seconds -- falsifier: pytest tests/unit/runtime/auto_wiring/test_handler_wiring_sync_off_loop.py -k heartbeat -q
+      - id: AC3
+        statement: >-
+          AC3: an error raised by a plain-function handler on the worker thread reaches the dispatch path as the same error as before the change -- falsifier: pytest tests/unit/runtime/auto_wiring/test_handler_wiring_sync_off_loop.py -k error_chain -q
+      - id: AC4
+        statement: >-
+          AC4: integrated: on the dev runtime on h201 a 20-minute reading of the readiness endpoint every 10 seconds shows no latency above 3 seconds and no heartbeat expiry while the 14 listed scheduled jobs run -- falsifier: any sample in the sampler file with latency above 3 seconds or a non-200 answer, or any heartbeat-session-expired line in the runtime log in the window
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Entry-method placement (plain function on a worker thread, async handle and handle_async on the loop thread), the loop heartbeat gap with a positive control for the old direct call, and the error identity and cause chain.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_handler_wiring_sync_off_loop.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24491-ac1-entry-method
+    description: >-
+      The ticket's falsifier. On the unchanged wiring the plain-function handler runs on the loop thread, so the worker-thread case fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_handler_wiring_sync_off_loop.py -k entry_method -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn24491-ac2-heartbeat
+    description: >-
+      The ticket's falsifier. The heartbeat test reads a gap under 0.25 seconds through the dispatch callback, and its control reads at least 0.48 seconds for the old direct call.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_handler_wiring_sync_off_loop.py -k heartbeat -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn24491-ac3-error-chain
+    description: >-
+      The ticket's falsifier. The error the plain-function handler raises on the worker thread is the same object, with the same cause, at the dispatch path.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/auto_wiring/test_handler_wiring_sync_off_loop.py -k error_chain -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn24491-ac4-deploy-probe
+    description: >-
+      Hosted stand-in for AC4, which is read on the dev runtime on h201 after it is rebuilt with this change and is not read by this probe. The first check runs the real off-loop helper on a real event loop with a blocking handler and reads the loop heartbeat, so it fails at the merge base where the helper does not exist; the second reads the helper file GitHub serves on the PR branch.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/handlers/test_entry_method_offload_omn24491.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/entry_method_offload.py?ref=omn-24491-sync-handlers-off-loop\" --jq .content | base64 -d | grep -q 'async def invoke_entry_method'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]

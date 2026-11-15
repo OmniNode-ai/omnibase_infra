@@ -123,6 +123,7 @@ from omnibase_infra.handlers.boot_topic_provisioning import (
     ensure_topics_exist,
     provision_unattached_publish_topics,
 )
+from omnibase_infra.handlers.entry_method_offload import invoke_entry_method
 from omnibase_infra.handlers.handler_projection_derived_write import (
     HandlerProjectionDerivedWrite,
 )
@@ -1031,12 +1032,7 @@ def _make_dispatch_callback(
                     elif isinstance(payload, Mapping):
                         dispatch_arg = target_model.model_validate(payload)
 
-            raw_result_obj = handle_method(dispatch_arg)
-            raw_result = (
-                await cast("Awaitable[object]", raw_result_obj)
-                if asyncio.iscoroutine(raw_result_obj)
-                else raw_result_obj
-            )
+            raw_result = await invoke_entry_method(handle_method, dispatch_arg)
             if raw_result is None or isinstance(raw_result, ModelDispatchResult):
                 return raw_result
             if isinstance(raw_result, str):
@@ -1087,9 +1083,9 @@ def _make_dispatch_callback(
                 fallback_envelope = _materialize_raw_event_envelope(
                     envelope, payload, event_model.name
                 )
-                fallback_result = handle_method(fallback_envelope)
-                if asyncio.iscoroutine(fallback_result):
-                    fallback_result = await cast("Awaitable[object]", fallback_result)
+                fallback_result = await invoke_entry_method(
+                    handle_method, fallback_envelope
+                )
                 return _normalize_handler_result(
                     fallback_result,
                     envelope,
@@ -1123,9 +1119,7 @@ def _make_dispatch_callback(
             handler_arg = _materialize_typed_event_envelope(
                 envelope, cast("BaseModel", typed_payload), event_model.name
             )
-        typed_result = handle_method(handler_arg)
-        if asyncio.iscoroutine(typed_result):
-            typed_result = await cast("Awaitable[object]", typed_result)
+        typed_result = await invoke_entry_method(handle_method, handler_arg)
         return _normalize_handler_result(
             typed_result,
             envelope,
