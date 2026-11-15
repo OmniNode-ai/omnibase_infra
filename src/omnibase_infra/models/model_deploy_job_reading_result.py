@@ -22,5 +22,5 @@ class ModelDeployJobReadingResult(BaseModel):
 
     outcome: Literal["skipped", "appended", "unappended"]
     row: str = ""
-    request_id: str = ""
+    append_key: str = ""
     detail: str = ""
