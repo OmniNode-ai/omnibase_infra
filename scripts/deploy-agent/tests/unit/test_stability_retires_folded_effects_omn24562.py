@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from deploy_agent.events import EnumRuntimeLane, Scope
+from deploy_agent import executor as executor_mod
+from deploy_agent.events import EnumRuntimeLane, Phase, Scope
 from deploy_agent.executor import (
     DeployExecutor,
     _requested_services_for_up,
@@ -88,3 +90,97 @@ def test_stability_with_no_old_container_removes_nothing() -> None:
         DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.STABILITY_TEST)
 
     assert [c[1] for c in calls] == ["ps"]
+
+
+class _StopAfterRetirementError(Exception):
+    """Raised by the fake `_run` once the runtime phase reaches `docker compose`."""
+
+
+def _drive_runtime_phase(
+    lane: EnumRuntimeLane, services: list[str], events: list[str]
+) -> None:
+    """Run `_compose_up` for the runtime scope, recording what it does in order.
+
+    The retirement is replaced by a recorder so the test pins the call site (the
+    lane it passes and where it sits before compose) without needing docker.
+    """
+    executor = DeployExecutor()
+    budget = SimpleNamespace(timeout_seconds=600, describe=lambda: "test budget")
+
+    def retire(retired_lane: EnumRuntimeLane, *_: object) -> None:
+        events.append(f"retire:{retired_lane.value}")
+
+    def run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        events.append("compose")
+        raise _StopAfterRetirementError
+
+    with (
+        patch.object(executor_mod, "_run", side_effect=run),
+        patch.object(executor_mod, "_compose_env", lambda *a, **k: {}),
+        patch.object(executor_mod, "finish_recreate_renames", lambda lane: []),
+        patch.object(executor_mod, "preflight_dev_images", lambda *a, **k: None),
+        patch.object(executor_mod, "runtime_compose_up_budget", lambda *a: budget),
+        patch.object(executor_mod, "runtime_health_probe_budget", lambda *a: 900),
+        patch.object(executor, "_ensure_runtime_migrations_ready"),
+        patch.object(executor, "rerun_changed_oneshots", return_value=[]),
+        patch.object(executor, "_retire_folded_dev_services", side_effect=retire),
+        pytest.raises(_StopAfterRetirementError),
+    ):
+        executor._compose_up(
+            Phase.RUNTIME,
+            Scope.RUNTIME,
+            services,
+            lambda phase, status: None,
+            lane=lane,
+        )
+
+
+def test_stability_runtime_phase_retires_before_compose_starts_main() -> None:
+    events: list[str] = []
+    _drive_runtime_phase(EnumRuntimeLane.STABILITY_TEST, [], events)
+    assert events == [f"retire:{EnumRuntimeLane.STABILITY_TEST.value}", "compose"]
+
+
+def test_runtime_phase_without_main_runtime_retires_nothing() -> None:
+    """Positive control for the call's guard: main is what takes the port over."""
+    events: list[str] = []
+    _drive_runtime_phase(EnumRuntimeLane.STABILITY_TEST, ["runtime-worker"], events)
+    assert events == ["compose"]
+
+
+def test_stability_census_failure_fails_the_retirement_loudly() -> None:
+    def run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="docker down")
+
+    with (
+        patch.object(executor_mod, "_run", side_effect=run),
+        pytest.raises(RuntimeError, match="runtime-effects container census"),
+    ):
+        DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.STABILITY_TEST)
+
+
+def test_stability_stop_failure_fails_before_the_remove() -> None:
+    calls: list[list[str]] = []
+
+    def run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        if cmd[1] == "ps":
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="935bf70c5d47\n", stderr=""
+            )
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="stop refused")
+
+    with (
+        patch.object(executor_mod, "_run", side_effect=run),
+        pytest.raises(RuntimeError, match="Cannot retire folded dev containers"),
+    ):
+        DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.STABILITY_TEST)
+
+    assert [c[1] for c in calls] == ["ps", "stop"]
+
+
+def test_prod_runtime_phase_retires_nothing() -> None:
+    assert not lane_config_for(EnumRuntimeLane.PROD).disabled_services
+    with patch.object(executor_mod, "_run") as run:
+        DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.PROD)
+    run.assert_not_called()
