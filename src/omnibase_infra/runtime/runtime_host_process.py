@@ -6722,12 +6722,13 @@ class RuntimeHostProcess:
         self,
         correlation_id: UUID,
     ) -> None:
-        """Publish startup introspection, then start the heartbeat (OMN-1930).
+        """Publish startup introspection and start the heartbeat (OMN-1930, OMN-24496).
 
         Delegates to ``HandlerRuntimeIntrospectionStartup``, which applies the
-        jitter and throttle protections. The heartbeat task starts only after a
-        successful publish. A no-op when introspection is not configured,
-        disabled, or throttled.
+        jitter and throttle protections and starts the heartbeat task after a
+        successful publish; a heartbeat that cannot start refuses the startup
+        with ``RuntimeHeartbeatRequiredError``. A no-op when introspection is
+        not configured, disabled, or throttled.
 
         Args:
             correlation_id: Correlation ID for distributed tracing.
@@ -6755,12 +6756,6 @@ class RuntimeHostProcess:
             build_events=HandlerRegistrationFromAnnouncement.build_events,
         )
         self._last_introspection_time = result.last_introspection_time
-        if result.published:
-            await handler.start_heartbeat(
-                correlation_id,
-                service=self._introspection_service,
-                config=self._introspection_config,
-            )
 
     # =========================================================================
     # Gateway Methods (OMN-1899)
