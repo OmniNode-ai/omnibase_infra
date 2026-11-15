@@ -15,14 +15,29 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+from typing import Any
 
 import pytest
 from deploy_agent import executor as executor_mod
 
 AGENT_DIR = Path(__file__).resolve().parents[2]
-dsc = executor_mod.load_dev_boot_guard("handler_deploy_source_clone")
-# Captured at import: the autouse conftest fixture stubs the module attribute per test.
-_ensure = dsc.ensure_clone
+
+
+class _HandlerModule:
+    """The handler module, loaded on first use: a checkout without it fails per test."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(
+            executor_mod.load_dev_boot_guard("handler_deploy_source_clone"), name
+        )
+
+
+dsc = _HandlerModule()
+
+
+def _ensure(settings: object) -> Any:
+    """Create when absent. ``apply_request`` is not the attribute conftest stubs."""
+    return dsc.apply_request(settings)
 
 
 def _git(repo: Path, *args: str) -> str:
