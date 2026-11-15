@@ -87,36 +87,18 @@ def _function_body(name: str) -> str:
 
 
 @pytest.mark.unit
-def test_dev_lane_migration_array_carries_both_cloud_oneshots() -> None:
-    """AC3: both services are in the dev-lane migration set, in order.
+def test_dev_lane_migration_arrays_name_no_cloud_oneshot() -> None:
+    """OMN-24476: the dev lane declares no omninode_cloud one-shot, so no array names one.
 
-    ``cloud-migration-files`` copies the corpus into the shared volume;
-    ``cloud-migration`` applies it. A warm ``up -d --no-deps`` is exactly what
-    switches ``depends_on`` off, so the ORDER in this array is the ordering.
+    The two one-shots were removed from the dev overlay with the onex-api container
+    that was their only reader. An entry here would make every refresh start and
+    wait on a service compose cannot resolve.
     """
-    entries = _array_entries(DEV_LANE_ARRAY)
-
-    assert entries == list(CLOUD_ONESHOTS), (
-        f"{DEV_LANE_ARRAY} is {entries}; it must be {list(CLOUD_ONESHOTS)} -- the "
-        "files one-shot copies the corpus the migration one-shot then applies, "
-        "and --no-deps means this array is the only thing ordering them"
-    )
-
-
-@pytest.mark.unit
-def test_both_cloud_services_are_declared_one_shots() -> None:
-    """AC3: the preflight must ``docker wait`` on each, not just start it.
-
-    A one-shot that is started and never waited on lets the runtime restart race
-    an unapplied corpus -- the failure OMN-13220 fixed for
-    ``intelligence-migration``.
-    """
-    oneshots = _array_entries(DEV_LANE_ONESHOT_ARRAY)
-
-    for service in CLOUD_ONESHOTS:
-        assert service in oneshots, (
-            f"{service} is not in {DEV_LANE_ONESHOT_ARRAY}, so the preflight "
-            "would start it and move on without proving it exited 0"
+    for array in (DEV_LANE_ARRAY, DEV_LANE_ONESHOT_ARRAY):
+        entries = _array_entries(array)
+        assert entries == [], (
+            f"{array} is {entries}; the dev lane declares no omninode_cloud "
+            "one-shot after OMN-24476, so the refresh must name none"
         )
 
 
@@ -183,37 +165,9 @@ def test_preflight_is_fail_closed_for_lanes_without_the_overlay() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
-def test_dev_lane_overlay_declares_both_services() -> None:
-    """The array names services; compose must declare them, or every up fails."""
-    text = DEV_LANE_COMPOSE.read_text(encoding="utf-8").replace("!override", "")
-    compose = yaml.safe_load(text) or {}
-    services = compose.get("services", {})
-
-    for service in CLOUD_ONESHOTS:
-        assert service in services, (
-            f"{DEV_LANE_COMPOSE.name} declares no {service}; "
-            f"{DEV_LANE_ARRAY} would name a service compose cannot resolve"
-        )
-
-
-@pytest.mark.unit
-def test_both_services_are_one_shots_in_compose() -> None:
-    """``restart: "no"`` is what makes the RT-6 readback treat them as one-shots.
-
-    ``omnibase_infra#3330`` partitions that readback by restart policy. A
-    service in this array that compose declares long-running would be certified
-    against the wrong assertion.
-    """
-    text = DEV_LANE_COMPOSE.read_text(encoding="utf-8").replace("!override", "")
-    compose = yaml.safe_load(text) or {}
-
-    for service in CLOUD_ONESHOTS:
-        restart = compose["services"][service].get("restart")
-        assert str(restart) == "no", (
-            f"{service} declares restart={restart!r}; the one-shot-aware RT-6 "
-            'readback keys on restart: "no"'
-        )
+# OMN-24476: the dev lane overlay no longer declares the two one-shots; the dev policy
+# retires them by name (tests/unit/test_dev_lane_has_no_onex_api_omn24475.py), so
+# the two tests that required compose to declare them are gone with them.
 
 
 @pytest.mark.unit

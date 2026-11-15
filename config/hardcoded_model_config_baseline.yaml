@@ -599,9 +599,6 @@ entries:
   - path: docker/dns-cache/unbound.conf
     family: E-LAN
     content_sha1: 00727291d31491cd42941c0df52ac765f4974a43
-  - path: docker/docker-compose.dev-lane.yml
-    family: O
-    content_sha1: 15c00d181e75250214e883dbb7f958bfdfc993c6
   - path: docker/docker-compose.dogfood.yml
     family: M
     content_sha1: 6a59aee6659ad9b2a233940f506c5dc5d25f5ccd

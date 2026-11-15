@@ -735,7 +735,7 @@ baseline:
     files: 7
     ticket: OMN-21288
   - service: onex-api
-    files: 5
+    files: 1
     ticket: OMN-21288
   - service: projection-api
     files: 11
