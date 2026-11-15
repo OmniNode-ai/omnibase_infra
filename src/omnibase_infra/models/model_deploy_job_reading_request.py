@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
@@ -16,10 +18,10 @@ class ModelDeployJobReadingRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    correlation_id: str = Field(min_length=1)
+    correlation_id: UUID
     runtime_lane: str = Field(min_length=1)
     scope: str = Field(min_length=1)
-    status: str = Field(min_length=1)
+    job_outcome: str = Field(min_length=1)
     phase_results: dict[str, str] = Field(default_factory=dict)
     not_started: str = ""
     completed_at: AwareDatetime | None = None

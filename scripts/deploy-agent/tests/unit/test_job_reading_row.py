@@ -107,7 +107,7 @@ def _request(job: JobState) -> Any:
         correlation_id=record["correlation_id"],
         runtime_lane=record["command"]["runtime_lane"],
         scope=record["command"]["scope"],
-        status=record["status"],
+        job_outcome=record["status"],
         phase_results=record["phase_results"],
         not_started=record.get("not_started") or "",
         completed_at=record.get("completed_at"),
@@ -240,21 +240,21 @@ def test_row_is_appended_through_the_reading_writers_append_command(
         "--host",
         "lab-host",
         "--request-id",
-        result.request_id,
+        result.append_key,
         "--rows-file",
         "-",
     ]
     # exactly one row on stdin, carrying the request cell the bus append requires
     lines = seen["stdin"].splitlines()
     assert len(lines) == 1
-    assert lines[0] == f"{result.row} | req={result.request_id}"
+    assert lines[0] == f"{result.row} | req={result.append_key}"
     cells = _cells(lines[0])
     assert cells["verdict"] == "NOT_WORKING"
     assert cells["failing_step"] == "verification"
     assert cells["deploy_lane"] == STABILITY
     # a retry of the same job is the same request
     again = _handler().request_id(_request(job))
-    assert again == result.request_id
+    assert again == result.append_key
 
 
 def test_prod_job_appends_nothing(

@@ -122,9 +122,9 @@ class HandlerDeployJobReading:
         """The reading row of a terminal job on a covered lane, or ``None`` when it has none."""
         if request.runtime_lane in _names(self._settings, "excluded_lanes"):
             return None
-        if request.status not in ("success", "failed"):
+        if request.job_outcome not in ("success", "failed"):
             return None
-        failed = request.status == "failed"
+        failed = request.job_outcome == "failed"
         step = self.failing_step(request) if failed else ""
         completed = request.completed_at or request.published_at
         cells = [
@@ -166,10 +166,10 @@ class HandlerDeployJobReading:
                 "job reading for %s not appended: %s", request.correlation_id, error
             )
             return ModelDeployJobReadingResult(
-                outcome="unappended", row=row, request_id=request_id, detail=error
+                outcome="unappended", row=row, append_key=request_id, detail=error
             )
         return ModelDeployJobReadingResult(
-            outcome="appended", row=row, request_id=request_id
+            outcome="appended", row=row, append_key=request_id
         )
 
     def _append(self, row: str, request_id: str) -> str:
