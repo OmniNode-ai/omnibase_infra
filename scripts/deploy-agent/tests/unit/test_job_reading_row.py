@@ -110,6 +110,7 @@ def _request(job: JobState) -> Any:
         status=record["status"],
         phase_results=record["phase_results"],
         not_started=record.get("not_started") or "",
+        first_error=(record.get("errors") or [""])[0],
         completed_at=record.get("completed_at"),
         published_at=NOW,
     )
@@ -333,3 +334,56 @@ def test_publish_terminal_hands_the_settled_job_to_the_reading() -> None:
     reading = "load_dev_boot_guard(JOB_READING_RUNTIME).publish"
     assert reading in calls
     assert calls.index(reading) > calls.index("publish_result")
+
+
+def test_job_refused_between_phases_names_the_phase_that_was_due() -> None:
+    """The 14:26Z stability follow: refused with no phase failed, so the step is the first not run."""
+    job = _job(STABILITY, "failed")
+    for phase in (Phase.CORE, Phase.RUNTIME, Phase.VERIFICATION):
+        job.phase_results[phase] = PhaseStatus.SKIPPED
+    job.errors = ["Refusing a runtime deploy: no healthy, retained rollback point"]
+    cells = _cells(_row(job) or "")
+    assert cells["failing_step"] == "core"
+    assert cells["reason"] == "job-failed:core"
+    assert (
+        cells["error"]
+        == "Refusing-a-runtime-deploy:-no-healthy-retained-rollback-point"
+    )
+
+
+def test_error_cell_is_bounded_and_a_successful_job_carries_none() -> None:
+    job = _job(DEV, "failed", failed_phase=Phase.GIT)
+    job.errors = ["x" * 1000]
+    assert len(_cells(_row(job) or "")["error"]) == 160
+    ok = _job(DEV, "success")
+    ok.errors = ["a note"]
+    assert "error" not in _cells(_row(ok) or "")
+
+
+def test_the_agents_prefixed_broker_login_reaches_the_append_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The agent holds its login as DEV_KAFKA_SASL_*; the append command reads the unprefixed names."""
+    record = tmp_path / "login.json"
+    script = tmp_path / "append.py"
+    script.write_text(
+        "import json, os, sys\n"
+        "sys.stdin.read()\n"
+        f"open({str(record)!r}, 'w').write(json.dumps({{"
+        "'user': os.environ.get('KAFKA_SASL_USERNAME') == 'dev-user', "
+        "'password': os.environ.get('KAFKA_SASL_PASSWORD') == 'dev-pass'}))\n"
+        "print(json.dumps({'status': 'accepted'}))\n",
+        encoding="utf-8",
+    )
+    _route(monkeypatch, f"{sys.executable} {script}")
+    monkeypatch.setenv("KAFKA_SASL_ENV_PREFIX", "DEV_")
+    monkeypatch.setenv("DEV_KAFKA_SASL_USERNAME", "dev-user")
+    monkeypatch.setenv("DEV_KAFKA_SASL_PASSWORD", "dev-pass")
+    monkeypatch.delenv("KAFKA_SASL_USERNAME", raising=False)
+    monkeypatch.delenv("KAFKA_SASL_PASSWORD", raising=False)
+    result = runtime_mod.publish(_job(DEV, "success"), agent_mod)
+    assert result is not None and result.outcome == "appended"
+    assert json.loads(record.read_text(encoding="utf-8")) == {
+        "user": True,
+        "password": True,
+    }

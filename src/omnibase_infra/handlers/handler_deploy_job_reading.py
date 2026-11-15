@@ -101,9 +101,15 @@ class HandlerDeployJobReading:
         return EnumHandlerTypeCategory.EFFECT
 
     def failing_step(self, request: ModelDeployJobReadingRequest) -> str:
-        """The first deploy phase that failed, else why no phase ran, else ``unknown``."""
-        for phase in _names(self._settings, "phase_order"):
+        """The first phase that failed, else the first that did not succeed, else ``unknown``."""
+        order = _names(self._settings, "phase_order")
+        for phase in order:
             if request.phase_results.get(phase) == "failed":
+                return phase
+        # A job refused between phases marks none failed; it stopped where the first phase
+        # that did not succeed was due.
+        for phase in order:
+            if request.phase_results.get(phase) != "success":
                 return phase
         if request.not_started:
             return _token(f"not-started-{request.not_started}")
@@ -143,6 +149,10 @@ class HandlerDeployJobReading:
         ]
         if failed:
             cells.append(f"failing_step={step}")
+            if request.first_error:
+                width = self._settings["error_cell_chars"]
+                limit = width if isinstance(width, int) else 0
+                cells.append(f"error={_token(request.first_error)[:limit]}")
         cells += [
             f"completed_at={_stamp(completed)}",
             f"probed_at={_stamp(request.published_at)}",
@@ -172,6 +182,15 @@ class HandlerDeployJobReading:
             outcome="appended", row=row, request_id=request_id
         )
 
+    def _append_env(self) -> dict[str, str]:
+        """The append command's environment: the agent's, with its prefixed broker login unprefixed."""
+        env = dict(self._environ)
+        prefix = env.get(_text(self._settings, "sasl_prefix_env"), "")
+        for name in _names(self._settings, "sasl_login_names"):
+            if prefix and name not in env and f"{prefix}{name}" in env:
+                env[name] = env[f"{prefix}{name}"]
+        return env
+
     def _append(self, row: str, request_id: str) -> str:
         """Append ``row``; an empty string when the append command took it, else why not."""
         command_env = _text(self._settings, "append_command_env")
@@ -192,12 +211,14 @@ class HandlerDeployJobReading:
             "-",
         ]
         timeout = self._settings["append_timeout_seconds"]
+        env = self._append_env()
         try:
             done = subprocess.run(
                 argv,
                 input=f"{row} | req={request_id}\n",
                 capture_output=True,
                 text=True,
+                env=env,
                 timeout=float(timeout) if isinstance(timeout, int | float) else None,
                 check=False,
             )

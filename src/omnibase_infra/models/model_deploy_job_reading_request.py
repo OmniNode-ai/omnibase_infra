@@ -11,7 +11,8 @@ class ModelDeployJobReadingRequest(BaseModel):
     """The facts of one job the deploy agent settled, and the time its reading is read.
 
     ``phase_results`` maps each deploy phase name to its settled status; ``not_started``
-    is the reason no phase ran, empty when one did.
+    is the reason no phase ran, empty when one did; ``first_error`` is the first line of the
+    job's recorded errors, empty when it recorded none.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -22,5 +23,6 @@ class ModelDeployJobReadingRequest(BaseModel):
     status: str = Field(min_length=1)
     phase_results: dict[str, str] = Field(default_factory=dict)
     not_started: str = ""
+    first_error: str = ""
     completed_at: AwareDatetime | None = None
     published_at: AwareDatetime

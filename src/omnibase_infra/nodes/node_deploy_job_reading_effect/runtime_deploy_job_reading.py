@@ -89,6 +89,7 @@ def publish(job: BaseModel, execution: ModuleType) -> BaseModel | None:
             status=record["status"],
             phase_results=record["phase_results"],
             not_started=record.get("not_started") or "",
+            first_error=(record.get("errors") or [""])[0],
             completed_at=record.get("completed_at"),
             published_at=datetime.now(UTC),
         )
