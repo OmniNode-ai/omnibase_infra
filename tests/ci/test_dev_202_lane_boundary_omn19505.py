@@ -67,8 +67,7 @@ HOSTNAME_ON_HOST = "omnipc2"
 COMPOSE_PROJECT = "omnibase-infra-dev-202"
 NETWORK = "omnibase-infra-dev-202-network"
 
-#: The declared block. 61090 (onex-api) is published by a disabled service, so
-#: it is reserved and never bound; it is still in the block.
+#: The declared block.
 EXPECTED_PUBLISHED_PORTS = {
     "61085",  # runtime main
     "61086",  # runtime effects
@@ -78,7 +77,6 @@ EXPECTED_PUBLISHED_PORTS = {
     "61092",  # skill lifecycle consumer
     "61093",  # context audit consumer
     "61006",  # phoenix
-    "61090",  # onex-api (disabled here, reserved)
     "61436",  # Postgres
     "61379",  # Valkey
     "61192",  # Redpanda Kafka (external listener)
@@ -127,18 +125,11 @@ DEV_TO_DEV_202 = {
     "omnimarket-projection-live-events-writer": "omnimarket-dev-202-projection-live-events-writer",
     "omnimarket-tenant-projection-writer": "omnimarket-dev-202-tenant-projection-writer",
     "omnibase-infra-forward-migration": "omnibase-infra-dev-202-forward-migration",
-    "omnibase-infra-cloud-migration": "omnibase-infra-dev-202-cloud-migration",
-    "omnibase-infra-cloud-migration-files": "omnibase-infra-dev-202-cloud-migration-files",
-    "onex-api": "onex-api-dev-202",
 }
 
-#: Declared but disabled on .202: the cloud image only the .201 lab-overlay pin
-#: delivers.
-PROFILE_GATED = {
-    "omnibase-infra-dev-202-cloud-migration",
-    "omnibase-infra-dev-202-cloud-migration-files",
-    "onex-api-dev-202",
-}
+#: No service is declared but disabled on this lane: the cloud API and its
+#: one-shots were removed from the dev lane (OMN-24476).
+PROFILE_GATED: set[str] = set()
 
 
 #: OMN-21481: dev services this lane does not mirror. The cost estimator page

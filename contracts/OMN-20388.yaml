@@ -17,11 +17,11 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn20388-lane-estimator-key
-    description: The dev lane's onex-api reads ESTIMATOR_FERNET_KEY from the operator env file, and the render script provisions a key Fernet accepts, so the lane encrypts estimator data at rest (AC6).
+    description: Retired by OMN-24476. The dev lane no longer runs onex-api, so the key entry this check read left with the service and its test was deleted; the check is now the removal test, which fails while a dev compose file still declares the service that carried the key (AC6).
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_dev_lane_estimator_key_omn20388.py -q -o addopts=''
+        check_value: uv run pytest tests/unit/test_dev_lane_has_no_onex_api_omn24475.py -q -o addopts=''
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
