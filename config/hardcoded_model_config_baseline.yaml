@@ -1309,9 +1309,6 @@ entries:
     content_sha1: f717953dee3a688fdd7e645f61f4a87c4f19f737
   - path: scripts/deploy-agent/deploy_agent/executor.py
     family: F
-    content_sha1: 09bde03f8f0e135dc37ec1b7b33e341780e19fa6
-  - path: scripts/deploy-agent/deploy_agent/executor.py
-    family: F
     content_sha1: b1057f084b7537472a0f7f2c04fe622f9613f695
   - path: scripts/deploy-agent/deploy_agent/executor.py
     family: F
@@ -1391,9 +1388,6 @@ entries:
   - path: scripts/deploy-agent/deploy_agent/executor.py
     family: O
     content_sha1: e3e45e9eaea264abdecf2ae09f98c29a752a1123
-  - path: scripts/deploy-agent/deploy_agent/executor.py
-    family: O
-    content_sha1: f198d5fbe2efc6d5bc9d15cafe424153e5e976b2
   - path: scripts/deploy-agent/deploy_agent/executor.py
     family: O
     content_sha1: f2bacd69636d80d7c279393b0fc3eab650533945

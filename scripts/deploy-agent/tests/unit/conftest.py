@@ -3,7 +3,7 @@
 """Shared fixtures for deploy-agent unit tests.
 
 OMN-12626 (R1): release-mode ``_compose_build`` now runs the prod
-promotion-lineage guard, which inspects the git state of ``REPO_DIR`` (a deploy
+promotion-lineage guard, which inspects the git state of ``deploy_repo_dir()`` (a deploy
 HOST path that does not exist in the unit-test sandbox). Unit tests that
 exercise unrelated build-arg / staging concerns are not testing lineage, so by
 default the guard is stubbed to a no-op here.
@@ -28,21 +28,54 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
-# OMN-24562: the executor resolves its deploy-source clone at import and the
-# settings have no default. These paths are never created by unit tests (the
-# autouse fixture below stubs clone creation); tests that exercise clones pass
-# their own temporary repositories.
-os.environ.setdefault(
-    "DEPLOY_AGENT_REPO_DIR", "/nonexistent/agent-clone/omnibase_infra"
-)
-os.environ.setdefault(
-    "DEPLOY_AGENT_CANONICAL_CLONE", "/nonexistent/canonical/omnibase_infra"
-)
-os.environ.setdefault("DEPLOY_AGENT_LAB_OVERLAY_SOURCE", "/nonexistent/overlay-source")
-
 from deploy_agent import agent as agent_mod
 from deploy_agent import executor as executor_mod
+
+#: OMN-24562: the deploy-source settings have no default. These paths are never
+#: created by unit tests (the fixture below stubs clone creation); tests that
+#: exercise clones pass their own temporary repositories.
+_COLLECTION_ENV = pytest.StashKey[pytest.MonkeyPatch]()
+DEPLOY_SOURCE_ENV = {
+    "DEPLOY_AGENT_REPO_DIR": "/nonexistent/agent-clone/omnibase_infra",
+    "DEPLOY_AGENT_CANONICAL_CLONE": "/nonexistent/canonical/omnibase_infra",
+    "DEPLOY_AGENT_LAB_OVERLAY_SOURCE": "/nonexistent/overlay-source",
+    "DEPLOY_AGENT_TRACKING_REF": "dev",
+}
+
+
+_CACHED = (
+    executor_mod.deploy_source,
+    executor_mod._lane_configs,
+    executor_mod.dev_instance_lane_configs,
+)
+
+
+def _clear_deploy_source_caches() -> None:
+    """Clear the real caches even while a test has patched the accessors."""
+    for cached in _CACHED:
+        cached.cache_clear()
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Test modules read lane compositions at import, which needs the settings."""
+    config.stash[_COLLECTION_ENV] = patch = pytest.MonkeyPatch()
+    for key, value in DEPLOY_SOURCE_ENV.items():
+        patch.setenv(key, value)
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    session.config.stash[_COLLECTION_ENV].undo()
+    _clear_deploy_source_caches()
+
+
+@pytest.fixture(autouse=True)
+def _deploy_source_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Resolve the deploy source from the sandbox settings, fresh for each test."""
+    for key, value in DEPLOY_SOURCE_ENV.items():
+        monkeypatch.setenv(key, value)
+    _clear_deploy_source_caches()
+    yield
+    _clear_deploy_source_caches()
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +84,7 @@ def _stub_deploy_source_clone_creation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         executor_mod.load_dev_boot_guard("handler_deploy_source_clone"),
         "ensure_clone",
-        lambda settings: settings,
+        lambda settings, *, served_sha: settings,
     )
 
 
@@ -288,7 +321,7 @@ def _derive_runtime_budget_from_this_checkout(monkeypatch: pytest.MonkeyPatch) -
     (``deploy_agent.compose_budget``) and refuses fail-closed when it cannot --
     a ceiling that silently reverts to its floor because the model was
     unreadable is the same undetectable wrongness as the bare ``300`` this
-    replaced. ``REPO_DIR`` is a deploy-HOST path that does not exist in the
+    replaced. ``deploy_repo_dir()`` is a deploy-HOST path that does not exist in the
     unit-test sandbox, so the files are repointed at the repository under test.
 
     This is a path repoint, not a stub: the real derivation runs, against the
@@ -333,7 +366,7 @@ def _derive_runtime_budget_from_this_checkout(monkeypatch: pytest.MonkeyPatch) -
 def _derive_deps_budget_from_this_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
     """OMN-18692: derive the DEPS compose-up ceiling from THIS checkout.
 
-    Same path repoint, same reason, as the runtime budget above: ``REPO_DIR``
+    Same path repoint, same reason, as the runtime budget above: ``deploy_repo_dir()``
     is a deploy-HOST path absent from the unit-test sandbox, and the deps
     derivation refuses fail-closed when it cannot read the compose model.
 
@@ -383,7 +416,7 @@ def _derive_image_build_budget_from_this_checkout(
     ``_compose_build`` now reads the compose file it is about to invoke, and the
     Dockerfile that file names, to derive its ceiling
     (``deploy_agent.build_budget``) and refuses fail-closed when it cannot.
-    ``REPO_DIR`` is a deploy-HOST path absent from the unit-test sandbox, so the
+    ``deploy_repo_dir()`` is a deploy-HOST path absent from the unit-test sandbox, so the
     compose file is repointed at the repository under test -- the same visible
     path repoint the compose-up budget already takes above.
 
@@ -465,7 +498,7 @@ def _resolve_preflight_script_from_this_checkout(
     ``_preflight_required_compose_env`` now refuses with its own error class
     when the script is not a file, because a preflight that could not RUN and a
     preflight that RAN and found unset variables are different facts and were
-    reported as the same one. ``REPO_DIR`` is a deploy-HOST path absent from the
+    reported as the same one. ``deploy_repo_dir()`` is a deploy-HOST path absent from the
     unit-test sandbox, so every test that drives compose generation would hit
     the new refusal instead of the behaviour it is asserting.
 
@@ -500,7 +533,7 @@ def _derive_gateway_deploy_budget_from_this_checkout(
     (``deploy_agent.gateway_budget``) and refuses fail-closed when it cannot --
     a ceiling that silently reverted to a floor because the model was
     unreadable would be the same undetectable wrongness as the flat
-    floor-plus-300 this replaced. ``REPO_DIR`` is a deploy-HOST path absent
+    floor-plus-300 this replaced. ``deploy_repo_dir()`` is a deploy-HOST path absent
     from the unit-test sandbox, so both files are repointed at the repository
     under test -- the same visible path repoint the compose-up and
     image-build budget fixtures above take.
@@ -548,7 +581,7 @@ def _no_host_runtime_policy_file(
 ) -> None:
     """OMN-21629: no test reads the runtime policy env of the host it runs on.
 
-    The file is read from the host checkout the agent runs from (REPO_DIR), so a
+    The file is read from the host checkout the agent runs from (deploy_repo_dir()), so a
     lab host that carries one (the tenant fold) made a dozen composition tests
     red there while CI, which has none, stayed green. An absent file reads as
     empty; the tests that want values patch the loader.
@@ -557,8 +590,8 @@ def _no_host_runtime_policy_file(
 
     monkeypatch.setattr(
         executor_mod,
-        "RUNTIME_POLICY_ENV_FILE",
-        tmp_path_factory.mktemp("runtime-policy") / "absent-runtime-policy.env",
+        "runtime_policy_env_file",
+        lambda: tmp_path_factory.mktemp("runtime-policy") / "absent-runtime-policy.env",
     )
 
 
@@ -630,9 +663,9 @@ def gateway_phase_available(monkeypatch: pytest.MonkeyPatch) -> None:
     from deploy_agent import executor as executor_mod
 
     monkeypatch.setitem(
-        executor_mod.DEV_INSTANCE_LANE_CONFIGS,
+        executor_mod.dev_instance_lane_configs(),
         executor_mod.DEFAULT_DEV_INSTANCE,
-        executor_mod._LANE_CONFIGS[executor_mod.EnumRuntimeLane.DEV],
+        executor_mod._lane_configs()[executor_mod.EnumRuntimeLane.DEV],
     )
 
 

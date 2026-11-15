@@ -32,12 +32,9 @@ _ERROR_BLOCK = (
 
 def _declare_deploy_source(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
     """The deploy source and the canonical clone beside it (OMN-24562 splits them)."""
-    monkeypatch.setattr(executor_mod, "REPO_DIR", path)
-    monkeypatch.setattr(
-        executor_mod,
-        "SOURCE",
-        executor_mod.SOURCE.model_copy(update={"canonical_clone": path}),
-    )
+    source = executor_mod.deploy_source().model_copy(update={"canonical_clone": path})
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: path)
+    monkeypatch.setattr(executor_mod, "deploy_source", lambda: source)
 
 
 def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:

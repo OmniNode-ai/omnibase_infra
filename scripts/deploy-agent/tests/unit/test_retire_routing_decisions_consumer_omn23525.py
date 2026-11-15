@@ -35,8 +35,8 @@ CONSUMER = "infra-routing-decisions-consumer"
 def _committed_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     """Read this checkout's policy, not the deploy host's clone path."""
     monkeypatch.setattr(
-        "deploy_agent.executor.RUNTIME_POLICY_ENV_FILE",
-        REPO_ROOT / "docker/runtime-policy.env",
+        "deploy_agent.executor.runtime_policy_env_file",
+        lambda: REPO_ROOT / "docker/runtime-policy.env",
     )
 
 

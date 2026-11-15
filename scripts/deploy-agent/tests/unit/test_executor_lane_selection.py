@@ -23,10 +23,10 @@ from unittest.mock import patch
 import pytest
 from deploy_agent.events import EnumRuntimeLane, Phase, PhaseStatus, Scope
 from deploy_agent.executor import (
-    COMPOSE_FILE,
     COMPOSE_PROJECT,
     RUNTIME_HEALTH_TARGETS,
     DeployExecutor,
+    compose_file,
     lane_config_for,
 )
 
@@ -55,7 +55,7 @@ class TestLaneConfig:
         assert cfg.postgres_container == "omnibase-infra-postgres"
         # OMN-15379: dev/lab now layers its own migration-fence overlay on top
         # of the base infra compose file (previously single-file).
-        assert cfg.compose_files[0] == COMPOSE_FILE
+        assert cfg.compose_files[0] == compose_file()
         assert any("docker-compose.dev-lane.yml" in f for f in cfg.compose_files)
         assert cfg.runtime_health_targets == RUNTIME_HEALTH_TARGETS
         assert cfg.runtime_health_targets == (
@@ -68,7 +68,7 @@ class TestLaneConfig:
         assert cfg.compose_project == "omnibase-infra-stability-test"
         assert cfg.postgres_container == "omnibase-infra-stability-test-postgres"
         # overlay must be layered on top of the base infra compose file
-        assert cfg.compose_files[0] == COMPOSE_FILE
+        assert cfg.compose_files[0] == compose_file()
         assert any("docker-compose.stability-test.yml" in f for f in cfg.compose_files)
         # OMN-15181: must match the container_name: override in
         # docker-compose.stability-test.yml, not the dev-lane bare name.
@@ -81,7 +81,7 @@ class TestLaneConfig:
         cfg = lane_config_for(EnumRuntimeLane.PROD)
         assert cfg.compose_project == "omnibase-infra-prod"
         assert cfg.postgres_container == "omnibase-infra-prod-postgres"
-        assert cfg.compose_files[0] == COMPOSE_FILE
+        assert cfg.compose_files[0] == compose_file()
         assert any("docker-compose.prod.yml" in f for f in cfg.compose_files)
         # OMN-15181: must match the container_name: override in
         # docker-compose.prod.yml, not the dev-lane bare name — the live
@@ -121,7 +121,7 @@ class TestComposeUpLaneSelection:
 
         cmd = captured[0]
         assert cmd[:3] == ["docker", "compose", "-f"]
-        assert cmd[3] == COMPOSE_FILE
+        assert cmd[3] == compose_file()
         assert "-p" in cmd
         assert cmd[cmd.index("-p") + 1] == "omnibase-infra"
         # OMN-15379: dev/lab layers its own migration-fence overlay.

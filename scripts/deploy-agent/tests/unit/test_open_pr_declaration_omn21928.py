@@ -69,7 +69,7 @@ def _noop(phase: Phase, status: PhaseStatus) -> None:
 @pytest.fixture(autouse=True)
 def _checker_from_this_clone(monkeypatch: pytest.MonkeyPatch) -> None:
     """The executor reads the policy and checker from the clone it builds."""
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(REPO_ROOT))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(REPO_ROOT))
 
 
 def test_the_dev_lane_command_carries_the_declaration() -> None:

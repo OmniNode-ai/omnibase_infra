@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_restart_on_merge_effect
+contract_name: node_restart_on_merge_effect
+node_name: node_restart_on_merge_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Host-local decision on whether a merge may sync and restart one deploy-agent unit. The restart set is the declared agent units whose own tracked fence does not name prod and whose tracked unit declares the deploy-source settings the new code refuses to start without.
+input_model:
+  name: ModelRestartOnMerge
+  module: omnibase_infra.models.model_restart_on_merge
+  description: The unit name and the repository root holding its tracked unit and the unit-drift manifest.
+output_model:
+  name: ModelRestartOnMerge
+  module: omnibase_infra.models.model_restart_on_merge
+  description: The same request with the decision and, when refused, the reason.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: verify
+      handler: {name: HandlerRestartOnMerge, module: omnibase_infra.handlers.handler_restart_on_merge}
+capabilities:
+  - name: restart_on_merge.verify
+    description: Keep a merge from restarting a prod agent or an agent whose new code would refuse to start.
+metadata:
+  ticket: OMN-24562
+  author: OmniNode Team
+  description: Host-local effect. No runtime bus dependency and no prod or customer runner admission.
+  tags: [effect, deployment]

@@ -199,7 +199,7 @@ def _real_helpers_no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     from deploy_agent import executor as executor_mod
 
     assert HELPERS.is_file(), HELPERS
-    monkeypatch.setattr(executor_mod, "RUNTIME_HEALTH_WAIT_HELPERS", HELPERS)
+    monkeypatch.setattr(executor_mod, "runtime_health_wait_helpers", lambda: HELPERS)
     clock = [0.0]
     monkeypatch.setattr(executor_mod.time, "monotonic", lambda: clock[0])
 

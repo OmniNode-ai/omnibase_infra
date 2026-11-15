@@ -15,7 +15,9 @@ class ModelDeploySourceClone(BaseModel):
 
     ``resolve`` reads the declared settings and refuses a deploy source that is a
     canonical clone. ``ensure`` also creates the agent's own clone when it is absent.
-    ``created`` and ``mirror_fallbacks`` are results; a request leaves them at zero.
+    ``served_sha`` is the commit the agent was serving when the clone is created (empty
+    means the tracked ref's head on origin); ``created`` and ``mirror_fallbacks`` are
+    results; a request leaves them at zero.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -24,6 +26,8 @@ class ModelDeploySourceClone(BaseModel):
     clone_dir: str
     canonical_clone: str
     mirror_url: str = ""
+    tracking_ref: str
+    served_sha: str = ""
     lab_overlay_source: str
     host_root: str = ""
     registry_root: str = ""

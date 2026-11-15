@@ -689,11 +689,11 @@ def test_a_deploy_that_folds_effects_waits_for_the_services_of_the_new_generatio
     ['runtime-effects']": the guard still named the service the fold retires.
     """
     previous, current = _policy_files(tmp_path)
-    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", previous)
+    monkeypatch.setattr(executor_mod, "runtime_policy_env_file", lambda: previous)
     guard = executor_mod.DevBootGuard(DeployExecutor(), tmp_path)
     assert "runtime-effects" in guard.services
     # git_pull replaces the policy; the rolled family has no runtime-effects.
-    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", current)
+    monkeypatch.setattr(executor_mod, "runtime_policy_env_file", lambda: current)
     docker["containers"] = [
         c
         for c in docker["containers"]
@@ -716,11 +716,11 @@ def test_a_deploy_that_folds_the_worker_waits_for_the_services_of_the_new_genera
     deploy rolls main with the workers role and no runtime-worker container.
     """
     previous, current = _policy_files(tmp_path, unfolded=("workers",))
-    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", previous)
+    monkeypatch.setattr(executor_mod, "runtime_policy_env_file", lambda: previous)
     guard = executor_mod.DevBootGuard(DeployExecutor(), tmp_path)
     assert "runtime-worker" in guard.services
     assert "runtime-effects" not in guard.services
-    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", current)
+    monkeypatch.setattr(executor_mod, "runtime_policy_env_file", lambda: current)
     docker["containers"] = [
         c
         for c in docker["containers"]

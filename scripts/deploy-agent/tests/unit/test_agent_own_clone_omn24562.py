@@ -82,12 +82,14 @@ class _World:
             check=True,
         )
 
-    def settings(self, mirror_url: str = "") -> object:
+    def settings(self, mirror_url: str = "", served_sha: str = "") -> object:
         return dsc.ModelDeploySourceClone(
             operation="ensure",
             clone_dir=str(self.agent_clone),
             canonical_clone=str(self.canonical),
             mirror_url=mirror_url,
+            tracking_ref="dev",
+            served_sha=served_sha,
             lab_overlay_source=str(self.root / "overlay-source"),
         )
 
@@ -110,9 +112,8 @@ def _pinned_job(world: _World, repo_dir: Path) -> subprocess.CompletedProcess[st
     code = textwrap.dedent(
         f"""
         from deploy_agent import executor
-        if hasattr(executor, "SOURCE"):  # start-up creates the agent's own clone
-            executor.load_dev_boot_guard("handler_deploy_source_clone").ensure_clone(
-                executor.SOURCE)
+        executor.load_dev_boot_guard("handler_deploy_source_clone").ensure_clone(
+            executor.deploy_source(), served_sha={world.dev_sha!r})  # start-up creates the agent's own clone
         from deploy_agent.events import EnumRuntimeLane
         from deploy_agent.executor import DeployExecutor
         sha = DeployExecutor().git_pull(
@@ -168,7 +169,7 @@ class TestMigrationOnStart:
     def test_first_start_creates_the_clone_at_the_served_commit(
         self, world: _World
     ) -> None:
-        assert _ensure(world.settings()).created is True
+        assert _ensure(world.settings(served_sha=world.dev_sha)).created is True
         assert _git(world.agent_clone, "rev-parse", "HEAD") == world.dev_sha
         assert _git(world.agent_clone, "symbolic-ref", "--short", "HEAD") == "dev"
 
@@ -178,13 +179,6 @@ class TestMigrationOnStart:
         assert _pinned_job(world, world.agent_clone).returncode == 0
         assert _ensure(world.settings()).created is False
         assert _git(world.agent_clone, "rev-parse", "HEAD") == world.pinned_sha
-
-    def test_the_served_commit_is_the_canonical_head_even_when_ahead_of_origin(
-        self, world: _World
-    ) -> None:
-        local = _commit(world.canonical, "local-only")
-        assert _ensure(world.settings()).created is True
-        assert _git(world.agent_clone, "rev-parse", "HEAD") == local
 
 
 class TestMirror:
@@ -226,6 +220,7 @@ def _env(world: _World, repo_dir: Path, **extra: str) -> dict[str, str]:
         "DEPLOY_AGENT_REPO_DIR": str(repo_dir),
         "DEPLOY_AGENT_CANONICAL_CLONE": str(world.canonical),
         "DEPLOY_AGENT_LAB_OVERLAY_SOURCE": str(world.root / "overlay-source"),
+        "DEPLOY_AGENT_TRACKING_REF": "dev",
         **extra,
     }
 

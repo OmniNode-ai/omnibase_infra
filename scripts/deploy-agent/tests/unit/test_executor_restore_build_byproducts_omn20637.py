@@ -78,7 +78,7 @@ def _rebuild(scope: Scope) -> None:
 def build_clone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     clone = _make_build_clone(tmp_path)
     monkeypatch.setenv("OMNI_HOME", str(tmp_path))
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(clone))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(clone))
     monkeypatch.setattr(DeployExecutor, "_compose_up", lambda self, *a, **kw: None)
     monkeypatch.setattr(
         DeployExecutor, "_build_dev_lane_only_services", lambda self, *a, **kw: None
@@ -152,7 +152,9 @@ def test_a_build_context_that_is_not_a_git_clone_does_not_fail_the_rebuild(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OMNI_HOME", str(tmp_path))
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(tmp_path / "omnibase_infra"))
+    monkeypatch.setattr(
+        executor_mod, "deploy_repo_dir", lambda: str(tmp_path / "omnibase_infra")
+    )
     built: list[Scope] = []
     monkeypatch.setattr(
         DeployExecutor,

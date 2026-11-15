@@ -478,12 +478,16 @@ def test_dev_lane_compose_file_set_matches_both_deploy_paths() -> None:
     assert "docker-compose.dev-lane.yml" in resolver
 
     executor = _EXECUTOR.read_text(encoding="utf-8")
-    assert "_DEV_LANE_OVERLAY = " in executor
     assert "docker-compose.dev-lane.yml" in executor
-    dev_config = executor.split("EnumRuntimeLane.DEV: ModelLaneConfig(", 1)[1][:400]
+    dev_config = executor.split("EnumRuntimeLane.DEV: ModelLaneConfig(", 1)[1][:800]
     assert (
-        "compose_files=(COMPOSE_FILE, _DEV_LANE_OVERLAY, _DEV_TENANT_FOLD_OVERLAY)"
-        in dev_config
+        re.search(
+            r"compose_files=\(\s*base,\s*"
+            r'f"\{root\}/docker/docker-compose\.dev-lane\.yml",\s*'
+            r'f"\{root\}/docker/docker-compose\.dev-tenant-fold\.yml",\s*\)',
+            dev_config,
+        )
+        is not None
     ), (
         "the deploy agent's DEV lane no longer loads exactly "
         "(base, dev-lane overlay, tenant fold). Update this test and the manifest set together."

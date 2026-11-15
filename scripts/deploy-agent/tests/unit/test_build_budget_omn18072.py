@@ -237,10 +237,10 @@ class TestLiveRuntimeModel:
         from deploy_agent import executor as executor_mod
 
         # Resolved through the module attribute so the conftest repoint onto
-        # THIS checkout applies (REPO_DIR is a deploy-host path).
+        # THIS checkout applies (deploy_repo_dir() is a deploy-host path).
         budget = executor_mod.runtime_image_build_budget("runtime")
 
-        assert Path(executor_mod.COMPOSE_FILE).name == "docker-compose.infra.yml"
+        assert Path(executor_mod.compose_file()).name == "docker-compose.infra.yml"
         # The regression guard: not the constant that killed both live rebuilds,
         # and comfortably clear of the one build this history completed.
         assert budget.timeout_seconds != FAILED_FLAT_CONSTANT_SECONDS

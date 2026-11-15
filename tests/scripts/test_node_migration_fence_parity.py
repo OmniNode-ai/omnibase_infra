@@ -1475,7 +1475,7 @@ def test_dev_lane_overlay_is_wired_into_both_lane_mappings() -> None:
     """Two files own lane -> compose-file mapping; both must layer the overlay.
 
     ``src/omnibase_infra/handlers/handler_runtime_deploy.sh`` is what actually brings the ``.201`` lab lane
-    up, and ``deploy_agent.executor._LANE_CONFIGS`` is the tested mapping the
+    up, and ``deploy_agent.executor._lane_configs`` is the tested mapping the
     deploy agent uses. They are already required to agree (the comment in
     ``resolve_compose_file_args`` says so); a release wired into only one of
     them would apply the trio through one path and not the other.
@@ -1516,17 +1516,14 @@ def test_dev_lane_overlay_is_wired_into_both_lane_mappings() -> None:
         REPO_ROOT / "scripts" / "deploy-agent" / "deploy_agent" / "executor.py"
     ).read_text(encoding="utf-8")
     dev_config = re.search(
-        r"EnumRuntimeLane\.DEV:\s*ModelLaneConfig\((?P<body>.*?)\n    \),",
+        r"EnumRuntimeLane\.DEV:\s*ModelLaneConfig\((?P<body>.*?)\n        \),",
         executor,
         re.DOTALL,
     )
-    assert dev_config is not None, "_LANE_CONFIGS[EnumRuntimeLane.DEV] not found"
-    assert "_DEV_LANE_OVERLAY" in dev_config.group("body"), (
-        "_LANE_CONFIGS[DEV].compose_files does not include _DEV_LANE_OVERLAY"
+    assert dev_config is not None, "_lane_configs()[EnumRuntimeLane.DEV] not found"
+    assert overlay_filename in dev_config.group("body"), (
+        f"_lane_configs()[DEV].compose_files does not include {overlay_filename}"
     )
-    assert re.search(
-        rf'_DEV_LANE_OVERLAY\s*=\s*f?"[^"]*{re.escape(overlay_filename)}"', executor
-    ), f"_DEV_LANE_OVERLAY does not point at {overlay_filename}"
 
 
 K8S_MANIFEST_RELPATH = "k8s/migrations/omnibase-infra-migrate.yaml"
