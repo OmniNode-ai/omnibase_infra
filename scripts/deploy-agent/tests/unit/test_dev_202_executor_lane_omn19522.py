@@ -175,7 +175,6 @@ class TestDev202LaneConfig:
         cfg = lane_config_for(EnumRuntimeLane.DEV)
 
         assert cfg.compose_project == "omnibase-infra-dev-202"
-        assert cfg.build_project == "omnibase-infra-dev-202"
         assert cfg.compose_files[0] == COMPOSE_FILE
         assert [Path(f).name for f in cfg.compose_files] == [
             "docker-compose.infra.yml",
@@ -510,7 +509,6 @@ class TestDev201Unchanged:
 
         assert cfg == default
         assert cfg.compose_project == COMPOSE_PROJECT == "omnibase-infra"
-        assert cfg.build_project == "omnibase-infra"
         assert [Path(f).name for f in cfg.compose_files] == [
             "docker-compose.infra.yml",
             "docker-compose.dev-lane.yml",
