@@ -68,7 +68,6 @@ _FORBIDDEN_PACKAGES: frozenset[str] = frozenset(
     {
         "omnibase-core",
         "omnibase-spi",
-        "omnibase-compat",
     }
 )
 
@@ -507,8 +506,8 @@ def find_lineage_violations(
     """RED when a git-pinned override's `src/` tree differs from the released
     tree of the version declared alongside it (OMN-15604).
 
-    Applies to every forbidden package (omnibase-core / omnibase-spi /
-    omnibase-compat) that has a `[tool.uv.sources]` git override — regardless
+    Applies to every forbidden package (omnibase-core / omnibase-spi)
+    that has a `[tool.uv.sources]` git override — regardless
     of a `# raw-override-ok:` escape token, which exempts a line from
     `find_violations` only. A package with a git override but NO requirement
     string referencing it anywhere is skipped (nothing to compare against —
@@ -1121,7 +1120,7 @@ def main(argv: list[str] | None = None) -> int:
         for msg in violations:
             print(f"  - {msg}", file=sys.stderr)
         print(
-            "\nomnibase-core / omnibase-spi / omnibase-compat are PyPI-published "
+            "\nomnibase-core / omnibase-spi are PyPI-published "
             "first-party deps and must NOT be pinned to git commits/branches/tags "
             "on dev/main. Resolve them from PyPI (release the dep first if the "
             "needed version is unpublished). If a temporary override is genuinely "
