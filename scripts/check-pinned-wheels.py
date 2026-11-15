@@ -5,13 +5,11 @@
 """Detect drift between pinned wheel refs in Dockerfile.runtime / pyproject.toml
 and the latest published GitHub releases.
 
-Checks three classes of pin:
+Checks two classes of pin:
 
-1. Dockerfile ARG git-ref pins (OMNIBASE_COMPAT_REF) — compared
-   against the latest release tag on GitHub.
-2. pyproject.toml [tool.uv.sources] git rev/tag pins (omnibase-core,
+1. pyproject.toml [tool.uv.sources] git rev/tag pins (omnibase-core,
    omnibase-spi) — compared against latest release tag.
-3. Dockerfile ``uv pip install --no-deps`` PyPI range pins (omninode-claude,
+2. Dockerfile ``uv pip install --no-deps`` PyPI range pins (omninode-claude,
    omninode-memory, omninode-intelligence) — compared against the latest
    published PyPI version (covered by check_dockerfile_pins.py; included here
    for the structured JSON output consumed by merge-sweep integration).
@@ -48,8 +46,6 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 _GITHUB_REPOS: dict[str, str] = {
-    "omnibase_compat": "OmniNode-ai/omnibase_compat",
-    "omnibase-compat": "OmniNode-ai/omnibase_compat",
     "omnimarket": "OmniNode-ai/omnimarket",
     "omnibase_core": "OmniNode-ai/omnibase_core",
     "omnibase-core": "OmniNode-ai/omnibase_core",
@@ -67,7 +63,7 @@ _GITHUB_REPOS: dict[str, str] = {
 
 @dataclass
 class PinResult:
-    source: str  # "dockerfile_arg" | "pyproject_uv_source" | "pypi_range"
+    source: str  # "pyproject_uv_source" | "pypi_range"
     name: str
     pinned: str  # what the repo currently pins (commit SHA, tag, range)
     latest: str  # latest release tag / version on GitHub/PyPI
@@ -163,27 +159,6 @@ def _minor_behind(pinned_tag: str, latest_tag: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Dockerfile ARG parsing
-# ---------------------------------------------------------------------------
-
-_ARG_RE = re.compile(r'^ARG\s+(\w+)="?([^"\s]+)"?', re.MULTILINE)
-
-# Maps Dockerfile ARG name → (canonical package name, pin type)
-_DOCKERFILE_ARG_PINS: dict[str, tuple[str, str]] = {
-    "OMNIBASE_COMPAT_REF": ("omnibase_compat", "commit_sha"),
-    # OMN-16296: ONEX_CHANGE_CONTROL_REF removed. onex_change_control is no
-    # longer installed into the runtime image in either build mode, so there is
-    # no ARG left to pin and nothing here to validate.
-}
-
-
-def _parse_dockerfile_args(path: Path) -> dict[str, str]:
-    """Return {ARG_NAME: value} for all ARG declarations in the Dockerfile."""
-    text = path.read_text()
-    return {m.group(1): m.group(2) for m in _ARG_RE.finditer(text)}
-
-
-# ---------------------------------------------------------------------------
 # pyproject.toml [tool.uv.sources] parsing (minimal TOML — no stdlib tomllib
 # dep needed because we parse just the uv.sources block with regex)
 # ---------------------------------------------------------------------------
@@ -212,109 +187,6 @@ def _parse_uv_sources(path: Path) -> dict[str, dict[str, str]]:
         kv_str = entry_m.group(2)
         sources[pkg] = dict(_KV_RE.findall(kv_str))
     return sources
-
-
-# ---------------------------------------------------------------------------
-# Check: Dockerfile ARG pins
-# ---------------------------------------------------------------------------
-
-
-def _check_dockerfile_args(
-    args: dict[str, str],
-    threshold: int,
-) -> list[PinResult]:
-    results: list[PinResult] = []
-
-    for arg_name, (pkg, pin_type) in _DOCKERFILE_ARG_PINS.items():
-        pinned_val = args.get(arg_name)
-        if pinned_val is None:
-            continue
-
-        repo_slug = _GITHUB_REPOS.get(pkg)
-        if repo_slug is None:
-            continue
-
-        latest_release = _gh_latest_release(repo_slug)
-
-        if pinned_val == "main":
-            # "main" is an unpinned floating ref — always drifted by definition.
-            # Distinguish: if there's a latest release, this is a real drift gap.
-            if latest_release:
-                results.append(
-                    PinResult(
-                        source="dockerfile_arg",
-                        name=arg_name,
-                        pinned="main",
-                        latest=latest_release,
-                        drifted=True,
-                        minor_behind=0,
-                        message=(
-                            f"{arg_name} is pinned to 'main' (floating ref). "
-                            f"Latest release is {latest_release}. "
-                            f"Pin to a specific commit SHA to eliminate silent drift."
-                        ),
-                    )
-                )
-            else:
-                results.append(
-                    PinResult(
-                        source="dockerfile_arg",
-                        name=arg_name,
-                        pinned="main",
-                        latest="unknown",
-                        drifted=True,
-                        minor_behind=0,
-                        message=(
-                            f"{arg_name} is pinned to 'main' (floating ref). "
-                            "Could not fetch latest release from GitHub."
-                        ),
-                        check_failed=True,
-                    )
-                )
-            continue
-
-        # Pinned to a commit SHA — check whether HEAD has advanced beyond it
-        if latest_release is None:
-            results.append(
-                PinResult(
-                    source="dockerfile_arg",
-                    name=arg_name,
-                    pinned=pinned_val,
-                    latest="unknown",
-                    drifted=False,
-                    minor_behind=0,
-                    message=f"Could not fetch latest release for {repo_slug}.",
-                    check_failed=True,
-                )
-            )
-            continue
-
-        behind = _minor_behind(pinned_val, latest_release)
-        # For commit SHAs: pinned_val is a SHA, not a semver tag.
-        # We compare to the latest release tag instead.
-        # If a release exists and the pinned value is a SHA (not a tag), always
-        # flag — a newer tagged release means we're behind by definition.
-        is_sha = re.fullmatch(r"[0-9a-f]{7,40}", pinned_val) is not None
-        drifted = is_sha and latest_release != pinned_val
-
-        results.append(
-            PinResult(
-                source="dockerfile_arg",
-                name=arg_name,
-                pinned=pinned_val,
-                latest=latest_release,
-                drifted=drifted,
-                minor_behind=behind,
-                message=(
-                    f"{arg_name} pinned to commit {pinned_val[:12]}; "
-                    f"latest release is {latest_release}."
-                )
-                if drifted
-                else f"{arg_name} is current ({pinned_val[:12]!r} / latest {latest_release}).",
-            )
-        )
-
-    return results
 
 
 # ---------------------------------------------------------------------------
@@ -522,15 +394,11 @@ def _build_report(
         pyproject=str(pyproject_path),
     )
 
-    # 1. Dockerfile ARG pins
-    df_args = _parse_dockerfile_args(dockerfile_path)
-    report.results.extend(_check_dockerfile_args(df_args, threshold))
-
-    # 2. pyproject.toml [tool.uv.sources] pins
+    # 1. pyproject.toml [tool.uv.sources] pins
     uv_sources = _parse_uv_sources(pyproject_path)
     report.results.extend(_check_uv_sources(uv_sources, threshold))
 
-    # 3. Dockerfile --no-deps PyPI range pins (ONEX packages only)
+    # 2. Dockerfile --no-deps PyPI range pins (ONEX packages only)
     report.results.extend(_check_pypi_range_pins(dockerfile_path, threshold))
 
     return report

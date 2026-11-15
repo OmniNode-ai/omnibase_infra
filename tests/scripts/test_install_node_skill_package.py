@@ -46,7 +46,6 @@ _FIXTURE_PYPROJECT = """\
 name = "omnimarket"
 version = "0.0.0"
 dependencies = [
-    "omnibase-compat==0.5.7",
     "omninode-memory==0.18.0",
 ]
 """
@@ -163,8 +162,7 @@ def test_no_deps_used_for_market_provider_layer() -> None:
     # OMN-18675: the NAMES are fixed here, the VERSIONS come from the ref being
     # installed. A version literal beside either name is the recurrence
     # mechanism that downgraded a shared venv and broke the onex CLI host-wide.
-    assert "OMNI_INTERNAL_NO_DEPS_PKGS=(omnibase-compat omninode-memory)" in text
-    assert 'COMPAT_PIN="omnibase-compat==' not in text
+    assert "OMNI_INTERNAL_NO_DEPS_PKGS=(omninode-memory)" in text
     assert 'MEMORY_PIN="omninode-memory==' not in text
 
 
@@ -238,7 +236,6 @@ def test_dry_run_with_current_interpreter_prints_plan(tmp_path: Path) -> None:
     assert pinned_test_ref in result.stdout
     assert "OMNIMARKET_REF override (pinned/offline use)" in result.stdout
     # The pins printed are the fixture ref's, not any literal in the script.
-    assert "omnibase-compat==0.5.7" in result.stdout
     assert "omninode-memory==0.18.0" in result.stdout
 
 

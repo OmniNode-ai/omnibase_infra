@@ -345,12 +345,11 @@ def test_compose_deploy_runner_env_is_fail_fast_and_org_scoped() -> None:
         f"OMNI_HOME must fail-fast interpolate from DEPLOY_RUNNER_OMNI_HOME "
         f"(got {omni_home!r}) -- a silent empty default produces broken binds"
     )
-    assert str(env.get("GIT_CONFIG_COUNT")) == "5"
-    values = [str(env[f"GIT_CONFIG_VALUE_{i}"]) for i in range(5)]
+    assert str(env.get("GIT_CONFIG_COUNT")) == "4"
+    values = [str(env[f"GIT_CONFIG_VALUE_{i}"]) for i in range(4)]
     for repo in (
         "omnibase_infra",
         "omnibase_core",
-        "omnibase_compat",
         "onex_change_control",
         "omnimarket",
     ):
@@ -360,7 +359,7 @@ def test_compose_deploy_runner_env_is_fail_fast_and_org_scoped() -> None:
         assert all("DEPLOY_RUNNER_OMNI_HOME" in v for v in values), (
             "safe.directory values must point at the PRIVATE clones"
         )
-    for i in range(5):
+    for i in range(4):
         assert env[f"GIT_CONFIG_KEY_{i}"] == "safe.directory"
 
 
