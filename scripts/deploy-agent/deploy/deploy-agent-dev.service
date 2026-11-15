@@ -107,7 +107,8 @@
 #
 # ENV TRANSPORT: NO EnvironmentFile= ON THIS UNIT (OMN-18073)
 #
-# This unit deliberately declares NO EnvironmentFile=. ExecStart runs
+# This unit deliberately declares NO EnvironmentFile= for the operator store (the one
+# it does declare is the dev signing key, below). ExecStart runs
 # deploy/deploy-agent-launch.sh, which bash-`source`s the operator env store
 # and then execs the interpreter -- exactly what onex-runtime-deploy has
 # always done.
@@ -138,6 +139,32 @@
 # this. It stays as the fail-closed backstop for any path that still arrives
 # mangled -- including this unit installed without a matching daemon-reload.
 #
+# THE ONE EnvironmentFile= THIS UNIT DOES DECLARE (OMN-24565)
+#
+# The operator env store carries ONE signing key, DEPLOY_AGENT_HMAC_SECRET, and
+# the live deploy agent reads the same name from the same file. The dev agent
+# must not hold that key (and a lab host that sends a signed dev command must not
+# need it), so this unit reads its own dev-only key from a second file that holds
+# that one key and nothing else:
+#
+#   EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env
+#
+# systemd's parser is safe for it: the file is one `DEPLOY_AGENT_HMAC_SECRET=<hex>`
+# line, and a hex key has no quote or backslash for the OMN-18073 mangling to
+# touch. The file is NOT optional (no leading `-`): an unreadable file fails the
+# start loudly, where a missing key would start an agent that rejects every
+# signed command. The value is the secret store's DEPLOY_AGENT_DEV_HMAC_SECRET,
+# the dev-only entry that node_secret_store_effect generates; the file is its
+# delivery to this host, and a value is never written in this repository.
+#
+# Why that beats the store: DEPLOY_AGENT_HMAC_SECRET is listed in
+# DEPLOY_AGENT_ENV_PROTECTED below. The launcher snapshots every protected name
+# before it sources the store and restores it after, so the dev key survives the
+# store's shared value; deploy_agent.executor.operator_store_overlay leaves the
+# protected names out of its re-read, so no compose command re-applies the shared
+# value either, and the dev runtime's containers (which sign with the same name)
+# get the dev key too. auth.py, the launcher and the compose files do not change.
+#
 # PORT PREFLIGHT (fail-fast, never destructive)
 #
 # ExecStartPre runs deploy/preflight_port_free.sh, which refuses to start
@@ -166,6 +193,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/data/omninode/omnibase_infra/scripts/deploy-agent
+# OMN-24565: the dev agent's own signing key, see THE ONE EnvironmentFile= above.
+EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env
 # OMN-19522: the agent runs a bare `uv` (self-update's `uv sync`, build steps'
 # `uv run`), and uv lives in ~/.local/bin, which a systemd user manager's default
 # PATH does not carry. Declared here rather than inherited from whatever the
@@ -188,7 +217,7 @@ Environment=OMNI_HOME=/data/omninode
 Environment=UNIT_DRIFT_REGISTRY_ROOT=/data/omninode/omni_home
 # OMN-20637: same declaration as the host operator env used by stability refresh.
 Environment=DEPLOY_SOURCE_CLONE_ROOT=/data/omninode
-Environment="DEPLOY_AGENT_ENV_PROTECTED=PATH OMNI_HOME UNIT_DRIFT_REGISTRY_ROOT DEPLOY_SOURCE_CLONE_ROOT DEPLOY_AGENT_ENV_FILE DEPLOY_AGENT_PYTHON DEPLOY_AGENT_ENV_PROTECTED DEPLOY_AGENT_DIR DEPLOY_AGENT_STATE_DIR DEPLOY_AGENT_PORT DEPLOY_AGENT_TRACKING_REF DEPLOY_AGENT_ALLOWED_LANES DEPLOY_AGENT_FOLLOW_STABILITY ONEX_LEDGER_WRITE_VIA ONEX_LEDGER_HOST_NAME KAFKA_BOOTSTRAP_SERVERS KAFKA_ENVIRONMENT KAFKA_SECURITY_PROTOCOL KAFKA_SASL_MECHANISM KAFKA_SASL_ENV_PREFIX DEPLOY_AGENT_LANE_BUILDER DEPLOY_AGENT_OVERLAY_HOME_CLONE"
+Environment="DEPLOY_AGENT_ENV_PROTECTED=PATH OMNI_HOME UNIT_DRIFT_REGISTRY_ROOT DEPLOY_SOURCE_CLONE_ROOT DEPLOY_AGENT_ENV_FILE DEPLOY_AGENT_PYTHON DEPLOY_AGENT_ENV_PROTECTED DEPLOY_AGENT_DIR DEPLOY_AGENT_STATE_DIR DEPLOY_AGENT_PORT DEPLOY_AGENT_TRACKING_REF DEPLOY_AGENT_ALLOWED_LANES DEPLOY_AGENT_FOLLOW_STABILITY ONEX_LEDGER_WRITE_VIA ONEX_LEDGER_HOST_NAME KAFKA_BOOTSTRAP_SERVERS KAFKA_ENVIRONMENT KAFKA_SECURITY_PROTOCOL KAFKA_SASL_MECHANISM KAFKA_SASL_ENV_PREFIX DEPLOY_AGENT_LANE_BUILDER DEPLOY_AGENT_OVERLAY_HOME_CLONE DEPLOY_AGENT_HMAC_SECRET"
 # OMN-21279: the host agent reports a failed dev boot even while the runtime
 # bus workers are down. The ledger writer is bus-only; its local ledger is a
 # read mirror, not a second ledger of record. The guard retains unacknowledged

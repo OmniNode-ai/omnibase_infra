@@ -28,7 +28,7 @@ _DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
 _DEV_UNIT = _DEPLOY_DIR / "deploy-agent-dev.service"
 _LAUNCHER = _DEPLOY_DIR / "deploy-agent-launch.sh"
 
-_OPERATOR_ENV_STORE = "/home/jonah/.omnibase/.env"
+_OPERATOR_ENV_STORE_SUFFIX = "/.omnibase/.env"
 
 _ENVIRONMENT_RE = re.compile(r'^Environment="?([A-Za-z_][A-Za-z0-9_]*)=')
 
@@ -57,10 +57,13 @@ def test_dev_unit_declares_no_environment_file_on_the_operator_store() -> None:
     would reintroduce systemd's parser for whatever it names, and the store is
     the only env file this unit ever had.
     """
+    # OMN-24565: the one EnvironmentFile= allowed is the dev agent's own signing-key
+    # file (one hex line, nothing the store's quoting could mangle), never the store.
     offenders = [
         line
         for line in _directive_lines(_DEV_UNIT)
         if line.startswith("EnvironmentFile=")
+        and line != "EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env"
     ]
     assert offenders == [], (
         "deploy-agent-dev.service must not use EnvironmentFile= -- systemd's "
@@ -68,7 +71,9 @@ def test_dev_unit_declares_no_environment_file_on_the_operator_store() -> None:
         f"through {_LAUNCHER.name} instead. Found: {offenders}"
     )
     # The store must still be reachable, by the name the launcher requires.
-    assert _unit_value(_DEV_UNIT, "DEPLOY_AGENT_ENV_FILE") == _OPERATOR_ENV_STORE
+    store = _unit_value(_DEV_UNIT, "DEPLOY_AGENT_ENV_FILE")
+    assert store.startswith("/")
+    assert store.endswith(_OPERATOR_ENV_STORE_SUFFIX)
 
 
 def test_dev_unit_exec_start_goes_through_the_launcher() -> None:

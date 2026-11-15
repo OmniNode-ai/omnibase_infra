@@ -1,0 +1,81 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24611
+title: The dev deploy agent signs with its own dev-only key
+summary: The dev deploy agent unit (deploy-agent-dev.service) reads its signing key from its own file, EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env (one DEPLOY_AGENT_HMAC_SECRET line holding the secret store's DEPLOY_AGENT_DEV_HMAC_SECRET), and lists DEPLOY_AGENT_HMAC_SECRET in DEPLOY_AGENT_ENV_PROTECTED so the launcher's source of the operator store and the executor's store re-read never put the shared value back. The live agent's unit and drop-in are not touched; auth.py, the launcher and the compose files do not change (the launcher and auth.py are baselined files that only shrink).
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - public_api
+  - infrastructure
+requirements:
+  - id: req-omn24611-unit
+    statement: The dev agent unit declares its own signing key file and protects the key name, and no other unit names that file.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the dev deploy agent's unit declares one EnvironmentFile for its own signing key file and lists the key name as protected, and no other unit names that file -- falsifier: pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py fails 4 tests against the dev unit on origin/dev"
+  - id: req-omn24611-store
+    statement: The secret store's own node generates the dev-only entry the key file carries; the node and its test are the omnimarket pull request of this ticket, and this repository names the entry in its environment example.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the secret store's own node holds a generated dev-only entry DEPLOY_AGENT_DEV_HMAC_SECRET, created without the value being printed -- falsifier: the node's generate test fails on the contract without the entry, and the store's name list lacks DEPLOY_AGENT_DEV_HMAC_SECRET"
+  - id: req-omn24611-check
+    statement: The check value the dev agent serves is the check value of the store's entry.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the key check value the dev agent serves equals the key check value of the store's entry on the sending lab hosts -- falsifier: the key check node answers different check values for the agent and for the store entry"
+  - id: req-omn24611-integrated
+    statement: The dev agent on h201 accepts a signed no-op from h051 after the unit is installed, and the live agent's unit file is unchanged.
+    acceptance:
+      - id: AC4
+        statement: "AC4: integrated: from h051 one signed no-op command is accepted by the dev agent on h201 after its unit is installed, and the live agent's unit file digest is identical before and after, read on h201 -- falsifier: the running dev agent on lab host h201 rejects the command as an invalid signature, or the live unit digest read back after the install differs from the one before"
+evidence_requirements:
+  - kind: tests
+    description: The focused tests of the dev unit's own signing key and the launcher.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24611-ac1-unit
+    description: The dev unit declares the one signing key EnvironmentFile and protects DEPLOY_AGENT_HMAC_SECRET; the launcher keeps the dev value over the store's shared one; the executor overlay leaves the name out. The same test file fails 4 tests with the dev unit from origin/dev.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24611-ac2-store-entry-named
+    description: The generation itself is the omnimarket pull request of this ticket (its contract entry and test). Here, the environment example names the dev-only entry DEPLOY_AGENT_DEV_HMAC_SECRET, read at the checked-out commit.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/env-example-full.txt?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'DEPLOY_AGENT_DEV_HMAC_SECRET' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24611-ac3-same-key
+    description: With the dev value presented by the unit's file, the agent environment carries that value under the name auth.py reads, so the check value the agent serves is the dev key's. The reading against the store's entry on the sending hosts is cited in a pull request comment.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "launcher_keeps_the_dev_key" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24611-ac4-integrated
+    description: Hosted-runner deploy probe reads the dev unit from GitHub at the checked-out commit and requires the signing key EnvironmentFile, so a checkout without the change fails it. The running reading (one signed no-op accepted on h201 and the live unit digest before and after) is cited in a pull request comment.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy/deploy-agent-dev.service?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q '^EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env$' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra
