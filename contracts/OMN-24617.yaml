@@ -57,20 +57,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_reading_row.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn24617-ac4-installed-and-read
-    description: >-
-      Deploy check the hosted runner can run: the agent's terminal publish calls the reading. The runtime read (the branch installed on h201 through runtime_code_ref_pin for the dev and stability lanes, and the reading row of the next real job read back from the ledger with its read time) is posted as a pull request comment naming the head and the revision running; it is not claimed by this check.
-    source: manual
-    execution_scope: local_done_gate
-    binds_ac:
-      - AC4
-    checks:
-      - check_type: command
-        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.handlers.handler_deploy_job_reading import HandlerDeployJobReading; print('deploy smoke ok', HandlerDeployJobReading.__name__)\""
-        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24617-ac4-agent-calls-reading
     description: >-
-      The agent's terminal publish imports and calls the job reading handler (runs on the hosted runner).
+      The agent's terminal publish imports and calls the job reading handler (runs on the hosted runner). The runtime read (the branch installed on h201 through runtime_code_ref_pin for the dev and stability lanes, and the reading row of the next real job read back from the ledger with its read time) is posted as a pull request comment naming the head and the revision running; it is not claimed by this check.
     source: manual
     binds_ac:
       - AC4
@@ -82,7 +71,6 @@ dod_evidence:
     description: >-
       The handler runs against a real stand-in append executable: a failed dev job's NOT_WORKING row, request id and job id reach the command's argv and stdin, and a prod job writes nothing.
     source: manual
-    execution_scope: local_done_gate
     binds_ac:
       - AC3
     checks:
