@@ -111,7 +111,7 @@ requirements:
   - id: req-omn19998-lane-liveness-folded-effects
     statement: The lane liveness probe does not demand the effects container on a lane whose runtime policy folds the effects role into main, so a serving primary dev lane no longer reads red on runtime_containers; a policy that does not fold effects still requires it.
   - id: req-omn19998-pool-prove-first-party-context
-    statement: The pre-merge pool prover's image build for an isolated member passes the pre-PR slot first-party audit context the tree under test declares, so the runtime image audit no longer refuses the unmerged target built from a branch and every lab proof stops reading INCONCLUSIVE at the build.
+    statement: The pre-merge pool prover's image build for an isolated member passes the pre-PR slot first-party audit context the tree under test declares, so the runtime image audit no longer refuses the unmerged target built from a branch, and the prover stages the siblings at dev-merge tags for an infra proof as for every other, so lab proofs stop reading INCONCLUSIVE at the image audit.
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -208,7 +208,7 @@ evidence_requirements:
     command: uv run pytest tests/ci/test_dev_lane_liveness.py -q -n 0 --no-cov
   - kind: tests
     description: The pool prover tests read the isolated member's build command for the FIRST_PARTY_BUILD_CONTEXT build arg, run the context assignment as written against the real policy, and expect the pre-PR slot context that accepts a branch target; they fail on the merge base, whose build passes no such arg.
-    command: uv run pytest tests/unit/scripts/test_prepr_pool_first_party_context_omn19998.py -q -n 0 --no-cov
+    command: uv run pytest tests/unit/scripts/test_prepr_pool_first_party_context_omn19998.py tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q -n 0 --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1445,11 +1445,11 @@ dod_evidence:
     binds_ac:
       - AC1
   - id: dod-omn19998-pool-prove-first-party-context
-    description: The isolated pool member's docker compose build passes FIRST_PARTY_BUILD_CONTEXT, read from the tree under test as its pre-PR slot context. The tests fail on the merge base, whose build passes no such arg (the lab proof of omnibase_infra#5986 read build rc=1 at the image audit).
+    description: The isolated pool member's docker compose build passes FIRST_PARTY_BUILD_CONTEXT, read from the tree under test as its pre-PR slot context, and an infra proof stages its siblings at dev-merge tags by default. The context tests fail on the merge base, whose build passes no such arg (the lab proof of omnibase_infra#5986 read build rc=1 at the image audit).
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/scripts/test_prepr_pool_first_party_context_omn19998.py -q -n 0 --no-cov
+        check_value: uv run pytest tests/unit/scripts/test_prepr_pool_first_party_context_omn19998.py tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q -n 0 --no-cov
         cwd: .
     binds_ac:
       - AC1
