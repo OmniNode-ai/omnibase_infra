@@ -6,7 +6,6 @@ is_seam_ticket: true
 interface_change: true
 interfaces_touched:
   - public_api
-  - infrastructure
 requirements:
   - id: req-omn24611-unit
     statement: The dev agent unit declares its own signing key file and protects the key name, and no other unit names that file.
