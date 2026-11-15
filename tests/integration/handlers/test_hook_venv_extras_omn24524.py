@@ -42,6 +42,8 @@ def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A project whose only dependency is an optional extra, installed from a local wheel."""
+    # The CI runner exports UV_PROJECT_ENVIRONMENT, which would send uv to another venv.
+    monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
     monkeypatch.setenv("UV_OFFLINE", "1")
     monkeypatch.setenv("UV_LINK_MODE", "copy")
     wheel = tmp_path / "probe-1.0-py3-none-any.whl"
