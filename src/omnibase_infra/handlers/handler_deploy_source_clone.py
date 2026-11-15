@@ -192,6 +192,20 @@ def execution_runner(execution: ModuleType, timeout: float) -> GitRunner:
     )
 
 
+def fetch_deploy_source(
+    execution: ModuleType, timeout: float
+) -> subprocess.CompletedProcess[str]:
+    """Fetch the agent's deploy source, mirror first, through the agent's runner."""
+    return fetch(execution.deploy_source(), run=execution_runner(execution, timeout))
+
+
+def deploy_source_reachable(execution: ModuleType, timeout: float) -> bool:
+    """Whether the mirror, else origin, answers for the agent's deploy source."""
+    return remote_reachable(
+        execution.deploy_source(), run=execution_runner(execution, timeout)
+    )
+
+
 def fetch(
     request: ModelDeploySourceClone, *, run: GitRunner
 ) -> subprocess.CompletedProcess[str]:

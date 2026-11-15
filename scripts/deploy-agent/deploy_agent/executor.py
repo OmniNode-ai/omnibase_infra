@@ -279,7 +279,10 @@ logger = logging.getLogger(__name__)
 @functools.cache
 def deploy_source() -> ModelDeploySourceClone:
     """The agent's OWN deploy-source settings (OMN-24562), read on first use, never at import."""
-    return load_dev_boot_guard("handler_deploy_source_clone").settings(os.environ)
+    return cast(
+        "ModelDeploySourceClone",
+        load_dev_boot_guard("handler_deploy_source_clone").settings(os.environ),
+    )
 
 
 def deploy_repo_dir() -> str:
@@ -288,10 +291,6 @@ def deploy_repo_dir() -> str:
 
 def _clone_handler() -> ModuleType:
     return load_dev_boot_guard("handler_deploy_source_clone")
-
-
-def _git_in_clone(timeout: int) -> Any:
-    return _clone_handler().execution_runner(sys.modules[__name__], timeout)
 
 
 def _in_clone(*parts: str) -> Path:
@@ -1385,7 +1384,7 @@ def _run(
     )
 
 
-def _sync_own_unit_after_pull(agent_dir: str, timeout: int) -> str | None:
+def _sync_own_unit_after_pull(agent_dir: str, timeout: int) -> Any:
     handler = load_dev_boot_guard("handler_restart_on_merge")
     return handler.sync_own_unit_after_pull(
         sys.modules[__name__], agent_dir, timeout, os.environ
@@ -4017,9 +4016,7 @@ class DeployExecutor:
         timeout = PHASE_TIMEOUTS[Phase.PREFLIGHT]
 
         # Check git remote is reachable
-        if not _clone_handler().remote_reachable(
-            deploy_source(), run=_git_in_clone(timeout)
-        ):
+        if not _clone_handler().deploy_source_reachable(sys.modules[__name__], timeout):
             raise RuntimeError("Git remote unreachable: mirror and origin both refused")
 
         # Check docker is available
@@ -4072,11 +4069,13 @@ class DeployExecutor:
         timeout = PHASE_TIMEOUTS[Phase.GIT]
 
         # Fetch with 1 retry
-        result = _clone_handler().fetch(deploy_source(), run=_git_in_clone(timeout))
+        result = _clone_handler().fetch_deploy_source(sys.modules[__name__], timeout)
         if result.returncode != 0:
             logger.warning("Git fetch failed, retrying in 5s...")
             time.sleep(5)
-            result = _clone_handler().fetch(deploy_source(), run=_git_in_clone(timeout))
+            result = _clone_handler().fetch_deploy_source(
+                sys.modules[__name__], timeout
+            )
             if result.returncode != 0:
                 raise RuntimeError(f"Git fetch failed: {result.stderr}")
 
