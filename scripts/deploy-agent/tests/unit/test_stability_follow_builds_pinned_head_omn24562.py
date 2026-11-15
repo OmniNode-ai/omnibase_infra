@@ -85,3 +85,72 @@ def test_the_follow_still_names_the_tag_and_the_stability_lane(tmp_path: Path) -
     cmd = stability_follow_command(TAG, "omnimarket", tmp_path)
     assert cmd.sibling_tags == {"omnimarket": TAG}
     assert cmd.runtime_lane is EnumRuntimeLane.STABILITY_TEST
+
+
+# The stability lane builds only the open pull request its own live pin declares.
+
+
+def _admit(state_dir: Path, lane: EnumRuntimeLane, open_pr: str) -> None:
+    load_dev_boot_guard("handler_dev_lane_code_ref_pin").admit_open_pr(
+        lane is EnumRuntimeLane.STABILITY_TEST, open_pr, state_dir
+    )
+
+
+def test_the_follow_s_own_declaration_is_admitted(tmp_path: Path) -> None:
+    _register(tmp_path, expires_in=timedelta(hours=2))
+    command = stability_follow_command(TAG, "omnimarket", tmp_path)
+    _admit(tmp_path, EnumRuntimeLane.STABILITY_TEST, command.open_pr)
+
+
+@pytest.mark.parametrize(
+    "open_pr",
+    [f"omnibase_infra#6010@{HEAD}", f"omnibase_infra#6011@{'b' * 40}"],
+    ids=["a_different_declared_open_pr", "another_head_of_the_pinned_pr"],
+)
+def test_a_different_declared_open_pr_is_refused_on_stability(
+    tmp_path: Path, open_pr: str
+) -> None:
+    _register(tmp_path, expires_in=timedelta(hours=2))
+    with pytest.raises(ValueError, match="builds only the open pull request"):
+        _admit(tmp_path, EnumRuntimeLane.STABILITY_TEST, open_pr)
+
+
+def test_a_declared_open_pr_with_no_live_pin_is_refused_on_stability(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="no pin is live"):
+        _admit(
+            tmp_path,
+            EnumRuntimeLane.STABILITY_TEST,
+            f"omnibase_infra#6011@{HEAD}",
+        )
+
+
+def test_dev_and_undeclared_builds_are_not_read(tmp_path: Path) -> None:
+    _admit(tmp_path, EnumRuntimeLane.DEV, f"omnibase_infra#6010@{HEAD}")
+    _admit(tmp_path, EnumRuntimeLane.STABILITY_TEST, "")
+
+
+def test_preflight_refuses_a_foreign_declaration_before_the_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from deploy_agent import agent as agent_mod
+
+    _register(tmp_path, expires_in=timedelta(hours=2))
+    monkeypatch.setattr(agent_mod, "STATE_DIR", tmp_path)
+    assert sys.modules["deploy_agent.agent"] is agent_mod
+    executor = Mock()
+    command = SimpleNamespace(
+        runtime_lane=EnumRuntimeLane.STABILITY_TEST,
+        open_pr=f"omnibase_infra#6010@{HEAD}",
+    )
+    with pytest.raises(ValueError, match="builds only the open pull request"):
+        load_dev_boot_guard().run_preflight(executor, command, Mock())
+    executor.preflight.assert_not_called()
+    own = stability_follow_command(TAG, "omnimarket", tmp_path)
+    load_dev_boot_guard().run_preflight(executor, own, Mock())
+    executor.preflight.assert_called_once()

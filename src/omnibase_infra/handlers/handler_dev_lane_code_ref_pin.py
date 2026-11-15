@@ -226,9 +226,44 @@ def follow(repo: str, tag: str, state_dir: Path) -> dict[str, Any]:
     pin = read_active_pin(state_dir, datetime.now(UTC))
     if pin is not None:
         fields["git_ref"] = pin.head
-        fields["open_pr"] = f"omnibase_infra#{pin.pr}@{pin.head}"
+        fields["open_pr"] = declared_open_pr(pin)
         fields["rollback"] = {
             "actor": pin.registered_by,
             "reason": f"the stability follow builds code-ref pin {pin.branch}",
         }
     return fields
+
+
+def declared_open_pr(pin: ModelDevLaneCodeRefPin) -> str:
+    """The open pull request a stability build of ``pin`` declares."""
+    return f"omnibase_infra#{pin.pr}@{pin.head}"
+
+
+def admit_open_pr(
+    stability: bool,
+    open_pr: str,
+    state_dir: Path,
+    *,
+    clock: Callable[[], datetime] | None = None,
+) -> None:
+    """Refuse a stability build whose declared open PR is not the live pin's own.
+
+    ``stability`` is whether the build runs on the stability lane, read by the
+    caller from the deploy agent's own lane enum.
+
+    The stability lane builds a declared open pull request only to follow the
+    code-ref pin (:func:`follow`, which reads the pin from the same ``state_dir``,
+    the agent's ``STATE_DIR``). Any other declaration on that lane -- a different
+    pull request, another head of the pinned one, or any declaration while no pin is
+    live -- raises ``ValueError`` before the build. The dev lane keeps its own rule
+    (``ModelRebuildRequested.validate_open_pr``) and is not read here.
+    """
+    if not open_pr or not stability:
+        return
+    pin = read_active_pin(state_dir, (clock or (lambda: datetime.now(UTC)))())
+    own = declared_open_pr(pin) if pin is not None else ""
+    if open_pr != own:
+        raise ValueError(
+            "the stability lane builds only the open pull request its live "
+            f"code-ref pin declares ({own or 'no pin is live'}); refused {open_pr}"
+        )
