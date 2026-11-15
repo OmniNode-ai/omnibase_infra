@@ -24,6 +24,17 @@ requirements:
         statement: 'AC5: the retirement is present on the pull request branch and absent at the merge base -- falsifier: the branch''s executor.py has no _retire_folded_dev_services method'
       - id: AC6
         statement: 'AC6: integrated: one stability-follow job on h201 passes the runtime phase and the stability runtime and runtime-effects health targets read healthy -- falsifier: the job record shows phase_results.runtime other than success, or the stability runtime container is not healthy at the job''s completion'
+  - id: req-omn24562-stability-start-wait
+    statement: verify() waits out a stability runtime's declared start the way it does on dev, reading the budget from the container's own compose healthcheck, so a runtime that takes about five minutes to start is not failed on its first probe and rolled back. A spent budget still fails the job, no lane but dev may recreate, and dev and prod behave as before.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: a stability runtime that fails its first probe while Docker reports it starting is re-probed within its declared start budget and passes without a recreate -- falsifier: pytest scripts/deploy-agent/tests/unit/test_verify_stability_start_wait_omn24562.py -k "waited_for_and_passes" fails when VERIFY_START_WAIT_LANES in executor.py drops the stability lane'
+      - id: AC8
+        statement: 'AC8: a stability runtime still failing past its declared start budget fails the job, which the agent turns into the rollback, and nothing is recreated; a shorter declared budget gives fewer probes than a longer one, so the wait is read from the container and not from a constant -- falsifier: the outlives-its-budget and wait-length tests fail when the wait length is a fixed number or the failed job passes'
+      - id: AC9
+        statement: 'AC9: dev behaves as before (the same one service-label lookup, the same wait, the recreate allowlist still dev only) and prod gets neither the wait nor a recreate -- falsifier: the dev lookup, fence and prod tests of the same file fail when stability or prod joins VERIFY_RECREATE_LANES or prod joins VERIFY_START_WAIT_LANES'
+      - id: AC10
+        statement: 'AC10: integrated: a stability-follow job on h201 installed from this branch passes verify() for a runtime that needs minutes to start and is not rolled back -- falsifier: the job record shows verification other than success for a container that Docker later reports healthy, or a rollback restores the retained image'
   - id: req-omn24562-stability-build-project
     statement: The stability job of the dev-fenced deploy agent builds the runtime images under the stability compose project that its runtime up runs, and does not name autoheal, which the stability overlay disables.
     acceptance:
@@ -47,6 +58,9 @@ evidence_requirements:
   - kind: tests
     description: Stability lane retirement of the folded effects container and its runtime-phase call site, with a positive control that the services the lane still runs stay requested.
     command: cd scripts/deploy-agent && uv run --frozen --extra dev python -m pytest tests/unit/test_stability_retires_folded_effects_omn24562.py -q -p no:cacheprovider
+  - kind: tests
+    description: Stability start wait within and past the declared budget, with the dev lookup, the two fences and prod unchanged.
+    command: cd scripts/deploy-agent && uv run --frozen --extra dev python -m pytest tests/unit/test_verify_stability_start_wait_omn24562.py -q -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ''
@@ -99,6 +113,26 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/handlers/test_handler_dev_boot_guard_stability_fold_omn24562.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac7-ac9-stability-start-wait
+    description: A stability runtime is waited for within its declared start budget and passes, fails and is not recreated past it, and dev, the two fences and prod behave as before.
+    source: manual
+    binds_ac:
+      - AC7
+      - AC8
+      - AC9
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_verify_stability_start_wait_omn24562.py tests/unit/test_verify_honours_declared_start_omn19374.py tests/unit/test_verify_force_recreate_omn18640.py tests/unit/test_auto_rollback.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac10-start-wait-probe
+    description: Hosted stand-in for AC10, which is read on h201 after the agent is installed from this branch. The check reads the executor file GitHub serves on the pull request branch and fails at the merge base, where the stability lane is not in the start-wait fence.
+    source: manual
+    binds_ac:
+      - AC10
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=omn-24562-stability-start-wait\" --jq .content | base64 -d | grep -q 'lane in VERIFY_START_WAIT_LANES'"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-ac7-stability-build-project
     description: The build command of a stability job runs under the stability compose project, dev still builds under its own, the stability lane disables autoheal and keeps the services it runs by name, and the executor builds under the lane's compose project.

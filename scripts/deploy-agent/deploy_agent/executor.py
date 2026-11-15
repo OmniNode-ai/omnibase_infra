@@ -502,6 +502,10 @@ PhaseCallback = Callable[[Phase, PhaseStatus], None]
 # this path builds would abort on `no such service` there in any case.
 VERIFY_RECREATE_LANES: frozenset[EnumRuntimeLane] = frozenset({EnumRuntimeLane.DEV})
 
+# OMN-24562: where verify() waits out a runtime's declared start (it only re-probes
+# and reads Docker); a recreate stays dev only (above).
+VERIFY_START_WAIT_LANES = VERIFY_RECREATE_LANES | {EnumRuntimeLane.STABILITY_TEST}
+
 # The ceiling on the recreate command itself. The same number
 # ``deliver_onex_api_pin`` uses for the same shape of command: one service,
 # ``--no-deps``, nothing to build.
@@ -7011,7 +7015,7 @@ class DeployExecutor:
                 earlier_target_failed = True
             if (
                 check.status == "fail"
-                and lane in VERIFY_RECREATE_LANES
+                and lane in VERIFY_START_WAIT_LANES
                 and recover_runtime
             ):
                 self._assert_boot_can_progress(lane=lane, service=service, failed=check)
@@ -7315,31 +7319,25 @@ class DeployExecutor:
         return check, timed_out
 
     def _compose_service_container(self, lane: EnumRuntimeLane, service: str) -> str:
-        """Resolve one compose service on this lane to its container id, or ``""``.
-
-        By compose's own labels rather than a container name, because on the
-        dev lane ``runtime_health_targets`` carries SERVICE names. More than one
-        match is ambiguous and reads as unresolved.
-        """
+        """A dev SERVICE or another lane's CONTAINER-named target to its one id."""
+        label = "label=com.docker.compose"
+        selectors = [f"{label}.service={service}"]
+        if lane is not EnumRuntimeLane.DEV:
+            selectors.append(f"name=^/{service}$")
+        project = f"{label}.project={lane_config_for(lane).compose_project}"
         try:
-            result = _run(
-                [
-                    "docker",
-                    "ps",
-                    "--all",
-                    "-q",
-                    "--no-trunc",
-                    "--filter",
-                    f"label=com.docker.compose.project={lane_config_for(lane).compose_project}",
-                    "--filter",
-                    f"label=com.docker.compose.service={service}",
-                ],
-                timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS,
-            )
+            for selector in selectors:
+                argv = ["docker", "ps", "--all", "-q", "--no-trunc"]
+                result = _run(
+                    [*argv, "--filter", project, "--filter", selector],
+                    timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS,
+                )
+                ids = result.stdout.split() if result.returncode == 0 else []
+                if ids:
+                    return ids[0] if len(ids) == 1 else ""
         except (OSError, subprocess.TimeoutExpired):
-            return ""
-        ids = result.stdout.split() if result.returncode == 0 else []
-        return ids[0] if len(ids) == 1 else ""
+            pass
+        return ""
 
     def _force_recreate_and_reverify(
         self,
