@@ -9,6 +9,7 @@ job, and for a code-ref pin within six hours of its expiry, written on the agent
 
 from __future__ import annotations
 
+import ast
 import json
 import stat
 import sys
@@ -159,15 +160,95 @@ def test_pin_outside_window_writes_nothing(hours_left: float, tmp_path: Path) ->
 
 
 def test_pin_alarm_append_is_deduplicated_within_the_hour() -> None:
-    handler = _handler()
+    handler = handler_mod
     pin = _pin(3)
-    first = handler.pin_request_id(pin["branch"], pin["expires_at"], NOW)
-    assert first == handler.pin_request_id(
+    first = handler._pin_request_id(pin["branch"], pin["expires_at"], NOW)
+    assert first == handler._pin_request_id(
         pin["branch"], pin["expires_at"], NOW + timedelta(minutes=20)
     )
-    assert first != handler.pin_request_id(
+    assert first != handler._pin_request_id(
         pin["branch"], pin["expires_at"], NOW + timedelta(hours=1)
     )
+
+
+_REFUSING_APPEND = """#!INTERPRETER
+import pathlib, sys
+args = sys.argv[1:]
+rid = args[args.index('--request-id') + 1]
+row = sys.stdin.read()
+seen = pathlib.Path('LEDGER') / rid
+if seen.exists():
+    if seen.read_text() == row:
+        print('{"duplicate": true}')
+        sys.exit(0)
+    open('REFUSALS', 'a').write(rid + '\\n')
+    sys.stderr.write('request id already belongs to different rows')
+    sys.exit(65)
+seen.parent.mkdir(exist_ok=True)
+seen.write_text(row)
+print('{"ok": true}')
+"""
+
+
+def _refusing_append(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
+    """The work-ledger append's id rule: a row under a seen request id is a duplicate when
+    identical and a refusal (exit 65) when different; ``refusals`` counts the refusals."""
+    ledger = tmp_path / "ledger"
+    refusals = tmp_path / "refusals.txt"
+    script = tmp_path / "append.py"
+    script.write_text(
+        _REFUSING_APPEND.replace("INTERPRETER", sys.executable)
+        .replace("LEDGER", str(ledger))
+        .replace("REFUSALS", str(refusals))
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    environ = {
+        "ONEX_LEDGER_BUS_APPEND_COMMAND": str(script),
+        "ONEX_LEDGER_HOST_NAME": "test-host",
+    }
+    return environ, ledger, refusals
+
+
+def test_a_simulated_pin_hour_has_no_refused_append_and_one_row_per_pin(
+    tmp_path: Path,
+) -> None:
+    environ, ledger, refusals = _refusing_append(tmp_path)
+    handler = _handler(environ)
+    start = datetime(2026, 11, 16, 8, 0, 5, tzinfo=UTC)
+    expires = start + timedelta(hours=3, minutes=20)
+    outcomes = [
+        handler.handle_pin(
+            branch="integration/stab-integ2",
+            pr=6012,
+            ticket="OMN-24617",
+            registered_by="stab-integ2-1750",
+            expires_at=expires,
+            now=start + timedelta(seconds=300 * tick),
+        ).outcome
+        for tick in range(12)
+    ]
+    assert outcomes == ["appended"] * 12
+    assert not refusals.exists()
+    assert len(list(ledger.iterdir())) == 1
+    row = next(ledger.iterdir()).read_text()
+    assert _cells(row.split(" | req=")[0])["hours_left"] == "3.3"
+
+
+def test_the_next_clock_hour_writes_a_new_row(tmp_path: Path) -> None:
+    environ, ledger, refusals = _refusing_append(tmp_path)
+    handler = _handler(environ)
+    expires = NOW + timedelta(hours=4)
+    for hours in (0, 0.5, 1, 1.5):
+        handler.handle_pin(
+            branch="b",
+            pr=1,
+            ticket="OMN-1",
+            registered_by="x",
+            expires_at=expires,
+            now=NOW + timedelta(hours=hours),
+        )
+    assert not refusals.exists()
+    assert len(list(ledger.iterdir())) == 2
 
 
 def _write_pin(state_dir: Path, hours_left: float) -> None:
@@ -229,7 +310,117 @@ def test_idle_check_is_throttled(
     assert runtime_mod.check_pin() is None
 
 
-def test_agent_idle_tick_calls_the_pin_check() -> None:
+def _bare_agent(lanes: set[EnumRuntimeLane]) -> Any:
+    agent = object.__new__(agent_mod.DeployAgent)
+    agent._allowed_lanes = lanes
+    return agent
+
+
+def _pin_check_gate() -> ast.If:
+    """The ``if`` of the idle tick that wraps the pin check call."""
+    tree = ast.parse(Path(agent_mod.__file__).read_text(encoding="utf-8"))
+    run = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "run"
+    )
+    return next(
+        node
+        for node in ast.walk(run)
+        if isinstance(node, ast.If)
+        and any("'check_pin'" in ast.unparse(inner) for inner in node.body)
+        and not any(isinstance(inner, ast.If) for inner in node.body)
+    )
+
+
+def test_a_prod_agent_never_runs_the_pin_check() -> None:
+    """The idle tick reaches the check only behind ``DEV in self._allowed_lanes``."""
+    gate = _pin_check_gate()
+    assert ast.unparse(gate.test) == "EnumRuntimeLane.DEV in self._allowed_lanes"
+    assert not gate.orelse
     source = Path(agent_mod.__file__).read_text(encoding="utf-8")
-    assert "load_dev_boot_guard(JOB_READING).check_pin" in source
-    assert sys.modules[agent_mod.__name__] is agent_mod
+    assert source.count('"check_pin"') == 1
+
+
+def test_a_dev_agent_runs_the_pin_check_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class _Module:
+        @staticmethod
+        def check_pin() -> None:
+            calls.append("check_pin")
+
+    monkeypatch.setattr(agent_mod, "load_dev_boot_guard", lambda name: _Module)
+    gate = _pin_check_gate()
+    assert ast.unparse(gate.body[0]) == (
+        "await self._offload(self._job_reading, 'check_pin')"
+    )
+    _bare_agent({EnumRuntimeLane.DEV})._job_reading("check_pin")
+    assert calls == ["check_pin"]
+
+
+def test_a_pin_check_load_error_does_not_stop_the_agent(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def _broken(name: str) -> Any:
+        raise ImportError("the module set did not load")
+
+    monkeypatch.setattr(agent_mod, "load_dev_boot_guard", _broken)
+    agent = _bare_agent({EnumRuntimeLane.DEV})
+    agent._job_reading("check_pin")
+    agent._job_reading("check_pin")
+    assert caplog.text.count("deploy job reading check_pin failed") == 2
+
+
+def test_a_terminal_publish_error_does_not_skip_the_rest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _broken(name: str) -> Any:
+        raise OSError("the contract could not be read")
+
+    monkeypatch.setattr(agent_mod, "load_dev_boot_guard", _broken)
+    _bare_agent({EnumRuntimeLane.DEV})._job_reading("publish", object(), agent_mod)
+
+
+def test_the_terminal_publish_goes_through_the_guard_before_clear_settling() -> None:
+    source = Path(agent_mod.__file__).read_text(encoding="utf-8")
+    publish = source.index('self._job_reading("publish"')
+    assert publish < source.index("self.job_store.clear_settling(cid)", publish)
+
+
+def test_the_contract_is_parsed_once_and_a_failed_read_logs_once_per_interval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    reads: list[Path] = []
+    original = runtime_mod._contract_settings
+
+    def _counting(path: Path) -> Any:
+        reads.append(path)
+        return original(path)
+
+    monkeypatch.setattr(runtime_mod, "_contract_settings", _counting)
+    monkeypatch.setattr(runtime_mod, "_pin_settings", [])
+    monkeypatch.setattr(runtime_mod, "_pin_last_check", [])
+    monkeypatch.delenv("DEPLOY_AGENT_STATE_DIR", raising=False)
+    for _ in range(5):
+        assert runtime_mod.check_pin(force=True) is None
+    assert len(reads) == 1
+
+    def _failing(path: Path) -> Any:
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(runtime_mod, "_contract_settings", _failing)
+    monkeypatch.setattr(runtime_mod, "_pin_settings", [])
+    monkeypatch.setattr(runtime_mod, "_pin_last_check", [])
+    caplog.clear()
+    for _ in range(5):
+        runtime_mod.check_pin()
+    assert caplog.text.count("pin alarm check skipped") == 1
+
+
+def test_the_alarm_owner_is_the_item_lane_and_names_no_host() -> None:
+    settings = runtime_mod.load_settings(agent_mod)
+    assert settings["alarm_owner"] == "swarm-item-lane-OMN-24562"
+    assert "h201" not in str(settings["alarm_job_owner_line"])

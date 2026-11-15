@@ -100,7 +100,11 @@ def _request_id(request: ModelDeployJobReadingRequest) -> str:
 
 
 def _pin_request_id(branch: str, expires_at: datetime, now: datetime) -> str:
-    """One id per pin and clock hour: a retry within the hour is a duplicate, the next hour re-alarms."""
+    """One id per pin and clock hour, for the one row ``build_pin_alarm_row`` builds in that hour.
+
+    The row is identical for every tick of the hour, so a retry within the hour is a
+    duplicate to the append; the next clock hour is a new id and a new row.
+    """
     bucket = now.astimezone(UTC).strftime("%Y%m%dT%H")
     return str(
         uuid.uuid5(
@@ -218,13 +222,20 @@ class HandlerDeployJobReading:
         expires_at: datetime,
         now: datetime,
     ) -> str | None:
-        """The alarm row of a live code-ref pin inside the window before its expiry, else ``None``."""
+        """The alarm row of a live code-ref pin inside the window before its expiry, else ``None``.
+
+        The row is a function of the pin and the clock hour of ``now`` (its stamp and
+        ``hours_left`` are those of the hour's start), so every tick of one hour builds
+        the identical row: the work-ledger append answers duplicate for it, where a row
+        that changed under one request id would be refused.
+        """
         window = self._settings["pin_alarm_window_hours"]
         hours = float(window) if isinstance(window, int | float) else 0.0
-        left = (expires_at - now).total_seconds() / 3600
-        if left > hours:
+        if (expires_at - now).total_seconds() / 3600 > hours:
             return None
-        cells = self._alarm_head("pin-near-expiry", now)
+        bucket = now.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+        left = (expires_at - bucket).total_seconds() / 3600
+        cells = self._alarm_head("pin-near-expiry", bucket)
         cells += [
             f"pin_branch={_token(branch)}",
             f"pin_pr={pr}",
