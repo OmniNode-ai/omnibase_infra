@@ -550,7 +550,7 @@ class DeployAgent:
         self._stability_follow_attempted: set[str] = set()
         self._stability_follow_last_verdict: EnumStabilityFollowVerdict | None = None
         self._stability_read_running_ref = load_dev_boot_guard().healthy_ref_reader(
-            _runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST),
+            lambda: _runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST),
             read_running_ref,
         )
         # OMN-20864: the restore of a lane with no running runtime, and its seams.

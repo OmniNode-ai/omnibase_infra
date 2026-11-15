@@ -82,8 +82,13 @@ requirements:
   - id: req-omn24562-stability-follow-unhealthy
     statement: The stability follow reads an unhealthy stability runtime as running no revision, so a parked runtime built from the followed tag is rebuilt instead of reading up to date.
     acceptance:
-      - id: AC15
-        statement: 'AC15: the stability follow decides FOLLOW when the stability runtime is unhealthy and UP_TO_DATE when it is healthy on the tag -- falsifier: scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py fails at the merge base'
+      - id: AC26
+        statement: 'AC26: the stability follow decides FOLLOW when the stability runtime is unhealthy and UP_TO_DATE when it is healthy on the tag -- falsifier: scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py fails at the merge base'
+  - id: req-omn24562-stability-config-lazy
+    statement: The deploy agent resolves the stability lane's runtime container only when the stability follow reads it, never in its constructor, so a bad stability fold policy fails the stability follow alone and every agent still starts.
+    acceptance:
+      - id: AC27
+        statement: 'AC27: a dev agent whose stability fold policy cannot resolve starts, and its stability reader answers None without raising; the agent''s own stability reader reads the stability runtime container and reads an unhealthy one as the empty ref -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py -k "bad_stability_fold_policy or stability_reader_reads" fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -314,12 +319,21 @@ dod_evidence:
       - check_type: command
         check_value: grep -q 'x-composed-runtime-build' docker/docker-compose.stability-t*.yml
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn24562-ac15-stability-follow-unhealthy
+  - id: dod-omn24562-ac26-stability-follow-unhealthy
     description: An unhealthy stability runtime reads as running no revision and the follow rebuilds it; a healthy one on the tag reads up to date.
     source: manual
     binds_ac:
-      - AC15
+      - AC26
     checks:
       - check_type: test_passes
         check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_follow_unhealthy_omn24562.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac27-stability-config-lazy
+    description: 'AC27: an agent with a bad stability fold policy starts and only its stability read fails; the agent''s stability reader is wired to the stability runtime container.'
+    source: manual
+    binds_ac:
+      - AC27
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py -q -p no:randomly --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
