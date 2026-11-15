@@ -16,9 +16,15 @@ node's other private facts already live in:
 
 The overlay is read from the roots ``ONEX_SKILL_OVERLAY_ROOTS`` declares first (the one overlay root
 resolver renders that list: store root, canonical overlays clone, declared roots), then from the
-workspace config root. A missing overlay, an overlay with no
-``event_bus``, a malformed block and a lane the declaration does not bind are refused with the
-overlay path. Nothing falls back to a default broker.
+workspace config root. When the node's own overlay is missing or has no ``event_bus`` key, the
+resolver reads one shared overlay named ``run_node_default`` (the same lookup order: the overlay
+roots first, then the workspace config root) and binds the node on the lane that overlay declares;
+the binding's overlay path is the default file that answered. A node's own ``event_bus`` always
+wins, and a node overlay whose ``event_bus`` is malformed is refused as before with its own path
+and never falls back. When the default overlay is missing or has no ``event_bus`` either, the
+original refusal for the node stands, naming its own overlay path. A malformed block and a lane the
+declaration does not bind are refused with the overlay path that named them. No environment
+variable or default broker answers for a lane; it comes from an overlay file alone.
 """
 
 from __future__ import annotations
@@ -58,6 +64,17 @@ from omnibase_infra.runtime.overlay.contract_env_ref import expand_contract_env_
 _EVENT_BUS_KEY: Final[str] = "event_bus"
 _KIND_NAMES: Final[tuple[str, str]] = ("kafka", "inmemory")
 _OVERLAY_ROOTS_ENV: Final[str] = "ONEX_SKILL_OVERLAY_ROOTS"
+_DEFAULT_OVERLAY_KEY: Final[str] = "run_node_default"
+
+
+class MissingOrNoKeyOverlayError(ModelNodeBrokerResolutionError):
+    """The overlay file does not exist, or it holds no ``event_bus`` key.
+
+    ``_read_event_bus`` raises this for those two cases only; a node whose own overlay
+    did not answer may be reached through the ``run_node_default`` overlay, while every
+    other refusal (malformed ``event_bus``, an unreadable or non-mapping file) propagates
+    untouched.
+    """
 
 
 def _workspace_root_from_environment() -> Path | None:
@@ -106,11 +123,31 @@ class HandlerNodeBrokerResolve:
         )
 
     def handle(self, request: ModelNodeBrokerResolveRequest) -> ModelNodeBrokerBinding:
-        """Read the node's overlay and resolve it to a binding, or raise with the overlay path."""
-        overlay_path = self._roots_overlay(request)
-        if overlay_path is None:
-            overlay_path = self._overlay_path(request)
-        declared = self._read_event_bus(request.overlay_key, overlay_path)
+        """Read the node's overlay and resolve it to a binding, or raise with the overlay path.
+
+        When the node's own overlay is missing or has no ``event_bus`` key, one shared
+        overlay (``run_node_default``) is read with the same lookup order and the node
+        is bound on the lane it declares; the binding's overlay path is that file.
+        """
+        return self._handle_overlay_key(request, request.overlay_key)
+
+    def _handle_overlay_key(
+        self, request: ModelNodeBrokerResolveRequest, overlay_key: str
+    ) -> ModelNodeBrokerBinding:
+        overlay_path = self._locate_overlay(overlay_key, request.workspace_root)
+        try:
+            declared = self._read_event_bus(overlay_key, overlay_path)
+        except MissingOrNoKeyOverlayError as node_refusal:
+            # The node's own overlay did not answer; one shared overlay may. If the
+            # default overlay does not answer either, the node's original refusal stands.
+            default_path = self._locate_overlay(
+                _DEFAULT_OVERLAY_KEY, request.workspace_root
+            )
+            try:
+                declared = self._read_event_bus(_DEFAULT_OVERLAY_KEY, default_path)
+                overlay_path = default_path
+            except MissingOrNoKeyOverlayError:
+                raise node_refusal
         if declared.type == EnumEventBusType.INMEMORY:
             return ModelNodeBrokerBinding(
                 bus_type=EnumEventBusType.INMEMORY, overlay_path=overlay_path
@@ -119,30 +156,30 @@ class HandlerNodeBrokerResolve:
             str(declared.lane), request.workspace_root, overlay_path
         )
 
-    def _roots_overlay(self, request: ModelNodeBrokerResolveRequest) -> Path | None:
-        """The first overlay under the overlay roots, or None to fall back to the workspace root."""
+    def _locate_overlay(self, overlay_key: str, workspace_root: Path | None) -> Path:
+        """The overlay for ``overlay_key``: the overlay roots first, else the workspace root."""
         for root in _declared_overlay_roots():
-            candidate = Path(root) / request.overlay_key / "overlay.yaml"
+            candidate = Path(root) / overlay_key / "overlay.yaml"
             if candidate.is_file():
                 return candidate
-        return None
+        return self._workspace_overlay_path(overlay_key, workspace_root)
 
-    def _overlay_path(self, request: ModelNodeBrokerResolveRequest) -> Path:
-        relative = Path(
-            "config", "onex", "overlays", request.overlay_key, "overlay.yaml"
-        )
-        if request.workspace_root is None:
+    def _workspace_overlay_path(
+        self, overlay_key: str, workspace_root: Path | None
+    ) -> Path:
+        relative = Path("config", "onex", "overlays", overlay_key, "overlay.yaml")
+        if workspace_root is None:
             raise ModelNodeBrokerResolutionError(
-                f"{request.overlay_key} names no broker: no workspace root is set, so the node's "
+                f"{overlay_key} names no broker: no workspace root is set, so the node's "
                 f"overlay (<workspace config root>/{relative}) cannot be located. Set "
                 "$OMNIBASE_PATH to the workspace root.",
                 overlay_path=f"<workspace config root>/{relative}",
             )
         try:
-            declaration = resolve_lane_declaration_path(request.workspace_root)
+            declaration = resolve_lane_declaration_path(workspace_root)
         except DelegateLaneSelectionError as exc:
             raise ModelNodeBrokerResolutionError(
-                f"{request.overlay_key} names no broker: the workspace config root that holds its "
+                f"{overlay_key} names no broker: the workspace config root that holds its "
                 f"overlay (<workspace config root>/{relative}) cannot be located. {exc}",
                 overlay_path=f"<workspace config root>/{relative}",
             ) from exc
@@ -153,6 +190,8 @@ class HandlerNodeBrokerResolve:
     def _read_event_bus(
         self, node_id: str, overlay_path: Path
     ) -> ModelNodeEventBusOverlay:
+        """The overlay's ``event_bus``; ``MissingOrNoKeyOverlayError`` for a
+        missing file or key only."""
         refusal = (
             f"{node_id} declares no event_bus in its contract overlay {overlay_path}"
         )
@@ -161,7 +200,7 @@ class HandlerNodeBrokerResolve:
             "the broker address stays in the lane declaration."
         )
         if not overlay_path.is_file():
-            raise ModelNodeBrokerResolutionError(
+            raise MissingOrNoKeyOverlayError(
                 f"{refusal}: the file does not exist. {declaration}",
                 overlay_path=str(overlay_path),
             )
@@ -178,7 +217,7 @@ class HandlerNodeBrokerResolve:
                 overlay_path=str(overlay_path),
             )
         if _EVENT_BUS_KEY not in raw:
-            raise ModelNodeBrokerResolutionError(
+            raise MissingOrNoKeyOverlayError(
                 f"{refusal}: the file has no event_bus key. {declaration}",
                 overlay_path=str(overlay_path),
             )

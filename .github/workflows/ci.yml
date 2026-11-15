@@ -391,6 +391,11 @@ jobs:
       - name: Check no localhost env fallbacks (OMN-10732)
         run: uv run pre-commit run no-env-fallbacks --all-files
 
+      # OMN-24480: the count of files that read or write the old ledger file may only fall; the hook
+      # of the same id runs omnimarket's census node at a pinned commit against this checkout.
+      - name: Ledger file census ratchet (OMN-24480)
+        run: uv run pre-commit run ledger-file-census-ratchet --all-files
+
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py
 
@@ -1662,7 +1667,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 579ff39fbcd0d3d74633f15c18b163e26dfae71c # .github/sibling-pins.yaml
+          ref: 3c24996842fdf6c06d2dc7e6660a584a6cbf0abe # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |

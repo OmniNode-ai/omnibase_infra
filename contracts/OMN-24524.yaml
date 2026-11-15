@@ -1,0 +1,52 @@
+schema_version: 1.0.0
+ticket_id: OMN-24524
+title: Hook venv repair keeps installed lock-listed extras
+summary: The hook venv reconcile names, on its uv sync and its dry-run plan, every optional extra of the project whose requirements are all installed in the venv, so a lock-listed extra installed at its locked revision no longer reads as a branch install the sync would discard; the refusal for any other git install the plan would replace or drop is unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24524-extras
+    statement: The hook venv reconcile passes --extra for each project extra whose requirements are all installed, and still refuses a git install the plan would drop.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a hook environment holding an optional extra at its locked revision syncs without the refusal and keeps that extra -- falsifier: pytest tests/unit/nodes/node_reconcile_workspace_venvs/test_hook_venv_extras.py -q'
+      - id: AC2
+        statement: 'AC2: a git install that is not covered by any lock-listed extra is still refused when the sync would drop it -- falsifier: pytest tests/unit/nodes/node_reconcile_workspace_venvs/test_hook_venv_extras.py -q'
+      - id: AC3
+        statement: 'AC3: integrated: on h201 the reconcile for the omniclaude root exits 0 and the next host-drift reading no longer lists the dispatch-venv line for that root -- falsifier: read the host-drift fleet state at the next tick for the omniclaude dispatch-venv key on h201'
+evidence_requirements:
+  - kind: tests
+    description: The hook venv reconcile tests pass at the pushed head.
+    command: uv run pytest tests/unit/nodes/node_reconcile_workspace_venvs -q -n 0 --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24524-tests
+    description: AC1 and AC2 proven by the named tests; AC3 is read on h201 after the reconcile runs from the branch and named in the pull request.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_reconcile_workspace_venvs tests/integration/handlers/test_hook_venv_extras_omn24524.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24524-deploy-conditions
+    description: 'Deploy probe the hosted runner can run: the handler at the checked-out commit holds the string ''_installed_extras''; it does not exist at the merge base, so the probe fails there.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/hook_venv_reconcile/handler_reconcile_workspace_venvs.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "_installed_extras" > /dev/null'
+        cwd: .
+  - id: dod-omn24524-integration-proof
+    description: AC3 is read on h201 after the reconcile runs from the branch; the host, revision and observation are named in the pull request.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: uv run onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane venv-h201-6803 -- uv run pytest tests/unit/nodes/node_reconcile_workspace_venvs/test_hook_venv_extras.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
