@@ -58,8 +58,10 @@ def _dev_lane_service_text() -> str:
     """The page service's own block in the dev-lane file, as written."""
     text = _DEV_LANE.read_text(encoding="utf-8")
     start = text.index(f"\n  {_SERVICE}:\n")
-    end = text.index("\nvolumes:\n", start)
-    return text[start:end]
+    # OMN-24476: the cloud_migrations volume was the file's only top-level volume, so
+    # the page service is now the last block; with no volumes section it runs to the end.
+    end = text.find("\nvolumes:\n", start)
+    return text[start:] if end == -1 else text[start:end]
 
 
 def _render(compose: Path, env_values: dict[str, str]) -> dict[str, Any]:

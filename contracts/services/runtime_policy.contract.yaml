@@ -317,6 +317,15 @@ profiles:
           # (infra-routing-decisions-postgres), which fences the attach of
           # projection_infra_routing_decisions in main. It is retired by name too.
           - infra-routing-decisions-consumer
+          # OMN-24476: the separate onex-api container and the two omninode_cloud
+          # migration one-shots only it read are gone from the dev lane (the operator
+          # ruled the separate HTTP API a mistake for the local runtime, 2026-11-10,
+          # and consented to its deletion, 2026-11-14T19:01:14Z). The deploy agent
+          # never names, rolls, waits on or recreates them; the previous revision's
+          # containers are retired by name.
+          - onex-api
+          - cloud-migration-files
+          - cloud-migration
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof

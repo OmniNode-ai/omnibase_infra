@@ -149,7 +149,7 @@ def _render_with(service: dict[str, Any]) -> list[str]:
     """Verify a good slot render that carries ``service`` as the build-only image."""
     rendered = _slot_render()
     rendered["services"][BUILD_ONLY_IMAGE] = copy.deepcopy(service)
-    problems: list[str] = verifier.check(rendered, policy.resolve_slot(1), False)
+    problems: list[str] = verifier.check(rendered, policy.resolve_slot(1))
     return problems
 
 
@@ -249,5 +249,5 @@ def test_the_kind_entry_does_not_admit_a_second_build_service() -> None:
     rendered = _slot_render()
     rendered["services"][BUILD_ONLY_IMAGE] = copy.deepcopy(RENDERED_SHAPE)
     rendered["services"]["another-image"] = copy.deepcopy(RENDERED_SHAPE)
-    problems = verifier.check(rendered, policy.resolve_slot(1), False)
+    problems = verifier.check(rendered, policy.resolve_slot(1))
     assert any("not the slot's" in p and "another-image" in p for p in problems)
