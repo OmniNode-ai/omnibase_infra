@@ -1,0 +1,31 @@
+schema_version: 1.0.0
+ticket_id: OMN-24562
+title: Track the h202 cpu-boost-off unit under deploy/systemd
+summary: The cpu-boost-off oneshot that holds CPU boost off on lab host h202 is tracked in deploy/systemd with its ordering fixed to After=sysinit.target.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24562-boost-unit
+    statement: The cpu-boost-off unit is tracked in the repository with After=sysinit.target and WantedBy=multi-user.target.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: deploy/systemd/cpu-boost-off.service carries After=sysinit.target and WantedBy=multi-user.target -- falsifier: grep -F After=sysinit.target deploy/systemd/cpu-boost-off.service'
+evidence_requirements:
+  - kind: tests
+    description: The tracked unit holds the ordering line.
+    command: grep -F After=sysinit.target deploy/systemd/cpu-boost-off.service
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24562-unit
+    description: AC1 proven by reading the tracked unit at the checked-out commit.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: grep -F After=sysinit.target deploy/systemd/cpu-boost-off.service
+        cwd: .
