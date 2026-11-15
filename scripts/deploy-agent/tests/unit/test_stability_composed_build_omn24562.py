@@ -22,13 +22,15 @@ from deploy_agent.events import (
     PhaseStatus,
     Scope,
 )
-from deploy_agent.executor import DeployExecutor, lane_config_for
-
-from omnibase_infra.nodes.node_setup_local_provision_effect.runtime_cost_estimator_build import (
-    STABILITY_TEST_COMPOSED_RUNTIME_SERVICES,
-)
+from deploy_agent.executor import DeployExecutor, lane_config_for, load_dev_boot_guard
 
 pytestmark = pytest.mark.unit
+
+# The agent loads its host effects from its own checkout by file path (OMN-21279); the
+# agent's venv carries a released omnibase_infra that need not hold this module.
+STABILITY_TEST_COMPOSED_RUNTIME_SERVICES = load_dev_boot_guard(
+    "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+).STABILITY_TEST_COMPOSED_RUNTIME_SERVICES
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 _OVERLAY = f"docker-compose.{EnumRuntimeLane.STABILITY_TEST.value}.yml"

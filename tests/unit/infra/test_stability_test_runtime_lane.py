@@ -148,7 +148,10 @@ def test_stability_lane_runtime_services_do_not_reuse_production_names() -> None
         assert "stability-test" in container_name
         assert container_name not in PRODUCTION_CONTAINER_NAMES
         assert "image" not in service
-        assert "build" not in service
+        # OMN-24562: the runtime services build on the composed omnimarket image.
+        assert service["build"]["additional_contexts"] == {
+            "infra-runtime": "service:composed-runtime-base-image"
+        }
         assert service["restart"] == "unless-stopped"
 
 

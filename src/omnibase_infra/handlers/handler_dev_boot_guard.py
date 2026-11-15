@@ -181,10 +181,18 @@ def run_preflight(
     naming the issuer and the failed phase (OMN-24048). Evidence only: announcing never
     raises and never replaces the preflight's own error.
     """
+    execution = sys.modules["deploy_agent.executor"]
+    # OMN-24562: a stability build declares only its live pin's own open PR; the
+    # pin is read from the agent's STATE_DIR, where the stability follow reads it.
+    lane = getattr(command, "runtime_lane", None)
+    execution.load_dev_boot_guard("handler_dev_lane_code_ref_pin").admit_open_pr(
+        lane is execution.EnumRuntimeLane.STABILITY_TEST,
+        str(getattr(command, "open_pr", "") or ""),
+        Path(sys.modules["deploy_agent.agent"].STATE_DIR),
+    )
     try:
         executor.preflight(on_phase_update=on_phase_update)
     except Exception as error:
-        execution = sys.modules["deploy_agent.executor"]
         _roll_events_module(execution).announce_preflight_failure(
             execution,
             command.model_dump(mode="json"),

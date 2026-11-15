@@ -57,6 +57,16 @@ requirements:
     acceptance:
       - id: AC16
         statement: 'AC16: while a code-ref pin is live the stability follow command carries the pin head as its git_ref, and without a live pin it carries the tracking ref -- falsifier: scripts/deploy-agent/tests/unit/test_stability_follow_builds_pinned_head_omn24562.py fails at the merge base'
+  - id: req-omn24562-stability-runtime-lane-test
+    statement: The stability runtime lane test reads the runtime services as the composed build the overlay declares.
+    acceptance:
+      - id: AC17
+        statement: 'AC17: the stability runtime lane unit test passes on the integration, asserting the composed build context on the runtime services -- falsifier: tests/unit/infra/test_stability_test_runtime_lane.py fails at the merge base'
+  - id: req-omn24562-stability-follow-open-pr
+    statement: The stability follow of a live code-ref pin builds the pinned branch as a declared open pull request, and only the stability and dev lanes may; prod keeps refusing a branch build.
+    acceptance:
+      - id: AC18
+        statement: 'AC18: a stability command carries an open pull request declaration with its rollback declaration, prod refuses one, and the first-party policy admits the stability lane -- falsifier: scripts/deploy-agent/tests/unit/test_open_pr_declaration_omn21928.py or tests/unit/validation/test_first_party_open_pr_context_omn21928.py fails at the merge base'
   - id: req-omn24562-stability-rollback-waiver
     statement: The deploy agent runs a stability runtime deploy that has no retained rollback point only when its own probe reads every runtime target of the lane down with no timeout, records on the job that it ran without one, and never applies the waiver to the prod lane.
     acceptance:
@@ -66,6 +76,11 @@ requirements:
         statement: 'AC5: a stability runtime deploy with no retained rollback point is refused when the probe reads the lane HEALTHY or UNKNOWN (a timeout or a probe error) -- falsifier: the healthy and unknown tests in the same file pass only with the refusal'
       - id: AC6
         statement: 'AC6: the waiver is never granted to the prod or dev lane and probes nothing for them -- falsifier: the prod and dev control test fails at the head'
+  - id: req-omn24562-stability-own-open-pr
+    statement: The stability lane builds a declared open pull request only when it is the one its live code-ref pin declares; any other declaration on that lane, or any declaration with no live pin, is refused before the build.
+    acceptance:
+      - id: AC22
+        statement: 'AC22: a stability build declaring a different open pull request, another head of the pinned one, or any declaration with no live pin is refused in the preflight, and the follow''s own declaration is admitted -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_follow_builds_pinned_head_omn24562.py -k "different_declared_open_pr or no_live_pin or preflight_refuses" fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: The stability compose-environment and guard tests pass at the pushed head and fail at the merge base, where the render is fenced to the dev lane.
@@ -236,6 +251,27 @@ dod_evidence:
       - check_type: test_passes
         check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_follow_builds_pinned_head_omn24562.py tests/unit/test_stability_follows_dev_tag_omn19998.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac17-stability-runtime-lane-test
+    description: The stability runtime lane unit test passes with the composed build declared on the runtime services.
+    source: manual
+    binds_ac:
+      - AC17
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_stability_test_runtime_lane.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac18-stability-follow-open-pr
+    description: A stability command carries the open pull request declaration, prod refuses it, and the policy data admits the stability lane.
+    source: manual
+    binds_ac:
+      - AC18
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_open_pr_declaration_omn21928.py tests/unit/test_stability_follow_builds_pinned_head_omn24562.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-rollback-waiver
     description: 'AC4, AC5 and AC6: UNHEALTHY allows and records, HEALTHY refuses, UNKNOWN refuses, prod and dev never waived; the existing rollback tests still pass'
     source: manual
@@ -247,3 +283,12 @@ dod_evidence:
       - check_type: command
         check_value: uv run pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -p no:randomly --no-cov
         cwd: .
+  - id: dod-omn24562-ac22-stability-own-open-pr
+    description: 'AC22: the stability lane refuses a declared open PR that is not its live pin''s own, in the preflight before the build, and admits the follow''s own declaration.'
+    source: manual
+    binds_ac:
+      - AC22
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_follow_builds_pinned_head_omn24562.py scripts/deploy-agent/tests/unit/test_open_pr_declaration_omn21928.py -q -p no:randomly --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
