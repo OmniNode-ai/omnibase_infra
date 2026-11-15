@@ -149,9 +149,10 @@
 #
 #   EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env
 #
-# systemd's parser is safe for it: the file is one `DEPLOY_AGENT_HMAC_SECRET=<hex>`
-# line, and a hex key has no quote or backslash for the OMN-18073 mangling to
-# touch. The file is NOT optional (no leading `-`): an unreadable file fails the
+# systemd's parser is safe for it: the file is one `DEPLOY_AGENT_HMAC_SECRET=<key>`
+# line, and the generated key is letters, digits, `-` and `_` only (the secret store
+# node refuses to write any other value), so it has no quote or backslash for the
+# OMN-18073 mangling to touch. The file is NOT optional (no leading `-`): an unreadable file fails the
 # start loudly, where a missing key would start an agent that rejects every
 # signed command. The value is the secret store's DEPLOY_AGENT_DEV_HMAC_SECRET,
 # the dev-only entry that node_secret_store_effect generates; the file is its
