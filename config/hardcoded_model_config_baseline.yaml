@@ -1871,9 +1871,6 @@ entries:
   - path: scripts/publish_pr_webhook_event.py
     family: O
     content_sha1: 7c8576367983dc392c1e512cecf771f583f0f16e
-  - path: scripts/publish_test_failure_baseline.py
-    family: O
-    content_sha1: b39e6da24c5a5b6c2f9ee08981ce4b5dfa652512
   - path: scripts/pull-all.sh
     family: O
     content_sha1: 642618de1bfe68c92e089a092eebb724bb89c0ed
