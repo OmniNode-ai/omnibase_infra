@@ -10,6 +10,7 @@ stability lane retires exactly the profile-mapped services, and nothing else.
 from __future__ import annotations
 
 import subprocess
+from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -77,6 +78,48 @@ def test_stability_retires_the_old_effects_container_and_keeps_volumes() -> None
         ["docker", "rm", "935bf70c5d47"],
     ]
     assert all("-v" not in c and "--volumes" not in c for c in calls)
+
+
+def test_stability_retires_only_containers_of_its_own_compose_project() -> None:
+    """Two lanes' runtime-effects containers sit in one docker census; one is retired."""
+    own = STABILITY_PROJECT.split("=", 2)[2]
+    census = {
+        "own-effects": {"project": own, "service": "runtime-effects"},
+        "own-main": {"project": own, "service": "omninode-runtime"},
+        "other-effects": {"project": "other-lane", "service": "runtime-effects"},
+        "dev-effects": {"project": "omnibase-infra-dev", "service": "runtime-effects"},
+    }
+    assert own not in {"other-lane", "omnibase-infra-dev"}
+    calls: list[list[str]] = []
+
+    def run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        if cmd[1] != "ps":
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        wanted = {
+            key: value
+            for flag, spec in pairwise(cmd)
+            if flag == "--filter"
+            for key, value in [
+                spec.removeprefix("label=com.docker.compose.").split("=", 1)
+            ]
+        }
+        ids = [
+            name
+            for name, labels in census.items()
+            if all(labels[key] == value for key, value in wanted.items())
+        ]
+        return subprocess.CompletedProcess(cmd, 0, stdout="\n".join(ids), stderr="")
+
+    with patch("deploy_agent.executor._run", side_effect=run):
+        DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.STABILITY_TEST)
+
+    assert [c for c in calls if c[1] != "ps"] == [
+        ["docker", "stop", "--time", "30", "own-effects"],
+        ["docker", "rm", "own-effects"],
+    ]
+    touched = {name for c in calls if c[1] != "ps" for name in c[2:]}
+    assert touched.isdisjoint({"own-main", "other-effects", "dev-effects"})
 
 
 def test_stability_with_no_old_container_removes_nothing() -> None:
