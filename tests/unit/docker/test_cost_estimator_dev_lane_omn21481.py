@@ -119,10 +119,10 @@ def test_ac1_dev_lane_declares_the_estimator_page_service() -> None:
     assert "/cost-estimator" in " ".join(svc["healthcheck"]["test"])
 
 
-def test_ac1_the_estimator_api_stays_declared_with_its_health_route() -> None:
-    api = _services(_DEV_LANE)[_API]
-    assert "8090:8000" in api["ports"]
-    assert "http://localhost:8000/health" in " ".join(api["healthcheck"]["test"])
+def test_ac1_the_estimator_api_is_no_longer_declared_on_the_dev_lane() -> None:
+    # OMN-24476: the separate onex-api container is gone from the dev lane, so
+    # the page's /api/estimator/* proxy has no upstream here.
+    assert _API not in _services(_DEV_LANE)
 
 
 def test_ac1_the_page_image_is_tag_referenced_and_never_pulled() -> None:

@@ -52,7 +52,6 @@
 # The preflight derives which of the two it should be, per name, from the
 # runtime-policy key set -- it is not annotated here, so it cannot go stale.
 
-ALPHA_INVITE_ADMIN_SECRET
 DEV_KAFKA_SASL_PASSWORD
 DEV_KAFKA_SASL_USERNAME
 # Broker advertised address, shared with the base command (OMN-21279).
@@ -68,34 +67,14 @@ DEV_RUNTIME_EFFECTS_READY_BOUND_SECONDS
 # credential namespace rule. Contract-rendered into docker/runtime-policy.env,
 # never an operator value.
 DEV_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON
-KEYCLOAK_ADMIN_CLIENT_SECRET
-# OMN-17530 provenance: the onex-api service image tag. An image tag, never a
-# credential; resolved from the operator env store, which is why it has no
-# compose default -- a stale silent default would run last week's API image.
-ONEX_API_IMAGE
-# OMN-17530 provenance: the cloud-migration-files service image tag. Resolved
-# from the operator env store by migration-corpus hash (the image's
-# /migrations/MANIFEST must match omninode_infra db/migrations at the deployed
-# ref), never by tag recency -- docker/migrations/cloud/run-cloud-migrations.sh
-# refuses a MANIFEST-less image by name and has no lexicographic fallback.
-ONEX_CLOUD_MIGRATE_IMAGE
 # OMN-18109 provenance: the password half of the omninode_runtime DSN the
 # three single-domain standalone projection writers connect with. Already
 # required by docker/docker-compose.infra.yml's own ${VAR:?} render of
 # OMNINODE_INTERNAL_DB_URL, so this declares a name the dev lane already
 # needed -- it adds no new operator-supplied value on any host.
 OMNINODE_RUNTIME_PASSWORD
-ONEX_LAB_TENANT_STATE_DIR
 ROLE_OMNIDASH_PASSWORD
-ROLE_OMNINODE_PASSWORD
-STRIPE_API_KEY
-STRIPE_WEBHOOK_SECRET
-TENANT_BOOTSTRAP_ADMIN_SECRET
-TENANT_CLIENTS_ADMIN_SECRET
-TENANT_OFFBOARD_ADMIN_SECRET
 # OMN-17454 provenance: the tenant projection DSN for the three split
 # standalone writers. The base compose already requires this password for
 # ONEX_TENANT_DB_URL; the overlay now names that requirement too.
 TENANT_PROJECTION_WRITER_PASSWORD
-TENANT_TOPICS_ADMIN_SECRET
-VALKEY_PASSWORD

@@ -252,29 +252,6 @@ services:
       POSTGRES_USER: "role_omniintelligence_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
       POSTGRES_PASSWORD: "${ROLE_OMNIINTELLIGENCE_PASSWORD:?ROLE_OMNIINTELLIGENCE_PASSWORD must be set}"
   # =========================================================================
-  # The gateway's existing corpus and runner, scoped to the slot. The corpus
-  # volume must also be private: its copier deletes the previous contents.
-  cloud-migration-files:
-    profiles: !override ["prepr-migrate"]
-    container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-cloud-migration-files"
-    depends_on: !override []
-    volumes: !override
-      - prepr_cloud_migrations:/work
-    labels: !override
-      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
-  cloud-migration:
-    profiles: !override ["prepr-migrate"]
-    container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-cloud-migration"
-    depends_on: !override []
-    volumes: !override
-      - prepr_cloud_migrations:/work
-      - ../docker/migrations/cloud/run-cloud-migrations.sh:/run-cloud-migrations.sh:ro
-    environment:
-      DB_NAME: "omninode_cloud_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
-      DB_USER: "role_omninode_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
-      PGPASSWORD: "${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD must be set}"
-    labels: !override
-      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
   # THE SLOT'S TWELVE. Names, ports, volumes and namespace only -- every other
   # property is inherited, which is the whole reason this is an overlay.
   #
@@ -530,58 +507,6 @@ services:
       - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
       - "com.omninode.service=projection-live-events-writer"
       - "com.omninode.layer=runtime"
-  # -------------------------------------------------------------------------
-  # The slot's own gateway API.
-  #
-  # It carries its own profile, `prepr-gateway`, enabled by the entrypoint
-  # alongside the runtime family. Every claimed slot mints its own tenant.
-  #
-  # onex-api is IMAGE-REFERENCED (${ONEX_API_IMAGE}), not lane-built: it is a
-  # self-contained application in the omninode_infra clone with no omnibase
-  # wheel, so a slot cannot build it from the branch under test the way it
-  # builds the runtime family. OMN-18891 added the topic-namespace surface to
-  # that application, but whether the TAG on this host carries that surface is
-  # a property of when the image was last built, not of the branch. A tag
-  # predating OMN-18891 reads KAFKA_TOPIC_NAMESPACE and does nothing with it,
-  # so the container would publish UNPREFIXED into the dev lane's topics
-  # through exactly the path the isolation exists to protect.
-  #
-  # The entrypoint pins the local image digest and checks the running
-  # gateway's namespace transform before minting the slot tenant (OMN-18894).
-  # The descriptor records `gateway_started` so an omitted gateway never
-  # implies a gateway proof.
-  # -------------------------------------------------------------------------
-  onex-api:
-    profiles: !override ["prepr-gateway"]
-    restart: "on-failure:3"
-    container_name: "onex-api-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}"
-    depends_on: !override []
-    ports: !override
-      - "${PREPR_GATEWAY_PORT:?PREPR_GATEWAY_PORT must be set}:8000"
-    environment:
-      !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
-      OMNINODE_CLOUD_DB_URL: "postgresql://role_omninode_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}:${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD must be set - the slot's own role_omninode_<slot> credential}@postgres:5432/omninode_cloud_${ONEX_DB_SLOT}"
-      # Shared Valkey server, the slot's own logical index. The dev lane's URL
-      # carries no index and therefore uses 0, so no slot index collides with
-      # it as long as the policy table starts at 1 -- which it does, and a test
-      # asserts it.
-      WORKFLOW_RATE_LIMIT_VALKEY_URL: "redis://:${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set}@valkey:6379/${PREPR_VALKEY_DB_INDEX:?PREPR_VALKEY_DB_INDEX must be set}"
-      ONEX_API_BASE_URL: "http://onex-api-prepr-${ONEX_PREPR_SLOT}:8000"
-    volumes: !override
-      - ${ONEX_PREPR_TENANT_STATE_DIR:?ONEX_PREPR_TENANT_STATE_DIR must name a per-slot host directory this slot may write its own tenant credential into - prepr_verify_lane.sh creates it; it is NOT the dev lane's ONEX_LAB_TENANT_STATE_DIR, because two lanes writing one credential file is two lanes sharing a tenant}:/var/lib/onex-lab-tenant
-    labels: !override
-      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
-      - "com.omninode.service=onex-api"
-      - "com.omninode.layer=gateway"
-      # ---------------------------------------------------------------------------
-      # The network is JOINED, never created.
-      #
-      # `external: true` is what makes this true mechanically. Without it compose
-      # would create `omnibase-infra-network` if absent -- and the dangerous case is
-      # not absence, it is a slot brought up while the dev lane is down, creating the
-      # network with its own settings and owning it, so the dev lane's next bring-up
-      # attaches to a network a slot made and a slot's teardown can remove.
-      # ---------------------------------------------------------------------------
   # OMN-19513: the claude hook-events projection writer belongs to the primary
   # dev lane. A slot's lane is outside the node's own `runtime_lanes` scope, so a
   # slot's main runtime never attaches the node and a writer here would wire zero
@@ -603,8 +528,6 @@ networks:
 # would have mounted one is fenced.
 # ---------------------------------------------------------------------------
 volumes:
-  prepr_cloud_migrations:
-    name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-cloud-migrations"
   prepr_runtime_logs:
     name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime-logs"
   prepr_runtime_data:
