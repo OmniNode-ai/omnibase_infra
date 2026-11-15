@@ -61,11 +61,22 @@ dod_evidence:
     description: >-
       Deploy check the hosted runner can run: the agent's terminal publish calls the reading. The runtime read (the branch installed on h201 through runtime_code_ref_pin for the dev and stability lanes, and the reading row of the next real job read back from the ledger with its read time) is posted as a pull request comment naming the head and the revision running; it is not claimed by this check.
     source: manual
+    execution_scope: local_done_gate
     binds_ac:
       - AC4
     checks:
       - check_type: command
-        check_value: grep -q 'handler_deploy_job_reading' scripts/deploy-agent/deploy_agent/agent.py
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.handlers.handler_deploy_job_reading import HandlerDeployJobReading; print('deploy smoke ok', HandlerDeployJobReading.__name__)\""
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24617-ac4-agent-calls-reading
+    description: >-
+      The agent's terminal publish imports and calls the job reading handler (runs on the hosted runner).
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: grep -q 'load_dev_boot_guard(JOB_READING_RUNTIME).publish(' scripts/deploy-agent/deploy_agent/agent.py
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24617-integration-proof
     description: >-
