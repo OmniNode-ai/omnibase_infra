@@ -2041,23 +2041,23 @@ class DeployAgent:
                 with protection:
                     # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
                     # cache. prod pulls the pinned digest instead of rebuilding from a ref.
-                    lanes_off_guard = (EnumRuntimeLane.PROD, EnumRuntimeLane.DEV)
-                    needs_point = cmd.scope in (Scope.RUNTIME, Scope.FULL)
-                    needs_point = (
-                        needs_point and cmd.runtime_lane not in lanes_off_guard
+                    # OMN-24562: a stability lane read down by the guard's own
+                    # probe may deploy with no point; see the handler.
+                    rollback_point = load_dev_boot_guard(
+                        "handler_stability_rollback_waiver"
+                    ).admit_rollback_point(
+                        lane=cmd.runtime_lane,
+                        scope=cmd.scope,
+                        correlation_id=cid,
+                        record_dir=self.job_store.state_dir / "rollback-waivers",
+                        targets=lane_config_for(
+                            cmd.runtime_lane
+                        ).runtime_health_targets,
+                        probe=lambda **kw: self.executor._probe_runtime_health(**kw),
+                        capture=lambda: capture_rollback_point(
+                            self.executor, cmd.runtime_lane
+                        ),
                     )
-                    rollback_point = (
-                        capture_rollback_point(self.executor, cmd.runtime_lane)
-                        if needs_point
-                        else None
-                    )
-                    # Dev recovery belongs to the boot guard. Every other
-                    # non-prod runtime/full rebuild needs a retained point.
-                    if needs_point and rollback_point is None:
-                        raise RuntimeError(
-                            f"Refusing {cmd.runtime_lane.value} {cmd.scope.value} deploy: "
-                            "no healthy, retained rollback point"
-                        )
                     services_restarted = self.executor.rebuild_scope(
                         cmd.scope,
                         cmd.services,
