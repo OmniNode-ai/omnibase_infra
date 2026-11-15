@@ -125,6 +125,10 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "gate_store_state": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "gate_store_steps": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "experiment_arm_results": "omnimarket OMN-24286 (node_projection_experiment_result)",
+    "eval_item_scores": "omnimarket OMN-24174 (node_projection_eval_results)",
+    "eval_item_traces": "omnimarket OMN-24174 (node_projection_eval_results)",
+    "eval_run_closes": "omnimarket OMN-24174 (node_projection_eval_results)",
+    "eval_run_rates": "omnimarket OMN-24174 (node_projection_eval_results)",
 }
 
 _SKIP_REASON = (
