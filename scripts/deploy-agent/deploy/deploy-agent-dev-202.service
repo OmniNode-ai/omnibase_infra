@@ -65,6 +65,9 @@ Environment="DEPLOY_AGENT_ENV_PROTECTED=PATH DEPLOY_AGENT_ENV_FILE DEPLOY_AGENT_
 Environment=DEPLOY_AGENT_DIR=/data/omninode/omnibase_infra/scripts/deploy-agent
 Environment=DEPLOY_AGENT_INSTANCE=dev-202
 Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs-dev-202
+# OMN-24562: DEPLOY_AGENT_REPO_DIR (the agent's own deploy-source clone, under its
+# state dir), DEPLOY_AGENT_CANONICAL_CLONE and DEPLOY_AGENT_LAB_OVERLAY_SOURCE are declared in
+# the instance env file (dev-instance.env.template); the agent refuses to start without them.
 Environment=DEPLOY_AGENT_PORT=61098
 Environment=DEPLOY_AGENT_TRACKING_REF=dev
 Environment=DEPLOY_AGENT_ALLOWED_LANES=dev

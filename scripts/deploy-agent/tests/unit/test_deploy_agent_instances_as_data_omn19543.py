@@ -254,7 +254,9 @@ class TestLaunchAgent:
         assert env["DEPLOY_AGENT_INSTANCE"] == _LAUNCHD_INSTANCE
         assert env["DEPLOY_AGENT_DIR"] == f"{root}/omnibase_infra/scripts/deploy-agent"
         assert env["DEPLOY_AGENT_PYTHON"].startswith(f"{root}/omnibase_infra/")
-        assert env["DEPLOY_AGENT_REPO_DIR"] == f"{root}/omni_home/omnibase_infra"
+        assert env["DEPLOY_AGENT_REPO_DIR"] == (
+            f"{root}/state/jobs-{_LAUNCHD_INSTANCE}/deploy-source/omnibase_infra"
+        )
         assert env["OMNI_HOME"] == f"{root}/omni_home"
         assert (
             env["DEPLOY_AGENT_ENV_FILE"]

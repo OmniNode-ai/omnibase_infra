@@ -184,6 +184,8 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/model_dev_boot_result.py",
         "handlers/handler_dev_boot_guard.py",
         "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",
+        "models/model_deploy_source_clone.py",
+        "handlers/handler_deploy_source_clone.py",
         "models/model_dev_lane_code_ref_pin.py",
         "handlers/handler_dev_lane_code_ref_pin.py",
         "models/model_onex_api_image_import_request.py",
@@ -232,7 +234,7 @@ def dev_boot_report_config() -> ModelDevBootReportConfig:
     registry_root = Path(
         os.environ.get("UNIT_DRIFT_REGISTRY_ROOT")
         or os.environ.get("OMNI_HOME")
-        or Path(REPO_DIR).parent
+        or SOURCE.canonical_root
     ).expanduser()
     plugin_setting = os.environ.get("DEPLOY_AGENT_REPORT_PLUGIN_DIR") or os.environ.get(
         "CLAUDE_PLUGIN_ROOT"
@@ -274,9 +276,9 @@ def deliver_dev_boot_reports(root: Path) -> None:
 
 logger = logging.getLogger(__name__)
 
-REPO_DIR = os.environ.get(
-    "DEPLOY_AGENT_REPO_DIR", "/data/omninode/omni_home/omnibase_infra"
-)
+# OMN-24562: the agent's OWN deploy-source clone, never a canonical clone.
+SOURCE = load_dev_boot_guard("handler_deploy_source_clone").settings(os.environ)
+REPO_DIR = SOURCE.clone_dir
 DEPLOY_AGENT_DIR = os.environ.get(
     "DEPLOY_AGENT_DIR", "/data/omninode/omnibase_infra/scripts/deploy-agent"
 )
@@ -329,7 +331,7 @@ def _reconcile_lock_roots() -> list[str]:
     """Return distinct agent and build-context trees, preserving their paths."""
     roots: list[str] = []
     seen: set[str] = set()
-    for root in (os.environ.get("OMNI_HOME", "").strip(), str(Path(REPO_DIR).parent)):
+    for root in (os.environ.get("OMNI_HOME", "").strip(), SOURCE.canonical_root):
         if not root.strip():
             continue
         normalized = os.path.realpath(root)
@@ -4026,19 +4028,17 @@ class DeployExecutor:
         on_phase_update: PhaseCallback,
         lock_timeout: float = DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
     ) -> str:
-        """Fetch and reset the SHARED deploy-source clone to ``git_ref``.
+        """Fetch and reset the agent's OWN deploy-source clone to ``git_ref``.
 
-        OMN-18124: under the lane's per-compose-project host lock, the SAME lock
-        ``scripts/runtime_build/refresh_dev_lane.sh`` has held over its own
-        critical section since OMN-16729. ``REPO_DIR`` is shared with that
-        script and this method took nothing, so the two rewrote the same tree
-        concurrently -- recorded in the clone's reflog at 21:26:37 / 23:06:50 /
-        23:31:49 local on 2026-09-09.
+        OMN-18124: taken under the lane's per-compose-project host lock, the SAME
+        lock ``scripts/runtime_build/refresh_dev_lane.sh`` holds over its critical
+        section. OMN-24562: ``REPO_DIR`` is the agent's own clone, never the
+        canonical clone those tools use; the lock still excludes a concurrent
+        refresh.
 
         ``lane`` is REQUIRED and has no default: it decides WHICH lane's lock is
         taken, and a lock on the wrong lane excludes nobody while looking like
-        protection. Guessing ``dev`` here is the same class of defect as the
-        branch literal OMN-16442 removed from this package (rule 8).
+        protection (rule 8).
 
         The lock wraps the whole method rather than the reset alone, so a
         contended lane is refused with the tree untouched -- not after a fetch
@@ -4569,8 +4569,6 @@ class DeployExecutor:
 
         seed_script = f"{REPO_DIR}/scripts/seed-infisical.py"
         venv_python = f"{REPO_DIR}/.venv/bin/python"
-
-        import shutil
 
         # Resolve Python: prefer venv, fall back to uv, then system python3
         python_bin = (

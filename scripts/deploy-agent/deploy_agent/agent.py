@@ -58,6 +58,7 @@ from deploy_agent.executor import (
     DEPLOY_AGENT_DIR,
     REPO_DIR,
     SCOPE_BUNDLES,
+    SOURCE,
     DeployExecutor,
     DeployRolledBackError,
     DevBootGuard,
@@ -357,15 +358,8 @@ BRANCH_INSTALL_EXIT_NOT_WHOLE = 4
 #: (OMN-19501; before it, the single-flight lock and the dev lane), and a
 #: disabled run says so in the journal rather than being silent.
 LAB_OVERLAY_ENABLED = os.environ.get("DEPLOY_AGENT_LAB_OVERLAY", "on").lower() != "off"
-#: The ``omninode_infra`` clone the overlay is archived from. Derived from
-#: ``REPO_DIR``'s parent rather than written out, because the two are siblings in
-#: the same ``omni_home`` clone by construction and a second literal path is a
-#: second thing to keep in step (rule 6).
-LAB_OVERLAY_SOURCE_DIR = Path(
-    os.environ.get(
-        "DEPLOY_AGENT_LAB_OVERLAY_SOURCE", str(Path(REPO_DIR).parent / "omninode_infra")
-    )
-)
+#: The overlay source clone, declared like the deploy source (OMN-24562).
+LAB_OVERLAY_SOURCE_DIR = Path(SOURCE.lab_overlay_source)
 
 # NOTE (OMN-13760): no systemd watchdog. _run_deploy runs minutes-long
 # synchronous subprocess.run() rebuilds — and a background pinger would only
@@ -486,6 +480,7 @@ DEV_LANE_DRIFT_REPUBLISH_AFTER = timedelta(minutes=15)
 
 class DeployAgent:
     def __init__(self, *, skip_self_update: bool = False):
+        load_dev_boot_guard("handler_deploy_source_clone").ensure_clone(SOURCE)
         self.job_store = JobStore(state_dir=STATE_DIR)
         self.executor = DeployExecutor(migration_record_dir=STATE_DIR)
         self._state = "idle"

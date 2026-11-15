@@ -28,8 +28,31 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+# OMN-24562: the executor resolves its deploy-source clone at import and the
+# settings have no default. These paths are never created by unit tests (the
+# autouse fixture below stubs clone creation); tests that exercise clones pass
+# their own temporary repositories.
+os.environ.setdefault(
+    "DEPLOY_AGENT_REPO_DIR", "/nonexistent/agent-clone/omnibase_infra"
+)
+os.environ.setdefault(
+    "DEPLOY_AGENT_CANONICAL_CLONE", "/nonexistent/canonical/omnibase_infra"
+)
+os.environ.setdefault("DEPLOY_AGENT_LAB_OVERLAY_SOURCE", "/nonexistent/overlay-source")
+
 from deploy_agent import agent as agent_mod
 from deploy_agent import executor as executor_mod
+
+
+@pytest.fixture(autouse=True)
+def _stub_deploy_source_clone_creation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agent construction creates no clone in unrelated tests (OMN-24562)."""
+    monkeypatch.setattr(
+        executor_mod.load_dev_boot_guard("handler_deploy_source_clone"),
+        "ensure_clone",
+        lambda settings: settings,
+    )
 
 
 @pytest.fixture(autouse=True)

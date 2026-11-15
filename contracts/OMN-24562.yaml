@@ -1,0 +1,71 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24562
+title: "The deploy agent resets only its own deploy-source clone, never the canonical clone"
+summary: >-
+  The deploy agent's deploy-source clone is a declared path under its state directory, created on first start from the canonical clone's HEAD (fetched from the git mirror when one is declared and reachable, else origin), and a guard refuses a deploy-source path that resolves to a canonical clone. A pinned job no longer moves the canonical clone off dev.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24562-agent-own-clone
+    statement: >-
+      The deploy agent runs git fetch, reset and checkout only in its own clone, creates it on start without losing the served commit, and refuses a canonical clone as its deploy source.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: A pinned job through the real git_pull leaves the canonical clone's HEAD, branch and working tree unchanged and puts the agent's own clone on the pinned ref; a deploy source configured as the canonical clone runs nothing. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k PinnedJob -q
+      - id: AC2
+        statement: >-
+          AC2: First start with no agent clone creates it at the previously served commit; a second start leaves it and its pin untouched. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k MigrationOnStart -q
+      - id: AC3
+        statement: >-
+          AC3: An unreachable mirror falls back to origin, is counted and logged; a reachable mirror is the fetch url and origin stays the push url. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k Mirror -q
+      - id: AC4
+        statement: >-
+          AC4: A deploy-source path that resolves to a canonical clone (equal, symlinked, or the OMNI_HOME clone) is refused with a typed error, and unset settings have no default. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k Guard -q
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Pinned job leaves the canonical clone byte-identical, migration on start, mirror fallback counted, and the canonical-clone guard.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24562-ac1-own-clone
+    description: >-
+      The pinned job runs in a child process configured as a unit configures it; against the executor at the merge base the canonical-clone case resets the canonical clone and fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k PinnedJob
+        cwd: .
+    binds_ac: [AC1]
+  - id: dod-omn24562-ac2-migration
+    description: >-
+      Creation is seeded from the canonical clone's HEAD, including an unpushed head, and an existing clone is never reset.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k MigrationOnStart
+        cwd: .
+    binds_ac: [AC2]
+  - id: dod-omn24562-ac3-mirror-fallback
+    description: >-
+      The fallback count is kept in a file beside the clone.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k Mirror
+        cwd: .
+    binds_ac: [AC3]
+  - id: dod-omn24562-ac4-guard
+    description: >-
+      The guard compares real paths.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k Guard
+        cwd: .
+    binds_ac: [AC4]
