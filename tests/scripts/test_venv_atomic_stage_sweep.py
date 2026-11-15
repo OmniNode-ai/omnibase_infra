@@ -21,6 +21,14 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+from omnibase_infra.handlers.venv_atomic_install.handler_venv_atomic_install import (
+    HandlerVenvAtomicInstall,
+)
+from omnibase_infra.models.model_venv_atomic_install_request import (
+    ModelVenvAtomicInstallRequest,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -303,3 +311,34 @@ def test_a_commit_whose_restore_failed_keeps_its_journal(
     monkeypatch.setattr(plan, "_undo", broken_undo)
     assert plan.commit_stage(sys.executable, stage) == plan.EXIT_COMMIT_FAILED
     assert (stage / "journal.json").is_file(), "the only copy's journal was dropped"
+
+
+def test_the_typed_sweep_carries_the_lock_fields_through_to_the_engine(
+    tmp_path: Path,
+) -> None:
+    """The typed request's lock_held_path and lock_timeout_seconds reach the engine's lock."""
+    handler = HandlerVenvAtomicInstall(ModelONEXContainer())
+    venv = _venv_root(tmp_path)
+    lock = venv.resolve() / ".onex-venv-reconcile.lock"
+    holder = os.open(lock, os.O_CREAT | os.O_RDWR)
+    fcntl.flock(holder, fcntl.LOCK_EX)
+    try:
+        busy = handler.handle(
+            ModelVenvAtomicInstallRequest(
+                command="sweep", stage_dir=venv / ".atomic-stage.none"
+            )
+        )
+        assert "stale-stage sweep skipped" in busy.output, busy
+        assert len(_stages(venv)) == 9, "the typed sweep removed a stage while locked"
+        held = handler.handle(
+            ModelVenvAtomicInstallRequest(
+                command="sweep",
+                stage_dir=venv / ".atomic-stage.none",
+                lock_held_path=str(lock),
+                lock_timeout_seconds=1.0,
+            )
+        )
+    finally:
+        os.close(holder)
+    assert held.status == "ok" and "swept 6 stale stage dir(s), kept 3" in held.output
+    assert len(_stages(venv)) == 3
