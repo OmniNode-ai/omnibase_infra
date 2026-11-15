@@ -43,6 +43,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from deploy_agent import events
+from deploy_agent import executor as executor_mod
 from deploy_agent.events import (
     DEV_LANE_ONLY_MIGRATION_SERVICES,
     DEV_LANE_ONLY_RUNTIME_SERVICES,
@@ -90,17 +92,26 @@ def _ok() -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
 
+@pytest.fixture
+def cloud_machinery_declared(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restore the pre-OMN-24476 dev-lane one-shot declarations the preflight ran."""
+    monkeypatch.setattr(
+        executor_mod, "DEV_LANE_ONLY_MIGRATION_SERVICES", CLOUD_ONESHOTS
+    )
+    monkeypatch.setattr(events, "DEV_LANE_ONLY_MIGRATION_SERVICES", CLOUD_ONESHOTS)
+
+
 # ---------------------------------------------------------------------------
 # Positive control -- an empty parse must never read as agreement
 # ---------------------------------------------------------------------------
 
 
 class TestTheArrayIsFoundAtAll:
-    def test_bash_migration_array_is_non_empty(self) -> None:
-        assert len(_bash_array("DEV_LANE_ONLY_MIGRATION_SERVICES")) == 2
+    def test_bash_migration_array_is_empty(self) -> None:
+        assert _bash_array("DEV_LANE_ONLY_MIGRATION_SERVICES") == []
 
-    def test_python_declaration_is_non_empty(self) -> None:
-        assert len(DEV_LANE_ONLY_MIGRATION_SERVICES) == 2
+    def test_python_declaration_is_empty(self) -> None:
+        assert DEV_LANE_ONLY_MIGRATION_SERVICES == ()
 
 
 # ---------------------------------------------------------------------------
@@ -116,11 +127,6 @@ class TestTheTwoDeclarationsCannotDrift:
         assert list(DEV_LANE_ONLY_MIGRATION_SERVICES) == _bash_array(
             "DEV_LANE_ONLY_MIGRATION_SERVICES"
         )
-
-    def test_order_is_preserved_because_order_is_the_ordering(self) -> None:
-        """``--no-deps`` switches compose's ``depends_on`` off, so the sequence
-        in this tuple is the only thing sequencing the copy before the apply."""
-        assert tuple(DEV_LANE_ONLY_MIGRATION_SERVICES) == CLOUD_ONESHOTS
 
     def test_every_member_is_a_one_shot_on_the_bash_side(self) -> None:
         """Why Python needs one tuple where bash carries two arrays.
@@ -218,7 +224,9 @@ class TestThePreflightRunsThem:
                 "array declared only there is unreachable"
             )
 
-    def test_the_corpus_copy_precedes_the_apply(self) -> None:
+    def test_the_corpus_copy_precedes_the_apply(
+        self, cloud_machinery_declared: None
+    ) -> None:
         started = _services_started(_preflight_calls(EnumRuntimeLane.DEV))
         assert started.index("cloud-migration-files") < started.index(
             "cloud-migration"
@@ -227,7 +235,9 @@ class TestThePreflightRunsThem:
             "this ordering is not enforced by compose"
         )
 
-    def test_the_one_shots_run_after_the_lane_agnostic_migrations(self) -> None:
+    def test_the_one_shots_run_after_the_lane_agnostic_migrations(
+        self, cloud_machinery_declared: None
+    ) -> None:
         started = _services_started(_preflight_calls(EnumRuntimeLane.DEV))
         assert started.index("forward-migration") < started.index(
             "cloud-migration-files"
@@ -270,7 +280,9 @@ class TestThePreflightRunsThem:
 
 
 class TestExitZeroGating:
-    def test_a_one_shot_that_did_not_exit_zero_records_the_failure(self) -> None:
+    def test_a_one_shot_that_did_not_exit_zero_records_the_failure(
+        self, cloud_machinery_declared: None
+    ) -> None:
         """A one-shot that is merely RUNNING is not done.
 
         ``_service_satisfied`` deliberately accepts ``running`` for the
@@ -309,10 +321,23 @@ class TestExitZeroGating:
 
 
 class TestTheOverlayDeclaresThem:
-    def test_dev_lane_overlay_declares_both_services(self) -> None:
+    def test_dev_lane_overlay_declares_or_retires_both_services(self) -> None:
+        # OMN-24476: the overlay declares neither one-shot any more; the dev policy
+        # retires them by name, so the deploy agent's lane config filters them out
+        # of the preflight and no compose argv resolves them.
         text = DEV_LANE_OVERLAY.read_text(encoding="utf-8")
+        policy = (DEV_LANE_OVERLAY.parent / "runtime-policy.env").read_text(
+            encoding="utf-8"
+        )
+        retired = next(
+            line.split("=", 1)[1].split(",")
+            for line in policy.splitlines()
+            if line.startswith("DEV_RUNTIME_MAIN_RETIRED_SERVICES=")
+        )
         for service in DEV_LANE_ONLY_MIGRATION_SERVICES:
-            assert re.search(rf"^  {re.escape(service)}:$", text, re.M), (
-                f"{DEV_LANE_OVERLAY.name} declares no {service}; the preflight "
-                "would name a service compose cannot resolve and fail the whole up"
+            declared = re.search(rf"^  {re.escape(service)}:$", text, re.M)
+            assert declared or service in retired, (
+                f"{DEV_LANE_OVERLAY.name} declares no {service} and the dev policy "
+                "does not retire it; the preflight would name a service compose "
+                "cannot resolve and fail the whole up"
             )
