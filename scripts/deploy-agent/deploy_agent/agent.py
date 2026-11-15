@@ -346,7 +346,7 @@ BRANCH_INSTALL_APPLY_TIMEOUT_SECONDS = 900
 #: tree the job just built), so a change to it needs no release of the omnibase_infra
 #: package the agent venv holds.
 BRANCH_INSTALL_ENTRY = f"{REPO_DIR}/src/omnibase_infra/nodes/node_dev_roll_events_effect/runtime_dev_branch_install_reapply.py"
-JOB_READING_RUNTIME = "nodes.node_deploy_job_reading_effect.runtime_deploy_job_reading"
+JOB_READING = "nodes.node_deploy_job_reading_effect.runtime_deploy_job_reading"
 BRANCH_INSTALL_EXIT_NOT_WHOLE = 4
 
 #: OMN-18200 AC5. The k3s ``onex-lab`` overlay re-apply, ON by default.
@@ -957,6 +957,7 @@ class DeployAgent:
                     # deferred IS one already waiting, so no converge while a
                     # deferral holds its partition paused.
                     await self._offload(self._maybe_reapply_branch_installs)
+                    await self._offload(load_dev_boot_guard(JOB_READING).check_pin)
                     if getattr(consumer, "load_gate_paused", None) is None:
                         await self._offload(self._maybe_idle_converge)
                         await self._offload(self._maybe_converge_forward_migration)
@@ -1178,8 +1179,7 @@ class DeployAgent:
                 EnumSelfUpdateBoundary.IDLE_HEARTBEAT.value,
             )
             return
-        pending = self.job_store.get_pending_publish()
-        if pending:
+        if pending := self.job_store.get_pending_publish():
             logger.info(
                 "self_update[boundary=%s]: %d result(s) still awaiting publish, "
                 "deferring",
@@ -2441,7 +2441,7 @@ class DeployAgent:
                 job.result_publish_pending = True
                 self.job_store._save(job)
                 logger.warning("Publish failed for %s, marked pending", cid)
-            load_dev_boot_guard(JOB_READING_RUNTIME).publish(job, sys.modules[__name__])
+            load_dev_boot_guard(JOB_READING).publish(job, sys.modules[__name__])
 
         # OMN-18636 AC5. Nothing further runs for this job, so it stops
         # reporting itself as settling. A flag that is only ever set makes every

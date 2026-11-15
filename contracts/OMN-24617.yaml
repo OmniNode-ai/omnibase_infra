@@ -76,7 +76,7 @@ dod_evidence:
       - AC4
     checks:
       - check_type: command
-        check_value: grep -q 'load_dev_boot_guard(JOB_READING_RUNTIME).publish(' scripts/deploy-agent/deploy_agent/agent.py
+        check_value: grep -q 'load_dev_boot_guard(JOB_READING).publish(' scripts/deploy-agent/deploy_agent/agent.py
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24617-integration-proof
     description: >-

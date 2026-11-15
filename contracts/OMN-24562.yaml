@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24562
+title: "A failed deploy-agent job, or a code-ref pin within six hours of expiry, writes an alarm row with an owner line"
+summary: "Stacked on the job reading of OMN-24617 (omnibase_infra#6012, related, not superseded). The node_deploy_job_reading_effect handler now also writes one ledger STATUS row with src=alarm and an owner line for a failed dev or stability job (alarm=deploy-job-failed), and the agent's idle tick writes one for a live code-ref pin inside the contract's six-hour window before its expiry (alarm=pin-near-expiry). Prod writes nothing."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24562-job-alarm
+    statement: A failed dev or stability deploy job, and a live code-ref pin within six hours of its expiry, each write an alarm row that names an owner and the owner's action.
+    acceptance:
+      - id: AC8
+        statement: "AC8: a fixture failed job on the dev lane and one on the stability lane each yield an alarm row with src=alarm, alarm=deploy-job-failed, the failing step, owner and owner_line, and a prod job, a successful job and a running job yield none -- falsifier: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q fails at the pushed head's parent"
+      - id: AC9
+        statement: "AC9: a live pin 6 hours or less from its expiry yields an alarm row with alarm=pin-near-expiry, the pin's owner and branch and the hours left, a pin further out yields none, and the agent's idle tick calls the check on a schedule -- falsifier: the pin cases of test_job_alarm_row.py fail with the idle-tick call or the window removed"
+evidence_requirements:
+  - kind: tests
+    description: The alarm row tests and the job reading tests.
+    command: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py scripts/deploy-agent/tests/unit/test_job_reading_row.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24562-alarm-job-failed
+    description: The failed-job alarm row is built for dev and stability, appended after the reading row, and absent for prod, a successful job and a running job.
+    source: manual
+    binds_ac:
+      - AC8
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-alarm-pin-expiry
+    description: The pin alarm row appears inside the six-hour window and not outside it, is deduplicated within the clock hour, and the idle tick calls the check.
+    source: manual
+    binds_ac:
+      - AC9
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -q 'load_dev_boot_guard(JOB_READING).check_pin' scripts/deploy-agent/deploy_agent/agent.py
+        cwd: ${OMNI_HOME}/omnibase_infra
