@@ -5,8 +5,8 @@
 The operator ruled the separate HTTP API a mistake for the local runtime
 (2026-11-10) and consented to deleting the container (2026-11-14). No compose
 file of the dev lane declares an ``onex-api``, ``cloud-migration-files`` or
-``cloud-migration`` service any more -- the collaborator's lane and the
-per-slot verification lane are not the dev lane and keep their own onex-api -- and the dev
+``cloud-migration`` service any more -- the collaborator's lane is not the dev lane
+and keeps its own onex-api; the per-slot verification lane lost its gateway too -- and the dev
 policy retires the previous revision's containers by name before main is
 recreated.
 """
