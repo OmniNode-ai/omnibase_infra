@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-24544
+title: Lift the hold on automatic development system updates
+summary: >-
+  The committed lane routing table no longer declares the time-boxed freeze on the dev-201 lane that OMN-24474 added. The hold was waiting for two fixes, the onex-api import fix and the change that leaves a healthy runtime alone when the onex-api step fails (omnibase_infra#5985); both are merged. With the hold gone the deploy agent takes merge-driven commands again after its next self-update, and its idle converge rolls the lane to the current dev heads. The one test exception that allowed the hold, and the test that read it, are removed with it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24544-lift-dev-hold
+    statement: Merge-driven rolls of the dev-201 lane are accepted again and the lane carries no freeze.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the committed lane routing table declares no freeze on the development lane and still keeps its lag bound and disabled phases -- falsifier: pytest scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q fails on the table that still carries the freeze"
+      - id: AC2
+        statement: "AC2: no test names a time-boxed hold on a full development lane any more -- falsifier: grep -rn TIME_BOXED_DEV_HOLDS scripts/deploy-agent/tests finds an entry"
+      - id: AC3
+        statement: "AC3: integrated: after the agent picks up the table, the agent journal no longer prints a FROZEN line for a merge-driven command and a roll to the current development heads completes with the runtime reading ready and required equal to attached -- falsifier: the agent journal shows a command rejected as frozen after the pick-up, or the runtime readiness read shows a required piece not attached"
+evidence_requirements:
+  - kind: tests
+    description: The lane flag tests, including the check that no committed full dev lane carries a freeze.
+    command: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py scripts/deploy-agent/tests/unit/test_deploy_lane_routing_omn19506.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24544-ac1-table-carries-no-freeze
+    description: >-
+      The committed table's dev-201 flags carry no freeze and keep max_dev_lag_minutes and disabled_phases. On origin/dev's table the unchanged test file reads a freeze and test_committed_dev_lanes_carry_no_freeze fails once its OMN-24474 exception is removed.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24544-ac2-no-test-hold
+    description: >-
+      Deploy check the hosted runner can run: the table and the tests no longer name the hold.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: "! grep -rq TIME_BOXED_DEV_HOLDS scripts/deploy-agent/tests"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24544-ac3-integrated
+    description: >-
+      Deploy check the hosted runner can run: the committed table no longer names the hold. The runtime read (the agent journal accepting a merge-driven command after its self-update, the roll finishing, and the runtime readiness with required equal to attached) is posted as a pull request comment naming the head and the revision running; it is not claimed by this check.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: "! grep -q 'OMN-24474' config/deploy_lane_routing.yaml"
+        cwd: ${OMNI_HOME}/omnibase_infra
