@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24562
+title: "The deploy agent's stability follow job takes the embedding address from the overlay"
+summary: "Two stability follow jobs of the lab dev deploy agent (agent/stability-follow-tag, 2026-11-15T10:56Z and 11:41Z) failed the LLM endpoint env contract check: the operator settings store on the lab host still names the removed embedding server (port 8002) while the llm_endpoints overlay names the staying one (port 8100). OMN-24025 rendered the overlay address for the dev lane's jobs and OMN-24119 for the stability refresh script, but the agent's own stability job was left fenced out, so its compose environment and its guard read the store. The render now covers the stability job of a dev-fenced agent; a prod job still takes nothing from it."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24562-stability-job-renders-overlay-address
+    statement: A stability job of a dev-fenced deploy agent takes LLM_EMBEDDING_URL, BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL and the rewritten lane overlay directory from the llm_endpoints overlay, in its compose environment and in its env contract guard, and a prod job takes nothing from the render.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the compose environment of a stability job of a dev-fenced agent carries the overlay address over the settings store''s -- falsifier: python -m pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -k "stability_job" -q fails at the merge base'
+      - id: AC2
+        statement: 'AC2: the env contract guard of a stability job checks the rendered environment and skips the store''s value for the rendered names -- falsifier: the guard test for a stability job passes with the render fence unchanged'
+      - id: AC3
+        statement: 'AC3: a prod job of a dev-fenced agent keeps the store''s address -- falsifier: the prod control test fails at the head'
+evidence_requirements:
+  - kind: tests
+    description: The stability compose-environment and guard tests pass at the pushed head and fail at the merge base, where the render is fenced to the dev lane.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:randomly --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24562-ac1
+    description: 'AC1 and AC2 and AC3: the stability job compose environment, the stability guard and the prod control pass'
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+      - AC3
+    checks:
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:randomly --no-cov
+        cwd: .
+  - id: dod-omn24562-integration-proof
+    description: 'The real renderer reads the real contracts and a real git overlay: a stability job takes the overlay address and a prod job takes nothing. It binds no criterion; the hosted proof is dod-omn24562-ac1, this one is the local Done gate'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/ci/test_stability_job_overlay_render_integration_omn24562.py -q -p no:randomly --no-cov
+        cwd: .

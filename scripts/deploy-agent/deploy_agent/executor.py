@@ -1012,8 +1012,9 @@ def active_dev_instance() -> str:
 
 
 def _folded_dev_services(lane: EnumRuntimeLane) -> set[str]:
+    policy = _load_runtime_policy_env()  # one snapshot for the profiles and the map
     services: set[str] = load_dev_boot_guard().folded_dev_services(
-        _load_runtime_policy_env(), lane_folded_profiles(lane)
+        policy, lane_folded_profiles(lane, policy), LANE_POLICY_PREFIX.get(lane, "")
     )
     return services
 
@@ -1022,13 +1023,14 @@ def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
     if lane is EnumRuntimeLane.DEV:
         config = DEV_INSTANCE_LANE_CONFIGS[_DevInstanceSelection.name]
-        if retired := _folded_dev_services(lane):
-            config = load_dev_boot_guard().retire_lane_services(
-                config, retired, {ONEX_API_SERVICE: EnumInstancePhase.ONEX_API_PIN}
-            )
     else:
         config = _LANE_CONFIGS[lane]
-    if "effects" in lane_folded_profiles(lane):
+    if retired := _folded_dev_services(lane):
+        config = load_dev_boot_guard().retire_lane_services(
+            config, retired, {ONEX_API_SERVICE: EnumInstancePhase.ONEX_API_PIN}
+        )
+    # One policy snapshot decides both: a folded effects role is one the lane retires.
+    if "runtime-effects" in retired:
         # The effects port is published by main once the role is folded, so the
         # effects health target reads main's container (OMN-22930 on primary dev).
         targets = list(config.runtime_health_targets)
@@ -6200,9 +6202,7 @@ class DeployExecutor:
     def _retire_folded_dev_services(
         self, lane: EnumRuntimeLane, config: ModelLaneConfig | None = None
     ) -> None:
-        """Retire each primary dev container whose role main now carries; keep volumes."""
-        if lane is not EnumRuntimeLane.DEV:
-            return  # Other dev instances fold nothing (lane_folded_profiles).
+        """Retire each lane container whose role main now carries; keep volumes."""
         config = lane_config_for(lane) if config is None else config
         project = f"label=com.docker.compose.project={config.compose_project}"
         containers: list[str] = []
@@ -6244,7 +6244,7 @@ class DeployExecutor:
         config = lane_config_for(lane)
         profile = "core" if scope == Scope.CORE else "runtime"
         requested_services = _requested_services_for_up(scope, services, lane=lane)
-        if lane is EnumRuntimeLane.DEV and services and not requested_services:
+        if services and not requested_services:
             # A retired-role-only request must never start the whole profile.
             on_phase_update(phase, PhaseStatus.SUCCESS)
             return
