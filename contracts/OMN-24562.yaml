@@ -81,6 +81,11 @@ requirements:
     acceptance:
       - id: AC22
         statement: 'AC22: a stability build declaring a different open pull request, another head of the pinned one, or any declaration with no live pin is refused in the preflight, and the follow''s own declaration is admitted -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_follow_builds_pinned_head_omn24562.py -k "different_declared_open_pr or no_live_pin or preflight_refuses" fails at the merge base'
+  - id: req-omn24562-stability-config-lazy
+    statement: The deploy agent resolves the stability lane's runtime container only when the stability follow reads it, never in its constructor, so a bad stability fold policy fails the stability follow alone and every agent still starts.
+    acceptance:
+      - id: AC23
+        statement: 'AC23: a dev agent whose stability fold policy cannot resolve starts, and its stability reader answers None without raising; the agent''s own stability reader reads the stability runtime container and reads an unhealthy one as the empty ref -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py -k "bad_stability_fold_policy or stability_reader_reads" fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: The stability compose-environment and guard tests pass at the pushed head and fail at the merge base, where the render is fenced to the dev lane.
@@ -302,4 +307,13 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -p no:randomly --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac23-stability-config-lazy
+    description: 'AC23: an agent with a bad stability fold policy starts and only its stability read fails; the agent''s stability reader is wired to the stability runtime container.'
+    source: manual
+    binds_ac:
+      - AC23
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py -q -p no:randomly --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
