@@ -164,8 +164,7 @@ for package in os.environ.get("ONEX_ACTIVE_RUNTIME_PACKAGES", "").split(","):
 
 def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
     """Load host-effect modules from the standalone agent's own checkout."""
-    prefix = "omnibase_infra." if "." in effect else "omnibase_infra.handlers."
-    name = prefix + effect
+    name = ("omnibase_infra." if "." in effect else "omnibase_infra.handlers.") + effect
     if name in sys.modules:
         return sys.modules[name]
     root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
@@ -194,6 +193,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "handlers/handler_onex_api_image_build.py",
         "models/model_dev_lane_pin_staleness.py",
         "handlers/handler_dev_lane_pin_compose_guard.py",
+        "handlers/handler_stability_rollback_waiver.py",
         "models/model_cost_estimator_build_config.py",
         "models/model_cost_estimator_build_request.py",
         "models/model_cost_estimator_build_result.py",
