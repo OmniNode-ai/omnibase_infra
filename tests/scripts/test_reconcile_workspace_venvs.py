@@ -794,7 +794,7 @@ def test_drift_check_still_reads_an_unlocked_extra_as_drift(
     result = ws.run("--check")
     assert result.returncode != _EXIT_OK, result.stdout + result.stderr
     assert "outdated against" in result.stdout
-    assert "extras not kept (not listed in uv.lock): probeextra" in result.stdout
+    assert "extras not kept (not listed in uv.lock): probeextra" in result.stderr
 
 
 def test_proven_installs_the_floor_commit_without_moving_the_clone(

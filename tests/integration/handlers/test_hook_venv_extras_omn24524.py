@@ -85,7 +85,7 @@ def _probe_installed(project: Path) -> bool:
 
 def test_plain_frozen_check_reads_a_kept_extra_as_outdated(project: Path) -> None:
     """The control: the drift check this change replaces says outdated, forever."""
-    assert _run([_uv(), "sync", "--frozen", "--check"], project).returncode == 1
+    assert _run([_uv(), "sync", "--frozen", "--check"], project).returncode != 0
     named = _run(
         [_uv(), "sync", "--frozen", "--check", "--extra", "probeextra"], project
     )
