@@ -49,6 +49,11 @@ requirements:
         statement: 'AC13: the stability overlay renders every runtime-profile service on the composed omnimarket build and the stability build names the overlay and those services, while the dev build argv is unchanged -- falsifier: scripts/deploy-agent/tests/unit/test_stability_composed_build_omn24562.py or tests/unit/docker/test_stability_composed_runtime_image_omn24562.py fails at the merge base'
       - id: AC14
         statement: 'AC14: integrated: after the agent is installed from the integration branch, one stability-follow job on h201 ends with outcome success and the stability omninode-runtime container reports healthy -- falsifier: the job record shows another outcome, or the container restarts with BIFROST_BASE_CONTRACT_PATH unset'
+  - id: req-omn24562-stability-follow-unhealthy
+    statement: The stability follow reads an unhealthy stability runtime as running no revision, so a parked runtime built from the followed tag is rebuilt instead of reading up to date.
+    acceptance:
+      - id: AC15
+        statement: 'AC15: the stability follow decides FOLLOW when the stability runtime is unhealthy and UP_TO_DATE when it is healthy on the tag -- falsifier: scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py fails at the merge base'
   - id: req-omn24562-stability-rollback-waiver
     statement: The deploy agent runs a stability runtime deploy that has no retained rollback point only when its own probe reads every runtime target of the lane down with no timeout, records on the job that it ran without one, and never applies the waiver to the prod lane.
     acceptance:
@@ -184,6 +189,15 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: grep -q 'x-composed-runtime-build' docker/docker-compose.stability-t*.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac15-stability-follow-unhealthy
+    description: An unhealthy stability runtime reads as running no revision and the follow rebuilds it; a healthy one on the tag reads up to date.
+    source: manual
+    binds_ac:
+      - AC15
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_follow_unhealthy_omn24562.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-rollback-waiver
     description: 'AC4, AC5 and AC6: UNHEALTHY allows and records, HEALTHY refuses, UNKNOWN refuses, prod and dev never waived; the existing rollback tests still pass'
