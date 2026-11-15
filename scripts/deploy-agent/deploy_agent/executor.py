@@ -208,6 +208,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/contracts/model_llm_endpoint_overlay.py",
         "nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py",
         "nodes/node_setup_local_provision_effect/runtime_overlay_revision.py",
+        "nodes/node_setup_local_provision_effect/runtime_host_broker_layer.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
         if module_name in sys.modules:
@@ -842,9 +843,14 @@ _PROD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.prod.yml"
 # forward-migration override inherits the base ``environment:`` block wholesale.
 # Unset indicator = FULL fence, so this list is fail-closed on omission.
 # Must stay matched with ``resolve_compose_file_args`` in
-# ``onex-runtime-deploy``.
+# ``onex-runtime-deploy``. The stability list gains the per-host broker layer from
+# the same module that resolver asks, in ``lane_config_for`` (OMN-24509).
 _DEV_LANE_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-lane.yml"
 _DEV_TENANT_FOLD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-tenant-fold.yml"
+_LAYER_MODULE = "nodes.node_setup_local_provision_effect.runtime_host_broker_layer"
+_PIN_GUARD = "handler_dev_lane_pin_compose_guard"
+_LANE_ENV = "nodes.node_setup_local_provision_effect.runtime_lane_env_overlay"
+_CODE_REF_PIN_MODULE = "handler_dev_lane_code_ref_pin"
 
 # OMN-15181 round 3 (Finding 9): maps each prod runtime service to the compose
 # env var that repoints its `image:` field (docker-compose.prod.yml). This is
@@ -1020,7 +1026,7 @@ def _folded_dev_services(lane: EnumRuntimeLane) -> set[str]:
 def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
     if lane is EnumRuntimeLane.DEV:
-        config = DEV_INSTANCE_LANE_CONFIGS[_DevInstanceSelection.name]
+        config: ModelLaneConfig = DEV_INSTANCE_LANE_CONFIGS[_DevInstanceSelection.name]
         if retired := _folded_dev_services(lane):
             config = config.model_copy(
                 update={"disabled_services": config.disabled_services | retired}
@@ -1036,6 +1042,7 @@ def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
         main, _ = targets[SERVICE_HEALTH_TARGET_INDEX["omninode-runtime"]]
         targets[index] = (main, port)
         config = config.model_copy(update={"runtime_health_targets": tuple(targets)})
+    config = load_dev_boot_guard(_LAYER_MODULE).layered(sys.modules[__name__], config)
     return config
 
 
@@ -1841,9 +1848,7 @@ def _lane_env_overlay() -> dict[str, str]:
     lane_id = DEV_INSTANCE_RUNTIME_LANES[active_dev_instance()]
     # OMN-22634: the overlay home's runtime_lane_env overlay is a second source for
     # the same keys, through the same allowlist; a key the two set differently refuses.
-    overlay: dict[str, str] = load_dev_boot_guard(
-        "nodes.node_setup_local_provision_effect.runtime_lane_env_overlay"
-    ).lane_env_with_overlay_home(
+    overlay: dict[str, str] = load_dev_boot_guard(_LANE_ENV).lane_env_with_overlay_home(
         sys.modules[__name__],
         read_lane_env_fragment(clone, lane_id),
         os.environ,
@@ -3697,7 +3702,7 @@ class DeployExecutor:
             return
 
         # OMN-23039: a live code-ref pin names the branch whose code this agent loads.
-        branch = load_dev_boot_guard("handler_dev_lane_code_ref_pin").followed_branch(
+        branch = load_dev_boot_guard(_CODE_REF_PIN_MODULE).followed_branch(
             load_tracking_ref_from_env(), os.environ, boundary.value
         )
 
@@ -4711,9 +4716,7 @@ class DeployExecutor:
             return services
 
         # OMN-23368: before any build, refuse a service the lane's compose lacks.
-        self.pin_staleness_report = load_dev_boot_guard(
-            "handler_dev_lane_pin_compose_guard"
-        ).guard_before_build(
+        self.pin_staleness_report = load_dev_boot_guard(_PIN_GUARD).guard_before_build(
             _without_disabled_services(
                 without_gateway_services(
                     services or services_for_scope(scope, lane=lane)
@@ -4724,9 +4727,7 @@ class DeployExecutor:
             env=os.environ,
             agent_dir=os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR),
             read_services=_read_compose_services,
-            read_pin=load_dev_boot_guard(
-                "handler_dev_lane_code_ref_pin"
-            ).read_active_pin,
+            read_pin=load_dev_boot_guard(_CODE_REF_PIN_MODULE).read_active_pin,
             git_timeout=PHASE_TIMEOUTS[Phase.GIT],
         )
 
