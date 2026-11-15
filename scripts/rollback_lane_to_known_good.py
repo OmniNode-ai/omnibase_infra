@@ -43,7 +43,7 @@ refuses ``--execute`` for it.
 
 What it cannot restore (named, not hidden): the redeploy command pins ONE
 repository, omnibase_infra. The deploy agent resolves every sibling
-(omnibase_core, omnibase_compat, omnimarket) at staging time from its own
+(omnibase_core, omnimarket) at staging time from its own
 fallback ref, so a rollback restores the infra half of a composition and the
 readback reports the siblings as observed, not as restored. A receipt records
 no sibling refs today (plan P9's composition block is not built).
