@@ -35,9 +35,9 @@ RATCHET_FILE = REPO_ROOT / "config" / "ledger_file_census_ratchet.yaml"
 CENSUS_HOOK_ID = "ledger-file-census-ratchet"
 REGISTER_FLAG = "--register omnibase_infra"
 RATCHET_FLAG = "--ratchet-file config/ledger_file_census_ratchet.yaml"
-# The omnimarket dependency must be pinned to one exact 40-hex commit.
+# The omnimarket dependency must be pinned to one dev tag (a tag, not a commit sha: RULING 2026-10-29T01:50:26Z).
 OMNIMARKET_PIN_RE = re.compile(
-    r"omnimarket @ git\+https://github\.com/OmniNode-ai/omnimarket@([0-9a-f]{40})\b"
+    r"omnimarket @ git\+https://github\.com/OmniNode-ai/omnimarket@(dev-[0-9]{14}-[0-9a-f]{12})\b"
 )
 
 
@@ -68,10 +68,9 @@ def _check_census_hook_wired(config: dict[str, Any]) -> None:
     )
     pin = OMNIMARKET_PIN_RE.search(entry)
     assert pin is not None, (
-        "the census hook entry must pin omnimarket to one exact 40-hex commit:\n"
-        f"{entry}"
+        f"the census hook entry must pin omnimarket to one dev tag:\n{entry}"
     )
-    assert len(pin.group(1)) == 40
+    assert pin.group(1).startswith("dev-")
 
 
 def test_the_census_ratchet_hook_is_wired() -> None:

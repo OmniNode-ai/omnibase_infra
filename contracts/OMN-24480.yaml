@@ -25,7 +25,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn24480-infra-ac1
-    description: The hook names the registration, the ratchet file and a 40-hex omnimarket pin; the count file parses.
+    description: The hook names the registration, the ratchet file and an omnimarket dev tag; the count file parses.
     source: manual
     execution_scope: hosted_and_local
     binds_ac:
@@ -52,5 +52,5 @@ dod_evidence:
       - AC3
     checks:
       - check_type: command
-        check_value: env ONEX_LEDGER_CENSUS_ROOT=. uv run --no-project --with "omnimarket @ git+https://github.com/OmniNode-ai/omnimarket@7199fa537f69b96f1172d66f0b12710541cec6a8" python -I -m omnimarket.nodes.node_work_ledger_file_census_effect --packaged-overlay --register omnibase_infra --directory omnibase_infra=. --ratchet-file config/ledger_file_census_ratchet.yaml
+        check_value: env ONEX_LEDGER_CENSUS_ROOT=. uv run --no-project --with "omnimarket @ git+https://github.com/OmniNode-ai/omnimarket@dev-20261114215104-e9d7998d3843" python -I -m omnimarket.nodes.node_work_ledger_file_census_effect --packaged-overlay --register omnibase_infra --directory omnibase_infra=. --ratchet-file config/ledger_file_census_ratchet.yaml
         cwd: ${OMNI_HOME}/omnibase_infra
