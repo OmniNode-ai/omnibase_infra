@@ -45,31 +45,8 @@ def _runtime_issuer_default() -> str:
     return raw[len("${KEYCLOAK_ISSUER:-") : -1]
 
 
-def _onex_api_env() -> dict:
-    return _load(DEV_LANE)["services"]["onex-api"]["environment"]
-
-
 def _keycloak_env() -> dict:
     return _load(DEV_LANE)["services"]["keycloak"]["environment"]
-
-
-@pytest.mark.unit
-def test_onex_api_expects_the_issuer_the_runtime_validates() -> None:
-    assert _onex_api_env()["KEYCLOAK_ISSUER_URL"] == _runtime_issuer_default()
-
-
-@pytest.mark.unit
-def test_onex_api_fetches_keys_in_network() -> None:
-    env = _onex_api_env()
-    key_source = urlsplit(env["KEYCLOAK_JWKS_URL"])
-    issuer = urlsplit(env["KEYCLOAK_ISSUER_URL"])
-    admin = urlsplit(env["KEYCLOAK_ADMIN_BASE_URL"])
-
-    assert key_source.netloc == admin.netloc == "keycloak:8080"
-    assert key_source.netloc != issuer.netloc
-    assert env["KEYCLOAK_JWKS_URL"] == (
-        f"http://keycloak:8080{issuer.path}/protocol/openid-connect/certs"
-    )
 
 
 @pytest.mark.unit

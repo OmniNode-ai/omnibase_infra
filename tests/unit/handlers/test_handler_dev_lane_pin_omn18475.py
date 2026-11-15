@@ -136,9 +136,11 @@ def test_every_dev_pin_is_rendered_by_the_dev_lane_and_by_no_governed_lane() -> 
         REPO_ROOT / "docker" / Path(f).name
         for f in lane_config_for(EnumRuntimeLane.DEV).compose_files
     ]
-    assert set().union(*(_rendered_keys(f) for f in dev)) == {
-        k.value for k in EnumDevLanePinKey
-    }
+    # OMN-24476: both registered pins named services the dev lane no longer
+    # runs (onex-api and its cloud migration one-shots), so no dev compose file
+    # renders a pin now. A pin a dev file renders again must be registered in
+    # EnumDevLanePinKey and named here deliberately.
+    assert set().union(*(_rendered_keys(f) for f in dev)) == set()
     for lane in (lane for lane in EnumRuntimeLane if lane is not EnumRuntimeLane.DEV):
         for name in lane_config_for(lane).compose_files:
             governed = REPO_ROOT / "docker" / Path(name).name

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -37,10 +38,16 @@ from omnibase_infra.protocols.protocol_hook_venv_reconcile_host import (
 
 _CHANGE = re.compile(r"^\s*([-+~])\s+([A-Za-z0-9][A-Za-z0-9._-]*)(?:==|\s+@)")
 _GIT_SOURCE = re.compile(r"git\+([^\s)]+)@([0-9a-fA-F]{40})(?:\)|$)")
+_REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
 def _normalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _requirement_name(requirement: str) -> str:
+    match = _REQUIREMENT_NAME.match(requirement)
+    return _normalize(match.group(1)) if match else ""
 
 
 def _approved(
@@ -235,6 +242,8 @@ class HandlerHookVenvReconcileHost:
         if flag != "--dry-run":
             args.append("--frozen")
         args += ["--project", str(request.project)]
+        for extra in self._installed_extras(request.project):
+            args += ["--extra", extra]
         if flag:
             args.append(flag)
         try:
@@ -250,3 +259,34 @@ class HandlerHookVenvReconcileHost:
         except subprocess.TimeoutExpired as exc:
             raise TimeoutError("hook venv package operation timed out") from exc
         return result.returncode, result.stdout + result.stderr
+
+    def _installed_extras(self, project: Path) -> tuple[str, ...]:
+        """List declared extras whose every requirement is already installed."""
+        source = project / "pyproject.toml"
+        if not source.is_file():
+            return ()
+        optional = (
+            tomllib.loads(source.read_text())
+            .get("project", {})
+            .get("optional-dependencies")
+        )
+        if not isinstance(optional, dict):
+            return ()
+        installed = {
+            _normalize(line[6:])
+            for path in (project / ".venv").glob(
+                "lib/python*/site-packages/*.dist-info/METADATA"
+            )
+            for line in path.read_text().splitlines()
+            if line.startswith("Name: ")
+        }
+        return tuple(
+            name
+            for name, requirements in sorted(optional.items())
+            if isinstance(requirements, list)
+            and requirements
+            and all(
+                _requirement_name(requirement) in installed
+                for requirement in requirements
+            )
+        )

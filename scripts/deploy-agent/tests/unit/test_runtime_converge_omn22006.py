@@ -69,6 +69,7 @@ class _Lane:
         self.fail_up_for = ""
         self.not_running = ""
         self.not_healthy = ""
+        self.crash_looping = ""
         self.timed_out = ""
         self.events: list[str] = []
         self.phases: list[tuple[Phase, PhaseStatus]] = []
@@ -117,6 +118,9 @@ class _Lane:
         return _ok()
 
     def verify(self, services: list[str], **_: Any) -> tuple[bool, list[str]]:
+        if len(services) > 1 and self.crash_looping in services:
+            # A crash-looping container fails every census of the whole list.
+            return False, [self.crash_looping]
         if len(services) == 1:
             if services[0] == self.not_running:
                 return False, services
@@ -204,10 +208,10 @@ class TestRuntimePhaseUnchangedNotRecreated:
         lane = _fixture_lane()
         lane.current_image = NEW_IMAGE
         for service, state in lane.running.items():
-            if service != "onex-api":
+            if service != "cost-estimator-web":
                 state["image"] = NEW_IMAGE
         _run_runtime_phase(lane)
-        assert lane.recreated == ["onex-api"]
+        assert lane.recreated == ["cost-estimator-web"]
 
 
 class TestRuntimePhaseRolling:
@@ -220,7 +224,9 @@ class TestRuntimePhaseRolling:
         # 19 containers in the recorded job; the hook-events writer (OMN-21288), the
         # infra-routing-decisions consumer (OMN-23072) and the intelligence API
         # (OMN-22391) are among them, and the runtime scope no longer names any.
-        assert len(lane.recreated) == 16
+        # OMN-24476: onex-api is retired from the dev lane too, so 15 remain.
+        assert len(lane.recreated) == 15
+        assert "onex-api" not in lane.recreated
         assert "infra-routing-decisions-consumer" not in lane.recreated
         assert "intelligence-api" not in lane.recreated
         assert "projection-claude-hook-events-writer" not in lane.recreated
@@ -264,6 +270,19 @@ class TestRuntimePhaseRolling:
         assert issued[-1] == failed_service
         assert len(issued) < 19
         assert (Phase.RUNTIME, PhaseStatus.SUCCESS) not in lane.phases
+
+    def test_runtime_phase_rolls_no_onex_api_step(self) -> None:
+        """OMN-24476: onex-api is removed from the dev lane, so the roll issues no onex-api step.
+
+        The 2026-11-14 incident (OMN-24471) was an onex-api step that could not become
+        healthy and recreated the runtime around it. The fixture's service list no longer
+        holds onex-api, so no step names it and an unhealthy one cannot stop the roll.
+        """
+        lane = _fixture_lane()
+        lane.current_image = NEW_IMAGE
+        _run_runtime_phase(lane)
+        assert "onex-api" not in [a[-1] for a in lane.ups]
+        assert (Phase.RUNTIME, PhaseStatus.SUCCESS) in lane.phases
 
     def test_runtime_phase_rolling_does_not_replace_a_peer_while_boot_is_unhealthy(
         self,

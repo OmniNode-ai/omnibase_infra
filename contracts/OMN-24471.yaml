@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-24471
+title: A failed onex API step of a development update leaves the running runtime alone
+summary: >-
+  A dev roll rolls one service per compose step. When the onex-api step fails (on 2026-11-14 its image crash-looped on a moved omnimarket module), HandlerDevBootGuard.protect treated the failure as a runtime failure and force-recreated the retained runtime family, three times, at 17:26Z, 17:47Z and 18:03Z. onex-api is not in DEV_BOOT_SERVICES. run_runtime_roll_step now raises DevOnexApiStepFailedError for the onex-api step, protect keeps a runtime that is up and healthy (recording runtime_kept_revision, or runtime_left_running when the family cannot become the recovery point), and the executor no longer verifies or starts onex-api after that failure, so the typed error is not masked by a census error. The job still fails and the incident is still reported. The change follows the OMN-21645 companion-lane carve-out.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24471-onex-api-step
+    statement: A failed onex-api step of a dev roll leaves a healthy running runtime untouched and reports the failure.
+    acceptance:
+      - id: AC2
+        statement: "AC2: a failed onex-api step of a dev roll leaves the running runtime container untouched and reports the failure -- falsifier: the deploy agent test for the onex-api failure path fails when the recovery recreates the runtime"
+evidence_requirements:
+  - kind: tests
+    description: The boot guard and the rolling runtime phase tests.
+    command: uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_onex_api_step.py tests/unit/handlers/test_handler_dev_boot_guard_companion_lane.py -q --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24471-ac2-onex-api-step-leaves-runtime
+    description: >-
+      With the onex-api step failing after a healthy new runtime family, the guard does not force-recreate it and reports the failed job; with a plain runtime step failure it still restores. The tests fail at the merge base, where the typed error does not exist and the recovery restores the retained family.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_onex_api_step.py tests/unit/handlers/test_handler_dev_boot_guard_companion_lane.py -q --no-cov -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_runtime_converge_omn22006.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24471-integration-proof
+    description: >-
+      The boot guard and the roll step run together: a failed onex-api step leaves the healthy new runtime in place and records runtime_kept_revision. Fails at the merge base, where the typed error does not exist. It binds no criterion; the hosted proof is dod-omn24471-ac2-onex-api-step-leaves-runtime.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_dev_boot_guard_onex_api_step_omn24471.py -q --no-cov -p no:cacheprovider
+        cwd: .
