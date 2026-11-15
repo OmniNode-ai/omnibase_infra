@@ -89,6 +89,27 @@ def _token(text: str) -> str:
     return _TOKEN_UNSAFE.sub("-", text).strip("-") or _UNKNOWN
 
 
+def _request_id(request: ModelDeployJobReadingRequest) -> str:
+    """One id per job, so a retry of the append is a duplicate and writes nothing twice."""
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"onex:deploy-job-reading:{request.correlation_id}",
+        )
+    )
+
+
+def _pin_request_id(branch: str, expires_at: datetime, now: datetime) -> str:
+    """One id per pin and clock hour: a retry within the hour is a duplicate, the next hour re-alarms."""
+    bucket = now.astimezone(UTC).strftime("%Y%m%dT%H")
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"onex:deploy-pin-alarm:{branch}:{_stamp(expires_at)}:{bucket}",
+        )
+    )
+
+
 class HandlerDeployJobReading:
     """Build a terminal deploy job's reading row and append it to the ledger."""
 
@@ -120,15 +141,6 @@ class HandlerDeployJobReading:
         if request.not_started:
             return _token(f"not-started-{request.not_started}")
         return _UNKNOWN
-
-    def request_id(self, request: ModelDeployJobReadingRequest) -> str:
-        """One id per job, so a retry of the append is a duplicate and writes nothing twice."""
-        return str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"onex:deploy-job-reading:{request.correlation_id}",
-            )
-        )
 
     def build_row(self, request: ModelDeployJobReadingRequest) -> str | None:
         """The reading row of a terminal job on a covered lane, or ``None`` when it has none."""
@@ -232,16 +244,6 @@ class HandlerDeployJobReading:
         ).strip()
         return Path(value) if value else None
 
-    def pin_request_id(self, branch: str, expires_at: datetime, now: datetime) -> str:
-        """One id per pin and clock hour: a retry within the hour is a duplicate, the next hour re-alarms."""
-        bucket = now.astimezone(UTC).strftime("%Y%m%dT%H")
-        return str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"onex:deploy-pin-alarm:{branch}:{_stamp(expires_at)}:{bucket}",
-            )
-        )
-
     def handle_pin(
         self,
         *,
@@ -263,7 +265,7 @@ class HandlerDeployJobReading:
         )
         if row is None:
             return ModelDeployJobReadingResult(outcome="skipped")
-        request_id = self.pin_request_id(branch, expires_at, now)
+        request_id = _pin_request_id(branch, expires_at, now)
         error = self._append(row, request_id)
         if error:
             logger.warning("pin alarm for %s not appended: %s", branch, error)
@@ -290,7 +292,7 @@ class HandlerDeployJobReading:
         row = self.build_row(request)
         if row is None:
             return ModelDeployJobReadingResult(outcome="skipped")
-        request_id = self.request_id(request)
+        request_id = _request_id(request)
         error = self._append(row, request_id)
         alarm_row = self.build_alarm_row(request) or ""
         alarm_outcome: Literal["none", "appended", "unappended"] = "none"
