@@ -65,13 +65,13 @@ dod_evidence:
         check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_retires_folded_effects_omn24562.py tests/unit/test_dev_tenant_projection_fold_omn21288.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-ac5-guard-line-absent-at-merge-base
-    description: 'AC5: the check reads the executor file GitHub serves on the pull request branch and looks for the guard line `if "runtime-effects" in retired:`. That line is absent at the merge base 6deccc76f (git show 6deccc76f:scripts/deploy-agent/deploy_agent/executor.py | grep -c on it prints 0 and grep -q exits 1) and present at the head (executor.py line 1032), so the same grep fails against the merge base and passes on the branch.'
+    description: 'AC5: the check greps the executor file in the checked-out head tree (no pipe) for for the guard line `if "runtime-effects" in retired:`. That line is absent at the merge base 6deccc76f (git show 6deccc76f:scripts/deploy-agent/deploy_agent/executor.py | grep -c on it prints 0 and grep -q exits 1) and present at the head (executor.py line 1032), so the same grep fails against the merge base and passes on the branch.'
     source: manual
     binds_ac:
       - AC5
     checks:
       - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=omn-24562-stability-retire-folded-effects\" --jq .content | base64 -d | grep -qF 'if \"runtime-effects\" in retired:'"
+        check_value: grep -qF 'if "runtime-effects" in retired:' scripts/deploy-agent/deploy_agent/executor.py
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-ac6-h201-job-record-runtime-phase
     description: 'AC6: reads the stability-follow job record on h201 (the deploy agent state file /data/omninode/deploy-agent/state/jobs-dev/<job id>*.json, field phase_results.runtime) and exits 0 only when exactly one record matches the job id prefix in STABILITY_FOLLOW_JOB_ID and its phase_results.runtime is success. It is read-only, prints no secret, needs no agent pin change, and exits non-zero when the variable is unset, no record matches, or the runtime phase is anything other than success. The hosted runner cannot reach h201, so the item is local_done_gate and runs on h201 after the agent is installed from this branch.'
