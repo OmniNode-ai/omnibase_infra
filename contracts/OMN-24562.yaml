@@ -59,6 +59,11 @@ requirements:
     acceptance:
       - id: AC16
         statement: 'AC16: while a code-ref pin is live the stability follow command carries the pin head as its git_ref, and without a live pin it carries the tracking ref -- falsifier: scripts/deploy-agent/tests/unit/test_stability_follow_builds_pinned_head_omn24562.py fails at the merge base'
+  - id: req-omn24562-stability-runtime-lane-test
+    statement: The stability runtime lane test reads the runtime services as the composed build the overlay declares.
+    acceptance:
+      - id: AC17
+        statement: 'AC17: the stability runtime lane unit test passes on the integration, asserting the composed build context on the runtime services -- falsifier: tests/unit/infra/test_stability_test_runtime_lane.py fails at the merge base'
   - id: req-omn24562-stability-rollback-waiver
     statement: The deploy agent runs a stability runtime deploy that has no retained rollback point only when its own probe reads every runtime target of the lane down with no timeout, records on the job that it ran without one, and never applies the waiver to the prod lane.
     acceptance:
@@ -221,6 +226,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_follow_builds_pinned_head_omn24562.py tests/unit/test_stability_follows_dev_tag_omn19998.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac17-stability-runtime-lane-test
+    description: The stability runtime lane unit test passes with the composed build declared on the runtime services.
+    source: manual
+    binds_ac:
+      - AC17
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_stability_test_runtime_lane.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-rollback-waiver
     description: 'AC4, AC5 and AC6: UNHEALTHY allows and records, HEALTHY refuses, UNKNOWN refuses, prod and dev never waived; the existing rollback tests still pass'
