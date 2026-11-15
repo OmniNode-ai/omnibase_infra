@@ -105,7 +105,9 @@ class TestDecideStabilityFollow:
         assert decision.followed_tag_sha == NEW
         assert decision.followed_tag == TAGS[-1].name
 
-    def test_follows_the_tag_dev_ran_even_when_a_newer_tag_exists(self) -> None:
+    def test_follows_the_tag_dev_ran_even_when_a_newer_tag_exists(
+        self, tmp_path: Path
+    ) -> None:
         """The starvation OMN-21485 fixes: dev lags the newest tag, and the
         stability lane follows the tag dev actually ran instead of waiting."""
         decision = decide_stability_follow(_inputs(dev_ran_tag_sha=MID))
@@ -114,7 +116,7 @@ class TestDecideStabilityFollow:
         assert decision.followed_tag_sha != NEW
         assert decision.followed_tag == TAGS[1].name
         # And the follow stages exactly that tag, never the newest one.
-        cmd = stability_follow_command(TAGS[1].name, "omnimarket")
+        cmd = stability_follow_command(TAGS[1].name, "omnimarket", tmp_path)
         assert cmd.sibling_tags == {"omnimarket": TAGS[1].name}
 
     @pytest.mark.parametrize("receipt", ["failed", None])
@@ -190,15 +192,15 @@ class TestSelectDevRanTag:
         assert selected is TAGS[2]
 
 
-def test_the_follow_command_is_a_workspace_stability_rebuild() -> None:
-    cmd = stability_follow_command(TAGS[1].name, "omnimarket")
+def test_the_follow_command_is_a_workspace_stability_rebuild(tmp_path: Path) -> None:
+    cmd = stability_follow_command(TAGS[1].name, "omnimarket", tmp_path)
     assert cmd.requested_by == STABILITY_FOLLOW_REQUESTER
     assert cmd.runtime_lane is EnumRuntimeLane.STABILITY_TEST
     assert cmd.build_source is BuildSource.WORKSPACE
     assert cmd.scope is Scope.RUNTIME
     assert cmd.sibling_tags == {"omnimarket": TAGS[1].name}
     assert (
-        stability_follow_command(TAGS[1].name, "omnimarket").correlation_id
+        stability_follow_command(TAGS[1].name, "omnimarket", tmp_path).correlation_id
         != cmd.correlation_id
     )
 
