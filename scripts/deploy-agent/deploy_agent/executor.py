@@ -164,8 +164,7 @@ for package in os.environ.get("ONEX_ACTIVE_RUNTIME_PACKAGES", "").split(","):
 
 def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
     """Load host-effect modules from the standalone agent's own checkout."""
-    prefix = "omnibase_infra." if "." in effect else "omnibase_infra.handlers."
-    name = prefix + effect
+    name = ("omnibase_infra." if "." in effect else "omnibase_infra.handlers.") + effect
     if name in sys.modules:
         return sys.modules[name]
     root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
@@ -186,6 +185,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",
         "models/model_dev_lane_code_ref_pin.py",
         "handlers/handler_dev_lane_code_ref_pin.py",
+        "nodes/node_deploy_job_reading_effect/runtime_deploy_job_reading.py",
         "models/model_onex_api_image_import_request.py",
         "models/model_onex_api_image_import_verdict.py",
         "handlers/handler_onex_api_image_import_check.py",
@@ -194,6 +194,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "handlers/handler_onex_api_image_build.py",
         "models/model_dev_lane_pin_staleness.py",
         "handlers/handler_dev_lane_pin_compose_guard.py",
+        "handlers/handler_stability_rollback_waiver.py",
         "models/model_cost_estimator_build_config.py",
         "models/model_cost_estimator_build_request.py",
         "models/model_cost_estimator_build_result.py",
@@ -3558,15 +3559,6 @@ class DeployExecutor:
                 ModelContainerResidue(service=service, state=state, exit_code=exit_code)
             )
 
-    def _mark_residue_recovered(self, recovered: set[str]) -> None:
-        """Flip residue entries whose service came up under recovery."""
-        self.container_residue = [
-            item.model_copy(update={"recovered": True})
-            if item.service in recovered
-            else item
-            for item in self.container_residue
-        ]
-
     def validate_llm_endpoint_env_contract(self) -> None:
         """Fail runtime deploys when configured LLM endpoints drift from contract."""
         operator_store = operator_env_file() or Path.home() / ".omnibase" / ".env"
@@ -6455,7 +6447,13 @@ class DeployExecutor:
                 timeout_s=CONTAINER_RECOVERY_VERIFY_TIMEOUT_SECONDS,
                 lane=lane,
             )
-            self._mark_residue_recovered(set(stuck) - set(still_stuck))
+            # Flip residue entries whose service came up under recovery.
+            self.container_residue = [
+                item.model_copy(update={"recovered": True})
+                if item.service in set(stuck) - set(still_stuck)
+                else item
+                for item in self.container_residue
+            ]
             if not ok:
                 detail = f"Containers still not running after docker start recovery: {still_stuck}"
                 if compose_up_error:
@@ -7637,13 +7635,6 @@ class DeployRolledBackError(VerificationFailedError):
         )
 
 
-def _retention_ref(image_ref: str, lane: EnumRuntimeLane) -> str:
-    repo = image_ref.split("@", 1)[0]
-    if repo.rfind(":") > repo.rfind("/"):
-        repo = repo.rsplit(":", 1)[0]
-    return f"{repo}:rollback-{lane.value}"
-
-
 def _tag_image(image_id: str, image_ref: str) -> None:
     result = _run(
         ["docker", "tag", image_id, image_ref],
@@ -7716,7 +7707,10 @@ def capture_rollback_point(
                     container,
                 )
                 return None
-            retain_ref = _retention_ref(image_ref, lane)
+            retain_repo = image_ref.split("@", 1)[0]
+            if retain_repo.rfind(":") > retain_repo.rfind("/"):
+                retain_repo = retain_repo.rsplit(":", 1)[0]
+            retain_ref = f"{retain_repo}:rollback-{lane.value}"
             if retain_ref in retention and retention[retain_ref] != image_id:
                 logger.warning(
                     "Cannot capture rollback for %s: conflicting image ids for %s",

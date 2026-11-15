@@ -346,6 +346,7 @@ BRANCH_INSTALL_APPLY_TIMEOUT_SECONDS = 900
 #: tree the job just built), so a change to it needs no release of the omnibase_infra
 #: package the agent venv holds.
 BRANCH_INSTALL_ENTRY = f"{REPO_DIR}/src/omnibase_infra/nodes/node_dev_roll_events_effect/runtime_dev_branch_install_reapply.py"
+JOB_READING_RUNTIME = "nodes.node_deploy_job_reading_effect.runtime_deploy_job_reading"
 BRANCH_INSTALL_EXIT_NOT_WHOLE = 4
 
 #: OMN-18200 AC5. The k3s ``onex-lab`` overlay re-apply, ON by default.
@@ -552,10 +553,9 @@ class DeployAgent:
         # a lab dev agent whose fence admits it; its seams and its last verdict.
         self._stability_follow_attempted: set[str] = set()
         self._stability_follow_last_verdict: EnumStabilityFollowVerdict | None = None
-        self._stability_read_running_ref: Callable[[str], str | None] = lambda repo: (
-            read_running_ref(
-                _runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST), repo
-            )
+        self._stability_read_running_ref = load_dev_boot_guard().healthy_ref_reader(
+            _runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST),
+            read_running_ref,
         )
         # OMN-20864: the restore of a lane with no running runtime, and its seams.
         self._idle_restore_last_attempt: datetime | None = None
@@ -677,10 +677,6 @@ class DeployAgent:
         with self._settle_guard:
             future = self._settle_future
         return future is not None and not future.done()
-
-    def _hand_to_settle(self, settle: Callable[[], None]) -> None:
-        with self._settle_guard:
-            self._settle_future = self._settle_pool.submit(settle)
 
     def drain_settle(self, timeout: float | None = None) -> bool:
         """Wait for every settle submitted so far. True when none is in flight.
@@ -1477,7 +1473,7 @@ class DeployAgent:
             return decision
         assert decision.followed_tag is not None  # FOLLOW names the tag
         assert decision.followed_tag_sha is not None
-        cmd = stability_follow_command(decision.followed_tag, repository)
+        cmd = stability_follow_command(decision.followed_tag, repository, STATE_DIR)
         self._stability_follow_attempted.add(decision.followed_tag_sha)
         logger.info(
             "stability follow: running %s as %s: %s",
@@ -2044,23 +2040,23 @@ class DeployAgent:
                 with protection:
                     # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
                     # cache. prod pulls the pinned digest instead of rebuilding from a ref.
-                    lanes_off_guard = (EnumRuntimeLane.PROD, EnumRuntimeLane.DEV)
-                    needs_point = cmd.scope in (Scope.RUNTIME, Scope.FULL)
-                    needs_point = (
-                        needs_point and cmd.runtime_lane not in lanes_off_guard
+                    # OMN-24562: a stability lane read down by the guard's own
+                    # probe may deploy with no point; see the handler.
+                    rollback_point = load_dev_boot_guard(
+                        "handler_stability_rollback_waiver"
+                    ).admit_rollback_point(
+                        lane=cmd.runtime_lane,
+                        scope=cmd.scope,
+                        correlation_id=cid,
+                        record_dir=self.job_store.state_dir / "rollback-waivers",
+                        targets=lane_config_for(
+                            cmd.runtime_lane
+                        ).runtime_health_targets,
+                        probe=lambda **kw: self.executor._probe_runtime_health(**kw),
+                        capture=lambda: capture_rollback_point(
+                            self.executor, cmd.runtime_lane
+                        ),
                     )
-                    rollback_point = (
-                        capture_rollback_point(self.executor, cmd.runtime_lane)
-                        if needs_point
-                        else None
-                    )
-                    # Dev recovery belongs to the boot guard. Every other
-                    # non-prod runtime/full rebuild needs a retained point.
-                    if needs_point and rollback_point is None:
-                        raise RuntimeError(
-                            f"Refusing {cmd.runtime_lane.value} {cmd.scope.value} deploy: "
-                            "no healthy, retained rollback point"
-                        )
                     services_restarted = self.executor.rebuild_scope(
                         cmd.scope,
                         cmd.services,
@@ -2316,7 +2312,8 @@ class DeployAgent:
             # the job thread, so the next command's compose job can start while
             # this one's overlay applies. The terminal event is published by the
             # settle, after the pin, exactly as OMN-18572 shaped it.
-            self._hand_to_settle(settle)
+            with self._settle_guard:
+                self._settle_future = self._settle_pool.submit(settle)
             self._state = "idle"
             return
 
@@ -2443,6 +2440,7 @@ class DeployAgent:
                 job.result_publish_pending = True
                 self.job_store._save(job)
                 logger.warning("Publish failed for %s, marked pending", cid)
+            load_dev_boot_guard(JOB_READING_RUNTIME).publish(job, sys.modules[__name__])
 
         # OMN-18636 AC5. Nothing further runs for this job, so it stops
         # reporting itself as settling. A flag that is only ever set makes every
