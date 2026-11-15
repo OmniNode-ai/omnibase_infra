@@ -1,7 +1,7 @@
 schema_version: 1.0.0
 ticket_id: OMN-24524
 title: Hook venv repair keeps installed lock-listed extras
-summary: The hook venv reconcile names, on its uv sync and its dry-run plan, every optional extra of the project whose requirements are all installed in the venv, so a lock-listed extra installed at its locked revision no longer reads as a branch install the sync would discard; the refusal for any other git install the plan would replace or drop is unchanged.
+summary: The hook venv reconcile names, on its uv sync and its dry-run plan, every optional extra of the project whose requirements are all installed in the venv, so a lock-listed extra installed at its locked revision no longer reads as a branch install the sync would discard; only extras the project's lock lists are kept, the rest are reported, extras are computed once per run, the drift check asks the same node in check mode so it uses the same extras, and the refusal for any other git install the plan would replace or drop is unchanged.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -33,7 +33,7 @@ dod_evidence:
       - AC3
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_reconcile_workspace_venvs tests/integration/handlers/test_hook_venv_extras_omn24524.py -q -n 0 --no-cov -p no:cacheprovider
+        check_value: uv run pytest tests/unit/nodes/node_reconcile_workspace_venvs tests/integration/handlers/test_hook_venv_extras_omn24524.py tests/scripts/test_reconcile_workspace_venvs.py -k 'extras or drift_check or hook' -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
   - id: dod-omn24524-deploy-conditions
     description: 'Deploy probe the hosted runner can run: the handler at the checked-out commit holds the string ''_installed_extras''; it does not exist at the merge base, so the probe fails there.'
