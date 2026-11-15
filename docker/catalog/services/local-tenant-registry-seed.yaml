@@ -22,8 +22,8 @@ ports: null
 healthcheck: null
 volumes: []
 depends_on:
-  - service: migration-gate
-    condition: service_healthy
+  - service: forward-migration
+    condition: service_completed_successfully
 restart: 'no'
 resources:
   cpus: '0.25'

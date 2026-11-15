@@ -41,7 +41,7 @@ class ModelLabProofBundlePolicy(BaseModel):
     )
     container_runtime_main: str = Field(min_length=1)
     container_runtime_effects: str = Field(min_length=1)
-    container_migration_gate: str = Field(min_length=1)
+    container_forward_migration: str = Field(min_length=1)
     host_ports: tuple[int, ...] = Field(min_length=1)
     health_interval_seconds: int = Field(ge=1)
     health_deadline_seconds: int = Field(ge=1)

@@ -614,9 +614,16 @@ except (OSError, ValueError):
     d={}
 det=d.get("details") if isinstance(d.get("details"),dict) else {}
 print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",det.get("failed_handlers"))' "/tmp/$TAG-h$p.json")"; done
-  # a slot has no migration-gate container: prepr_verify_lane.sh ran both
-  # migrations against its fresh databases and exits non-zero when one fails
-  [ "$KIND" = prepr-slot ] && echo "slot-migration-gate health=$([ -f "$W/migrated" ] && echo healthy || echo unknown)"
+  # no migration-gate container exists (OMN-24483). A slot: prepr_verify_lane.sh
+  # ran both migrations against its fresh databases and exits non-zero when one
+  # fails. Any other lane: the forward-migration one-shot exited 0. The line keeps
+  # the "migration-gate health=" shape the judge reads.
+  if [ "$KIND" = prepr-slot ]; then
+    echo "slot-migration-gate health=$([ -f "$W/migrated" ] && echo healthy || echo unknown)"
+  else
+    FM=$(docker ps -aq --filter label=com.docker.compose.project=$P --filter label=com.docker.compose.service=forward-migration | head -1)
+    echo "forward-migration-gate health=$([ -n "$FM" ] && [ "$(docker inspect -f '{{.State.Status}} {{.State.ExitCode}}' "$FM")" = "exited 0" ] && echo healthy || echo unhealthy)"
+  fi
   docker ps -aq --filter label=com.docker.compose.project=$P | xargs docker inspect -f '{{.Name}} health={{if .State.Health}}{{.State.Health.Status}}{{end}} restarts={{.RestartCount}} {{.State.Status}} exit={{.State.ExitCode}}'
   if [ -z "${LIVE_GREP:-}" ]; then
     LIVE_GREP=$(derive_live_grep $SUBJECTS)

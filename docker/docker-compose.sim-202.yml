@@ -122,8 +122,6 @@ services:
       - "127.0.0.1:62379:6379"
   forward-migration:
     container_name: omnibase-infra-sim-202-forward-migration
-  migration-gate:
-    container_name: omnibase-infra-sim-202-migration-gate
   intelligence-migration:
     container_name: omnibase-infra-sim-202-intelligence-migration
   omninode-runtime:

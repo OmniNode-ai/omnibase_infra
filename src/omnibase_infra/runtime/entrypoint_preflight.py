@@ -42,7 +42,17 @@ each, and once the declared bound is reached records the exhausted event and
 parks the container instead of booting again: the restart policy has nothing left
 to relaunch, and the container reports unhealthy with the cause in its log.
 
+Migration wait (OMN-24483): the long-running ``migration-gate`` container, a
+database image running a keepalive that other services waited on, is gone. The
+function it served -- hold the runtime back until the forward migrations have
+stamped ``db_metadata.migrations_complete`` and the projection tables exist --
+is the first preflight step, :func:`wait_for_migrations`, inside the one runtime.
+The step is opt-in through ``ONEX_BOOT_WAIT_FOR_MIGRATIONS`` because only the
+compose lanes stamp that flag; the compose model sets it for every runtime
+service.
+
 Related Tickets:
+    - OMN-24483: migration-gate container replaced by the runtime boot wait.
     - OMN-18550: unbounded, unreported restart loop on a malformed contract.
     - OMN-17372: runtime boot latency — four cold interpreters before the kernel.
     - OMN-13666: required (own DB) vs best-effort (non-owned DB) stamp policy.
@@ -80,6 +90,17 @@ STAMP_RETRY_SLEEP_SECONDS: float = 1.0
 
 #: Exit code the stamp returns for "schema mismatch" — never retried.
 STAMP_RC_MISMATCH: int = 2
+
+#: OMN-24483: the boot wait that replaces the ``migration-gate`` container.
+#: The wait is opt-in (only compose lanes stamp ``migrations_complete``); the
+#: window matches the retired gate's: 180 s start period + 30 retries x 10 s.
+ENV_WAIT_FOR_MIGRATIONS: str = "ONEX_BOOT_WAIT_FOR_MIGRATIONS"
+ENV_MIGRATION_WAIT_SECONDS: str = "ONEX_BOOT_MIGRATION_WAIT_SECONDS"
+ENV_MIGRATION_POLL_SECONDS: str = "ONEX_BOOT_MIGRATION_POLL_SECONDS"
+ENV_REQUIRED_PROJECTION_TABLES: str = "ONEX_BOOT_REQUIRED_PROJECTION_TABLES"
+DEFAULT_MIGRATION_WAIT_SECONDS: float = 480.0
+DEFAULT_MIGRATION_POLL_SECONDS: float = 5.0
+DEFAULT_REQUIRED_PROJECTION_TABLES: str = "delegation_events node_service_registry"
 
 #: CMD values whose handoff is an in-process call rather than an ``execvp``.
 #: ``onex-runtime`` is the packaged console script declared in ``pyproject.toml``
@@ -262,11 +283,116 @@ def render_resolver_config(env: Mapping[str, str]) -> int:
     return render_resolver_main()
 
 
+async def _probe_migrations(
+    infra_db_url: str, node_db_url: str, tables: tuple[str, ...]
+) -> bool:
+    """One readiness read: the sentinel flag, then every required table.
+
+    Same two checks the retired ``scripts/check_migrations_complete.sh`` ran:
+    ``db_metadata.migrations_complete`` is TRUE on the runtime's own database,
+    and each required projection table exists on the node analytics database.
+    """
+    import asyncpg
+
+    conn = await asyncpg.connect(infra_db_url, timeout=5)
+    try:
+        flag = await conn.fetchval(
+            "SELECT migrations_complete FROM public.db_metadata WHERE id = TRUE"
+        )
+    finally:
+        await conn.close()
+    if flag is not True:
+        return False
+    if not tables or not node_db_url:
+        return True
+    node_conn = await asyncpg.connect(node_db_url, timeout=5)
+    try:
+        for table_name in tables:
+            exists = await node_conn.fetchval(
+                "SELECT to_regclass($1) IS NOT NULL", f"public.{table_name}"
+            )
+            if exists is not True:
+                return False
+    finally:
+        await node_conn.close()
+    return True
+
+
+def wait_for_migrations(
+    env: Mapping[str, str],
+    *,
+    probe: Callable[[str, str, tuple[str, ...]], bool] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    monotonic: Callable[[], float] | None = None,
+) -> int:
+    """Hold boot until the forward migrations are complete (OMN-24483).
+
+    Replaces the ``migration-gate`` container: a long-running keepalive whose
+    healthcheck ran ``check_migrations_complete.sh`` and which every runtime
+    service waited on. The same two conditions are now read here, once, inside
+    the runtime that needs them, before the schema fingerprint is stamped (a
+    stamp taken before the tables exist is wrong and every later boot fails).
+
+    Opt-in through ``ONEX_BOOT_WAIT_FOR_MIGRATIONS=true``: a lane whose
+    migrations are applied by something that never stamps the flag (the managed
+    lane's migrate Job) must not wait for it. Returns ``0`` when boot may
+    proceed and ``1`` when the window ended with the migrations still
+    incomplete, which aborts boot like any other required preflight step.
+    """
+    if env.get(ENV_WAIT_FOR_MIGRATIONS, "").strip().lower() not in {"1", "true", "yes"}:
+        return 0
+    infra_db_url = env.get("OMNIBASE_INFRA_DB_URL", "")
+    if not infra_db_url:
+        _echo("[entrypoint] OMNIBASE_INFRA_DB_URL not set -- skipping migration wait")
+        return 0
+
+    def _asyncpg_probe(infra: str, node: str, tables: tuple[str, ...]) -> bool:
+        try:
+            return asyncio.run(_probe_migrations(infra, node, tables))
+        except Exception as exc:  # noqa: BLE001 -- any failure is "not ready yet"
+            _echo(f"[entrypoint] migration probe not ready: {type(exc).__name__}")
+            return False
+
+    probe_fn = _asyncpg_probe if probe is None else probe
+    sleeper: Callable[[float], None] = time.sleep if sleep is None else sleep
+    clock: Callable[[], float] = time.monotonic if monotonic is None else monotonic
+    window = _env_number(
+        env, ENV_MIGRATION_WAIT_SECONDS, DEFAULT_MIGRATION_WAIT_SECONDS
+    )
+    poll = _env_number(env, ENV_MIGRATION_POLL_SECONDS, DEFAULT_MIGRATION_POLL_SECONDS)
+    tables = tuple(
+        env.get(
+            ENV_REQUIRED_PROJECTION_TABLES, DEFAULT_REQUIRED_PROJECTION_TABLES
+        ).split()
+    )
+    node_db_url = env.get("OMNIDASH_ANALYTICS_DB_URL", "")
+
+    _echo(
+        f"[entrypoint] Waiting for migrations (db: {_safe_dsn(infra_db_url)}, "
+        f"window {window:.0f}s)..."
+    )
+    deadline = clock() + window
+    while True:
+        if probe_fn(infra_db_url, node_db_url, tables):
+            _echo("[entrypoint] Migrations complete.")
+            return 0
+        if clock() >= deadline:
+            _echo_err(
+                "[entrypoint] ERROR: migrations not complete after "
+                f"{window:.0f}s -- aborting boot"
+            )
+            return 1
+        sleeper(poll)
+
+
 def run_preflight(env: MutableMapping[str, str]) -> int:
     """Run every preflight step in the shell's original order.
 
     Returns ``0`` when the kernel may start, or the boot-abort exit code.
     """
+    rc = wait_for_migrations(env)
+    if rc != 0:
+        return rc
     rc = stamp_all_fingerprints(env)
     if rc != 0:
         return rc

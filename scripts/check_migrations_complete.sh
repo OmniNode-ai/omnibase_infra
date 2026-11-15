@@ -2,11 +2,16 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-# check_migrations_complete.sh — Docker healthcheck for migration sentinel
+# check_migrations_complete.sh — one-shot readiness probe for the migration sentinel
 #
-# Returns exit 0 if the db_metadata.migrations_complete flag is TRUE,
-# exit 1 otherwise. Used by docker-compose depends_on to gate runtime
-# service startup until all forward migrations have been applied.
+# Returns exit 0 if the db_metadata.migrations_complete flag is TRUE and the
+# required projection tables exist, exit 1 otherwise.
+#
+# OMN-24483: no container runs this any more. The long-running migration-gate
+# container that mounted it is gone; the runtime performs the same two checks at
+# boot (omnibase_infra.runtime.entrypoint_preflight.wait_for_migrations). The
+# script stays as the operator-runnable form of that probe and as the reference
+# the fence tests drive.
 #
 # Ticket: OMN-3737 (Boot-Order Migration Sentinel)
 #

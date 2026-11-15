@@ -78,11 +78,18 @@ def test_intelligence_migration_in_runtime_migration_services() -> None:
         "depends_on, so the preflight must run it or fresh-DB lanes crash-loop "
         "(OMN-13220)."
     )
-    # Order must keep migration-gate last: it stamps migrations_complete after
-    # both schema migrations have applied.
-    assert services.index("intelligence-migration") < services.index(
-        "migration-gate"
-    ), "intelligence-migration must run before migration-gate stamps completion."
+    # OMN-24483: the migration-gate container is gone; the runtime waits for the
+    # stamp itself, so the gate must not come back into the refreshed set.
+    assert "migration-gate" not in services
+    assert services.index("forward-migration") < services.index(
+        "intelligence-migration"
+    ), "forward-migration applies the base schema before the intelligence one."
+    retired = re.search(
+        r"RUNTIME_RETIRED_SERVICES=\((?P<body>.*?)\)",
+        _deploy_script_noncomment(),
+        re.DOTALL,
+    )
+    assert retired is not None and "migration-gate" in retired.group("body").split()
 
 
 @pytest.mark.unit
@@ -98,12 +105,9 @@ def test_intelligence_migration_is_waited_on_as_oneshot() -> None:
     oneshots = match.group("body").split()
     assert "forward-migration" in oneshots
     assert "intelligence-migration" in oneshots
-    # migration-gate is a long-running healthcheck keepalive, not a one-shot; a
-    # docker wait on it would block the deploy forever.
-    assert "migration-gate" not in oneshots, (
-        "migration-gate is a keepalive, not a one-shot; it must not be in the "
-        "docker-wait set or the deploy hangs."
-    )
+    # OMN-24483: no keepalive remains in the migration set; every member is a
+    # one-shot the deploy can docker wait on.
+    assert "migration-gate" not in oneshots
     # The wait loop must actually consult the one-shot set.
     assert "RUNTIME_MIGRATION_ONESHOTS" in text
     assert "docker wait" in text

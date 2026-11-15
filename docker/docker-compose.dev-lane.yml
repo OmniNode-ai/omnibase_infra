@@ -1422,8 +1422,8 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -1508,8 +1508,8 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -1594,8 +1594,8 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -1656,8 +1656,8 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -1707,8 +1707,8 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -1758,8 +1758,8 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:

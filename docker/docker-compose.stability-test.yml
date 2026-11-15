@@ -223,17 +223,14 @@ services:
   forward-migration:
     container_name: omnibase-infra-stability-test-forward-migration
     restart: "no"
-  migration-gate:
-    container_name: omnibase-infra-stability-test-migration-gate
-    restart: "no"
   intelligence-migration:
     container_name: omnibase-infra-stability-test-intelligence-migration
   omninode-runtime:
     container_name: omninode-stability-test-runtime
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       intelligence-migration:
         condition: service_completed_successfully
       redpanda-partition-cap:
@@ -350,8 +347,8 @@ services:
     container_name: omninode-stability-test-runtime-effects
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
     environment:
       # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
       ONEX_RUNTIME_LANE: "stability-test"
@@ -458,8 +455,8 @@ services:
     container_name: omninode-stability-test-runtime-worker
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
     environment:
       !!merge <<: *stability_test_strict_wiring_env
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED}
@@ -640,8 +637,8 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -704,8 +701,8 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -758,8 +755,8 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -811,8 +808,8 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -865,8 +862,8 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -919,8 +916,8 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:

@@ -49,7 +49,6 @@ one_shots:
   - cloud-migration-files
   - forward-migration
   - intelligence-migration
-  - migration-gate
   - redpanda-partition-cap
   - redpanda-sasl-enable
   - redpanda-scram-user
@@ -336,13 +335,6 @@ allowed_commands:
     reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
     argv_sha256: 538cf86ad1dd81e9749207d29a655500a42d3b90657e79a69da190d0b6da58d2
     command_hint: /bin/sh -c
-  - match: exact
-    field: entrypoint
-    services:
-      - migration-gate
-    reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
-    argv_sha256: 5530e6d45601261a96a7db593fcfb6233a28d2cff66289f1a3375bc9db9fca55
-    command_hint: sh -c
   - match: exact
     field: entrypoint
     services:

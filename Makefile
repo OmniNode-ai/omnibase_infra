@@ -165,8 +165,8 @@ up-local-mirror: _check-docker local-env ## Laptop profile plus the mirror-only 
 	@echo "==> Starting the laptop profile with the lane mirror (compose project $(LOCAL_PROJECT))..."
 	$(ONEX_CLI) up local-lane-mirror --env-file "$(LOCAL_ENV_FILE)" --build
 
-status-local: _check-docker ## Laptop profile: migration gate, runtime /health bodies, delegate consumer group
-	@echo "migration-gate: $$(docker inspect --format '{{.State.Health.Status}}' $(LOCAL_PROJECT)-migration-gate)"
+status-local: _check-docker ## Laptop profile: forward migration, runtime /health bodies, delegate consumer group
+	@echo "forward-migration: $$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}}' $(LOCAL_PROJECT)-forward-migration)"
 	@echo "runtime main /health:";    curl -sS --max-time 10 http://localhost:8085/health; echo
 	@echo "runtime effects /health:"; curl -sS --max-time 10 http://localhost:8086/health; echo
 	@echo "delegate-skill command topic consumer groups:"

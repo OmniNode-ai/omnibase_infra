@@ -79,19 +79,6 @@ def test_real_catalog_migration_gate_meets_start_period_floor() -> None:
 
 
 @pytest.mark.unit
-def test_migration_gate_is_classified_as_completion_gate() -> None:
-    """migration-gate must be recognized as a migration-completion gate.
-
-    Guards against the classifier silently no-op'ing (which would let a
-    too-short start_period slip through unvalidated).
-    """
-    resolver = CatalogResolver(catalog_dir=CATALOG_DIR)
-    resolved = resolver.resolve(bundles=["runtime"])
-    assert "migration-gate" in resolved.manifests
-    assert is_migration_completion_gate(resolved.manifests["migration-gate"])
-
-
-@pytest.mark.unit
 def test_validator_flags_too_short_start_period() -> None:
     """A gate below the floor (the pre-fix 10s value) must be flagged."""
     result = validate_migration_gate_start_period({"migration-gate": _gate(10)})

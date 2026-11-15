@@ -105,13 +105,6 @@ services:
       - "com.omninode.lane=prod"
       - "com.omninode.service=forward-migration"
       - "com.omninode.layer=infrastructure"
-  migration-gate:
-    container_name: omnibase-infra-prod-migration-gate
-    restart: "no"
-    labels:
-      - "com.omninode.lane=prod"
-      - "com.omninode.service=migration-gate"
-      - "com.omninode.layer=infrastructure"
   intelligence-migration:
     container_name: omnibase-infra-prod-intelligence-migration
     restart: "no"
@@ -138,8 +131,8 @@ services:
     image: ${PROD_OMNINODE_RUNTIME_IMAGE:-omnibase-infra-prod-omninode-runtime:latest}
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       intelligence-migration:
         condition: service_completed_successfully
       redpanda-partition-cap:
@@ -181,8 +174,8 @@ services:
     image: ${PROD_RUNTIME_EFFECTS_IMAGE:-omnibase-infra-prod-runtime-effects:latest}
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
     environment:
       ONEX_TRAJECTORY_EVALUATION_BACKEND: ${PROD_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set PROD_TRAJECTORY_EVALUATION_BACKEND}
       OMNIMEMORY_ENABLED: ${PROD_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED:?runtime policy contract must set PROD_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED}
@@ -230,8 +223,8 @@ services:
     container_name: omninode-prod-runtime-worker
     restart: unless-stopped
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
     environment:
       ONEX_TRAJECTORY_EVALUATION_BACKEND: ${PROD_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set PROD_TRAJECTORY_EVALUATION_BACKEND}
       OMNIMEMORY_ENABLED: ${PROD_RUNTIME_WORKER_OMNIMEMORY_ENABLED:?runtime policy contract must set PROD_RUNTIME_WORKER_OMNIMEMORY_ENABLED}

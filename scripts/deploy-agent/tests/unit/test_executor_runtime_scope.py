@@ -342,8 +342,12 @@ class TestCoreAndFullScopeComposeUp:
 
         assert captured_cmds[0][-1] == "forward-migration"
         assert "--no-deps" in captured_cmds[0]
-        assert captured_cmds[1][-1] == "migration-gate"
-        assert "--no-deps" in captured_cmds[1]
+        # OMN-24483: no migration-gate step; the keepalive container is retired.
+        assert all(c[-1] != "migration-gate" for c in captured_cmds)
+        # ... and the roll looks for the one an earlier roll left behind.
+        retire_read = captured_cmds[1]
+        assert retire_read[:3] == ["docker", "ps", "-a"]
+        assert "label=com.docker.compose.service=migration-gate" in retire_read
         assert any(
             "SELECT to_regclass('public.delegation_events') IS NOT NULL" in cmd
             and "omnidash_analytics" in cmd
@@ -361,7 +365,7 @@ class TestCoreAndFullScopeComposeUp:
         )
         tail = captured_cmds[-len(dev_runtime_services) :]
         assert [c[-1] for c in tail] == dev_runtime_services
-        assert verified[:2] == [["forward-migration"], ["migration-gate"]]
+        assert verified[:1] == [["forward-migration"]]
         # OMN-18438: the cloud one-shots run AFTER the lane-agnostic pair and
         # BEFORE the runtime family, each waited on individually, in the order
         # the shared declaration gives -- the corpus copy before the apply.
@@ -370,3 +374,60 @@ class TestCoreAndFullScopeComposeUp:
         assert "--force-recreate" in captured_cmds[2]
         assert "--force-recreate" in captured_cmds[3]
         assert completed == [["cloud-migration-files"], ["cloud-migration"]]
+
+
+class TestRetireRemovedServices:
+    """OMN-24483: a roll removes the container of a service the model dropped."""
+
+    def test_removes_the_leftover_migration_gate_container(self) -> None:
+        from deploy_agent import executor
+        from deploy_agent.executor import EnumRuntimeLane
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess:
+            calls.append(cmd)
+            if cmd[:3] == ["docker", "ps", "-a"]:
+                return subprocess.CompletedProcess(
+                    args=cmd,
+                    returncode=0,
+                    stdout="abc123def456\tomnibase-infra-migration-gate\n",
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr=""
+            )
+
+        with patch("deploy_agent.executor._run", side_effect=fake_run):
+            removed = executor.retire_removed_services(EnumRuntimeLane.DEV)
+
+        assert removed == ["omnibase-infra-migration-gate"]
+        assert ["docker", "rm", "-f", "abc123def456"] in calls
+
+    def test_nothing_to_remove_removes_nothing(self) -> None:
+        from deploy_agent import executor
+        from deploy_agent.executor import EnumRuntimeLane
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess:
+            calls.append(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr=""
+            )
+
+        with patch("deploy_agent.executor._run", side_effect=fake_run):
+            assert executor.retire_removed_services(EnumRuntimeLane.DEV) == []
+        assert not any(c[:2] == ["docker", "rm"] for c in calls)
+
+    def test_an_unreadable_listing_is_left_for_the_next_roll(self) -> None:
+        from deploy_agent import executor
+        from deploy_agent.executor import EnumRuntimeLane
+
+        def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess:
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=1, stdout="", stderr="boom"
+            )
+
+        with patch("deploy_agent.executor._run", side_effect=fake_run):
+            assert executor.retire_removed_services(EnumRuntimeLane.DEV) == []

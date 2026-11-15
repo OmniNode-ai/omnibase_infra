@@ -1,0 +1,48 @@
+schema_version: 1.0.0
+ticket_id: OMN-24483
+title: Replace the long-running migration gate container with a runtime boot step
+summary: >-
+  The migration-gate container (a database image running a keepalive that runtime services waited on) is removed from every compose file and from the service catalog. Its function moves into the one runtime. The runtime's boot preflight (entrypoint_preflight.wait_for_migrations, opt-in through ONEX_BOOT_WAIT_FOR_MIGRATIONS, set for omninode-runtime, runtime-effects and runtime-worker) waits for db_metadata.migrations_complete and the required projection tables before it stamps the schema fingerprint, and every service that waited on the gate now waits on forward-migration completing successfully. The dev roll (deploy agent and the bash deploy handler) removes the leftover migration-gate container an earlier roll created.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24483-boot-step
+    statement: The function of migration-gate is done by a boot step inside the one runtime and no compose file or catalog manifest declares or depends on a migration-gate service.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the function of migration-gate is done by a node or boot step inside the one runtime and the compose model declares no migration-gate service -- falsifier: a test that reads the dev compose model fails while the service is declared"
+  - id: req-omn24483-dev-roll
+    statement: After one dev roll no migration-gate container exists in the dev compose project and the runtime reads ready.
+    acceptance:
+      - id: AC2
+        statement: "AC2: integrated: after one dev roll no migration-gate container exists in the dev compose project and the runtime reads ready -- falsifier: docker ps on the dev host lists the container, or the runtime is not ready"
+evidence_requirements:
+  - kind: tests
+    description: The compose-model scan, the runtime boot wait and the deploy agent's retire step.
+    command: uv run --frozen pytest tests/unit/infra/test_no_migration_gate_service_omn24483.py tests/unit/runtime/test_entrypoint_preflight_omn17372.py scripts/deploy-agent/tests/unit/test_executor_runtime_scope.py -q --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24483-ac1-no-gate-in-compose-model
+    description: >-
+      A test reads every compose file and catalog manifest and fails while any of them declares migration-gate or depends on it; its positive control proves the scan flags each shape the model used to carry. A second test shows the boot wait returns on completion and fails the boot when the window ends incomplete. They fail at the merge base, where the service is declared and wait_for_migrations does not exist.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_no_migration_gate_service_omn24483.py tests/unit/runtime/test_entrypoint_preflight_omn17372.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24483-ac2-dev-roll-retires-the-container
+    description: >-
+      The deploy agent's roll removes a leftover migration-gate container by its compose labels and the migration step list no longer names it. The live dev roll proof (docker ps on the dev host lists no migration-gate container, the runtime reads ready) is recorded by the dev-lane receipt after merge; the unit tests below are the hosted proof of the code path.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_executor_runtime_scope.py tests/scripts/test_deploy_runtime_coldstart.py -q --no-cov -p no:cacheprovider
+        cwd: .

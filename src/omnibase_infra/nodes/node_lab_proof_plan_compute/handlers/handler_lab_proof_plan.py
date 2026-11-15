@@ -974,18 +974,22 @@ class HandlerLabProofPlan:
                 _ID.HEALTH_MIGRATION_GATE,
                 _PROVE,
                 _S,
-                "migration gate Docker-healthy",
+                # OMN-24483: no migration-gate container exists; the runtime
+                # waits for the migrations itself, and the migrations' result is
+                # the forward-migration one-shot having exited 0. The step id
+                # keeps its name: it is the vocabulary stored receipts use.
+                "forward-migration one-shot exited 0",
                 [
                     "docker",
                     "inspect",
                     "-f",
-                    "{{.State.Health.Status}}",
-                    bundle.container_migration_gate,
+                    "{{.State.Status}} {{.State.ExitCode}}",
+                    bundle.container_forward_migration,
                 ],
                 timeout=bundle.step_timeouts.health_probe_seconds,
                 must_succeed=False,
                 retry=health,
-                expect_stdout_equals="healthy",
+                expect_stdout_equals="exited 0",
             )
         )
         for health_id, _identity, _smoke, _logs, container in containers:

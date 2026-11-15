@@ -4,9 +4,6 @@ consumers:
   forward-migration:
     physical_database_envs:
       - NODE_POSTGRES_DB
-  migration-gate:
-    physical_database_envs:
-      - NODE_POSTGRES_DB
   omnidash:
     bindings:
       - app_dashboard

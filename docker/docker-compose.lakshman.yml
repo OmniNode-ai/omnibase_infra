@@ -448,36 +448,6 @@ services:
       - omnibase-infra-lakshman-network
     restart: "no"
     logging: *logging-defaults
-  migration-gate:
-    image: postgres:16-alpine
-    container_name: omnibase-infra-lakshman-migration-gate
-    profiles: ["lakshman"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      forward-migration:
-        condition: service_completed_successfully
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: omnibase_infra
-      NODE_POSTGRES_DB: omnidash_analytics
-      REQUIRED_PROJECTION_TABLES: "delegation_events node_service_registry"
-    entrypoint: ["sh", "-c", "while true; do sleep 3600; done"]
-    volumes:
-      - ../scripts/check_migrations_complete.sh:/check_migrations_complete.sh:ro
-    networks: !override
-      - omnibase-infra-lakshman-network
-    healthcheck:
-      test: ["CMD-SHELL", "sh /check_migrations_complete.sh"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 10s
-    logging: *logging-defaults
-    restart: unless-stopped
   intelligence-migration:
     image: postgres:16-alpine
     container_name: omnibase-infra-lakshman-intelligence-migration
@@ -519,8 +489,8 @@ services:
     !!merge <<: *runtime-base
     container_name: omninode-lakshman-runtime
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       intelligence-migration:
         condition: service_completed_successfully
       redpanda:
@@ -646,8 +616,8 @@ services:
       - -m
       - omnimarket.nodes.node_projection_delegation.handlers.handler_delegation
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -687,8 +657,8 @@ services:
     container_name: omnimarket-lakshman-projection-api
     command: ["omnimarket-projection-api"]
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -829,8 +799,8 @@ services:
     depends_on:
       cloud-migration:
         condition: service_completed_successfully
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       redpanda-partition-cap:

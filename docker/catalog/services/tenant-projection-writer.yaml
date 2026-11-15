@@ -67,8 +67,8 @@ volumes:
   - tenant_projection_logs:/app/logs
   - ../contracts:/app/contracts:ro
 depends_on:
-  - service: migration-gate
-    condition: service_healthy
+  - service: forward-migration
+    condition: service_completed_successfully
   - service: redpanda
     condition: service_healthy
   - service: postgres

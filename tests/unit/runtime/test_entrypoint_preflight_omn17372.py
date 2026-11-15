@@ -251,3 +251,135 @@ def test_empty_cmd_aborts_rather_than_starting_nothing(
 
 
 __all__: list[str] = []
+
+
+# ---------------------------------------------------------------------------
+# OMN-24483: the boot wait that replaces the migration-gate container
+# ---------------------------------------------------------------------------
+
+_WAIT_ENV = {
+    "ONEX_BOOT_WAIT_FOR_MIGRATIONS": "true",
+    "OMNIBASE_INFRA_DB_URL": "postgresql://u:p@postgres:5432/omnibase_infra",
+    "OMNIDASH_ANALYTICS_DB_URL": "postgresql://u:p@postgres:5432/omnidash_analytics",
+}
+
+
+class _Clock:
+    """A fake clock whose ``sleep`` advances it, so the wait runs with no wall time."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def test_wait_is_off_unless_opted_in() -> None:
+    calls: list[object] = []
+    rc = entrypoint_preflight.wait_for_migrations(
+        {"OMNIBASE_INFRA_DB_URL": "postgresql://u:p@h/db"},
+        probe=lambda *a: calls.append(a) or False,
+    )
+    assert rc == 0
+    assert calls == []
+
+
+def test_wait_skips_without_a_database_url() -> None:
+    calls: list[object] = []
+    rc = entrypoint_preflight.wait_for_migrations(
+        {"ONEX_BOOT_WAIT_FOR_MIGRATIONS": "true"},
+        probe=lambda *a: calls.append(a) or False,
+    )
+    assert rc == 0
+    assert calls == []
+
+
+def test_wait_returns_when_the_migrations_complete_after_a_few_polls() -> None:
+    clock = _Clock()
+    answers = iter([False, False, True])
+    seen: list[tuple[str, str, tuple[str, ...]]] = []
+
+    def probe(infra: str, node: str, tables: tuple[str, ...]) -> bool:
+        seen.append((infra, node, tables))
+        return next(answers)
+
+    rc = entrypoint_preflight.wait_for_migrations(
+        _WAIT_ENV, probe=probe, sleep=clock.sleep, monotonic=clock.monotonic
+    )
+    assert rc == 0
+    assert len(seen) == 3
+    assert len(clock.sleeps) == 2
+    assert seen[0][1] == _WAIT_ENV["OMNIDASH_ANALYTICS_DB_URL"]
+    assert seen[0][2] == ("delegation_events", "node_service_registry")
+
+
+def test_wait_aborts_boot_when_the_window_ends_incomplete(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Falsifier control: a probe that never turns true must fail, not hang."""
+    clock = _Clock()
+    rc = entrypoint_preflight.wait_for_migrations(
+        {**_WAIT_ENV, "ONEX_BOOT_MIGRATION_WAIT_SECONDS": "20"},
+        probe=lambda *a: False,
+        sleep=clock.sleep,
+        monotonic=clock.monotonic,
+    )
+    assert rc == 1
+    assert "migrations not complete after 20s" in capsys.readouterr().err
+
+
+def test_wait_reads_the_table_list_from_the_environment() -> None:
+    clock = _Clock()
+    seen: list[tuple[str, ...]] = []
+
+    def probe(infra: str, node: str, tables: tuple[str, ...]) -> bool:
+        seen.append(tables)
+        return True
+
+    entrypoint_preflight.wait_for_migrations(
+        {**_WAIT_ENV, "ONEX_BOOT_REQUIRED_PROJECTION_TABLES": "a b c"},
+        probe=probe,
+        sleep=clock.sleep,
+        monotonic=clock.monotonic,
+    )
+    assert seen == [("a", "b", "c")]
+
+
+def test_the_wait_runs_before_the_fingerprint_stamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stamp taken before the tables exist is wrong, so the wait comes first."""
+    order: list[str] = []
+    monkeypatch.setattr(
+        entrypoint_preflight,
+        "wait_for_migrations",
+        lambda env: order.append("wait") or 0,
+    )
+    monkeypatch.setattr(
+        entrypoint_preflight,
+        "stamp_all_fingerprints",
+        lambda env: order.append("stamp") or 0,
+    )
+    monkeypatch.setattr(entrypoint_preflight, "render_bifrost_contract", lambda e: 0)
+    monkeypatch.setattr(entrypoint_preflight, "render_resolver_config", lambda e: 0)
+    assert entrypoint_preflight.run_preflight({}) == 0
+    assert order == ["wait", "stamp"]
+
+
+def test_a_failed_wait_aborts_before_the_stamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stamped: list[str] = []
+    monkeypatch.setattr(entrypoint_preflight, "wait_for_migrations", lambda env: 1)
+    monkeypatch.setattr(
+        entrypoint_preflight,
+        "stamp_all_fingerprints",
+        lambda env: stamped.append("stamp") or 0,
+    )
+    assert entrypoint_preflight.run_preflight({}) == 1
+    assert stamped == []

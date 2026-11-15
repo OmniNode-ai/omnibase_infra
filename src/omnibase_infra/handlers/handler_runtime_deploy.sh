@@ -475,9 +475,11 @@ resolve_lane_runtime_services() {
 }
 readonly RUNTIME_BUILD_SERVICES
 # Migration services refreshed (one-shot) before the --no-deps runtime restart.
-# Order matters: forward-migration applies the omnibase_infra schema, then
-# intelligence-migration applies the omniintelligence schema, then migration-gate
-# stamps db_metadata.migrations_complete and stays up as a healthcheck keepalive.
+# Order matters: forward-migration applies the omnibase_infra schema and stamps
+# db_metadata.migrations_complete, then intelligence-migration applies the
+# omniintelligence schema. The runtime waits for that stamp itself at boot
+# (OMN-24483): the migration-gate keepalive container is retired, see
+# RUNTIME_RETIRED_SERVICES.
 #
 # OMN-13220: intelligence-migration was MISSING here. The compose file gates
 # omninode-runtime on `intelligence-migration: condition: service_completed_successfully`,
@@ -486,11 +488,15 @@ readonly RUNTIME_BUILD_SERVICES
 # the runtime crash-looped. The preflight must run it explicitly.
 #
 # One-shot services (run-to-completion, exit 0) are listed in
-# RUNTIME_MIGRATION_ONESHOTS so the preflight can `docker wait` on them; the
-# keepalive migration-gate is deliberately excluded from that wait set.
+# RUNTIME_MIGRATION_ONESHOTS so the preflight can `docker wait` on them.
 readonly RUNTIME_MIGRATION_SERVICES=(
     forward-migration
     intelligence-migration
+)
+# OMN-24483: compose services the model no longer declares. `docker compose up`
+# without --remove-orphans leaves the container an earlier roll created, so the
+# preflight removes it by name once the migrations have run.
+readonly RUNTIME_RETIRED_SERVICES=(
     migration-gate
 )
 readonly RUNTIME_MIGRATION_ONESHOTS=(
@@ -3006,8 +3012,7 @@ reconcile_runtime_container_start_state() {
     # `:latest` only fixes what a FUTURE `docker compose up` would build/pull;
     # it does nothing for containers THIS run already force-recreated (or
     # attempted to) and that are now stranded in 'Created' because a
-    # depends_on:condition:service_healthy dependency (e.g. migration-gate)
-    # can never become healthy. Reconcile every RUNTIME_BUILD_SERVICES
+    # depends_on:condition:service_healthy dependency can never become healthy. Reconcile every RUNTIME_BUILD_SERVICES
     # container back to running, or explicitly tear it down.
     #
     # Best-effort: needs DEPLOY_COMPOSE_PROJECT (set once main() resolves the
@@ -3480,10 +3485,8 @@ warm_broker_topic_provisioning() {
 # A second copy of this block is how the two sets would drift -- a bound added
 # to one and not the other reads as deliberate to the next reader.
 #
-# The one-shot decision is passed in rather than re-derived, because the two
-# sets have different one-shot members: migration-gate is a long-running
-# healthcheck keepalive in the lane-agnostic set, and both members of the
-# dev-lane set are one-shots.
+# The one-shot decision is passed in rather than re-derived, so a member that
+# is not a one-shot can join either set without a second copy of the block.
 refresh_one_migration_service() {
     MIGRATION_SERVICE_FAILURE=""
     local compose_project="$1"
@@ -3548,6 +3551,23 @@ refresh_one_migration_service() {
     return 0
 }
 
+# OMN-24483: remove the containers of services the compose model dropped.
+# Scoped by the compose project label and to RUNTIME_RETIRED_SERVICES.
+retire_removed_runtime_services() {
+    local compose_project="$1"
+    local retired_service container_ids
+    local -a retired_containers=()
+    for retired_service in "${RUNTIME_RETIRED_SERVICES[@]}"; do
+        container_ids="$(docker ps -aq \
+            --filter "label=com.docker.compose.project=${compose_project}" \
+            --filter "label=com.docker.compose.service=${retired_service}")" || return 1
+        [[ -n "${container_ids}" ]] || continue
+        mapfile -t retired_containers <<< "${container_ids}"
+        log_info "Retiring ${retired_service} containers ${retired_containers[*]}: the compose model no longer declares it"
+        docker rm -f "${retired_containers[@]}" || return 1
+    done
+}
+
 run_runtime_migration_preflight() {
     # Run bounded migration services before --no-deps runtime restarts.
     local deploy_target="$1"
@@ -3559,9 +3579,8 @@ run_runtime_migration_preflight() {
     DEV_LANE_CLOUD_MIGRATIONS_READY=true
     DEV_LANE_CLOUD_MIGRATION_FAILURE=""
 
-    # The lane-agnostic set first. migration-gate is a long-running healthcheck
-    # keepalive, NOT a one-shot, so it is deliberately excluded from the wait set
-    # (OMN-13220) -- membership in RUNTIME_MIGRATION_ONESHOTS is what decides.
+    # The lane-agnostic set first; membership in RUNTIME_MIGRATION_ONESHOTS is
+    # what decides which of them the preflight waits on (OMN-13220).
     local service
     local is_oneshot
     local oneshot
@@ -3576,6 +3595,10 @@ run_runtime_migration_preflight() {
         refresh_one_migration_service \
             "${compose_project}" "${service}" "${is_oneshot}" "${compose_args[@]}" || return 1
     done
+
+    # OMN-24483: the migrations are applied; remove the keepalive container an
+    # earlier roll left behind (the compose model no longer declares it).
+    retire_removed_runtime_services "${compose_project}" || return 1
 
     # OMN-18438: then the lane's own migration services, if it declares any.
     #
@@ -3847,7 +3870,7 @@ restart_services() {
     # under set -e exactly as before; only the hang risk is closed). --no-deps
     # skips STARTING dependencies but compose still honors a target service's
     # own depends_on:condition:service_healthy before creating/starting it
-    # (e.g. migration-gate for runtime-effects/runtime-worker) -- if that
+    # (e.g. a one-shot for runtime-effects/runtime-worker) -- if that
     # dependency can never become healthy this call would otherwise hang
     # indefinitely instead of failing fast (the exact 2026-08-05 defect,
     # OMN-15718).

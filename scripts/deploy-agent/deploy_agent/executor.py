@@ -584,10 +584,12 @@ RUNTIME_HEALTH_TARGETS: tuple[tuple[str, int], ...] = (
     ("omninode-runtime", 8085),
     ("runtime-effects", 8086),
 )
-RUNTIME_MIGRATION_SERVICES: tuple[str, ...] = (
-    "forward-migration",
-    "migration-gate",
-)
+RUNTIME_MIGRATION_SERVICES: tuple[str, ...] = ("forward-migration",)
+# OMN-24483: compose services the model no longer declares. The long-running
+# ``migration-gate`` keepalive was replaced by the runtime's own boot wait, and
+# ``docker compose up`` without ``--remove-orphans`` never removes the container
+# an earlier roll left behind, so the roll retires it by name.
+RETIRED_RUNTIME_SERVICES: tuple[str, ...] = ("migration-gate",)
 # OMN-19911: one-shots that configure the lane's control plane and that the
 # runtime services rely on having run. A runtime rebuild starts its services
 # with ``up -d --no-deps``, so compose never revisits a completed one-shot it
@@ -2390,6 +2392,74 @@ def remove_recreate_leftovers(
     return removed
 
 
+def retire_removed_services(lane: EnumRuntimeLane) -> list[str]:
+    """Remove this lane's containers of services the compose model dropped.
+
+    OMN-24483. Scoped by the lane's compose project label and to the services in
+    ``RETIRED_RUNTIME_SERVICES``; returns the removed container names. A failed
+    read or remove is logged and left for the next roll, never raised: the
+    container is stale, not a reason to fail a deploy that is otherwise healthy.
+    """
+    project = lane_config_for(lane).compose_project
+    removed: list[str] = []
+    for service in RETIRED_RUNTIME_SERVICES:
+        try:
+            listed = _run(
+                [
+                    "docker",
+                    "ps",
+                    "-a",
+                    "--filter",
+                    f"label=com.docker.compose.project={project}",
+                    "--filter",
+                    f"label=com.docker.compose.service={service}",
+                    "--format",
+                    "{{.ID}}\t{{.Names}}",
+                ],
+                timeout=RECREATE_LEFTOVER_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning("retired service %s on %s unread: %s", service, project, exc)
+            continue
+        if listed.returncode != 0:
+            logger.warning(
+                "retired service %s on %s unread: docker ps exited %s",
+                service,
+                project,
+                listed.returncode,
+            )
+            continue
+        for line in listed.stdout.splitlines():
+            fields = [field.strip() for field in line.split("\t")]
+            if len(fields) != 2 or not fields[0]:
+                continue
+            container_id, name = fields
+            try:
+                result = _run(
+                    ["docker", "rm", "-f", container_id],
+                    timeout=RECREATE_LEFTOVER_TIMEOUT_SECONDS,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                logger.warning("could not remove retired %s: %s", name, exc)
+                continue
+            if result.returncode == 0:
+                removed.append(name)
+                logger.warning(
+                    "removed retired service container %s (service %s) on %s "
+                    "(OMN-24483)",
+                    name,
+                    service,
+                    project,
+                )
+            else:
+                logger.warning(
+                    "could not remove retired %s: %s",
+                    name,
+                    (result.stderr or result.stdout).strip()[:200],
+                )
+    return removed
+
+
 def finish_recreate_renames(lane: EnumRuntimeLane) -> list[str]:
     """Finish this lane's running recreates; return the completed name changes.
 
@@ -2847,8 +2917,8 @@ def _oneshot_completed(state: str, exit_code: int | None) -> bool:
 
     Deliberately stricter than ``_service_satisfied``, which also accepts
     ``running``. That tolerance is right for the lane-agnostic migration set,
-    which mixes in ``migration-gate`` -- a keepalive that is supposed to stay
-    up. Applied to a corpus migration it is wrong in a way that reads as
+    which once mixed in ``migration-gate`` -- a keepalive that was supposed to
+    stay up. Applied to a corpus migration it is wrong in a way that reads as
     success: a still-running apply would satisfy the gate, the runtime would
     start against a half-migrated database, and the deploy would report green.
     """
@@ -6736,6 +6806,10 @@ class DeployExecutor:
                 raise RuntimeError(
                     f"Runtime migration preflight did not satisfy {service}: {stuck}"
                 )
+
+        # OMN-24483: the migrations are applied; retire the keepalive container
+        # an earlier roll left behind (the compose model no longer declares it).
+        retire_removed_services(lane)
 
         # OMN-18438: then the lane's own migration one-shots, if it has any.
         #

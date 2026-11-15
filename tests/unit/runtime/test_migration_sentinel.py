@@ -108,52 +108,37 @@ class TestHealthcheckScript:
 
 @pytest.mark.unit
 class TestDockerComposeIntegration:
-    """Validate docker-compose references migration-gate correctly."""
+    """Validate docker-compose waits on the forward migration (OMN-24483)."""
 
-    def test_compose_has_migration_gate_service(self) -> None:
+    def test_compose_has_no_migration_gate_service(self) -> None:
         content = COMPOSE_FILE.read_text()
-        assert "migration-gate:" in content, (
-            "docker-compose.infra.yml must define a migration-gate service"
+        assert not re.search(r"^  migration-gate:", content, re.MULTILINE), (
+            "docker-compose.infra.yml must not define a migration-gate service"
         )
 
-    def test_runtime_services_depend_on_migration_gate(self) -> None:
-        """Key runtime services must depend on migration-gate, not postgres."""
+    def test_runtime_services_depend_on_forward_migration(self) -> None:
+        """Key runtime services wait on the forward-migration one-shot."""
         content = COMPOSE_FILE.read_text()
-        # Find the runtime services that should depend on migration-gate
-        services_needing_gate = [
+        services_needing_migration = [
             "omninode-runtime",
             "agent-actions-consumer",
             "skill-lifecycle-consumer",
         ]
-        for service in services_needing_gate:
-            # Check that somewhere after the service definition, migration-gate
-            # appears in depends_on before the next service definition
-            pattern = rf"{service}:.*?depends_on:.*?migration-gate:"
+        for service in services_needing_migration:
+            pattern = (
+                rf"\n  {service}:.*?depends_on:.*?"
+                r"forward-migration:\s+condition: service_completed_successfully"
+            )
             match = re.search(pattern, content, re.DOTALL)
             assert match is not None, (
-                f"{service} must depend on migration-gate (not postgres directly)"
+                f"{service} must depend on forward-migration completing"
             )
 
-    def test_migration_gate_depends_on_postgres(self) -> None:
-        """migration-gate itself must depend on postgres being healthy."""
+    def test_runtime_env_opts_in_to_the_boot_wait(self) -> None:
+        """The runtime itself waits for the sentinel flag and the tables."""
         content = COMPOSE_FILE.read_text()
-        pattern = r"migration-gate:.*?depends_on:.*?postgres:.*?service_healthy"
-        match = re.search(pattern, content, re.DOTALL)
-        assert match is not None, (
-            "migration-gate must depend on postgres: condition: service_healthy"
-        )
-
-    def test_migration_gate_mounts_healthcheck_script(self) -> None:
-        """migration-gate must mount the healthcheck script."""
-        content = COMPOSE_FILE.read_text()
-        assert "check_migrations_complete.sh" in content, (
-            "migration-gate must mount check_migrations_complete.sh"
-        )
+        assert 'ONEX_BOOT_WAIT_FOR_MIGRATIONS: "true"' in content
 
     def test_forward_migration_targets_projection_database(self) -> None:
         content = COMPOSE_FILE.read_text()
         assert "NODE_POSTGRES_DB: omnidash_analytics" in content
-        assert (
-            'REQUIRED_PROJECTION_TABLES: "delegation_events node_service_registry"'
-            in content
-        )

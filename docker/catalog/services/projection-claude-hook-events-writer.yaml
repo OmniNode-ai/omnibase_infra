@@ -83,8 +83,8 @@ volumes:
 tmpfs:
   - /run/onex-runtime:uid=1000,gid=1000,mode=0770
 depends_on:
-  - service: migration-gate
-    condition: service_healthy
+  - service: forward-migration
+    condition: service_completed_successfully
   - service: redpanda
     condition: service_healthy
   - service: postgres

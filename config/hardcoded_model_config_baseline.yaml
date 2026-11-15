@@ -581,9 +581,6 @@ entries:
   - path: docker/catalog/services/llm-cost-aggregation-consumer.yaml
     family: O
     content_sha1: 405b758f3abea5afdb0cef7dee12c85de9770020
-  - path: docker/catalog/services/migration-gate.yaml
-    family: O
-    content_sha1: 7719e0d37596fb9f7b96d9ce149252297c4af334
   - path: docker/catalog/services/omnimemory-memgraph.yaml
     family: B
     content_sha1: fbc81bf18872d74b04a39c764dd87e1c4366801c

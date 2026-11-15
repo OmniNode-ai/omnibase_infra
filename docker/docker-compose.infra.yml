@@ -148,6 +148,8 @@ x-runtime-env: &runtime-env
   # localhost:5436 (external port); the container-side value must use postgres:5432.
   # This override ensures containers are never broken by a host-side localhost:5436 URL.
   OMNIBASE_INFRA_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
+  # OMN-24483: the runtime waits for the migrations itself; no migration-gate container.
+  ONEX_BOOT_WAIT_FOR_MIGRATIONS: "true"
   # OMN-3431: Local Docker Redpanda — containers use Docker-internal redpanda:9092
   KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
   # Allowlist lets service_kernel.py's denylist accept Docker-internal redpanda: hostname
@@ -1154,68 +1156,6 @@ services:
       - "com.omninode.layer=infrastructure"
       - "com.omninode.ticket=OMN-4175"
   # ==========================================================================
-  # Migration Gate - Boot-Order Sentinel (Runtime Profile) [OMN-3737]
-  # ==========================================================================
-  # Lightweight healthcheck-only service that gates runtime service startup
-  # on all forward migrations being applied. The healthcheck queries
-  # db_metadata.migrations_complete (set by migration 037). Runtime services
-  # depend on this gate via service_healthy condition.
-  #
-  # Why: omniintelligence's validate_handshake auto-stamps a schema fingerprint
-  # on first boot. If tables like idempotency_records don't exist yet, the
-  # fingerprint is wrong and all subsequent boots fail (Audit Gap #7).
-  migration-gate:
-    image: postgres:16-alpine
-    container_name: omnibase-infra-migration-gate
-    profiles: ["runtime", "full"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      forward-migration:
-        condition: service_completed_successfully
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: omnibase_infra
-      NODE_POSTGRES_DB: omnidash_analytics
-      REQUIRED_PROJECTION_TABLES: "delegation_events node_service_registry"
-    # Stay alive so healthcheck can run; no actual workload.
-    entrypoint: ["sh", "-c", "while true; do sleep 3600; done"]
-    volumes:
-      - ../scripts/check_migrations_complete.sh:/check_migrations_complete.sh:ro
-    networks:
-      - omnibase-infra-network
-    healthcheck:
-      # start_period must cover the real forward+intelligence migration window.
-      # This sentinel is a long-running keepalive (entrypoint above), NOT a
-      # one-shot; the healthcheck runs continuously against
-      # db_metadata.migrations_complete. On a cold prod volume the migrations
-      # take ~2 min to apply and stamp the flag (OMN-12973: prod gate started
-      # 09:35:22, intelligence-migration finished 09:37:18). With start_period
-      # 10s the gate left `starting` after 10s and was reported UNHEALTHY for
-      # ~2 min until migrations completed. start_period 180s keeps the gate in
-      # `health: starting` for the full migration window so a still-applying
-      # gate is never reported UNHEALTHY. Floor enforced by
-      # validate_migration_gate_start_period (OMN-12973).
-      test: ["CMD-SHELL", "sh /check_migrations_complete.sh"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 180s
-    logging: *logging-defaults
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '0.1'
-          memory: 32M
-    labels:
-      - "com.omninode.service=migration-gate"
-      - "com.omninode.layer=infrastructure"
-      - "com.omninode.ticket=OMN-3737"
-  # ==========================================================================
   # ONEX Runtime - Main Kernel (Runtime Profile)
   # ==========================================================================
   # Primary runtime service that handles the kernel bootstrap process.
@@ -1227,8 +1167,8 @@ services:
     container_name: omninode-runtime
     profiles: ["runtime", "full"]
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       intelligence-migration:
         condition: service_completed_successfully
       redpanda:
@@ -1447,8 +1387,8 @@ services:
     container_name: omnimarket-projection-api
     profiles: ["runtime", "full"]
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -1615,8 +1555,8 @@ services:
     container_name: omnimarket-tenant-projection-writer
     profiles: ["profile-carrier-optin"]
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -1706,8 +1646,8 @@ services:
     container_name: omnimarket-projection-claude-hook-events-writer
     profiles: ["profile-carrier-optin"]
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
       postgres:
@@ -1757,8 +1697,8 @@ services:
     container_name: omninode-agent-actions-consumer
     profiles: ["runtime", "full"]
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
     command: ["python", "-m", "omnibase_infra.services.observability.agent_actions.consumer"]
@@ -1813,8 +1753,8 @@ services:
     container_name: omninode-skill-lifecycle-consumer
     profiles: ["runtime", "full"]
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
     command: ["python", "-m", "omnibase_infra.services.observability.skill_lifecycle.consumer"]
@@ -1863,8 +1803,8 @@ services:
     container_name: omninode-context-audit-consumer
     profiles: ["runtime", "full"]
     depends_on:
-      migration-gate:
-        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
     command: ["python", "-m", "omnibase_infra.services.observability.context_audit.consumer"]

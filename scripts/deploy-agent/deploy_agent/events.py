@@ -229,8 +229,9 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
 # sequence is the only thing sequencing the copy before the apply.
 #
 # ONE tuple here where bash carries two arrays: onex-runtime-deploy separates
-# services from one-shots because its lane-agnostic set mixes in a keepalive
-# (migration-gate). Every member of the dev-lane set is a one-shot, so a
+# services from one-shots because its lane-agnostic set once mixed in a keepalive
+# (the migration-gate container, retired by OMN-24483). Every member of the
+# dev-lane set is a one-shot, so a
 # second tuple would be a second thing to drift rather than a distinction --
 # and tests/unit/test_dev_lane_cloud_migrations_omn18438.py asserts the two
 # bash arrays are equal so that stays true.

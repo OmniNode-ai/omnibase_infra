@@ -13,6 +13,8 @@ hardcoded_env:
   # OMN-15645: pin the image's packaged tiers, as on the other runtime kernels.
   DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
   OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra'
+  # OMN-24483: the runtime waits for the migrations itself; no migration-gate container.
+  ONEX_BOOT_WAIT_FOR_MIGRATIONS: 'true'
   OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence'
   KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   # OMN-19558: 240s handler + 60s margin needs deadline >= 300s;

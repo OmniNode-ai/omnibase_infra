@@ -60,6 +60,7 @@ def _invoke(
         "STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES",
         "RUNTIME_MIGRATION_SERVICES",
         "RUNTIME_MIGRATION_ONESHOTS",
+        "RUNTIME_RETIRED_SERVICES",
         "DEV_LANE_ONLY_MIGRATION_SERVICES",
         "DEV_LANE_ONLY_MIGRATION_ONESHOTS",
         "REQUIRED_PROJECTION_TABLES",
@@ -68,6 +69,7 @@ def _invoke(
         "resolve_lane_folded_services",
         "resolve_lane_runtime_services",
         "refresh_one_migration_service",
+        "retire_removed_runtime_services",
         "run_runtime_migration_preflight",
         "restart_services",
         "bringup_full_stack",
@@ -320,3 +322,36 @@ def test_main_reports_the_cloud_failure_only_after_the_deploy_completes() -> Non
     report = body.index("report_cloud_migration_failure")
     assert complete < summary < report
     assert body.rstrip().splitlines()[-2].strip() == "report_cloud_migration_failure"
+
+
+def test_retire_removes_a_leftover_migration_gate_container() -> None:
+    """OMN-24483: a roll removes the container the compose model no longer declares."""
+    source = SCRIPT.read_text()
+    shell = "\n".join(
+        [
+            "set -euo pipefail",
+            "log_info() { :; }",
+            _array(source, "RUNTIME_RETIRED_SERVICES"),
+            _function(source, "retire_removed_runtime_services"),
+            r"""docker() {
+    { printf 'DOCKER'; printf ': %s' "$@"; printf '\n'; } >&2
+    if [[ "$1" == ps ]]; then
+        case "$*" in *service=migration-gate*) echo c0ffee123456 ;; esac
+    fi
+}""",
+            "retire_removed_runtime_services omnibase-infra",
+        ]
+    )
+    result = subprocess.run(
+        ["bash", "-c", shell], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    assert "label=com.docker.compose.project=omnibase-infra" in result.stderr
+    assert "DOCKER: rm: -f: c0ffee123456" in result.stderr
+
+
+def test_retire_names_only_the_retired_services() -> None:
+    source = SCRIPT.read_text()
+    match = re.search(r"RUNTIME_RETIRED_SERVICES=\((?P<body>.*?)\)", source, re.DOTALL)
+    assert match is not None
+    assert match.group("body").split() == ["migration-gate"]

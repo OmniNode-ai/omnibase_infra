@@ -74,30 +74,19 @@ GATE_HEALTHCHECK = REPO_ROOT / "scripts" / "check_migrations_complete.sh"
 # lane that adds a table to its own list is making the same promise: the
 # invariant must hold for whatever ANY of them can demand.
 #
-#   * the healthcheck's own default (the value a lane inherits when its compose
-#     file sets nothing),
-#   * each compose lane's explicit REQUIRED_PROJECTION_TABLES,
-#   * the service catalog manifest the compose files are generated against,
+#   * the readiness script's own default and the runtime boot wait's default
+#     (OMN-24483: the migration-gate container and its per-lane compose
+#     declarations are gone),
 #   * src/omnibase_infra/handlers/handler_runtime_deploy.sh and the deploy agent, which run the SAME
 #     required-table check as a post-deploy verification (so a table missing
 #     here fails a deploy, not only a boot).
 REQUIRED_TABLE_SOURCES: tuple[tuple[str, str], ...] = (
     ("scripts/check_migrations_complete.sh", r'REQUIRED_PROJECTION_TABLES:-([^"}]+)\}'),
+    # OMN-24483: the migration-gate container is gone; the runtime's own boot
+    # wait carries the same default list.
     (
-        "docker/docker-compose.infra.yml",
-        r'REQUIRED_PROJECTION_TABLES:\s*"([^"]+)"',
-    ),
-    (
-        "docker/docker-compose.judge.yml",
-        r'REQUIRED_PROJECTION_TABLES:\s*"([^"]+)"',
-    ),
-    (
-        "docker/docker-compose.lakshman.yml",
-        r'REQUIRED_PROJECTION_TABLES:\s*"([^"]+)"',
-    ),
-    (
-        "docker/catalog/services/migration-gate.yaml",
-        r"REQUIRED_PROJECTION_TABLES:\s*(.+)",
+        "src/omnibase_infra/runtime/entrypoint_preflight.py",
+        r'DEFAULT_REQUIRED_PROJECTION_TABLES:\s*str\s*=\s*"([^"]+)"',
     ),
 )
 

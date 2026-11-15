@@ -1089,19 +1089,21 @@ jobs:
             exit 1
           fi
 
-      - name: Migration gate healthy
+      - name: Migrations complete
         run: |
           set -euo pipefail
-          gate="${LOCAL_PROJECT}-migration-gate"
+          # OMN-24483: no migration-gate container exists; the runtime waits for
+          # the migrations itself at boot, and the one-shot's exit is the result.
+          fm="${LOCAL_PROJECT}-forward-migration"
           for _ in $(seq 1 90); do
-            status="$(docker inspect --format '{{.State.Health.Status}}' "$gate")"
-            echo "migration-gate: ${status}"
-            if [ "$status" = "healthy" ]; then exit 0; fi
-            if [ "$status" = "unhealthy" ]; then break; fi
+            state="$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}}' "$fm")"
+            echo "forward-migration: ${state}"
+            if [ "$state" = "exited 0" ]; then exit 0; fi
+            case "$state" in exited*) break ;; esac
             sleep 10
           done
-          docker logs --tail 80 "${LOCAL_PROJECT}-forward-migration" || true
-          echo "::error::migration gate did not become healthy"
+          docker logs --tail 80 "$fm" || true
+          echo "::error::forward-migration did not exit 0"
           exit 1
 
       - name: Both runtime kernels report healthy and running (/health body)
@@ -1547,7 +1549,7 @@ jobs:
         if: always()
         run: |
           docker ps -a --filter "name=${LOCAL_PROJECT}" --format 'table {{.Names}}\t{{.Status}}' || true
-          for svc in omninode-runtime runtime-effects migration-gate forward-migration redpanda-partition-cap redpanda-local-sasl consumer-health-projection; do
+          for svc in omninode-runtime runtime-effects forward-migration redpanda-partition-cap redpanda-local-sasl consumer-health-projection; do
             echo "::group::${svc} logs (tail)"
             docker logs --tail 120 "${LOCAL_PROJECT}-${svc}" 2>&1 || true
             echo "::endgroup::"

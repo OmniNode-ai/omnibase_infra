@@ -177,8 +177,6 @@ services:
     container_name: omnibase-infra-dev-202-forward-migration
     labels:
       com.omninode.lane: dev-202
-  migration-gate:
-    container_name: omnibase-infra-dev-202-migration-gate
   intelligence-migration:
     container_name: omnibase-infra-dev-202-intelligence-migration
   cloud-migration-files:

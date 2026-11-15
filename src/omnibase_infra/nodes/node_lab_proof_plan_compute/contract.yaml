@@ -119,7 +119,7 @@ config:
     runtime_policy_env: "docker/runtime-policy.env"
     container_runtime_main: "omnibase-infra-local-omninode-runtime"
     container_runtime_effects: "omnibase-infra-local-runtime-effects"
-    container_migration_gate: "omnibase-infra-local-migration-gate"
+    container_forward_migration: "omnibase-infra-local-forward-migration"
     # postgres, redpanda, valkey, runtime main, runtime effects
     host_ports: [5436, 19092, 16379, 8085, 8086]
     # A prover measured main and effects healthy about 6 minutes after up on a
