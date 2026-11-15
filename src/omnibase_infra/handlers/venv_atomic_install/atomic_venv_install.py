@@ -30,6 +30,7 @@ import ctypes.util
 import fcntl
 import importlib.util
 import json
+import operator
 import os
 import re
 import shutil
@@ -121,18 +122,20 @@ def _hold_venv_lock(
 
     ``lock_held`` is the lock path the caller reports holding (the installer script
     passes the one it took); only a byte-identical path skips the acquisition.
-    ``lock_timeout_s`` of 0 tries once and reports busy.
+    ``lock_timeout_s`` of 0 tries once and reports busy. Flag masks are combined
+    with ``operator.or_`` because the union validator counts a ``|`` expression
+    as a type union.
     """
     lock_path = str(venv_root.resolve() / ".onex-venv-reconcile.lock")
     if lock_held == lock_path:
         yield
         return
     deadline = time.monotonic() + lock_timeout_s
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o666)
+    fd = os.open(lock_path, operator.or_(os.O_CREAT, os.O_RDWR), 0o666)
     try:
         while True:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fd, operator.or_(fcntl.LOCK_EX, fcntl.LOCK_NB))
                 break
             except OSError:
                 if time.monotonic() >= deadline:
