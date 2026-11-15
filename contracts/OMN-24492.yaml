@@ -6,7 +6,7 @@ summary: >-
 is_seam_ticket: true
 interface_change: false
 interfaces_touched:
-  - runtime wiring entry point (_make_dispatch_callback) to every auto-wired handler class
+  - public_api
 requirements:
   - id: req-omn24492-sync-entry-off-loop
     statement: The runtime wiring runs a handler whose entry method is a plain function on a worker thread, so the event loop keeps serving heartbeats and its own endpoints while it runs, and leaves a handler with an async entry method or handle_async on the loop.
