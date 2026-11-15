@@ -562,8 +562,12 @@ json.dump(cfg, open(sys.argv[1],"w"))' "$DC/config.json"
     for d in cli-plugins contexts buildx; do [ -e "$HOME/.docker/$d" ] && ln -s "$HOME/.docker/$d" "$DC/$d"; done
     export DOCKER_CONFIG="$DC"; echo "docker config isolated at $DC (no credential store)"
   fi
+  # OMN-19998: this build is an unmerged branch of the target, so its first-party audit runs in the
+  # pre-PR slot context the tree under test declares (the one prepr_verify_lane.sh passes for a slot);
+  # without the build arg the audit falls back to dev-lane, which refuses the target built from a branch; the
+  # value is read inline so this baselined file gains no code line (a failed read leaves it empty and the audit fails loud)
   echo "build start $(ts) RUNTIME_VERSION=$RV GIT_SHA=$(git rev-parse HEAD)"
-  docker compose -f docker/docker-compose.generated.yml --env-file docker/runtime-policy.env --env-file "$W/local.env" build --build-arg BUILD_SOURCE=workspace --build-arg EXPECTED_BUILD_SOURCE=workspace --build-arg OMNI_HOME="$R" --build-arg PROMOTION_CLASS=stability-candidate --build-arg NON_MAIN_LINEAGE=true --build-arg GIT_SHA="$(git rev-parse HEAD)" --build-arg VCS_REF="$(git rev-parse HEAD)" --build-arg RUNTIME_VERSION="$RV" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.log" 2>&1
+  docker compose -f docker/docker-compose.generated.yml --env-file docker/runtime-policy.env --env-file "$W/local.env" build --build-arg BUILD_SOURCE=workspace --build-arg FIRST_PARTY_BUILD_CONTEXT="$(python3 -c "import importlib.util as u, sys; s = u.spec_from_file_location('c', sys.argv[1]); m = u.module_from_spec(s); sys.modules['c'] = m; s.loader.exec_module(m); print(m.load_contract().pre_pr_slot_context)" src/omnibase_infra/validation/checker_first_party_sources.py)" --build-arg EXPECTED_BUILD_SOURCE=workspace --build-arg OMNI_HOME="$R" --build-arg PROMOTION_CLASS=stability-candidate --build-arg NON_MAIN_LINEAGE=true --build-arg GIT_SHA="$(git rev-parse HEAD)" --build-arg VCS_REF="$(git rev-parse HEAD)" --build-arg RUNTIME_VERSION="$RV" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.log" 2>&1
   brc=$?; echo "build rc=$brc $(ts)"; tail -4 "$W/build.log"
   if [ "$brc" != 0 ]; then
     grep -qi keychain "$W/build.log" && echo "build failed on the docker credential keychain: set docker_config: isolated for this host"
