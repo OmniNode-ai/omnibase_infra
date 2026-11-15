@@ -123,6 +123,9 @@ from omnibase_infra.handlers.boot_topic_provisioning import (
     ensure_topics_exist,
     provision_unattached_publish_topics,
 )
+from omnibase_infra.handlers.handler_entry_method_placement.handler import (
+    HandlerEntryMethodPlacement,
+)
 from omnibase_infra.handlers.handler_projection_derived_write import (
     HandlerProjectionDerivedWrite,
 )
@@ -962,11 +965,14 @@ def _make_dispatch_callback(
     _request_model = _resolve_def_b_input_model_type(_effective_handle)
     _injected_request_model = ModelInjectedRequest.narrow(_request_model)
     handler_takes_envelope = _handler_accepts_event_envelope(_effective_handle)
+    # OMN-24492: dispatch through the placement caller — a plain (blocking)
+    # entry method runs on a worker thread; an async def one stays on the loop.
+    _entry_caller = HandlerEntryMethodPlacement().caller(_effective_handle)
 
     async def _callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
-        handle_method = _effective_handle
+        handle_method = _entry_caller
         if event_model is None:
             from omnibase_infra.models.dispatch.model_dispatch_result import (
                 ModelDispatchResult,
@@ -1012,7 +1018,10 @@ def _make_dispatch_callback(
             # CONCRETE ``ModelEventEnvelope`` annotation triggers
             # materialization here.
             dispatch_arg: object = envelope
-            if _handler_declares_typed_event_envelope(handle_method):
+            # Introspect the RAW entry method, not the placement caller: the
+            # caller's signature is (argument: object) and would never report
+            # a concrete ModelEventEnvelope annotation (OMN-15181 Finding 4).
+            if _handler_declares_typed_event_envelope(_effective_handle):
                 raw_payload = _extract_dispatch_payload(envelope)
                 dispatch_arg = _materialize_raw_event_envelope(
                     envelope, raw_payload, fallback_event_type="unknown"
@@ -1031,12 +1040,7 @@ def _make_dispatch_callback(
                     elif isinstance(payload, Mapping):
                         dispatch_arg = target_model.model_validate(payload)
 
-            raw_result_obj = handle_method(dispatch_arg)
-            raw_result = (
-                await cast("Awaitable[object]", raw_result_obj)
-                if asyncio.iscoroutine(raw_result_obj)
-                else raw_result_obj
-            )
+            raw_result = await handle_method(dispatch_arg)
             if raw_result is None or isinstance(raw_result, ModelDispatchResult):
                 return raw_result
             if isinstance(raw_result, str):
@@ -1087,9 +1091,7 @@ def _make_dispatch_callback(
                 fallback_envelope = _materialize_raw_event_envelope(
                     envelope, payload, event_model.name
                 )
-                fallback_result = handle_method(fallback_envelope)
-                if asyncio.iscoroutine(fallback_result):
-                    fallback_result = await cast("Awaitable[object]", fallback_result)
+                fallback_result = await handle_method(fallback_envelope)
                 return _normalize_handler_result(
                     fallback_result,
                     envelope,
@@ -1123,9 +1125,7 @@ def _make_dispatch_callback(
             handler_arg = _materialize_typed_event_envelope(
                 envelope, cast("BaseModel", typed_payload), event_model.name
             )
-        typed_result = handle_method(handler_arg)
-        if asyncio.iscoroutine(typed_result):
-            typed_result = await cast("Awaitable[object]", typed_result)
+        typed_result = await handle_method(handler_arg)
         return _normalize_handler_result(
             typed_result,
             envelope,

@@ -1,0 +1,85 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Entry Method Placement Compute
+#
+# OMN-24492: the runtime's dispatch callback used to call a handler's entry
+# method directly on the event loop at all three dispatch sites. A handler
+# whose entry method is a plain (blocking) function therefore froze the whole
+# loop — heartbeats, readiness endpoint — for as long as it ran: on the dev
+# runtime on 2026-11-14 that was ~70 s of freeze every 5 minutes. This node is
+# the PURE decision half of the fix: it classifies one entry method
+# ("async def -> on the loop, plain def -> worker thread") and its caller
+# wraps the entry method so the wiring's dispatch sites can simply await it.
+# It performs zero I/O and reads no clock, so the decision is a pure function
+# of the entry method and replayable without a runtime.
+#
+# The dispatch-side wiring lives in runtime/auto_wiring/handler_wiring.py.
+#
+# Related Tickets:
+#   - OMN-24492: this ticket (sync entry methods must not freeze the loop)
+#
+name: "node_entry_method_placement_compute"
+node_type: "COMPUTE_GENERIC"
+descriptor:
+  node_archetype: compute
+runtime_profiles:
+  - local-dev
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  Decides whether a handler's entry method runs on the event loop or on a worker thread (OMN-24492). Takes the entry method callable, classifies it once at wiring time (async def -> on_loop, plain def -> worker_thread), and can hand back a caller that awaits the entry method at its decided placement. Zero I/O, no clock read, no new setting and no new constant.
+
+input_model:
+  name: "ModelEntryMethodPlacementRequest"
+  module: "omnibase_infra.models.entry_method_placement.model_entry_method_placement_request"
+  description: "The handler entry method callable to classify."
+output_model:
+  name: "ModelEntryMethodPlacement"
+  module: "omnibase_infra.models.entry_method_placement.model_entry_method_placement"
+  description: "The decided placement: on_loop or worker_thread."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "decide_entry_method_placement"
+      handler:
+        name: "HandlerEntryMethodPlacement"
+        module: "omnibase_infra.handlers.handler_entry_method_placement.handler"
+      description: "entry method -> placement decision (on_loop or worker_thread)"
+      output_fields:
+        - placement
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "ENTRY_NOT_CALLABLE"
+      description: >
+        The request carried something that is not callable. Rejected at parse time by the input model rather than materialized into a placement — a wiring-time mistake must fail loudly at wiring, not at first dispatch.
+
+      recoverable: false
+      retry_strategy: "none"
+io_operations:
+  - operation: "decide_entry_method_placement"
+    description: "Classify one handler entry method. Pure."
+    input_fields:
+      - entry
+    output_fields:
+      - placement
+dependencies: []
+metadata:
+  description: "Pure entry-method placement decider for runtime dispatch (OMN-24492)"
+  author: "OmniNode Team"
+  transport_type: "none"
+  created: "2026-11-15"
+  updated: "2026-11-15"
+  tags:
+    - "compute"
+    - "runtime"
+    - "auto-wiring"
+    - "dispatch"
