@@ -62,10 +62,13 @@ dod_evidence:
     binds_ac: [AC3]
   - id: dod-omn24491-ac4-deploy-probe
     description: >-
-      Hosted stand-in for AC4, which is read on the dev runtime on h201 after it is rebuilt with this change and is not read by this probe. The probe reads the off-loop helper file GitHub serves at the checked-out commit and looks for its entry function, so it fails at the merge base.
+      Hosted stand-in for AC4, which is read on the dev runtime on h201 after it is rebuilt with this change and is not read by this probe. The first check runs the real off-loop helper on a real event loop with a blocking handler and reads the loop heartbeat, so it fails at the merge base where the helper does not exist; the second reads the helper file GitHub serves on the PR branch.
     source: manual
     checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/handlers/test_entry_method_offload_omn24491.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/entry_method_offload.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -q 'def entry_method_runs_off_loop'"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/entry_method_offload.py?ref=omn-24491-sync-handlers-off-loop\" --jq .content | base64 -d | grep -q 'async def invoke_entry_method'"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
