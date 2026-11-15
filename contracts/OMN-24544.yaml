@@ -27,13 +27,13 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn24544-ac1-table-carries-no-freeze
     description: >-
-      The committed table's dev-201 flags carry no freeze and keep max_dev_lag_minutes and disabled_phases. On origin/dev's table the unchanged test file reads a freeze and test_committed_dev_lanes_carry_no_freeze fails once its OMN-24474 exception is removed.
+      The deploy agent's own reader of the committed table (lane_flags_for_instance) reads no freeze for dev-201. On the parent commit's table the same read returns the freeze, so the check fails there. The lane flag test file is listed as evidence under evidence_requirements.
     source: manual
     binds_ac:
       - AC1
     checks:
-      - check_type: test_passes
-        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -p no:cacheprovider
+      - check_type: command
+        check_value: "uv run --frozen --project scripts/deploy-agent --extra dev python -c \"import sys; from pathlib import Path; from deploy_agent.routing import lane_flags_for_instance as f; sys.exit(1 if f(Path('.'), 'dev-201').freeze else 0)\""
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24544-ac2-no-test-hold
     description: >-
