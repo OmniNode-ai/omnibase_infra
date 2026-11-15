@@ -1456,7 +1456,7 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC50
-  - id: dod-omn19998-integration-proof-compat-removed-runtime-surface
+  - id: dod-omn19998-integration-proof-compat-removed
     description: The real runtime identity stamp list and contract-topic-graph package list, imported from the source tree, no longer name omnibase_compat and still name core, infra and spi.
     source: manual
     checks:
