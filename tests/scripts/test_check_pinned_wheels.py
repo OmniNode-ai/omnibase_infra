@@ -91,37 +91,19 @@ def test_minor_behind_pinned_ahead_returns_zero() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _parse_dockerfile_args
+# _parse_uv_sources
 # ---------------------------------------------------------------------------
 
 _SAMPLE_DOCKERFILE = """
 ARG PYTHON_VERSION=3.12
 ARG UV_VERSION=0.6.14
-ARG OMNIBASE_COMPAT_REF="c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1"
-ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1.tar.gz"
-ARG ONEX_CHANGE_CONTROL_REF=main
 """
-
-
-@pytest.mark.unit
-def test_parse_dockerfile_args_extracts_known_pins(tmp_path: Path) -> None:
-    df = tmp_path / "Dockerfile.runtime"
-    df.write_text(_SAMPLE_DOCKERFILE)
-    result = _mod._parse_dockerfile_args(df)
-    assert result["OMNIBASE_COMPAT_REF"] == "c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1"
-    assert result["ONEX_CHANGE_CONTROL_REF"] == "main"
-    assert result["UV_VERSION"] == "0.6.14"
-
-
-# ---------------------------------------------------------------------------
-# _parse_uv_sources
-# ---------------------------------------------------------------------------
 
 _SAMPLE_PYPROJECT = """
 [tool.uv.sources]
 omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "7631ef3321e1a6561f4b2c70019ee57d24160620" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", tag = "v0.21.0" }
-omnibase-compat = { git = "https://github.com/OmniNode-ai/omnibase_compat.git", branch = "main" }
+omnimarket = { git = "https://github.com/OmniNode-ai/omnimarket.git", branch = "main" }
 
 [other.section]
 foo = "bar"
@@ -142,7 +124,7 @@ def test_parse_uv_sources_extracts_rev() -> None:
             result["omnibase-core"]["rev"] == "7631ef3321e1a6561f4b2c70019ee57d24160620"
         )
         assert result["omnibase-spi"]["tag"] == "v0.21.0"
-        assert result["omnibase-compat"]["branch"] == "main"
+        assert result["omnimarket"]["branch"] == "main"
     finally:
         tmp_path.unlink()
 
@@ -152,61 +134,6 @@ def test_parse_uv_sources_missing_section(tmp_path: Path) -> None:
     pj = tmp_path / "pyproject.toml"
     pj.write_text("[project]\nname = 'foo'\n")
     assert _mod._parse_uv_sources(pj) == {}
-
-
-# ---------------------------------------------------------------------------
-# _check_dockerfile_args
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_check_dockerfile_args_flags_main_ref(tmp_path: Path) -> None:
-    df = tmp_path / "Dockerfile.runtime"
-    df.write_text(_SAMPLE_DOCKERFILE + "ARG OMNIBASE_COMPAT_REF=main\n")
-    df_args = _mod._parse_dockerfile_args(df)
-
-    with patch.object(_mod, "_gh_latest_release", return_value="v1.2.0"):
-        results = _mod._check_dockerfile_args(df_args, threshold=1)
-
-    main_results = [r for r in results if r.pinned == "main"]
-    # Positive control: the floating ref is found, so the drift assertion below
-    # is not vacuous.
-    assert main_results
-    assert all(r.drifted for r in main_results), "floating 'main' refs must be drifted"
-    names = {r.name for r in main_results}
-    # OMN-16296: ONEX_CHANGE_CONTROL_REF is no longer a Dockerfile ARG --
-    # onex_change_control is not installed into the runtime image -- so the
-    # checker must not expect or flag it. OMN-21279: the same holds for
-    # OMNIMARKET_REF, which the image no longer carries.
-    assert names == {"OMNIBASE_COMPAT_REF"}
-
-
-@pytest.mark.unit
-def test_check_dockerfile_args_sha_with_release_flags_drift(tmp_path: Path) -> None:
-    df = tmp_path / "Dockerfile.runtime"
-    df.write_text(_SAMPLE_DOCKERFILE)
-    df_args = _mod._parse_dockerfile_args(df)
-
-    # Latest release exists; the pinned SHA is not the tag — drift expected
-    with patch.object(_mod, "_gh_latest_release", return_value="v0.5.0"):
-        results = _mod._check_dockerfile_args(df_args, threshold=1)
-
-    compat_results = [r for r in results if r.name == "OMNIBASE_COMPAT_REF"]
-    assert len(compat_results) == 1
-    assert compat_results[0].drifted is True
-
-
-@pytest.mark.unit
-def test_check_dockerfile_args_github_unavailable(tmp_path: Path) -> None:
-    df = tmp_path / "Dockerfile.runtime"
-    df.write_text(_SAMPLE_DOCKERFILE)
-    df_args = _mod._parse_dockerfile_args(df)
-
-    with patch.object(_mod, "_gh_latest_release", return_value=None):
-        results = _mod._check_dockerfile_args(df_args, threshold=1)
-
-    # All results should mark check_failed when GitHub is unreachable
-    assert all(r.check_failed for r in results)
 
 
 # ---------------------------------------------------------------------------
@@ -226,9 +153,9 @@ def test_check_uv_sources_branch_is_always_drifted() -> None:
         with patch.object(_mod, "_gh_latest_release", return_value="v0.5.0"):
             results = _mod._check_uv_sources(sources, threshold=1)
 
-        compat = next(r for r in results if r.name == "omnibase-compat")
-        assert compat.drifted is True
-        assert "branch" in compat.pinned
+        branched = next(r for r in results if r.name == "omnimarket")
+        assert branched.drifted is True
+        assert "branch" in branched.pinned
     finally:
         tmp_path.unlink()
 
@@ -350,8 +277,6 @@ def test_check_pypi_range_pins_unavailable(tmp_path: Path) -> None:
 _SAMPLE_DOCKERFILE_NO_FLOATING = """
 ARG PYTHON_VERSION=3.12
 ARG UV_VERSION=0.6.14
-ARG OMNIBASE_COMPAT_REF="c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1"
-ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1.tar.gz"
 ARG ONEX_CHANGE_CONTROL_REF=abc123def456789012345678901234567890abcd
 """
 
@@ -360,7 +285,6 @@ _SAMPLE_PYPROJECT_NO_FLOATING = """
 [tool.uv.sources]
 omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "7631ef3321e1a6561f4b2c70019ee57d24160620" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", tag = "v0.21.0" }
-omnibase-compat = { git = "https://github.com/OmniNode-ai/omnibase_compat.git", tag = "v0.3.0" }
 """
 
 
