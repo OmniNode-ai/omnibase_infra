@@ -57,6 +57,7 @@ Exports:
     EnumRegistryResponseStatus: Registry operation response status (SUCCESS, PARTIAL, FAILED)
     EnumRetryErrorCategory: Error categories for retry decision making
     EnumRunVariant: A/B run variant (BASELINE, CANDIDATE) for baseline comparison
+    EnumRuntimeHeartbeatRefusalReason: Why a runtime refused to start (heartbeat is mandatory)
     EnumSecurityRuleId: Security validation rule identifiers for OMN-1098
     EnumSelectionStrategy: Selection strategies for capability-based discovery (FIRST, RANDOM, ROUND_ROBIN, LEAST_LOADED)
     EnumTopicStandard: Topic standards (ONEX_KAFKA, ENVIRONMENT_AWARE)
@@ -148,6 +149,9 @@ from omnibase_infra.enums.enum_response_status import EnumResponseStatus
 from omnibase_infra.enums.enum_retry_error_category import EnumRetryErrorCategory
 from omnibase_infra.enums.enum_run_variant import EnumRunVariant
 from omnibase_infra.enums.enum_runtime_backend import EnumRuntimeBackend
+from omnibase_infra.enums.enum_runtime_heartbeat_refusal_reason import (
+    EnumRuntimeHeartbeatRefusalReason,
+)
 from omnibase_infra.enums.enum_runtime_restart_policy import (
     EnumRuntimeRestartPolicy,
 )
@@ -229,6 +233,7 @@ __all__: list[str] = [
     "EnumRetryErrorCategory",
     "EnumRunVariant",
     "EnumRuntimeBackend",
+    "EnumRuntimeHeartbeatRefusalReason",
     "EnumSecurityRuleId",
     "EnumSelectionStrategy",
     "EnumSessionLifecycleState",
