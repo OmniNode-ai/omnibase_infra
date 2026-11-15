@@ -218,10 +218,17 @@ def follow(repo: str, tag: str, state_dir: Path) -> dict[str, Any]:
     the agent runs the pinned code, but a job's build reads the compose files of the
     deploy-source clone, which the job resets to its ``git_ref``. Without the pinned
     head the build read the tracking branch's compose files and ignored the change the
-    pin installed.
+    pin installed. A branch build also needs the first-party source audit's declared
+    open pull request (``open_pr``) and the rollback declaration that goes with a
+    deliberate off-lineage build.
     """
     fields: dict[str, Any] = {"sibling_tags": {repo: tag}}
     pin = read_active_pin(state_dir, datetime.now(UTC))
     if pin is not None:
         fields["git_ref"] = pin.head
+        fields["open_pr"] = f"omnibase_infra#{pin.pr}@{pin.head}"
+        fields["rollback"] = {
+            "actor": pin.registered_by,
+            "reason": f"the stability follow builds code-ref pin {pin.branch}",
+        }
     return fields

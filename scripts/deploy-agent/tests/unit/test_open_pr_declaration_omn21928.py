@@ -87,13 +87,16 @@ def test_a_malformed_declaration_is_refused(text: str) -> None:
         _command(open_pr=text)
 
 
-@pytest.mark.parametrize(
-    "lane", [EnumRuntimeLane.STABILITY_TEST.value, EnumRuntimeLane.PROD.value]
-)
-def test_stability_and_prod_commands_refuse_a_branch_build(lane: str) -> None:
-    extra = {"image_digest": "sha256:" + "0" * 64} if lane == "prod" else {}
-    with pytest.raises(ValidationError, match="open_pr needs runtime_lane dev"):
-        _command(lane, **extra)
+def test_prod_commands_refuse_a_branch_build() -> None:
+    with pytest.raises(ValidationError, match="open_pr needs a non-prod lane"):
+        _command(EnumRuntimeLane.PROD.value, image_digest="sha256:" + "0" * 64)
+
+
+def test_a_stability_command_carries_the_declaration() -> None:
+    """OMN-24562: the stability follow of a live code-ref pin builds its branch."""
+    cmd = _command(EnumRuntimeLane.STABILITY_TEST.value)
+    assert cmd.open_pr == DECLARED
+    assert cmd.runtime_lane is EnumRuntimeLane.STABILITY_TEST
 
 
 @pytest.mark.parametrize("lane", ["judge", "collaborator"])
@@ -103,11 +106,11 @@ def test_judge_and_collaborator_are_not_lanes_a_command_can_name(lane: str) -> N
 
 
 def test_the_declaration_must_name_the_commit_built_and_carry_a_rollback() -> None:
-    with pytest.raises(ValidationError, match="open_pr needs runtime_lane dev"):
+    with pytest.raises(ValidationError, match="open_pr needs a non-prod lane"):
         _command(git_ref="c4" * 20)
-    with pytest.raises(ValidationError, match="open_pr needs runtime_lane dev"):
+    with pytest.raises(ValidationError, match="open_pr needs a non-prod lane"):
         _command(git_ref=TRACKING)
-    with pytest.raises(ValidationError, match="open_pr needs runtime_lane dev"):
+    with pytest.raises(ValidationError, match="open_pr needs a non-prod lane"):
         _command(rollback=None)
 
 
@@ -146,10 +149,8 @@ def test_a_build_without_a_declaration_names_no_audit_context() -> None:
     assert not [arg for arg in build_cmd if arg.startswith("FIRST_PARTY_")]
 
 
-@pytest.mark.parametrize("lane", [EnumRuntimeLane.STABILITY_TEST, EnumRuntimeLane.PROD])
-def test_the_executor_refuses_a_declaration_on_any_other_lane_before_building(
-    lane: EnumRuntimeLane,
-) -> None:
+def test_the_executor_refuses_a_declaration_on_prod_before_building() -> None:
+    lane = EnumRuntimeLane.PROD
     executor = DeployExecutor()
     executor.declared_pr = DECLARED
     ran: list[list[str]] = []
