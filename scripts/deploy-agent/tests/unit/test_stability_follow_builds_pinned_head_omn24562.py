@@ -54,11 +54,20 @@ def _tracking_ref(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_a_live_pin_names_its_head_as_the_build_ref(tmp_path: Path) -> None:
     _register(tmp_path, expires_in=timedelta(hours=2))
-    assert stability_follow_command(TAG, "omnimarket", tmp_path).git_ref == HEAD
+    command = stability_follow_command(TAG, "omnimarket", tmp_path)
+    assert command.git_ref == HEAD
+    # The first-party source audit builds a branch only for a declared open pull
+    # request, and the declaration carries a rollback declaration.
+    assert command.open_pr == f"omnibase_infra#6011@{HEAD}"
+    assert command.rollback is not None
+    assert command.rollback.actor == "stab-integ2-1750"
 
 
 def test_no_pin_builds_the_tracking_ref(tmp_path: Path) -> None:
-    assert stability_follow_command(TAG, "omnimarket", tmp_path).git_ref == TRACKING
+    command = stability_follow_command(TAG, "omnimarket", tmp_path)
+    assert command.git_ref == TRACKING
+    assert command.open_pr == ""
+    assert command.rollback is None
 
 
 def test_an_expired_pin_builds_the_tracking_ref(tmp_path: Path) -> None:

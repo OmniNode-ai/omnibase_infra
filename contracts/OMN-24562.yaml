@@ -64,6 +64,11 @@ requirements:
     acceptance:
       - id: AC17
         statement: 'AC17: the stability runtime lane unit test passes on the integration, asserting the composed build context on the runtime services -- falsifier: tests/unit/infra/test_stability_test_runtime_lane.py fails at the merge base'
+  - id: req-omn24562-stability-follow-open-pr
+    statement: The stability follow of a live code-ref pin builds the pinned branch as a declared open pull request, and only the stability and dev lanes may; prod keeps refusing a branch build.
+    acceptance:
+      - id: AC18
+        statement: 'AC18: a stability command carries an open pull request declaration with its rollback declaration, prod refuses one, and the first-party policy admits the stability lane -- falsifier: scripts/deploy-agent/tests/unit/test_open_pr_declaration_omn21928.py or tests/unit/validation/test_first_party_open_pr_context_omn21928.py fails at the merge base'
   - id: req-omn24562-stability-rollback-waiver
     statement: The deploy agent runs a stability runtime deploy that has no retained rollback point only when its own probe reads every runtime target of the lane down with no timeout, records on the job that it ran without one, and never applies the waiver to the prod lane.
     acceptance:
@@ -235,6 +240,18 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/infra/test_stability_test_runtime_lane.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac18-stability-follow-open-pr
+    description: A stability command carries the open pull request declaration, prod refuses it, and the policy data admits the stability lane.
+    source: manual
+    binds_ac:
+      - AC18
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_open_pr_declaration_omn21928.py tests/unit/test_stability_follow_builds_pinned_head_omn24562.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-rollback-waiver
     description: 'AC4, AC5 and AC6: UNHEALTHY allows and records, HEALTHY refuses, UNKNOWN refuses, prod and dev never waived; the existing rollback tests still pass'
