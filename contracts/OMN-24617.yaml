@@ -65,6 +65,9 @@ dod_evidence:
       - AC4
     checks:
       - check_type: command
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.handlers.handler_deploy_job_reading import HandlerDeployJobReading; print('deploy smoke ok', HandlerDeployJobReading.__name__)\""
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
         check_value: grep -q 'handler_deploy_job_reading' scripts/deploy-agent/deploy_agent/agent.py
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24617-integration-proof
