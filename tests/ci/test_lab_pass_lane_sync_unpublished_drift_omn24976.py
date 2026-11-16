@@ -138,8 +138,11 @@ def test_the_check_names_no_broker_so_drift_is_never_published() -> None:
     assert census_env["KAFKA_BOOTSTRAP_SERVERS"] == ""
 
 
-def test_the_recorded_unpublished_drift_is_a_failed_lane_sync() -> None:
-    check = check_lane_sync(runner=_ReplayRunner(_recorded()["responses"]))
+@pytest.mark.live_contact("tests/ci/fixtures/omn24976_lane_sync_unpublished_drift.json")
+def test_the_recorded_unpublished_drift_is_a_failed_lane_sync(
+    recorded_response: dict[str, Any],
+) -> None:
+    check = check_lane_sync(runner=_ReplayRunner(recorded_response["responses"]))
     assert check.name == LANE_SYNC_CHECK
     assert check.outcome is EnumLabPassCheckOutcome.FAIL, check.evidence
     assert not check.ok
@@ -149,9 +152,12 @@ def test_the_recorded_unpublished_drift_is_a_failed_lane_sync() -> None:
     assert {f["lane"] for f in plan["findings"]} == {"lane-a"}
 
 
-def test_the_train_names_lane_sync_as_a_failed_check() -> None:
+@pytest.mark.live_contact("tests/ci/fixtures/omn24976_lane_sync_unpublished_drift.json")
+def test_the_train_names_lane_sync_as_a_failed_check(
+    recorded_response: dict[str, Any],
+) -> None:
     reason, detail = _train_reason(
-        check_lane_sync(runner=_ReplayRunner(_recorded()["responses"]))
+        check_lane_sync(runner=_ReplayRunner(recorded_response["responses"]))
     )
     assert reason is rt.EnumTrainReason.LAB_RECEIPT_FAIL, detail
     assert reason is not rt.EnumTrainReason.LAB_RECEIPT_INDETERMINATE

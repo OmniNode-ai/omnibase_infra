@@ -2144,8 +2144,8 @@ def check_lane_sync(
     """Run the existing census against this daemon; every finding refuses (OMN-19417).
 
     The host identity comes from the daemon, as in the census refresh job.
-    Report-only transport reuses the collector and planner without publishing
-    another alert. A zero must name at least one checked lane.
+    Report-only: no broker is named, so a drift exits 8, unpublished (OMN-20798),
+    and is a finding like 30 (OMN-24976). A zero must name a checked lane.
     """
     run = runner or _run_read_only
     try:
@@ -2172,7 +2172,7 @@ def check_lane_sync(
                     "KAFKA_BOOTSTRAP_SERVERS": "",
                 },
             )
-        if result.returncode not in (0, 30):
+        if result.returncode not in (0, 8, 30):
             raise ValueError(
                 f"census exit={result.returncode}: {result.stderr.strip()}"
             )
@@ -2193,7 +2193,7 @@ def check_lane_sync(
             or (not checked and not findings)
             or type(plan.get("has_drift")) is not bool
             or plan["has_drift"] != bool(findings)
-            or (result.returncode == 30) != bool(findings)
+            or (result.returncode != 0) != bool(findings)
         ):
             raise ValueError(
                 "census plan is empty, malformed or disagrees with its drift exit"
