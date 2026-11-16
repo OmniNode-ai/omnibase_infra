@@ -114,6 +114,50 @@ def _pin_request_id(branch: str, expires_at: datetime, now: datetime) -> str:
     )
 
 
+def _failing_step(
+    settings: Mapping[str, JsonValue], request: ModelDeployJobReadingRequest
+) -> str:
+    """The first phase that failed, else the first that did not succeed, else ``unknown``."""
+    order = _names(settings, "phase_order")
+    for phase in order:
+        if request.phase_results.get(phase) == "failed":
+            return phase
+    # A job refused between phases marks none failed; it stopped where the first phase
+    # that did not succeed was due.
+    for phase in order:
+        if request.phase_results.get(phase) != "success":
+            return phase
+    if request.not_started:
+        return _token(f"not-started-{request.not_started}")
+    return _UNKNOWN
+
+
+def _alarm_head(
+    settings: Mapping[str, JsonValue], alarm: str, moment: datetime
+) -> list[str]:
+    """The cells every alarm row opens with, then the owner line cells."""
+    return [
+        f"{_stamp(moment)} | STATUS",
+        f"lane={_text(settings, 'row_lane')}",
+        "src=alarm",
+        f"actor={_text(settings, 'row_actor')}",
+        "model=none",
+        f"alarm={alarm}",
+    ]
+
+
+def _append_env(
+    settings: Mapping[str, JsonValue], environ: Mapping[str, str]
+) -> dict[str, str]:
+    """The append command's environment: the agent's, with its prefixed broker login unprefixed."""
+    env = dict(environ)
+    prefix = env.get(_text(settings, "sasl_prefix_env"), "")
+    for name in _names(settings, "sasl_login_names"):
+        if prefix and name not in env and f"{prefix}{name}" in env:
+            env[name] = env[f"{prefix}{name}"]
+    return env
+
+
 class HandlerDeployJobReading:
     """Build a terminal deploy job's reading row and append it to the ledger."""
 
@@ -131,21 +175,6 @@ class HandlerDeployJobReading:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.EFFECT
 
-    def failing_step(self, request: ModelDeployJobReadingRequest) -> str:
-        """The first phase that failed, else the first that did not succeed, else ``unknown``."""
-        order = _names(self._settings, "phase_order")
-        for phase in order:
-            if request.phase_results.get(phase) == "failed":
-                return phase
-        # A job refused between phases marks none failed; it stopped where the first phase
-        # that did not succeed was due.
-        for phase in order:
-            if request.phase_results.get(phase) != "success":
-                return phase
-        if request.not_started:
-            return _token(f"not-started-{request.not_started}")
-        return _UNKNOWN
-
     def build_row(self, request: ModelDeployJobReadingRequest) -> str | None:
         """The reading row of a terminal job on a covered lane, or ``None`` when it has none."""
         if request.runtime_lane in _names(self._settings, "excluded_lanes"):
@@ -153,7 +182,7 @@ class HandlerDeployJobReading:
         if request.job_outcome not in ("success", "failed"):
             return None
         failed = request.job_outcome == "failed"
-        step = self.failing_step(request) if failed else ""
+        step = _failing_step(self._settings, request) if failed else ""
         completed = request.completed_at or request.published_at
         cells = [
             f"lane={_text(self._settings, 'row_lane')}",
@@ -184,29 +213,18 @@ class HandlerDeployJobReading:
         ]
         return f"{_stamp(request.published_at)} | STATUS | " + " | ".join(cells)
 
-    def _alarm_head(self, alarm: str, moment: datetime) -> list[str]:
-        """The cells every alarm row opens with, then the owner line cells."""
-        return [
-            f"{_stamp(moment)} | STATUS",
-            f"lane={_text(self._settings, 'row_lane')}",
-            "src=alarm",
-            f"actor={_text(self._settings, 'row_actor')}",
-            "model=none",
-            f"alarm={alarm}",
-        ]
-
     def build_alarm_row(self, request: ModelDeployJobReadingRequest) -> str | None:
         """The alarm row of a failed job on a covered lane, ``None`` for any other job."""
         if request.runtime_lane in _names(self._settings, "excluded_lanes"):
             return None
         if request.job_outcome != "failed":
             return None
-        cells = self._alarm_head("deploy-job-failed", request.published_at)
+        cells = _alarm_head(self._settings, "deploy-job-failed", request.published_at)
         cells += [
             f"deploy_lane={_token(request.runtime_lane)}",
             f"job={request.correlation_id}",
             f"kind={_token(request.scope)}",
-            f"failing_step={self.failing_step(request)}",
+            f"failing_step={_failing_step(self._settings, request)}",
             f"owner={_text(self._settings, 'alarm_owner')}",
             f"owner_line={_text(self._settings, 'alarm_job_owner_line')}",
         ]
@@ -235,7 +253,7 @@ class HandlerDeployJobReading:
             return None
         bucket = now.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
         left = (expires_at - bucket).total_seconds() / 3600
-        cells = self._alarm_head("pin-near-expiry", bucket)
+        cells = _alarm_head(self._settings, "pin-near-expiry", bucket)
         cells += [
             f"pin_branch={_token(branch)}",
             f"pin_pr={pr}",
@@ -343,15 +361,6 @@ class HandlerDeployJobReading:
             alarm_outcome=alarm_outcome,
         )
 
-    def _append_env(self) -> dict[str, str]:
-        """The append command's environment: the agent's, with its prefixed broker login unprefixed."""
-        env = dict(self._environ)
-        prefix = env.get(_text(self._settings, "sasl_prefix_env"), "")
-        for name in _names(self._settings, "sasl_login_names"):
-            if prefix and name not in env and f"{prefix}{name}" in env:
-                env[name] = env[f"{prefix}{name}"]
-        return env
-
     def _append(self, row: str, request_id: str) -> str:
         """Append ``row``; an empty string when the append command took it, else why not."""
         command_env = _text(self._settings, "append_command_env")
@@ -372,7 +381,7 @@ class HandlerDeployJobReading:
             "-",
         ]
         timeout = self._settings["append_timeout_seconds"]
-        env = self._append_env()
+        env = _append_env(self._settings, self._environ)
         try:
             done = subprocess.run(
                 argv,
