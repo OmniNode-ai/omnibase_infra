@@ -1,0 +1,50 @@
+schema_version: 1.0.0
+ticket_id: OMN-24792
+title: omnibase_infra pull request 5940 answers its review and reads green at a new head
+summary: The lane answers the four blocking and six non-blocking findings of the review of omnibase_infra pull request 5940 at head 5f7b8ac302a2. It removes the dead repository_dispatch branch of the plugin pin cascade, renames and extends the trigger test with a scan of every workflow, and leaves every check, threshold and gate as it was.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24792-answer-the-review
+    statement: The review findings of omnibase_infra pull request 5940 are fixed in the pull request or argued with evidence, with a red then green test run on a lab host, and no check is widened, skipped or lowered.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the cause is fixed in the pull request (a code or test fix, a contract or evidence fix, or a rebase onto the current base), with a red-then-green test run on the lab, and the new head carries a comment starting Lab: head=<full head sha> -- falsifier: onex scm pr-view omnibase_infra#5940 lists that comment, and the lab run of the named test at the previous head exits non-zero"
+      - id: AC4
+        statement: "AC4: no commit of the lane widens a check, lowers a threshold, skips a check or reverts a commit, and the lane never touches prod -- falsifier: git diff of the pull request branch against its base shows a lowered threshold, a skipped check or a widened pattern, or git log lists a revert commit"
+evidence_requirements:
+  - kind: tests
+    description: The trigger tests, the cascade input tests and the pin tests pass at the pushed head.
+    command: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn24206.py tests/ci/test_plugin_pin_cascade_attributable_omn18596.py tests/ci/test_omnimarket_contract_pin.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24792-ac2-red-then-green
+    description: The test file that answers the review fails against the merge-base workflows and passes at the head, so this check is red at the merge base where the file does not exist.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn24206.py tests/ci/test_plugin_pin_cascade_attributable_omn18596.py -q -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24792-ac4-no-revert-no-skip
+    description: No commit between the dev base and the head is a revert, read from the commit subjects.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: "! git log --format=%s origin/dev..HEAD | grep -E '^Revert'"
+        cwd: .
+  - id: dod-deploy
+    description: The change edits two workflow files, their tests and a contract; this hosted-runner check needs no deployed services and no deploy is triggered.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn24206.py -q -p no:cacheprovider
+        cwd: .

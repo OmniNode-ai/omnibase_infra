@@ -7,7 +7,7 @@
 # OMN-24206.
 # Updates Dockerfile.runtime pins for the released plugin and opens a PR.
 #
-# Ticket: OMN-5375 (origin), OMN-18596 (downstream pin-bump PRs on publish)
+# Ticket: OMN-5375 (origin), OMN-18596 (attributable pin-bump PRs), OMN-24206 (dispatch only)
 #
 # OMN-18596: the PR this opens must be attributable and must target the branch
 # its commit was cut from. Before this, it opened ticketless (so occ-autobind
@@ -54,7 +54,7 @@ permissions:
 jobs:
   update-dockerfile-pins:
     timeout-minutes: 30
-    name: Update Dockerfile.runtime pins for ${{ github.event.client_payload.package || inputs.package }}
+    name: Update Dockerfile.runtime pins for ${{ inputs.package }}
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-latest; public forks default to ubuntu-latest
     runs-on: ubuntu-latest
     steps:
@@ -64,27 +64,15 @@ jobs:
         # every field that reaches a ref, a PR title or a PR body is validated
         # first (the dependency-cascade.yml OMN-16286 rule).
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          DISPATCH_PACKAGE: ${{ github.event.client_payload.package }}
-          DISPATCH_VERSION: ${{ github.event.client_payload.version }}
-          DISPATCH_SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
-          DISPATCH_TICKET: ${{ github.event.client_payload.ticket }}
           MANUAL_PACKAGE: ${{ inputs.package }}
           MANUAL_VERSION: ${{ inputs.version }}
           MANUAL_TICKET: ${{ inputs.ticket }}
         run: |
           # >>> OMN-18596 plugin pin inputs >>>
-          if [ "${EVENT_NAME}" = "repository_dispatch" ]; then
-            PACKAGE="${DISPATCH_PACKAGE}"
-            VERSION="${DISPATCH_VERSION}"
-            SOURCE_REPO="${DISPATCH_SOURCE_REPO}"
-            TICKET="${DISPATCH_TICKET}"
-          else
-            PACKAGE="${MANUAL_PACKAGE}"
-            VERSION="${MANUAL_VERSION}"
-            SOURCE_REPO="manual"
-            TICKET="${MANUAL_TICKET}"
-          fi
+          PACKAGE="${MANUAL_PACKAGE}"
+          VERSION="${MANUAL_VERSION}"
+          SOURCE_REPO="manual"
+          TICKET="${MANUAL_TICKET}"
           TICKET="${TICKET:-${PLUGIN_PIN_CASCADE_STANDING_TICKET}}"
           if ! [[ "${PACKAGE}" =~ ^[A-Za-z0-9_-]+$ ]]; then
             echo "::error::OMN-18596: package '${PACKAGE}' does not match ^[A-Za-z0-9_-]+\$."

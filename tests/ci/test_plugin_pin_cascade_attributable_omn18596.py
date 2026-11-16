@@ -101,7 +101,7 @@ class TestAttributable:
     def test_a_standing_ticket_is_declared_as_workflow_config(self) -> None:
         assert re.fullmatch(r"OMN-\d+", _standing_ticket())
 
-    def test_dispatch_without_a_ticket_resolves_the_standing_ticket(
+    def test_a_manual_dispatch_without_a_ticket_resolves_the_standing_ticket(
         self, tmp_path: Path
     ) -> None:
         out = tmp_path / "out"
@@ -109,11 +109,9 @@ class TestAttributable:
             _program(_INPUTS_OPEN, _INPUTS_CLOSE),
             tmp_path,
             {
-                "EVENT_NAME": "repository_dispatch",
-                "DISPATCH_PACKAGE": "omninode-memory",
-                "DISPATCH_VERSION": "v0.18.3",
-                "DISPATCH_SOURCE_REPO": "OmniNode-ai/omnimemory",
-                "DISPATCH_TICKET": "",
+                "MANUAL_PACKAGE": "omninode-memory",
+                "MANUAL_VERSION": "v0.18.3",
+                "MANUAL_TICKET": "",
                 "PLUGIN_PIN_CASCADE_STANDING_TICKET": _standing_ticket(),
             },
             out,
@@ -121,18 +119,15 @@ class TestAttributable:
         assert result.returncode == 0, result.stderr + result.stdout
         assert _outputs(out)["ticket"] == _standing_ticket()
 
-    def test_a_dispatched_ticket_overrides_the_standing_one(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_manual_ticket_overrides_the_standing_one(self, tmp_path: Path) -> None:
         out = tmp_path / "out"
         result = _run(
             _program(_INPUTS_OPEN, _INPUTS_CLOSE),
             tmp_path,
             {
-                "EVENT_NAME": "repository_dispatch",
-                "DISPATCH_PACKAGE": "omninode-memory",
-                "DISPATCH_VERSION": "0.18.3",
-                "DISPATCH_TICKET": "OMN-12345",
+                "MANUAL_PACKAGE": "omninode-memory",
+                "MANUAL_VERSION": "0.18.3",
+                "MANUAL_TICKET": "OMN-12345",
                 "PLUGIN_PIN_CASCADE_STANDING_TICKET": _standing_ticket(),
             },
             out,
@@ -143,19 +138,18 @@ class TestAttributable:
     @pytest.mark.parametrize(
         ("field", "value"),
         [
-            ("DISPATCH_TICKET", "OMN-1; rm -rf /"),
-            ("DISPATCH_PACKAGE", "omninode-memory$(id)"),
-            ("DISPATCH_VERSION", "latest"),
+            ("MANUAL_TICKET", "OMN-1; rm -rf /"),
+            ("MANUAL_PACKAGE", "omninode-memory$(id)"),
+            ("MANUAL_VERSION", "latest"),
         ],
     )
     def test_malformed_input_refuses(
         self, tmp_path: Path, field: str, value: str
     ) -> None:
         env = {
-            "EVENT_NAME": "repository_dispatch",
-            "DISPATCH_PACKAGE": "omninode-memory",
-            "DISPATCH_VERSION": "0.18.3",
-            "DISPATCH_TICKET": "",
+            "MANUAL_PACKAGE": "omninode-memory",
+            "MANUAL_VERSION": "0.18.3",
+            "MANUAL_TICKET": "",
             "PLUGIN_PIN_CASCADE_STANDING_TICKET": _standing_ticket(),
             field: value,
         }
@@ -170,7 +164,7 @@ class TestAttributable:
         assert "-${TICKET_SLUG}" in text, "head ref carries the ticket"
         assert "Evidence-Ticket: ${{ steps.inputs.outputs.ticket }}" in text
 
-    def test_no_dispatch_value_is_interpolated_into_a_script(self) -> None:
+    def test_no_input_value_is_interpolated_into_a_script(self) -> None:
         for step_script in re.findall(r"run: \|\n((?:\s{10}.*\n)+)", _text()):
             assert "client_payload" not in step_script
 

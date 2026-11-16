@@ -20,9 +20,10 @@ The fix splits the two assertions the gate had fused:
   the contract set this repo has pinned. Deterministic, a pure function of
   committed state, and therefore still a hard per-PR gate.
 * **freshness** — the pinned contract set is current with omnimarket ``dev``.
-  A property of a *pair* of repos, not of any infra PR. It moves to a scheduled
-  bot that opens a regeneration PR, so drift lands as an actionable PR instead of
-  an org-wide ambush.
+  A property of a *pair* of repos, not of any infra PR. It moves to a bot,
+  dispatched by hand when a change needs a newer contract set (OMN-24206), that
+  opens a regeneration PR, so drift lands as an actionable PR instead of an
+  org-wide ambush.
 
 These tests pin that split down. They fail against the live-resolve
 implementation.
@@ -421,13 +422,13 @@ def test_the_resolver_refuses_a_mutable_ref(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_scheduled_bot_advances_the_pin_and_regenerates_in_one_commit() -> None:
-    """Pinning without auto-advance would be a straight return to OMN-15701.
+def test_a_dispatched_bot_advances_the_pin_and_regenerates_in_one_commit() -> None:
+    """The bot, dispatched by hand, advances the pin and regenerates in one commit.
 
-    The bot is the load-bearing half of this design: it is what makes the pin
-    unable to sit stale *silently*. It must advance the pin AND regenerate both
-    the topology instances and the rendered catalogs in the same commit, so the
-    pin and the grants it derives can never disagree on ``dev``.
+    It is how the pin advances when a change needs a newer contract set (OMN-24206
+    removed the schedule). It must advance the pin AND regenerate both the
+    topology instances and the rendered catalogs in the same commit, so the pin
+    and the grants it derives can never disagree on ``dev``.
     """
     assert _REFRESH_WORKFLOW.is_file(), f"missing refresh bot: {_REFRESH_WORKFLOW}"
     document = yaml.safe_load(_REFRESH_WORKFLOW.read_text(encoding="utf-8"))

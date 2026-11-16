@@ -19,12 +19,13 @@
 # OMN-17292 pins the derivation input so an infra PR's verdict depends only on
 # committed state. Pinning ALONE would be a straight return to OMN-15701 (a
 # stale pin used as a `--write` input silently reverted 8 live grants), so this
-# workflow is the other half: it advances the pin on a schedule, updates the
-# omnimarket entry in .github/sibling-pins.yaml and its inline workflow refs,
-# regenerates the instances AND the rendered catalogs in the same commit, and
-# opens a PR. The pin can be briefly behind omnimarket dev; it cannot sit stale
-# silently, and scripts/ci/check_omnimarket_contract_pin_advance.py keeps it
-# forward-only.
+# workflow is the other half: dispatched by hand when a change needs a newer
+# contract set, it advances the pin, updates the omnimarket entry in
+# .github/sibling-pins.yaml and its inline workflow refs, regenerates the
+# instances AND the rendered catalogs in the same commit, and opens a PR. The
+# pin can lag omnimarket dev, and no gate fails on that lag (OMN-24206 read
+# tests/ci, scripts and the contracts); scripts/ci/check_omnimarket_contract_pin_advance.py
+# keeps every move forward-only.
 #
 # The bot PR edits the pin and nothing else in contracts/OMN-17292.yaml (OMN-19998).
 # That contract carries every criterion the live ticket does, and the omnimarket

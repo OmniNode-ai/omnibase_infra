@@ -19,7 +19,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The workflow trigger tests pass at the head and fail at the merge base.
-    command: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn23386.py tests/ci/test_omnimarket_contract_pin.py -q -p no:cacheprovider
+    command: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn24206.py tests/ci/test_omnimarket_contract_pin.py -q -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ""
@@ -32,7 +32,7 @@ dod_evidence:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn23386.py -k contract_pin_refresh -q -p no:cacheprovider
+        check_value: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn24206.py -k contract_pin_refresh -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24206-ac2-plugin-pin-cascade-manual-only
     description: plugin-pin-cascade.yml triggers only on workflow_dispatch. At the merge base it also carries the plugin-release repository_dispatch trigger, so this test is red there.
@@ -41,10 +41,10 @@ dod_evidence:
       - AC2
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn23386.py -k plugin_pin_cascade -q -p no:cacheprovider
+        check_value: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn24206.py -k plugin_pin_cascade -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24206-ac3-no-automatic-trigger-on-dev
-    description: Neither workflow file carries a schedule key or a repository_dispatch key, read as text. The integrated read of the workflow run lists on the default branch after merge is made by the lane and named in the pull request.
+    description: Scoped to these two files, neither carries a schedule key or a repository_dispatch key, read as text; the same test file also scans every other workflow under .github/workflows for a workflow_run, a dispatch call or a pin-file write that would start or replace a producer. The integrated read of the workflow run lists on the default branch after merge is made by the lane and named in the pull request.
     source: manual
     binds_ac:
       - AC3
@@ -52,10 +52,13 @@ dod_evidence:
       - check_type: command
         check_value: "! grep -E '^[[:space:]]*(schedule|repository_dispatch):' .github/workflows/omnimarket-contract-pin-refresh.yml .github/workflows/plugin-pin-cascade.yml"
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn24206.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-deploy
     description: Both workflow files parse and their trigger shapes are asserted by the tests above; this hosted-runner check needs no deployed services and no deploy is triggered.
     source: manual
     checks:
       - check_type: command
-        check_value: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn23386.py -q -p no:cacheprovider
+        check_value: uv run --frozen pytest tests/ci/test_pin_producers_need_driven_omn24206.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
