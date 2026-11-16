@@ -29,6 +29,8 @@ from tests.integration.infra.test_stability_test_runtime_compose_render import (
     COMPOSE_FILES,
     REPO_ROOT,
     _compose_render_env,
+    # Imported for effect: this autouse fixture sets ONEX_LANE_OVERLAY_DIR, which
+    # ``_compose_render_env`` reads. Without it the render raises KeyError.
     lane_overlay_path,
 )
 

@@ -28,8 +28,14 @@ from pathlib import Path
 
 import pytest
 import yaml
-from deploy_agent.events import SCOPE_SERVICES, EnumRuntimeLane, Scope
-from deploy_agent.executor import lane_config_for
+from deploy_agent import executor as agent_executor
+from deploy_agent.events import EnumRuntimeLane, Scope
+from deploy_agent.executor import (
+    _LANE_CONFIGS,
+    ModelLaneConfig,
+    _requested_services_for_up,
+    lane_config_for,
+)
 
 
 def _construct_compose_value(loader: yaml.SafeLoader, node: yaml.Node) -> object:
@@ -73,15 +79,26 @@ STABILITY_FILE = DOCKER_DIR / "docker-compose.stability-test.yml"
 PROD_FILE = DOCKER_DIR / "docker-compose.prod.yml"
 JUDGE_FILE = DOCKER_DIR / "docker-compose.judge.yml"
 
-# Overlays whose lane the deploy agent drives. The agent hands
-# ``SCOPE_SERVICES[Scope.RUNTIME]`` to ``docker compose up -d --no-deps`` by name for
-# every service its lane config does not list in ``disabled_services``
-# (``_requested_services_for_up`` in deploy_agent/executor.py), and an explicit name
-# bypasses the overlay's profile-disable. A service in that list that the lane neither
-# disables nor renames is created under the dev lane's bare name. The prod overlay is
-# deliberately absent: it still carries both runtime-list-only services on their bare
-# names and is outside this ratchet's reach.
-AGENT_RUNTIME_LANES = {STABILITY_FILE: EnumRuntimeLane.STABILITY_TEST}
+# Overlay lanes the deploy agent drives. The agent hands its runtime up list to
+# ``docker compose up -d --no-deps`` by name for every service its lane config does not
+# list in ``disabled_services`` (``_requested_services_for_up`` in
+# deploy_agent/executor.py), and an explicit name bypasses the overlay's profile-disable.
+# A service in that list that the lane neither disables nor renames is created under the
+# dev lane's bare name. The map is derived from the agent's own ``_LANE_CONFIGS``, so a
+# lane added there is covered or has to be named below.
+#
+# The prod overlay is the one named exclusion: it still carries both runtime-list-only
+# services on their bare names, and prod is outside this lane's reach. Taking it out of
+# the exclusion list is the follow-up that adds the two names to prod's
+# ``disabled_services``.
+AGENT_RUNTIME_EXCLUSIONS = {
+    EnumRuntimeLane.PROD: "prod's disabled_services is a prod config change, not made here",
+}
+AGENT_RUNTIME_LANES = {
+    DOCKER_DIR / Path(config.compose_files[1]).name: lane
+    for lane, config in _LANE_CONFIGS.items()
+    if lane is not EnumRuntimeLane.DEV and lane not in AGENT_RUNTIME_EXCLUSIONS
+}
 
 # Layered overlays merge on top of the base infra file and inherit un-overridden
 # fields (including container_name). The judge overlay is standalone (see its
@@ -137,8 +154,7 @@ def _agent_runtime_services(overlay_file: Path) -> set[str]:
     lane = AGENT_RUNTIME_LANES.get(overlay_file)
     if lane is None:
         return set()
-    disabled = lane_config_for(lane).disabled_services
-    return set(SCOPE_SERVICES[Scope.RUNTIME]) - disabled
+    return set(_requested_services_for_up(Scope.RUNTIME, [], lane=lane))
 
 
 def _instantiated_services(overlay_file: Path) -> set[str]:
@@ -147,8 +163,8 @@ def _instantiated_services(overlay_file: Path) -> set[str]:
     A service is instantiated in the lane if either:
       * it is in onex-runtime-deploy's RUNTIME_SERVICES (started explicitly by name,
         which bypasses profile gating), or, for a lane the deploy agent drives
-        (``AGENT_RUNTIME_LANES``), in the agent's ``SCOPE_SERVICES[RUNTIME]`` minus
-        the services that lane's config disables, or
+        (``AGENT_RUNTIME_LANES``), in the up list the agent builds for that lane
+        (``_requested_services_for_up``), or
       * its *effective* profile (overlay override if present, else base) is empty
         (always-on) or contains ``runtime`` (the deploy ``--profile runtime`` set).
 
@@ -210,11 +226,8 @@ def test_deploy_runtime_services_are_named_and_reachable() -> None:
         )
 
 
-@pytest.mark.unit
-@pytest.mark.parametrize("lane", sorted(LAYERED_OVERLAYS))
-def test_layered_overlay_renames_every_instantiated_service(lane: str) -> None:
-    """No service a non-dev lane instantiates may keep its bare (dev/base) name."""
-    overlay_file = LAYERED_OVERLAYS[lane]
+def _bare_survivors(overlay_file: Path) -> list[str]:
+    """Instantiated services the overlay leaves on the dev lane's bare name."""
     instantiated = _instantiated_services(overlay_file)
     base_names = _container_names(_load_services(BASE_FILE))
     overlay_names = _container_names(_load_services(overlay_file))
@@ -228,6 +241,14 @@ def test_layered_overlay_renames_every_instantiated_service(lane: str) -> None:
         override = overlay_names.get(service)
         if override is None or override == base_names[service]:
             bare_survivors.append(service)
+    return bare_survivors
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("lane", sorted(LAYERED_OVERLAYS))
+def test_layered_overlay_renames_every_instantiated_service(lane: str) -> None:
+    """No service a non-dev lane instantiates may keep its bare (dev/base) name."""
+    bare_survivors = _bare_survivors(LAYERED_OVERLAYS[lane])
 
     assert not bare_survivors, (
         f"{lane} overlay instantiates {bare_survivors} but leaves them on the bare "
@@ -320,23 +341,63 @@ def test_expected_lane_container_name_overrides(
     )
 
 
+RUNTIME_LIST_ONLY_SERVICES = {"autoheal", "context-audit-consumer"}
+
+
 @pytest.mark.unit
-def test_agent_runtime_list_feeds_the_instantiated_set() -> None:
-    """The ratchet sees a runtime-scope service the bash RUNTIME_SERVICES lacks."""
-    for overlay_file in AGENT_RUNTIME_LANES:
-        agent_named = _agent_runtime_services(overlay_file)
-        assert agent_named, "the agent names no service for this lane"
-        base_services = _load_services(BASE_FILE)
-        assert agent_named & base_services.keys() <= _instantiated_services(
-            overlay_file
-        )
-    # The services the lane config disables never reach the instantiated set via the
-    # agent list, so they need no lane-scoped name.
-    disabled = lane_config_for(EnumRuntimeLane.STABILITY_TEST).disabled_services
-    assert {"autoheal", "context-audit-consumer"} <= disabled
-    assert not {"autoheal", "context-audit-consumer"} & _agent_runtime_services(
-        STABILITY_FILE
+def test_agent_runtime_list_feeds_the_instantiated_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ratchet sees a runtime-scope service that only the agent's list names.
+
+    With the lane's ``disabled_services`` as committed, the agent's list holds nothing
+    the bash ``RUNTIME_SERVICES`` array lacks, so the union line cannot be exercised
+    by the real config. The control empties the lane's ``disabled_services``: the two
+    runtime-list-only services then reach the agent's up list, the instantiated set
+    and the bare-name ratchet. Deleting ``runtime_explicit |= ...`` from
+    ``_instantiated_services`` fails the control.
+    """
+    bash_list = _runtime_services_from_deploy_script()
+    assert not RUNTIME_LIST_ONLY_SERVICES & bash_list, (
+        "autoheal / context-audit-consumer joined RUNTIME_SERVICES; the control below "
+        "no longer isolates the agent list"
     )
+
+    # Committed config: both are disabled, so neither is instantiated or bare.
+    assert not RUNTIME_LIST_ONLY_SERVICES & _instantiated_services(STABILITY_FILE)
+    assert not RUNTIME_LIST_ONLY_SERVICES & set(_bare_survivors(STABILITY_FILE))
+
+    # Control: the lane's config disables nothing.
+    real_lane_config_for = lane_config_for
+
+    def lane_config_without_disabled(lane: EnumRuntimeLane) -> ModelLaneConfig:
+        config = real_lane_config_for(lane)
+        if lane is EnumRuntimeLane.STABILITY_TEST:
+            return config.model_copy(update={"disabled_services": frozenset()})
+        return config
+
+    monkeypatch.setattr(agent_executor, "lane_config_for", lane_config_without_disabled)
+    assert RUNTIME_LIST_ONLY_SERVICES.issubset(_agent_runtime_services(STABILITY_FILE))
+    assert RUNTIME_LIST_ONLY_SERVICES.issubset(_instantiated_services(STABILITY_FILE))
+    assert RUNTIME_LIST_ONLY_SERVICES.issubset(_bare_survivors(STABILITY_FILE))
+
+
+@pytest.mark.unit
+def test_agent_runtime_lanes_cover_every_overlay_lane_of_the_agent() -> None:
+    """Every overlay lane of the agent is in the ratchet's map or a named exclusion."""
+    overlay_lanes = set(_LANE_CONFIGS) - {EnumRuntimeLane.DEV}
+    covered = set(AGENT_RUNTIME_LANES.values())
+    excluded = set(AGENT_RUNTIME_EXCLUSIONS)
+    assert covered | excluded == overlay_lanes
+    assert not covered & excluded
+    assert all(AGENT_RUNTIME_EXCLUSIONS.values()), "name a reason per exclusion"
+    layered = set(LAYERED_OVERLAYS.values())
+    for overlay_file, lane in AGENT_RUNTIME_LANES.items():
+        assert overlay_file.exists(), f"{lane} overlay {overlay_file} is missing"
+        assert overlay_file in layered, (
+            f"{lane} is driven by the agent but its overlay is not a layered overlay "
+            f"the bare-name ratchet checks"
+        )
 
 
 @pytest.mark.unit
