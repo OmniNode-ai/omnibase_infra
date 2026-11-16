@@ -25,13 +25,13 @@ from typing import Any
 import pytest
 from deploy_agent.events import DEV_LANE_GATEWAY_SERVICES, EnumRuntimeLane
 from deploy_agent.executor import (
-    _LANE_CONFIGS,
-    COMPOSE_FILE,
     DEFAULT_DEV_INSTANCE,
-    DEV_INSTANCE_LANE_CONFIGS,
     EnumInstancePhase,
     ModelLaneConfig,
+    _lane_configs,
     build_dev_instance_lane_configs,
+    compose_file,
+    dev_instance_lane_configs,
     lane_with_phases_off,
     select_dev_instance,
 )
@@ -117,7 +117,7 @@ class TestInstanceCompositionIsData:
         # The default declares no ``lane:`` block; its phases are the table's
         # ``flags:`` (OMN-21629), applied over the historical composition.
         assert configs[DEFAULT_DEV_INSTANCE] == lane_with_phases_off(
-            _LANE_CONFIGS[EnumRuntimeLane.DEV],
+            _lane_configs()[EnumRuntimeLane.DEV],
             lane_flags_for_instance(
                 AGENT_CLONE_ROOT, DEFAULT_DEV_INSTANCE
             ).disabled_phases,
@@ -129,9 +129,9 @@ class TestInstanceCompositionIsData:
         literal = ModelLaneConfig(
             lane=EnumRuntimeLane.DEV,
             compose_files=(
-                COMPOSE_FILE,
-                _LANE_CONFIGS[EnumRuntimeLane.DEV].compose_files[1],
-                COMPOSE_FILE.replace(
+                compose_file(),
+                _lane_configs()[EnumRuntimeLane.DEV].compose_files[1],
+                compose_file().replace(
                     "docker-compose.infra.yml", "docker-compose.dev-202.yml"
                 ),
             ),
@@ -155,6 +155,7 @@ class TestInstanceCompositionIsData:
                 }
             ),
         )
+        DEV_INSTANCE_LANE_CONFIGS = dev_instance_lane_configs()
         assert DEV_INSTANCE_LANE_CONFIGS["dev-202"] == literal
 
     def test_the_default_instance_may_not_declare_a_lane_block(self) -> None:

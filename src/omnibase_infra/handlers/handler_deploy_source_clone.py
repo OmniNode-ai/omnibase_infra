@@ -175,14 +175,27 @@ def _first_answering(
     return origin_url
 
 
+def probe_remote(
+    request: ModelDeploySourceClone, *, run: GitRunner
+) -> subprocess.CompletedProcess[str]:
+    """Probe the mirror, else origin; a mirror miss is a counted fallback.
+
+    Returns the probe that decided the answer, so a refusal keeps git's own stderr.
+    """
+    origin_url = _origin_url(run)
+    if request.mirror_url:
+        mirrored = run(["ls-remote", "--exit-code", request.mirror_url, "HEAD"])
+        if mirrored.returncode == 0:
+            return mirrored
+        _count_fallback(
+            Path(request.clone_dir), f"mirror unreachable (rc={mirrored.returncode})"
+        )
+    return run(["ls-remote", "--exit-code", origin_url, "HEAD"])
+
+
 def remote_reachable(request: ModelDeploySourceClone, *, run: GitRunner) -> bool:
-    """Whether the mirror, else origin, answers; a mirror miss is a counted fallback."""
-    url = _first_answering(
-        request,
-        _origin_url(run),
-        lambda target: run(["ls-remote", "--exit-code", target, "HEAD"]).returncode,
-    )
-    return run(["ls-remote", "--exit-code", url, "HEAD"]).returncode == 0
+    """Whether the mirror, else origin, answers."""
+    return probe_remote(request, run=run).returncode == 0
 
 
 def execution_runner(execution: ModuleType, timeout: float) -> GitRunner:
@@ -199,9 +212,11 @@ def fetch_deploy_source(
     return fetch(execution.deploy_source(), run=execution_runner(execution, timeout))
 
 
-def deploy_source_reachable(execution: ModuleType, timeout: float) -> bool:
-    """Whether the mirror, else origin, answers for the agent's deploy source."""
-    return remote_reachable(
+def probe_deploy_source(
+    execution: ModuleType, timeout: float
+) -> subprocess.CompletedProcess[str]:
+    """Probe the mirror, else origin, for the agent's deploy source."""
+    return probe_remote(
         execution.deploy_source(), run=execution_runner(execution, timeout)
     )
 

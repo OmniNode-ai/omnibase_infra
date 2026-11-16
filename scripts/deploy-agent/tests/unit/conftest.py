@@ -69,10 +69,20 @@ def pytest_collection_finish(session: pytest.Session) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _deploy_source_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Resolve the deploy source from the sandbox settings, fresh for each test."""
+def _deploy_source_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[None]:
+    """Resolve the deploy source from the sandbox settings, fresh for each test.
+
+    OMN-24626: a dev agent refuses to render a compose environment whose overlay store
+    is absent or empty, so the sandbox declares a populated one, as an operator's host
+    env store does. Tests of the store itself delete the variable.
+    """
     for key, value in DEPLOY_SOURCE_ENV.items():
         monkeypatch.setenv(key, value)
+    store = tmp_path_factory.mktemp("overlay-store")
+    (store / "overlay.yaml").write_text("sandbox: true\n", encoding="utf-8")
+    monkeypatch.setenv("DEV_LANE_OVERLAY_STORE_ROOTS_DIR", str(store))
     _clear_deploy_source_caches()
     yield
     _clear_deploy_source_caches()

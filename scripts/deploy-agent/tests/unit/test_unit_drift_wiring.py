@@ -120,6 +120,9 @@ def test_self_update_syncs_before_code_check_and_preserves_command_on_failure(
 ) -> None:
     agent_dir, home, installed = _unit_tree(tmp_path)
     monkeypatch.setenv("DEPLOY_AGENT_DIR", str(agent_dir))
+    monkeypatch.setenv(
+        "HOME", str(home)
+    )  # the restart handler reads the unit home here
     monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
     monkeypatch.delenv("DEPLOY_AGENT_NO_SELF_UPDATE", raising=False)
     actions: list[str] = []

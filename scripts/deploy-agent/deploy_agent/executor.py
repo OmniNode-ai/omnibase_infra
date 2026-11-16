@@ -884,10 +884,7 @@ _LANE_TEMPLATES: dict[EnumRuntimeLane, ModelLaneConfig] = {
     ),
     EnumRuntimeLane.PROD: ModelLaneConfig(
         lane=EnumRuntimeLane.PROD,
-        compose_files=(
-            "docker/docker-compose.infra.yml",
-            "docker/docker-compose.prod.yml",
-        ),
+        compose_files=(_BASE,),
         compose_project="omnibase-infra-prod",
         postgres_container="omnibase-infra-prod-postgres",
         # OMN-15181: must match the container_name: override in
@@ -4010,8 +4007,9 @@ class DeployExecutor:
         timeout = PHASE_TIMEOUTS[Phase.PREFLIGHT]
 
         # Check git remote is reachable
-        if not _clone_handler().deploy_source_reachable(sys.modules[__name__], timeout):
-            raise RuntimeError("Git remote unreachable: mirror and origin both refused")
+        probe = _clone_handler().probe_deploy_source(sys.modules[__name__], timeout)
+        if probe.returncode != 0:
+            raise RuntimeError(f"Git remote unreachable: {probe.stderr}")
 
         # Check docker is available
         result = _run(["docker", "info"], timeout=timeout)
