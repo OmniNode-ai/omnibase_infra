@@ -139,14 +139,11 @@ def _handler_result(receipt: object, result_model: str) -> dict[str, JsonValue] 
     durable as a pass.
     """
     result = getattr(receipt, "result", None)
-    if getattr(receipt, "result_model", None) == result_model and isinstance(
-        result, dict
-    ):
+    stamped = getattr(receipt, "result_model", None)
+    if stamped == result_model and isinstance(result, dict):
         return result
     handler_result = getattr(result, "handler_result", None)
-    if isinstance(handler_result, dict):
-        return handler_result
-    return None
+    return handler_result if isinstance(handler_result, dict) else None
 
 
 def _terminal_topic(contract_path: Path) -> str:
@@ -158,7 +155,7 @@ def _terminal_topic(contract_path: Path) -> str:
 def publish_skill_terminal_event(
     *,
     receipt: object,
-    result_model: str,
+    result_model: str | None,
     contract_path: Path,
     lane: str,
     resolve_target: Callable[[str], ModelSkillTerminalPublishTarget],
@@ -167,6 +164,7 @@ def publish_skill_terminal_event(
     timeout_seconds: float = 5.0,
 ) -> ModelSkillTerminalPublishReport:
     """Publish the receipt's handler result to its terminal topic. Never raises."""
+    result_model = result_model or str(getattr(receipt, "result_model", ""))
     topic = ""
     correlation_id: UUID | None = None
     artifact_ref: ModelArtifactRef | None = None
