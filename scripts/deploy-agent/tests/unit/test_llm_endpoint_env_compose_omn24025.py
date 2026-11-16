@@ -129,6 +129,34 @@ def test_golden_compose_env_takes_the_address_from_the_overlay(
     assert bound["backends"][0]["endpoint_url"] == f"{OVERLAY_ADDRESS}{EMBEDDING_PATH}"
 
 
+def test_golden_compose_env_keeps_the_lane_declaration_dir_on_the_real_folder(
+    dev_agent: dict[str, Any],
+) -> None:
+    """OMN-24854: the render repoints ONEX_LANE_OVERLAY_DIR, not the declaration dir."""
+    env = executor_mod._compose_env()
+
+    assert env["ONEX_LANE_DECLARATION_DIR"] == str(
+        dev_agent["lane_dir"].resolve().parent
+    )
+    rendered_dir = env["ONEX_LANE_OVERLAY_DIR"]
+    assert rendered_dir == str(dev_agent["state"] / "rendered-lane-overlays")
+    assert rendered_dir != env["ONEX_LANE_DECLARATION_DIR"]
+    assert Path(rendered_dir).name != "lane-overlays"
+
+
+def test_control_a_deploy_with_no_lane_overlay_dir_leaves_the_declaration_dir_unset(
+    dev_agent: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With no resolved lane overlay directory the render skips the lane overlay
+    # binding and _compose_env completes; neither variable may survive.
+    monkeypatch.setattr(executor_mod, "resolve_lane_overlay_dir", lambda _env: None)
+
+    env = executor_mod._compose_env()
+
+    assert "ONEX_LANE_DECLARATION_DIR" not in env
+    assert "ONEX_LANE_OVERLAY_DIR" not in env
+
+
 def test_control_an_agent_not_fenced_to_dev_keeps_the_stores_address(
     dev_agent: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -140,6 +168,7 @@ def test_control_an_agent_not_fenced_to_dev_keeps_the_stores_address(
 
     assert env["LLM_EMBEDDING_URL"] == STALE_ADDRESS
     assert env["ONEX_LANE_OVERLAY_DIR"] == str(dev_agent["lane_dir"].resolve())
+    assert "ONEX_LANE_DECLARATION_DIR" not in env
     assert "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL" not in env
 
 

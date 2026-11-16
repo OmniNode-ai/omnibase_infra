@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import posixpath
 import shlex
+from typing import Any
 
 import click
 import pytest
@@ -112,6 +113,22 @@ def test_folded_main_binds_the_same_ledger_source() -> None:
     assert mounts[0].endswith(f":{LEDGER_MOUNT_TARGET}:ro")
 
 
+def test_the_committed_mount_source_names_the_declaration_dir_with_a_fallback() -> None:
+    # OMN-24854: the deploy agent points ONEX_LANE_OVERLAY_DIR at a rendered copy
+    # under its state directory, so the declaration folder travels under its own
+    # name; the fallback keeps callers that do not set it working.
+    for filename, name in (
+        (DEV_LANE_OVERLAY, "runtime-effects"),
+        ("docker-compose.dev-tenant-fold.yml", "omninode-runtime"),
+    ):
+        mounts = _mounts_of(_services(filename)[name])
+        assert len(mounts) == 1, filename
+        assert mounts[0].startswith(
+            "${ONEX_LANE_DECLARATION_DIR:-${ONEX_LANE_OVERLAY_DIR}/..}:"
+        ), filename
+        assert mounts[0].endswith(f":{LEDGER_MOUNT_TARGET}:ro"), filename
+
+
 @needs_compose
 def test_runtime_effects_renders_the_mount_source() -> None:
     services = render_stack(
@@ -126,6 +143,46 @@ def test_runtime_effects_renders_the_mount_source() -> None:
         "/srv/workspace/config/lab"
     ]
     assert mounts[0]["read_only"] is True
+
+
+def _rendered_declaration_mount(stack: tuple[str, ...], name: str) -> dict[str, Any]:
+    services = render_stack(
+        stack,
+        {
+            "ONEX_LANE_OVERLAY_DIR": "/srv/state/rendered-lane-overlays",
+            "ONEX_LANE_DECLARATION_DIR": "/srv/workspace/config/lab",
+        },
+    )
+    volumes = services[name]["volumes"]
+    mounts = [v for v in volumes if v["target"] == LEDGER_MOUNT_TARGET]
+    assert len(mounts) == 1
+    return mounts[0]
+
+
+@needs_compose
+def test_runtime_effects_mount_follows_the_declaration_dir_not_the_rendered_overlay_dir() -> (
+    None
+):
+    # OMN-24854: the deploy agent points ONEX_LANE_OVERLAY_DIR at its rendered
+    # copy, so the mount source must come from ONEX_LANE_DECLARATION_DIR; the
+    # rendered state directory holds no lane declaration to resolve the broker
+    # address from.
+    mount = _rendered_declaration_mount(DEV_LANE_STACK, "runtime-effects")
+
+    assert posixpath.normpath(mount["source"]) == "/srv/workspace/config/lab"
+    assert mount["read_only"] is True
+
+
+@needs_compose
+def test_folded_main_mount_follows_the_declaration_dir_not_the_rendered_overlay_dir() -> (
+    None
+):
+    stack = (*DEV_LANE_STACK, "docker-compose.dev-tenant-fold.yml")
+
+    mount = _rendered_declaration_mount(stack, "omninode-runtime")
+
+    assert posixpath.normpath(mount["source"]) == "/srv/workspace/config/lab"
+    assert mount["read_only"] is True
 
 
 def _command_after_env_prefix(value: str) -> list[str]:

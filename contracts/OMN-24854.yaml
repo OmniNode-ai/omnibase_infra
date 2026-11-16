@@ -1,0 +1,60 @@
+schema_version: 1.0.0
+ticket_id: OMN-24854
+title: The dev runtime container mounts the folder that holds the lane declaration, so the commitment ledger source resolves on the dev lane
+summary: >-
+  The dev runtime on the lab host runs omnimarket PR 5347 but every commitment check run ends failed with DelegateLaneSelectionError and the work-state projection reads item_count 0, because config/lab/ci_bus_lanes.yaml is absent in the container. The dev lane compose files mount ${ONEX_LANE_OVERLAY_DIR}/.. at the container's config/lab folder, and the deploy agent rewrites ONEX_LANE_OVERLAY_DIR to its rendered overlay copy under its own state directory, so the parent that is mounted is the agent's job state directory, which holds no lane declaration. This change makes the dev render the agent already applies (render_dev_lane) and the warm refresh export ONEX_LANE_DECLARATION_DIR, computed from the real lane overlay directory before the rewrite, and makes both dev compose files mount ${ONEX_LANE_DECLARATION_DIR:-${ONEX_LANE_OVERLAY_DIR}/..}. The change does not run on the lab by itself: the dev runtime reads the lane declaration only after the deploy agent redeploys the dev lane from a revision that carries it, and that redeploy is the step that is not yet done at this head.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24854-ledger-source-mount
+    statement: The dev runtime container mounts the real config/lab folder, so the five commitment and work-state nodes read the ledger and run handled on the dev runtime.
+    acceptance:
+      - id: AC1
+        statement: "AC1: one demand or tick reaches node_commitment_check_runner_effect, node_commitment_ledger_compute, node_commitment_writer_effect, node_work_state_projection_compute and node_work_state_projection_effect on the dev runtime on h201 and the log or dispatch record shows it handled -- falsifier: read the dev runtime log on h201 for the run line naming all five nodes after the install"
+      - id: AC2
+        statement: "AC2: a STATUS row kv pr=omnimarket#5347 installed=h201:revision observed=what ran read_at=UTC is on the rolling ledger -- falsifier: grep -F 'pr=omnimarket#5347' on the ledger and its archive shows that STATUS row with installed=, observed= and read_at="
+      - id: AC3
+        statement: "AC3: the next hourly integration pass marks omnimarket PR 5347 SEEN RUNNING -- falsifier: the integration pass line for omnimarket#5347 reads SEEN RUNNING and not NOT RUNNING"
+evidence_requirements:
+  - kind: tests
+    description: The deploy agent exports the declaration folder from the real lane overlay directory, and both dev compose files mount it.
+    command: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24854-ac1-mount-source
+    description: >-
+      The mount half of AC1: the compose render of the dev lane stack and of the folded main service takes the ledger mount source from ONEX_LANE_DECLARATION_DIR and not from the rendered overlay directory, and the deploy agent's compose environment keeps that variable on the real folder when it rewrites ONEX_LANE_OVERLAY_DIR (dev-fenced agent). The run line naming all five nodes on the dev runtime is read on the lab after the deploy agent redeploys dev and is recorded in a STATUS row of the lane; it is not claimed by this check.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -c 'ONEX_LANE_DECLARATION_DIR:-' docker/docker-compose.dev-lane.yml docker/docker-compose.dev-tenant-fold.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24854-ac2-status-row
+    description: >-
+      The STATUS row is written by the lane through the ledger write skill after it reads the dev runtime; its installed= and observed= cells name what was read. The check reads the compose files only and does not claim the row.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: test -f docker/docker-compose.dev-lane.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24854-ac3-integration-pass
+    description: >-
+      The integration pass line for omnimarket PR 5347 is read from the hourly pass after the dev redeploy; this change cannot produce it and its check reads the endpoint env render source only.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: grep -q 'LANE_DECLARATION_DIR_ENV' src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py
+        cwd: ${OMNI_HOME}/omnibase_infra
