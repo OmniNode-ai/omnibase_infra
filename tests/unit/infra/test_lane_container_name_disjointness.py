@@ -28,6 +28,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+from deploy_agent.events import SCOPE_SERVICES, EnumRuntimeLane, Scope
+from deploy_agent.executor import lane_config_for
 
 
 def _construct_compose_value(loader: yaml.SafeLoader, node: yaml.Node) -> object:
@@ -71,6 +73,16 @@ STABILITY_FILE = DOCKER_DIR / "docker-compose.stability-test.yml"
 PROD_FILE = DOCKER_DIR / "docker-compose.prod.yml"
 JUDGE_FILE = DOCKER_DIR / "docker-compose.judge.yml"
 
+# Overlays whose lane the deploy agent drives. The agent hands
+# ``SCOPE_SERVICES[Scope.RUNTIME]`` to ``docker compose up -d --no-deps`` by name for
+# every service its lane config does not list in ``disabled_services``
+# (``_requested_services_for_up`` in deploy_agent/executor.py), and an explicit name
+# bypasses the overlay's profile-disable. A service in that list that the lane neither
+# disables nor renames is created under the dev lane's bare name. The prod overlay is
+# deliberately absent: it still carries both runtime-list-only services on their bare
+# names and is outside this ratchet's reach.
+AGENT_RUNTIME_LANES = {STABILITY_FILE: EnumRuntimeLane.STABILITY_TEST}
+
 # Layered overlays merge on top of the base infra file and inherit un-overridden
 # fields (including container_name). The judge overlay is standalone (see its
 # header) and self-defines every service, so it is validated separately.
@@ -111,12 +123,32 @@ def _runtime_services_from_deploy_script() -> set[str]:
     }
 
 
+@pytest.fixture(autouse=True)
+def _committed_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read this checkout's runtime policy, not the deploy host's clone path."""
+    monkeypatch.setattr(
+        "deploy_agent.executor.RUNTIME_POLICY_ENV_FILE",
+        DOCKER_DIR / "runtime-policy.env",
+    )
+
+
+def _agent_runtime_services(overlay_file: Path) -> set[str]:
+    """What the deploy agent names for this overlay's lane, from its own list."""
+    lane = AGENT_RUNTIME_LANES.get(overlay_file)
+    if lane is None:
+        return set()
+    disabled = lane_config_for(lane).disabled_services
+    return set(SCOPE_SERVICES[Scope.RUNTIME]) - disabled
+
+
 def _instantiated_services(overlay_file: Path) -> set[str]:
     """Base services a *layered* lane actually brings up via the deploy path.
 
     A service is instantiated in the lane if either:
       * it is in onex-runtime-deploy's RUNTIME_SERVICES (started explicitly by name,
-        which bypasses profile gating), or
+        which bypasses profile gating), or, for a lane the deploy agent drives
+        (``AGENT_RUNTIME_LANES``), in the agent's ``SCOPE_SERVICES[RUNTIME]`` minus
+        the services that lane's config disables, or
       * its *effective* profile (overlay override if present, else base) is empty
         (always-on) or contains ``runtime`` (the deploy ``--profile runtime`` set).
 
@@ -130,6 +162,7 @@ def _instantiated_services(overlay_file: Path) -> set[str]:
     base_services = _load_services(BASE_FILE)
     overlay_services = _load_services(overlay_file)
     runtime_explicit = _runtime_services_from_deploy_script()
+    runtime_explicit |= _agent_runtime_services(overlay_file)
     instantiated: set[str] = set()
     for name, base_cfg in base_services.items():
         if not isinstance(base_cfg, dict):
@@ -284,6 +317,25 @@ def test_expected_lane_container_name_overrides(
     overlay_names = _container_names(_load_services(LAYERED_OVERLAYS[lane]))
     assert overlay_names.get(service) == expected, (
         f"{lane}: expected {service!r} -> {expected!r}, got {overlay_names.get(service)!r}"
+    )
+
+
+@pytest.mark.unit
+def test_agent_runtime_list_feeds_the_instantiated_set() -> None:
+    """The ratchet sees a runtime-scope service the bash RUNTIME_SERVICES lacks."""
+    for overlay_file in AGENT_RUNTIME_LANES:
+        agent_named = _agent_runtime_services(overlay_file)
+        assert agent_named, "the agent names no service for this lane"
+        base_services = _load_services(BASE_FILE)
+        assert agent_named & base_services.keys() <= _instantiated_services(
+            overlay_file
+        )
+    # The services the lane config disables never reach the instantiated set via the
+    # agent list, so they need no lane-scoped name.
+    disabled = lane_config_for(EnumRuntimeLane.STABILITY_TEST).disabled_services
+    assert {"autoheal", "context-audit-consumer"} <= disabled
+    assert not {"autoheal", "context-audit-consumer"} & _agent_runtime_services(
+        STABILITY_FILE
     )
 
 

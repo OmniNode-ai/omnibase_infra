@@ -1,0 +1,72 @@
+schema_version: 1.0.0
+ticket_id: OMN-24780
+title: The deploy agent no longer names autoheal and context-audit-consumer for the stability lane
+summary: >-
+  The deploy agent names autoheal and context-audit-consumer in the runtime up list of every lane (SCOPE_SERVICES[RUNTIME] in scripts/deploy-agent/deploy_agent/events.py, handed to docker compose up -d --no-deps by _requested_services_for_up). The stability overlay disables both by profile and gives them no container_name, and an explicit name bypasses the profile gate, so the base file's fixed names, which the dev lane's containers hold, were requested for the stability project and two follow jobs failed at the runtime phase on a container-name conflict. The stability entry of _LANE_CONFIGS in scripts/deploy-agent/deploy_agent/executor.py now lists both in disabled_services, the field the agent already subtracts from the runtime up list, so neither is named for that lane and no container name needs to be minted for them. tests/unit/infra/test_lane_container_name_disjointness.py reads the agent's SCOPE_SERVICES[RUNTIME] minus the lane's disabled_services as well as the bash RUNTIME_SERVICES array, so a runtime-scope service that a lane overlay leaves on a bare shared name fails it. tests/integration/infra/test_agent_named_services_compose_render.py renders the dev composition and the overlay lane with every profile enabled and asserts no service in the lane's up list renders the dev lane's container name. Other shapes considered and not taken, as the pull request body explains - a reset of container_name in the overlay, a name interpolated from the compose project, filtering the up list by profile - are named there. The prod overlay, the base compose file and the catalog are untouched.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24780-agent-named-services
+    statement: A service the deploy agent names for a lane is never left on the dev lane's fixed container name by that lane's overlay.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the stability lane's autoheal and context-audit-consumer are not named in its runtime up list, so they cannot be created under the dev lane's container names, and no added line names a lab lane id -- falsifier: uv run pytest tests/unit/infra/test_lane_container_name_disjointness.py -q --no-cov -n 0 fails on the previous lane config and passes on this one"
+      - id: AC2
+        statement: "AC2: the disjointness test takes the deploy agent's SCOPE_SERVICES[RUNTIME] as well as RUNTIME_SERVICES, so a runtime-scope service that a lane overlay leaves on a bare shared name fails it -- falsifier: the same command with the disabled_services line removed from executor.py fails"
+      - id: AC3
+        statement: "AC3: a render test shows no service in the stability lane's up list renders the dev lane's container name -- falsifier: uv run pytest tests/integration/infra/test_agent_named_services_compose_render.py -q --no-cov -n 0 on a host with docker compose 2.24.4 or newer fails on the previous lane config"
+      - id: AC4
+        statement: "AC4: integrated: after the branch is installed on the h201 stability lane through the deploy agent's declared path, one follow job record read on h201 shows every phase success including runtime, and no deploy-job-failed alarm row names it -- falsifier: jq .phases on the job record shows a phase that is not success, or a ledger grep for the job id with alarm=deploy-job-failed returns a row"
+evidence_requirements:
+  - kind: tests
+    description: The disjointness ratchet, the lane-config test and the render test.
+    command: uv run --frozen pytest tests/unit/infra/test_lane_container_name_disjointness.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24780-ac1-lane-config
+    description: >-
+      The stability lane config disables both services and the disjointness ratchet passes. The ratchet fails at the merge base, where the lane config lists neither and the overlay leaves both on the base file's fixed names.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_lane_container_name_disjointness.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_retires_folded_effects_omn24562.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24780-ac2-agent-list-read
+    description: >-
+      The ratchet's instantiated set takes the deploy agent's SCOPE_SERVICES[RUNTIME] minus the lane's disabled_services.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: grep -qF 'SCOPE_SERVICES[Scope.RUNTIME]' tests/unit/infra/test_lane_container_name_disjointness.py
+        cwd: .
+  - id: dod-omn24780-ac3-render
+    description: >-
+      The render test takes the lane's up list from the agent's own function and compares the rendered container names with the dev composition's.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/infra/test_agent_named_services_compose_render.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24780-ac4-integrated
+    description: >-
+      Deploy check the hosted runner can run: the lane config lists both services as disabled. The runtime read after the install (the h201 follow job record with every phase and the alarm-row check) is posted as a pull request comment naming the head and the revision running; it is not claimed by this check.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: grep -qF 'disabled_services=frozenset({"autoheal", "context-audit-consumer"})' scripts/deploy-agent/deploy_agent/executor.py
+        cwd: .
