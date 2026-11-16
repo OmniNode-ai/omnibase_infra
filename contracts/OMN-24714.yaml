@@ -2,23 +2,23 @@ schema_version: "1.0.0"
 ticket_id: "OMN-24714"
 title: "The dev deploy agent starts omnibase-infra-memgraph so the architecture graph is populated on dev and answers from h051, h053 and the Mac"
 summary: >-
-  PROFILE-GAP HALF. omnibase-infra-memgraph is declared under the compose profiles omnimemory and full, and the deploy agent starts the runtime family by name under the runtime profile and the dependency set under the core profile with no service names, which compose resolves to every service with no profile. So no dev deploy started it. The dev-lane compose overlay empties its profile list, which makes it a dependency of the dev lane started by the core phase; the second dev instance scales it to zero in its own overlay, and the other lanes keep the base declaration. No deploy-agent code, stack shape, runtime policy or catalog entry changes. The live half (deploy, populate, three host readings) follows once the dev deploy trigger works.
+  PROFILE-GAP HALF. omnibase-infra-memgraph is declared under the compose profiles omnimemory and full, and the deploy agent starts the runtime family by name under the runtime profile and the dependency set under the core profile with no service names, which compose resolves to every service with no profile. So no dev deploy started it. The dev-lane compose overlay empties its profile list, which makes it a dependency of the dev lane started by the core phase; the second dev instance scales it to zero and every other overlay that layers the dev-lane file fences it in its own file, and the other lanes keep the base declaration. No deploy-agent code, stack shape, runtime policy or catalog entry changes. The live half (deploy, populate, three host readings) follows once the dev deploy trigger works.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
   - id: "req-omn24714-profile-gap"
-    statement: "A dev deploy through the agent names omnibase-infra-memgraph, and no other lane or dev instance does."
+    statement: "A dev deploy through the agent starts omnibase-infra-memgraph, and no other lane or dev instance does."
     acceptance:
       - id: "AC1"
         statement: >-
-          AC1: the profile gap is settled by a test written red first: the deploy agent's compose-up argv for omnibase-infra-memgraph under a dev deploy either starts the service by name or the dev bundle or overlay carries it, and the test fails on dev today -- falsifier: uv run pytest tests/unit/deploy_agent -k memgraph in omnibase_infra, red on the unchanged tree and green on the change
+          AC1: the profile gap is settled by a test written red first: the deploy agent's compose-up argv for omnibase-infra-memgraph under a dev deploy either starts the service by name or the dev bundle or overlay carries it, and the test fails on dev today -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_lane_memgraph_omn24714.py -k memgraph in omnibase_infra (the directory tests/unit/deploy_agent the ticket text names does not exist), red on the unchanged tree and green on the change
       - id: "AC2"
         statement: >-
           AC2: the change is a draft pull request against dev in omnibase_infra with the stack_shape, runtime_policy and catalog ratchets unwidened and its tests run on the lab -- falsifier: uv run pytest tests/integration/test_catalog_roundtrip.py tests/test_compose_profile_teardown_policy.py -m "not slow" passes on a lab host at the PR head
 evidence_requirements:
   - kind: "tests"
-    description: "The base declaration, the dev lane's merged profile list, the other lanes' unchanged lists, the core up argv and the second dev instance's scale for omnibase-infra-memgraph."
+    description: "The base declaration, the dev lane's merged profile list, the other lanes' unchanged lists, the core up argv, the full-scope core leg and the fence in every compose file that layers the dev-lane overlay for omnibase-infra-memgraph."
     command: "uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_lane_memgraph_omn24714.py -q -n 0 --no-cov"
 dod_evidence:
   - id: "dod-omn24714-dev-deploy-names-memgraph"

@@ -14,12 +14,23 @@ dependency of that lane and starts it in the core phase. These tests pin the
 whole path: the base declaration is the gap (positive control), the dev lane's
 merged declaration carries no profile, no other lane's does, the agent's core
 ``up`` names no service and so reaches every un-profiled one, and the second dev
-instance scales it to zero. One test runs the real compose binary over a stub,
+instance scales it to zero. Every other compose file that layers the dev-lane
+overlay (found by reading the files, not from the routing table, which omits a
+lane) must fence it too. One test runs the real compose binary over a stub,
 so the ``!override []`` semantics are compose's own and not this file's.
+
+Scope of the start: the service is started only by a deploy whose argv runs the
+``--profile core`` leg with no service names, that is a ``scope=core`` command
+and the core leg of a ``scope=full`` deploy. A ``scope=runtime`` deploy names the
+runtime family under ``--profile runtime`` and NEVER starts it. The orchestrator
+emits ``full`` (``executor.py`` ``observe_deps_convergence``), so a full deploy
+is the route that starts it in production.
 """
 
 from __future__ import annotations
 
+import re
+import shutil
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -36,6 +47,10 @@ from deploy_agent.executor import (
 )
 
 from .test_dev_202_executor_lane_omn19522 import _capture_compose_up
+from .test_full_rebuild_converges_deps_omn18640 import (
+    _capture_full_rebuild,
+    _deps_leg,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -91,6 +106,36 @@ def _merged_scale(files: Sequence[str]) -> int | None:
     return scale
 
 
+#: Profiles the dev deploy agent activates: ``--profile core`` and ``--profile runtime``.
+_STARTED_PROFILES = frozenset({"core", "runtime"})
+
+#: A compose file layers the dev-lane overlay when its header gives the command
+#: ``-f docker/docker-compose.dev-lane.yml`` or says it is layered over it. Other
+#: files only mention the overlay in a comment.
+_LAYERS_DEV_LANE = re.compile(
+    r"-f\s+docker/docker-compose\.dev-lane\.yml"
+    r"|Layered[^\n]*over docker-compose\.infra\.yml and docker-compose\.dev-lane\.yml"
+)
+
+
+def _layering_overlays() -> list[str]:
+    """Every compose file in ``docker/`` that layers the dev-lane overlay."""
+    return [
+        path.name
+        for path in sorted(_DOCKER.glob("docker-compose*.yml"))
+        if path.name != "docker-compose.dev-lane.yml"
+        and _LAYERS_DEV_LANE.search(path.read_text(encoding="utf-8"))
+    ]
+
+
+def _is_fenced(files: Sequence[str]) -> bool:
+    """True when no dev deploy's ``core`` or ``runtime`` leg starts the service."""
+    if _merged_scale(files) == 0:
+        return True
+    profiles = _merged_profiles(files)
+    return bool(profiles) and not set(profiles) & _STARTED_PROFILES
+
+
 def test_memgraph_base_declaration_is_outside_every_deploy_profile() -> None:
     """Positive control: the gap is real, the base file alone starts it nowhere."""
     base = _services(_DOCKER / "docker-compose.infra.yml")[MEMGRAPH]
@@ -133,8 +178,71 @@ def test_memgraph_every_other_dev_instance_scales_it_to_zero(instance: str) -> N
     assert _merged_scale(default_files) is None
 
 
+def test_memgraph_layering_overlays_are_found_by_reading_the_files() -> None:
+    """Positive control: the enumeration finds the known lanes, so it cannot go
+    vacuous, and omits the dev-lane file itself and the primary dev instance's own
+    overlay, which is the lane that starts the service."""
+    found = _layering_overlays()
+    assert "docker-compose.prepr.yml" in found
+    assert len(found) >= 3
+    assert "docker-compose.dev-tenant-fold.yml" not in found
+    assert "docker-compose.dev-lane.yml" not in found
+
+
+@pytest.mark.parametrize("overlay", _layering_overlays())
+def test_memgraph_every_overlay_that_layers_the_dev_lane_fences_it(
+    overlay: str,
+) -> None:
+    """The dev-lane file empties the profile list for every composition that
+    layers it, so each layering overlay must fence the service itself (scale 0 or
+    an unreachable profile). One such lane is not in the routing table, so a test over
+    ``DEV_INSTANCE_LANE_CONFIGS`` alone never saw it start a 4 GiB graph store on
+    a host whose overlay promises loopback-only ports."""
+    files = ["docker-compose.infra.yml", "docker-compose.dev-lane.yml", overlay]
+    assert _is_fenced(files), (
+        f"{overlay} layers docker-compose.dev-lane.yml and does not fence {MEMGRAPH}: "
+        f"merged profiles {_merged_profiles(files)}, scale {_merged_scale(files)}"
+    )
+
+
+def _require_docker_binary() -> None:
+    """``compose config --services`` needs the binary, not a daemon."""
+    if shutil.which("docker") is None:
+        pytest.skip("requires the docker binary on PATH")
+
+
+def test_memgraph_real_compose_test_skips_when_there_is_no_docker_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On a host with no docker binary the real-compose test skips; it does not
+    raise ``FileNotFoundError`` and turn the unit suite red."""
+    empty = tmp_path / "empty-bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    assert shutil.which("docker") is None
+    with pytest.raises(pytest.skip.Exception):
+        test_memgraph_override_semantics_under_real_compose(tmp_path)
+
+
+def test_memgraph_full_scope_deploy_starts_it_through_the_converge_core_leg() -> None:
+    """The orchestrator emits ``full``. Its core leg is ``--profile core`` with no
+    service names and converges (no force recreate), so the service is started as
+    a dependency and left alone while it runs. A ``scope=runtime`` deploy names the
+    runtime family under ``--profile runtime`` and never starts it."""
+    select_dev_instance(_DEFAULT_INSTANCE)
+    leg = _deps_leg(_capture_full_rebuild(EnumRuntimeLane.DEV))
+    assert leg[leg.index("--profile") + 1] == "core"
+    assert "--force-recreate" not in leg
+    assert "--no-deps" not in leg
+    assert MEMGRAPH not in leg, "the core leg starts it as a dependency, never by name"
+    runtime = _capture_compose_up(DeployExecutor(), Scope.RUNTIME)[0]
+    assert runtime[runtime.index("--profile") + 1] == "runtime"
+    assert MEMGRAPH not in runtime
+
+
 def test_memgraph_override_semantics_under_real_compose(tmp_path: Path) -> None:
     """compose itself: base profiles hide the service, the overlay's empty list shows it."""
+    _require_docker_binary()
     base = tmp_path / "base.yaml"
     base.write_text(
         yaml.safe_dump(
