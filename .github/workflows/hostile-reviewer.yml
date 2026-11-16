@@ -147,7 +147,7 @@ jobs:
         # OMN-22275: hostile-review-result.json is the reviewer's own output
         # (REVIEW_JSON_PATH below); a file of that name committed to the pull
         # request must never stand in for it when the gate-accept step reads it.
-        run: rm -rf ../omniintelligence ../omnibase_core_dep ../omnibase_compat ../omnimarket ../ci-overlay ./hostile-review-result.json
+        run: rm -rf ../omniintelligence ../omnibase_core_dep ../omnimarket ../ci-overlay ./hostile-review-result.json
 
       # OMN-20923: the review voters are a deployment fact, supplied by an
       # overlay this repository does not carry. OMNI_CI_OVERLAY_REPO (an org
@@ -250,20 +250,6 @@ jobs:
             if git clone --filter=blob:none --no-checkout \
               https://github.com/OmniNode-ai/omnibase_core.git ../omnibase_core_dep \
               && git -C ../omnibase_core_dep checkout --quiet f43f97629182f463d233b564b19a2b27d4fc4888; then # .github/sibling-pins.yaml
-              exit 0
-            fi
-            sleep $((attempt * 10))
-          done
-          exit 1
-
-      - name: Clone omnibase_compat
-        working-directory: ${{ github.workspace }}
-        run: |
-          for attempt in {1..4}; do
-            rm -rf ../omnibase_compat
-            if git clone --filter=blob:none --no-checkout \
-              https://github.com/OmniNode-ai/omnibase_compat.git ../omnibase_compat \
-              && git -C ../omnibase_compat checkout --quiet 65aed95fa710748654e37d5c15c5446e779fdf52; then # .github/sibling-pins.yaml
               exit 0
             fi
             sleep $((attempt * 10))
