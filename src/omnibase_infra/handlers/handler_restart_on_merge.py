@@ -23,18 +23,22 @@ THE RULES
 ---------
 1. The restart set is every declared agent unit whose fence does not name ``prod``.
 2. An agent is never stopped before its replacement settings are verified. A restart
-   re-runs the unit's launcher over the same host env store, so a setting counts as
-   present when the tracked unit declares it or the running process carries it; with
-   any of ``REQUIRED_SETTINGS`` in neither place the unit is left as installed and the
-   agent is not restarted (the new code refuses to start without them). The same holds
-   for a re-exec: a process that lacks the settings keeps the revision it loaded. The
-   tracked units cannot name the canonical clone or the overlay source clone: the
-   public-repo hygiene gate refuses their private directory names on added lines, so
-   those two stay in the host env store and are verified at runtime.
-3. When the restart fails the agent is restarted on the revision it was running (the
-   previous unit bytes and the code clone at the loaded commit). When that fails too the
-   failure is raised loudly, and no other agent is touched: an agent only restarts its
-   own unit.
+   re-runs the unit's launcher, which sources the unit's env files (``EnvironmentFile=``
+   and ``DEPLOY_AGENT_ENV_FILE``), so a setting counts as present when the tracked unit
+   declares it or one of those FILES assigns it, read when the check runs and never
+   from this process's start-time environment (OMN-24677). With a required setting in
+   neither place the unit is left as installed, the agent is not restarted, and one
+   STATUS row names the gap. A re-exec goes through the same launcher, so it counts the
+   process environment or the files. The overlay source is required only for a fence
+   naming the lab dev lane. ``check_host`` runs the same check over every non-prod
+   agent installed on a host: the blocking per-host check a merge waits on.
+3. The restart runs in a transient unit outside the agent's cgroup, which survives the
+   agent's own stop. It restarts the unit, waits, and verifies the unit is active with
+   no automatic restart since (a ``Type=simple`` start returns 0 on fork, so the exit
+   code alone says nothing). When the start died it puts the code clone back on the
+   loaded commit and the previous unit bytes, restarts and verifies again; when that
+   fails too it exits non-zero and :class:`AgentLeftStoppedError` is raised to the
+   caller. No other agent is touched: an agent only restarts its own unit.
 
 The deploy agent loads this module from its own checkout, like the other host effects,
 and is handed its own module as ``execution`` where it needs the agent's unit-drift
@@ -44,20 +48,21 @@ functions, which are not copied here.
 from __future__ import annotations
 
 import logging
+import re
 import shlex
-import shutil
 import signal
 import socket
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from typing import Any
+from types import ModuleType
 
 import yaml
 
+from omnibase_infra.models.model_agent_unit import ModelAgentUnit
 from omnibase_infra.models.model_restart_on_merge import ModelRestartOnMerge
+from omnibase_infra.models.model_unit_settings_gap import ModelUnitSettingsGap
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +72,20 @@ REQUIRED_SETTINGS = (
     "DEPLOY_AGENT_CANONICAL_CLONE",
     "DEPLOY_AGENT_LAB_OVERLAY_SOURCE",
 )
+#: Required only by an agent whose fence names the lab dev lane (OMN-24677).
+LAB_ONLY_SETTINGS = frozenset({"DEPLOY_AGENT_LAB_OVERLAY_SOURCE"})
+LAB_LANE = "dev"
 AGENT_UNIT_MARKER = "DEPLOY_AGENT_TRACKING_REF"
 FENCE_SETTING = "DEPLOY_AGENT_ALLOWED_LANES"
+ENV_FILE_SETTING = "DEPLOY_AGENT_ENV_FILE"
 PROD_LANE = "prod"
 MANIFEST_RELPATH = "deploy/unit-drift-manifest.yaml"
+SETTLE_SECONDS = 45
+REFUSAL_MARKER = "restart-settings-refusal.txt"
 _RESTART_OK = (0, -signal.SIGTERM)
+#: Transient-unit exit codes: the previous revision runs again / nothing runs.
+ROLLED_BACK = 2
+LEFT_STOPPED = 3
 
 
 class RestartRefusedError(RuntimeError):
@@ -80,6 +94,10 @@ class RestartRefusedError(RuntimeError):
 
 class AgentLeftStoppedError(RuntimeError):
     """The restart failed and so did the restart on the previous revision."""
+
+
+CommandRunner = Callable[[list[str]], int]
+"""Runs one argv and returns its exit code."""
 
 
 def declared_environment(unit_text: str) -> dict[str, str]:
@@ -96,103 +114,228 @@ def declared_environment(unit_text: str) -> dict[str, str]:
     return values
 
 
-def _unit_text(entry: Any, repo_root: Path) -> str:
-    path = repo_root / entry.tracked
-    return path.read_text("utf-8") if path.is_file() else ""
+def _unit_texts(entry: ModelAgentUnit, repo_root: Path) -> list[str]:
+    tracked = repo_root / entry.tracked
+    texts = [tracked.read_text("utf-8") if tracked.is_file() else ""]
+    dropins = tracked.with_name(tracked.name + ".d")
+    texts.extend(path.read_text("utf-8") for path in sorted(dropins.glob("*.conf")))
+    return texts
 
 
-def agent_units(entries: Sequence[Any], repo_root: Path) -> list[Any]:
-    """The declared agent instances: the manifest's services whose unit tracks a ref."""
+def _declared(entry: ModelAgentUnit, repo_root: Path) -> dict[str, str]:
+    declared: dict[str, str] = {}
+    for text in _unit_texts(entry, repo_root):
+        declared.update(declared_environment(text))
+    return declared
+
+
+def as_agent_units(entries: Sequence[object]) -> list[ModelAgentUnit]:
+    """The agent's own manifest entries, read as the typed entries this module takes."""
     return [
         entry
+        if isinstance(entry, ModelAgentUnit)
+        else ModelAgentUnit.model_validate(entry, from_attributes=True)
         for entry in entries
-        if entry.name.endswith(".service")
-        and AGENT_UNIT_MARKER in declared_environment(_unit_text(entry, repo_root))
     ]
 
 
-def declared_fence(entry: Any, repo_root: Path) -> frozenset[str]:
+def agent_units(
+    entries: Sequence[ModelAgentUnit], repo_root: Path
+) -> list[ModelAgentUnit]:
+    """The declared agent instances: the manifest's services whose unit tracks a ref."""
+    return [
+        entry
+        for entry in as_agent_units(entries)
+        if entry.name.endswith(".service")
+        and AGENT_UNIT_MARKER in _declared(entry, repo_root)
+    ]
+
+
+def declared_fence(entry: ModelAgentUnit, repo_root: Path) -> frozenset[str]:
     """The lane names the tracked unit and its drop-ins declare in the agent's own fence.
 
     Parsed as the agent parses it (``lane_policy.parse_allowed_lanes``): comma separated
     lane names. An empty or absent fence is refused there at agent start.
     """
-    tracked = repo_root / entry.tracked
-    texts = [_unit_text(entry, repo_root)]
-    dropins = tracked.with_name(tracked.name + ".d")
-    texts.extend(path.read_text("utf-8") for path in sorted(dropins.glob("*.conf")))
-    declared: dict[str, str] = {}
-    for text in texts:
-        declared.update(declared_environment(text))
-    raw = declared.get(FENCE_SETTING, "")
+    raw = _declared(entry, repo_root).get(FENCE_SETTING, "")
     return frozenset(token.strip() for token in raw.split(",") if token.strip())
 
 
-def missing_settings(entry: Any, repo_root: Path, env: Mapping[str, str]) -> list[str]:
-    """Required settings neither the tracked unit nor the running process carries."""
-    declared = declared_environment(_unit_text(entry, repo_root))
-    return [
+def required_settings(fence: frozenset[str]) -> tuple[str, ...]:
+    """The settings an agent with ``fence`` refuses to start without."""
+    if LAB_LANE in fence:
+        return REQUIRED_SETTINGS
+    return tuple(name for name in REQUIRED_SETTINGS if name not in LAB_ONLY_SETTINGS)
+
+
+def _expand(path: str, home: Path) -> Path:
+    return Path(path.lstrip("-").replace("%h", str(home)))
+
+
+def unit_env_files(
+    entry: ModelAgentUnit, repo_root: Path, home: Path
+) -> tuple[Path, ...]:
+    """The env files the unit's launcher sources: ``EnvironmentFile=`` and the store."""
+    files: list[Path] = []
+    for text in _unit_texts(entry, repo_root):
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("EnvironmentFile="):
+                files.append(_expand(stripped.removeprefix("EnvironmentFile="), home))
+    store = _declared(entry, repo_root).get(ENV_FILE_SETTING, "")
+    if store:
+        files.append(_expand(store, home))
+    return tuple(files)
+
+
+_ASSIGNMENT = re.compile(r"^\s*(?:export\s+)?(?P<name>[A-Za-z_]\w*)=(?P<value>.*)$")
+
+
+def env_file_names(path: Path) -> frozenset[str]:
+    """The names an env file assigns a non-empty value; values are never returned."""
+    try:
+        text = path.read_text("utf-8")
+    except OSError:
+        return frozenset()
+    names: set[str] = set()
+    for line in text.splitlines():
+        match = _ASSIGNMENT.match(line)
+        if match and match["value"].strip().strip("'\"").strip():
+            names.add(match["name"])
+    return frozenset(names)
+
+
+def settings_gap(
+    entry: ModelAgentUnit, repo_root: Path, home: Path
+) -> ModelUnitSettingsGap:
+    """Required settings neither the tracked unit nor one of its env files assigns."""
+    declared = _declared(entry, repo_root)
+    files = unit_env_files(entry, repo_root, home)
+    in_files: set[str] = set()
+    for path in files:
+        in_files |= env_file_names(path)
+    missing = tuple(
         name
-        for name in REQUIRED_SETTINGS
-        if not declared.get(name, "").strip() and not env.get(name, "").strip()
-    ]
+        for name in required_settings(declared_fence(entry, repo_root))
+        if not declared.get(name, "").strip() and name not in in_files
+    )
+    return ModelUnitSettingsGap(
+        unit=entry.name, env_files=tuple(str(p) for p in files), missing=missing
+    )
+
+
+def missing_settings(entry: ModelAgentUnit, repo_root: Path, home: Path) -> list[str]:
+    """Required settings neither the tracked unit nor its env files carry."""
+    return list(settings_gap(entry, repo_root, home).missing)
 
 
 def restart_set(
-    entries: Sequence[Any], repo_root: Path, env: Mapping[str, str]
+    entries: Sequence[ModelAgentUnit], repo_root: Path, home: Path
 ) -> list[str]:
     """Agent units a merge may restart: none whose fence names prod, none lacking settings."""
     return [
         entry.name
         for entry in agent_units(entries, repo_root)
         if PROD_LANE not in declared_fence(entry, repo_root)
-        and not missing_settings(entry, repo_root, env)
+        and not missing_settings(entry, repo_root, home)
     ]
 
 
 def assert_restartable(
-    unit_name: str,
-    entries: Sequence[Any],
-    repo_root: Path,
-    env: Mapping[str, str],
+    target: ModelRestartOnMerge, entries: Sequence[ModelAgentUnit]
 ) -> None:
     """Refuse (before anything is replaced or stopped) a unit outside the restart set."""
+    repo_root = Path(target.repo_root)
     entry = next(
-        (e for e in agent_units(entries, repo_root) if e.name == unit_name), None
+        (e for e in agent_units(entries, repo_root) if e.name == target.unit), None
     )
     if entry is None:
         return
     if PROD_LANE in declared_fence(entry, repo_root):
         raise RestartRefusedError(
-            f"{unit_name} is fenced to prod: a merge never restarts it"
+            f"{target.unit} is fenced to prod: a merge never restarts it"
         )
-    missing = missing_settings(entry, repo_root, env)
-    if missing:
+    gap = settings_gap(entry, repo_root, Path(target.home))
+    if gap.missing:
         raise RestartRefusedError(
-            f"{unit_name} would restart without {', '.join(missing)}: the new code "
+            f"{target.unit} would restart without {', '.join(gap.missing)} "
+            f"(env files read: {', '.join(gap.env_files) or 'none'}): the new code "
             "refuses to start without them, so the unit is left as installed"
         )
 
 
+def check_host(
+    entries: Sequence[ModelAgentUnit], repo_root: Path, home: Path
+) -> tuple[ModelUnitSettingsGap, ...]:
+    """Every non-prod agent installed under ``home`` whose env files lack a setting."""
+    installed = home / ".config" / "systemd" / "user"
+    return tuple(
+        gap
+        for entry in agent_units(entries, repo_root)
+        if (installed / entry.name).exists()
+        and PROD_LANE not in declared_fence(entry, repo_root)
+        and (gap := settings_gap(entry, repo_root, home)).missing
+    )
+
+
 def missing_runtime_settings(env: Mapping[str, str]) -> list[str]:
-    """The required settings the RUNNING process does not carry."""
-    return [name for name in REQUIRED_SETTINGS if not env.get(name, "").strip()]
+    """Required settings neither the process nor the store the launcher re-sources has."""
+    fence = frozenset(
+        token.strip() for token in env.get(FENCE_SETTING, "").split(",") if token
+    )
+    store = env.get(ENV_FILE_SETTING, "")
+    in_store = env_file_names(Path(store)) if store else frozenset()
+    return [
+        name
+        for name in required_settings(fence)
+        if not env.get(name, "").strip() and name not in in_store
+    ]
 
 
 def reexec_blocked_by_settings(env: Mapping[str, str]) -> bool:
     """Whether a re-exec would start code that refuses to run for want of settings.
 
-    A re-exec keeps this process's environment, so a process that lacks the settings
-    (a unit installed before OMN-24562, the prod unit a merge never syncs) must keep
-    running the revision it loaded: dying in the new code is a stopped agent.
+    A re-exec keeps this process's environment and the launcher re-sources the store,
+    so a setting in neither keeps the process on the revision it loaded: dying in the
+    new code is a stopped agent.
     """
     missing = missing_runtime_settings(env)
     if missing:
         logger.error(
-            "OMN-24626 not re-execing into the pulled revision: this process lacks %s",
+            "OMN-24626 not re-execing into the pulled revision: neither this process "
+            "nor its env store names %s",
             ", ".join(missing),
         )
     return bool(missing)
+
+
+def write_refusal_status(
+    execution: ModuleType, reason: str, env: Mapping[str, str]
+) -> None:
+    """One STATUS row per distinct refusal, so a frozen agent is named on the ledger."""
+    state_dir = env.get("DEPLOY_AGENT_STATE_DIR", "")
+    marker = Path(state_dir) / REFUSAL_MARKER if state_dir else None
+    if marker is not None and marker.is_file() and marker.read_text("utf-8") == reason:
+        return
+    config = execution.dev_boot_report_config()
+    if config.plugin_dir is None or not config.ledger_via_bus:
+        logger.warning("OMN-24677 restart refusal STATUS pending: %s", reason)
+        return
+    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    host = env.get("ONEX_LEDGER_HOST_NAME", "") or socket.gethostname()
+    row = (
+        f"{stamp} | STATUS | lane=deploy-agent-{host} | actor=script:deploy-agent "
+        f"| model=none | ticket=OMN-24677 | restart refused: {reason.replace('|', '/')}"
+    )
+    interpreter = config.registry_root / ".onex-dispatch-venv" / "bin" / "python"
+    argv = [
+        str(interpreter),
+        str(config.plugin_dir / "scripts" / "onex_ledger.py"),
+        "--append",
+        row,
+    ]
+    if execution._run(argv, 60).returncode == 0 and marker is not None:
+        marker.write_text(reason, "utf-8")
 
 
 def sync_own_unit_after_pull(
@@ -207,7 +350,7 @@ def sync_own_unit_after_pull(
     drift = execution.unit_drift
     home = Path(env["HOME"])
 
-    def run(command: list[str]) -> int:
+    def run_unit_command(command: list[str]) -> int:
         return int(execution._run(command, timeout).returncode)
 
     if sys.platform != "linux":
@@ -222,10 +365,14 @@ def sync_own_unit_after_pull(
         return None
     repo_root = Path(agent_dir).resolve().parents[1]
     entries = drift.load_manifest(repo_root / MANIFEST_RELPATH)
+    target = ModelRestartOnMerge(
+        unit=unit_name, repo_root=str(repo_root), home=str(home)
+    )
     try:
-        assert_restartable(unit_name, entries, repo_root, env)
+        assert_restartable(target, as_agent_units(entries))
     except RestartRefusedError as exc:
         logger.warning("self_update: unit not synced: %s", exc)
+        write_refusal_status(execution, str(exc), env)
         return None
     changed = drift.sync_own_unit(
         entries,
@@ -233,63 +380,76 @@ def sync_own_unit_after_pull(
         repo_root=repo_root,
         hostname=socket.gethostname(),
         home=home,
-        runner=run,
+        runner=run_unit_command,
         stamp=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
     )
     return unit_name if changed else None
 
 
-def restore_previous_unit(
-    execution: ModuleType,
-    unit_name: str,
-    entries: Sequence[Any],
-    repo_root: Path,
-    home: Path,
-    run: Callable[[list[str]], int],
-) -> None:
-    """Put the newest backup of the installed unit back and reload systemd."""
-    entry = next(e for e in entries if e.name == unit_name)
+def installed_unit_path(execution: ModuleType, target: ModelRestartOnMerge) -> Path:
+    """Where the agent's unit-drift check says ``target``'s unit is installed."""
+    repo_root = Path(target.repo_root)
+    entries = execution.unit_drift.load_manifest(repo_root / MANIFEST_RELPATH)
+    entry = next(e for e in entries if e.name == target.unit)
     result = execution.unit_drift.check_units(
-        [entry], repo_root=repo_root, hostname="", home=home
+        [entry], repo_root=repo_root, hostname="", home=Path(target.home)
     )[0]
-    installed: Path = result.installed_path
-    backups = sorted(installed.parent.glob(f"{installed.name}.bak-unit-drift-*"))
-    if backups:
-        shutil.copy2(backups[-1], installed)
-    run(["systemctl", "--user", "daemon-reload"])
+    return Path(result.installed_path)
+
+
+def transient_restart_script(
+    unit: str, *, installed: Path, agent_dir: str, loaded_sha: str, settle: int
+) -> str:
+    """The script a transient unit runs: restart, verify, roll back, verify again.
+
+    Exit 0: the new revision is up. ``ROLLED_BACK``: it died and the previous revision
+    is up. ``LEFT_STOPPED``: neither is up.
+    """
+    q = shlex.quote
+    up = (
+        f"sleep {settle}; systemctl --user is-active --quiet {q(unit)} && "
+        f'[ "$(systemctl --user show -p NRestarts --value {q(unit)})" = 0 ]'
+    )
+    return "\n".join(
+        (
+            f"systemctl --user restart {q(unit)}",
+            f"if {up}; then exit 0; fi",
+            f"git -C {q(agent_dir)} checkout --quiet --detach {q(loaded_sha)}",
+            f"backup=$(ls -1 {q(str(installed))}.bak-unit-drift-* 2>/dev/null | tail -n 1)",
+            f'[ -n "$backup" ] && cp -p "$backup" {q(str(installed))}',
+            "systemctl --user daemon-reload",
+            f"systemctl --user restart {q(unit)}",
+            f"if {up}; then exit {ROLLED_BACK}; fi",
+            f"exit {LEFT_STOPPED}",
+        )
+    )
 
 
 def restart_synced_unit(
-    unit_name: str,
+    target: ModelRestartOnMerge,
     *,
-    restart_command: Sequence[str],
-    run: Callable[[list[str]], int],
-    rollback: Sequence[Callable[[], None]],
+    transient_command: Sequence[str],
+    script: str,
+    run_unit_command: CommandRunner,
 ) -> None:
-    """Restart ``unit_name``; on failure restart it on the revision it was running.
+    """Run the restart script in a transient unit; raise when it left the agent stopped.
 
-    ``run`` returns an exit code. ``rollback`` steps put the code clone and the
-    installed unit back on what the process loaded. A failure of the second restart
-    raises :class:`AgentLeftStoppedError`; nothing else is stopped in either case.
+    A ``-SIGTERM`` is this process being stopped by its own restart: the transient
+    unit goes on verifying and rolling back without it.
     """
-    command = [*restart_command, unit_name]
-    if run(command) in _RESTART_OK:
+    code = run_unit_command([*transient_command, "bash", "-c", script])
+    if code in _RESTART_OK:
         return
-    logger.error(
-        "OMN-24626 restart of %s failed; restarting it on the revision it was running",
-        unit_name,
-    )
-    for step in rollback:
-        try:
-            step()
-        except Exception:
-            logger.exception("OMN-24626 rollback step failed for %s", unit_name)
-    if run(command) in _RESTART_OK:
-        logger.error("OMN-24626 %s restarted on its previous revision", unit_name)
+    if code == ROLLED_BACK:
+        logger.error(
+            "OMN-24626 the restarted %s died; it runs its previous revision again",
+            target.unit,
+        )
         return
     raise AgentLeftStoppedError(
-        f"restart of {unit_name} failed and so did its restart on the previous "
-        "revision: operator action needed; no other agent was touched"
+        f"restart of {target.unit} failed and so did its restart on the previous "
+        f"revision (transient unit exit {code}): operator action needed; no other "
+        "agent was touched"
     )
 
 
@@ -302,40 +462,55 @@ def restart_own_unit(
     timeout: int,
     env: Mapping[str, str],
 ) -> None:
-    """Restart our own synced unit; see :func:`restart_synced_unit` for a failure."""
-    repo_root = Path(agent_dir).resolve().parents[1]
-    home = Path(env["HOME"])
-
-    def run(command: list[str]) -> int:
-        return int(execution._run(command, timeout).returncode)
-
-    def restore_code() -> None:
-        argv = ["git", "-C", agent_dir, "checkout", "--quiet", "--detach", loaded_sha]
-        if run(argv):
-            raise RuntimeError(f"could not put {agent_dir} back on {loaded_sha[:12]}")
-
-    def restore_unit() -> None:
-        entries = execution.unit_drift.load_manifest(repo_root / MANIFEST_RELPATH)
-        restore_previous_unit(execution, unit_name, entries, repo_root, home, run)
-
+    """Restart our own synced unit from a transient unit; see :func:`restart_synced_unit`."""
+    target = ModelRestartOnMerge(
+        unit=unit_name,
+        repo_root=str(Path(agent_dir).resolve().parents[1]),
+        home=env["HOME"],
+    )
+    argv = execution.SELF_RESTART_COMMAND.split()
     restart_synced_unit(
-        unit_name,
-        restart_command=execution.SELF_RESTART_COMMAND.split(),
-        run=run,
-        rollback=(restore_code, restore_unit),
+        target,
+        transient_command=argv[: argv.index("systemctl")],
+        script=transient_restart_script(
+            unit_name,
+            installed=installed_unit_path(execution, target),
+            agent_dir=agent_dir,
+            loaded_sha=loaded_sha,
+            settle=SETTLE_SECONDS,
+        ),
+        run_unit_command=lambda command: int(
+            execution._run(command, timeout + 2 * SETTLE_SECONDS).returncode
+        ),
     )
 
 
 class HandlerRestartOnMerge:
-    """Decide whether a merge may sync and restart one agent unit."""
+    """Decide whether a merge may sync and restart one agent unit, or a whole host."""
 
     def handle(self, request: ModelRestartOnMerge) -> ModelRestartOnMerge:
         repo_root = Path(request.repo_root)
         manifest = yaml.safe_load((repo_root / MANIFEST_RELPATH).read_text("utf-8"))
-        entries = [SimpleNamespace(**unit) for unit in manifest["units"]]
-        carried = dict.fromkeys(request.carried_settings, "set")
+        entries = [
+            ModelAgentUnit(name=unit["name"], tracked=unit["tracked"])
+            for unit in manifest["units"]
+        ]
+        if not request.home:
+            return request.model_copy(
+                update={"reason": "home is required: the env files resolve under it"}
+            )
+        home = Path(request.home)
+        if request.operation == "check_host":
+            gaps = check_host(entries, repo_root, home)
+            reason = "; ".join(f"{g.unit}: {', '.join(g.missing)}" for g in gaps)
+            return request.model_copy(
+                update={"gaps": gaps, "restartable": not gaps, "reason": reason}
+            )
+        target = ModelRestartOnMerge(
+            unit=request.unit, repo_root=str(repo_root), home=str(home)
+        )
         try:
-            assert_restartable(request.unit_name, entries, repo_root, carried)
+            assert_restartable(target, entries)
         except RestartRefusedError as exc:
             return request.model_copy(update={"reason": str(exc)})
         return request.model_copy(update={"restartable": True})

@@ -18,6 +18,8 @@ owns. Four settings, none with a hidden default (rule 8):
     guard. The first creation is seeded at the commit the agent was serving.
 ``DEPLOY_AGENT_LAB_OVERLAY_SOURCE``
     The overlay source clone, which used to be derived from the deploy source's parent.
+    Required only when the fence names the lab dev lane; a non-lab fence never reads
+    it (OMN-24677).
 ``DEPLOY_AGENT_GIT_MIRROR_URL``
     The central git mirror (RULING 2026-11-15T19:17:55Z, OMN-23032). Optional: empty
     means no mirror is declared and the clone fetches from origin. No repository file
@@ -33,9 +35,11 @@ import logging
 import os
 import shutil
 import subprocess
-from collections.abc import Callable, Mapping, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from pathlib import Path
 from types import ModuleType
+
+import yaml
 
 from omnibase_infra.models.model_deploy_source_clone import ModelDeploySourceClone
 
@@ -59,34 +63,37 @@ class DeploySourceIsCanonicalCloneError(DeploySourceCloneError):
     """The deploy-source path resolves to a clone another tool owns."""
 
 
+def _fence(env: Mapping[str, str]) -> set[str]:
+    return {token.strip() for token in env.get(ENV_FENCE, "").split(",")}
+
+
 def settings(env: Mapping[str, str]) -> ModelDeploySourceClone:
-    """Read the declared settings; refuse a deploy source that is a canonical clone."""
-    values = {
-        name: env.get(name, "").strip()
-        for name in (
-            ENV_CLONE_DIR,
-            ENV_CANONICAL_CLONE,
-            ENV_LAB_OVERLAY_SOURCE,
-            ENV_TRACKING_REF,
-        )
-    }
-    for name, value in values.items():
-        if not value:
+    """Read the declared settings; refuse a deploy source that is a canonical clone.
+
+    The overlay source is required only when the fence names the lab dev lane.
+    """
+    required = [ENV_CLONE_DIR, ENV_CANONICAL_CLONE, ENV_TRACKING_REF]
+    if "dev" in _fence(env):
+        required.append(ENV_LAB_OVERLAY_SOURCE)
+    for name in required:
+        if not env.get(name, "").strip():
             raise DeploySourceCloneError(
                 f"{name} is not set: the deploy agent declares its own deploy-source "
-                "clone, the canonical clone it never mutates, the overlay source "
-                "clone and the tracked ref; none has a default"
+                "clone, the canonical clone it never mutates, the tracked ref and, "
+                "for a lab dev fence, the overlay source clone; none has a default"
             )
-    return ModelDeploySourceClone(
+    declared = ModelDeploySourceClone(
         operation="resolve",
-        clone_dir=values[ENV_CLONE_DIR],
-        canonical_clone=values[ENV_CANONICAL_CLONE],
-        lab_overlay_source=values[ENV_LAB_OVERLAY_SOURCE],
-        tracking_ref=values[ENV_TRACKING_REF],
+        clone_dir=env[ENV_CLONE_DIR].strip(),
+        canonical_clone=env[ENV_CANONICAL_CLONE].strip(),
+        lab_overlay_source=env.get(ENV_LAB_OVERLAY_SOURCE, "").strip(),
+        tracking_ref=env[ENV_TRACKING_REF].strip(),
         mirror_url=env.get(ENV_GIT_MIRROR, "").strip(),
         host_root=env.get("OMNI_HOME", "").strip(),
         registry_root=env.get("UNIT_DRIFT_REGISTRY_ROOT", "").strip(),
     )
+    _refuse_canonical(declared)
+    return declared
 
 
 def _git(
@@ -282,35 +289,127 @@ def _create(request: ModelDeploySourceClone) -> tuple[bool, int]:
     return True, read_mirror_fallback_count(clone)
 
 
+STORE_TARGET = "/etc/onex/skill-overlays-store"
+
+
+class ComposeMergeTag:
+    """A compose merge tag (``!override`` / ``!reset``) on a value."""
+
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+
+class ComposeTagLoader(yaml.SafeLoader):
+    """Safe YAML that keeps compose's merge tags instead of refusing them."""
+
+
+def _tagged(loader: yaml.SafeLoader, node: yaml.Node) -> ComposeMergeTag:
+    if isinstance(node, yaml.SequenceNode):
+        return ComposeMergeTag(loader.construct_sequence(node, deep=True))
+    if isinstance(node, yaml.MappingNode):
+        return ComposeMergeTag(loader.construct_mapping(node, deep=True))
+    if isinstance(node, yaml.ScalarNode):
+        return ComposeMergeTag(loader.construct_scalar(node))
+    return ComposeMergeTag(None)
+
+
+for _tag in ("!override", "!reset"):
+    ComposeTagLoader.add_constructor(_tag, _tagged)
+
+
+def composition_mounts_store(compose_files: Sequence[str]) -> bool:
+    """Whether the merged composition mounts the overlay store in any service.
+
+    Files merge in order: a service's ``volumes`` extend the earlier files' list, and
+    an ``!override`` or ``!reset`` replaces it, as ``docker compose`` merges them.
+    A file that cannot be read counts as mounting the store.
+    """
+    volumes: dict[str, list[object]] = {}
+    for name in compose_files:
+        try:
+            text = Path(name).read_text("utf-8")
+        except OSError:
+            return True  # an unreadable composition keeps the refusal: fail closed
+        loader = ComposeTagLoader(text)
+        try:
+            document = loader.get_single_data()
+        finally:
+            loader.dispose()
+        services = (document or {}).get("services") or {}
+        for service, spec in services.items():
+            raw = spec.get("volumes") if isinstance(spec, dict) else None
+            if raw is None:
+                continue
+            if isinstance(raw, ComposeMergeTag):
+                volumes[service] = (
+                    list(raw.value) if isinstance(raw.value, list) else []
+                )
+            else:
+                volumes.setdefault(service, []).extend(raw)
+    return any(
+        _volume_target(volume) == STORE_TARGET
+        for mounts in volumes.values()
+        for volume in mounts
+    )
+
+
+def _volume_target(volume: object) -> str:
+    """A compose volume's container path, short (``src:target[:mode]``) or long form."""
+    if isinstance(volume, dict):
+        return str(volume.get("target", ""))
+    text = str(volume)
+    if text.startswith("${"):
+        text = text[text.index("}") + 1 :]
+    parts = text.split(":")
+    return parts[1] if len(parts) > 1 else parts[0]
+
+
 def overlay_store_root(request: ModelDeploySourceClone) -> str:
-    """The populated overlay store the dev runtime mounts, beside the canonical clone.
+    """The populated overlay store the dev runtime mounts, under the registry root.
 
     The dev compose files default this mount to ``../../overlays/overlays`` relative to
     their own ``docker/`` directory, which was the registry root's overlays clone while
     the agent built from the canonical clone and is an empty path beside the agent's own
-    clone. The agent declares it instead, from the canonical clone's registry root, and
-    refuses an absent or empty store rather than mounting nothing.
+    clone. The agent declares it instead, from the registry root (the canonical clone's
+    parent when none is declared), and refuses an absent or empty store rather than
+    mounting nothing.
     """
-    store = Path(request.canonical_root) / "overlays" / "overlays"
+    root = request.registry_root or request.canonical_root
+    store = Path(root) / "overlays" / "overlays"
     if not store.is_dir() or not any(store.iterdir()):
         raise DeploySourceCloneError(
             f"the dev overlay store {store} is absent or empty: the dev runtime would "
-            f"mount nothing at /etc/onex/skill-overlays-store; set {ENV_OVERLAY_STORE} "
+            f"mount nothing at {STORE_TARGET}; set {ENV_OVERLAY_STORE} "
             "or populate the overlays clone"
         )
     return str(store)
 
 
 def declare_overlay_store(
-    env: MutableMapping[str, str], request: ModelDeploySourceClone
+    env: MutableMapping[str, str],
+    request: ModelDeploySourceClone,
+    compose_files: Sequence[str],
 ) -> None:
     """Name the overlay store in a dev lane's compose environment unless it is declared.
 
-    Only an agent whose fence names a lab dev lane and not prod mounts the store.
+    Only an agent whose fence names a lab dev lane and not prod, and whose composition
+    carries the store mount, needs the store; an instance whose overlay drops the
+    mount starts with none.
     """
-    lanes = {token.strip() for token in env.get(ENV_FENCE, "").split(",")}
-    if "dev" in lanes and "prod" not in lanes and not env.get(ENV_OVERLAY_STORE):
+    lanes = _fence(env)
+    if "dev" not in lanes or "prod" in lanes or env.get(ENV_OVERLAY_STORE):
+        return
+    if composition_mounts_store(compose_files):
         env[ENV_OVERLAY_STORE] = overlay_store_root(request)
+
+
+def declare_agent_overlay_store(
+    env: MutableMapping[str, str], execution: ModuleType
+) -> None:
+    """:func:`declare_overlay_store` for the agent's own selected dev composition."""
+    configs = execution.dev_instance_lane_configs()
+    selected = configs[execution._DevInstanceSelection.name]
+    declare_overlay_store(env, execution.deploy_source(), selected.compose_files)
 
 
 def apply_request(request: ModelDeploySourceClone) -> ModelDeploySourceClone:

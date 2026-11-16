@@ -1,0 +1,96 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24677
+title: "Deploy agent restart-on-merge: fix the five blocking findings of the omnibase_infra#6027 review at head 72d8c39490e5"
+summary: >-
+  The five blocking findings of the omnibase_infra#6027 review at 72d8c39490e5 are answered with a test each: the restart-on-merge handler is typed and has an integration test, a blocking per-host check names each agent whose env files lack the settings and a non-lab fence needs no lab overlay source, a start that dies after the restart command returns 0 is verified and rolled back from the transient unit and a second death is raised, the settings check reads the env files the launcher sources and a refusal writes a STATUS row, and the overlay store is refused only for a composition that mounts it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24677-review-6027
+    statement: >-
+      The five blocking findings of the omnibase_infra#6027 review at 72d8c39490e5 are fixed with a test each that fails on that head.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the ONEX Validators and Integration Test Coverage checks pass at the new head, with the manifest entries typed, the run runners renamed, a model passed in place of an untyped value, and a tests/integration test for the restart-on-merge handler -- falsifier: uv run pytest tests/integration -q -k restart_on_merge passes and fails on head 72d8c39490e5, and uv run pre-commit run --all-files reports no Any type finding on handler_restart_on_merge.py
+      - id: AC2
+        statement: >-
+          AC2: no dev-tracking agent restarts into code that raises at agent.py:476, because the guard lands before the restart or a blocking per-host check proves each env file names the settings, and a non-lab fence no longer needs the lab overlay source -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k restart_on_merge_guard fails on head 72d8c39490e5 and passes after the fix
+      - id: AC3
+        statement: >-
+          AC3: a start that dies after the restart command returns 0 is verified from the transient unit, rolled back, and raises AgentLeftStoppedError to the caller, with a test of exit 0 then dead -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k exit_zero_then_dead fails on head 72d8c39490e5 and passes after the fix
+      - id: AC4
+        statement: >-
+          AC4: the settings check reads the env file the launcher sources and not the process environment, and a failed check writes a STATUS row -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k settings_env_file fails on head 72d8c39490e5 and passes after the fix
+      - id: AC5
+        statement: >-
+          AC5: the overlay store refusal fires only when the composition carries the mount, derived from the registry root, and a dev instance whose composition drops the mount starts with no store -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k overlay_store_dev fails on head 72d8c39490e5 and passes after the fix
+      - id: AC6
+        statement: >-
+          AC6: the new head is commented on omnibase_infra#6027 for re-review and the lab runs of the PR's required suites are recorded -- falsifier: onex scm pr-view OmniNode-ai/omnibase_infra#6027 --source bus lists a comment naming the new head sha
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Restart-on-merge integration test through the node contract, and the unit tests of findings 2 to 5.
+    command: uv run --frozen pytest tests/integration/handlers/test_restart_on_merge_omn24677.py -q -p no:randomly --no-cov -n 0 && uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24677.py -q -p no:randomly --no-cov -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24677-ac1-integration-restart-on-merge
+    description: >-
+      Runs the restart-on-merge node contract with the local runtime over the real manifest and a synthetic host.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_restart_on_merge_omn24677.py -q -p no:randomly --no-cov -n 0 -k restart_on_merge
+        cwd: .
+    binds_ac: [AC1]
+  - id: dod-omn24677-ac2-restart-on-merge-guard
+    description: >-
+      The per-host check lists each non-prod agent whose env files lack a setting, and a prod fence resolves with no overlay source.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24677.py -q -p no:randomly --no-cov -n 0 -k restart_on_merge_guard
+        cwd: .
+    binds_ac: [AC2]
+  - id: dod-omn24677-ac3-exit-zero-then-dead
+    description: >-
+      The transient-unit script under stand-in systemctl and git: a death after exit 0 rolls back; a second death raises.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24677.py -q -p no:randomly --no-cov -n 0 -k exit_zero_then_dead
+        cwd: .
+    binds_ac: [AC3]
+  - id: dod-omn24677-ac4-settings-env-file
+    description: >-
+      The process environment carries every setting while the env file lacks one; the check refuses, and one STATUS row is written per refusal.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24677.py -q -p no:randomly --no-cov -n 0 -k settings_env_file
+        cwd: .
+    binds_ac: [AC4]
+  - id: dod-omn24677-ac5-overlay-store-dev
+    description: >-
+      Each routing-table dev instance whose composition drops the mount renders its compose environment with no store; the default instance still refuses an absent one.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24677.py -q -p no:randomly --no-cov -n 0 -k overlay_store_dev
+        cwd: .
+    binds_ac: [AC5]
+  - id: dod-omn24677-ac6-head-commented
+    description: >-
+      Reads the pull request through the bus and finds a comment naming the pushed branch head. Runs where the lane has the bus, not on the hosted runner.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: onex scm pr-view OmniNode-ai/omnibase_infra#6027 --source bus | grep -qF "$(git rev-parse origin/omn-24562-agent-own-clone)"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]

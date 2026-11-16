@@ -183,6 +183,8 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",
         "models/model_deploy_source_clone.py",
         "handlers/handler_deploy_source_clone.py",
+        "models/model_agent_unit.py",
+        "models/model_unit_settings_gap.py",
         "models/model_restart_on_merge.py",
         "handlers/handler_restart_on_merge.py",
         "models/model_dev_lane_code_ref_pin.py",
@@ -1385,8 +1387,7 @@ def _run(
 
 
 def _sync_own_unit_after_pull(agent_dir: str, timeout: int) -> Any:
-    handler = load_dev_boot_guard("handler_restart_on_merge")
-    return handler.sync_own_unit_after_pull(
+    return load_dev_boot_guard("handler_restart_on_merge").sync_own_unit_after_pull(
         sys.modules[__name__], agent_dir, timeout, os.environ
     )
 
@@ -2087,8 +2088,7 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     # value the operator store holds for them; a key it leaves out keeps
     # whatever the store says, or stays unset.
     env.update(_lane_env_overlay())
-    # OMN-24626: the compose default for the overlay store is beside the agent's own clone.
-    _clone_handler().declare_overlay_store(env, deploy_source())
+    _clone_handler().declare_agent_overlay_store(env, sys.modules[__name__])
     # OMN-24025: the rendered LLM endpoint env wins over the operator store, like the lane
     # fragment, and the compose mount reads the rewritten lane overlay directory.
     llm_env, rendered_lane_overlay_dir = _llm_endpoint_env_overlay(env)
@@ -3905,9 +3905,6 @@ class DeployExecutor:
                 )
                 if on_before_reexec is not None:
                     on_before_reexec()
-                # A transient unit outside this cgroup runs the restart (OMN-22683): run from
-                # inside it, the restart command was killed by the unit stop, which re-execed in
-                # this pid and let systemd SIGKILL the next job. Ending 0 or -SIGTERM is under way.
                 load_dev_boot_guard("handler_restart_on_merge").restart_own_unit(
                     sys.modules[__name__],
                     synced_unit,
@@ -3917,7 +3914,9 @@ class DeployExecutor:
                     env=os.environ,
                 )
                 return
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
+            if type(exc).__name__ == "AgentLeftStoppedError":
+                raise
             logger.warning(
                 "self_update[boundary=%s]: unit sync/restart failed: %s",
                 boundary.value,
