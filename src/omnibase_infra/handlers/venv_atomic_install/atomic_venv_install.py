@@ -270,7 +270,18 @@ def prune_git_checkouts(stage_dir: Path) -> list[Path]:
     return removed
 
 
-def sweep_stale_stages(venv_root: Path, *, keep: Path | None = None) -> list[Path]:
+def _warn_unremovable_stage(path: Path) -> None:
+    """One stderr line for a stage the running user's rmtree could not take."""
+    _say(
+        f"  WARNING: stale stage {path} could not be removed"
+        " (files owned by another user?); remove it as that user",
+        file=sys.stderr,
+    )
+
+
+def sweep_stale_stages(
+    venv_root: Path, *, keep: Path | None = None
+) -> tuple[list[Path], list[Path]]:
     """Remove the earlier installs' `.atomic-stage.*` side folders (OMN-24508).
 
     Must only run on the success path, under the venv's reconcile lock: the
@@ -278,10 +289,13 @@ def sweep_stale_stages(venv_root: Path, *, keep: Path | None = None) -> list[Pat
     a non-directory is skipped, never followed; ``keep`` is never removed. A stage
     that holds a journal is removed too: the run that follows it has already
     verified and read back the live venv, so its previous packages are obsolete.
+    Returns (removed, kept): the stages that went away and the ones that stayed
+    behind because their files belong to another user (OMN-24899).
     """
     removed: list[Path] = []
+    kept: list[Path] = []
     if not venv_root.is_dir():
-        return removed
+        return removed, kept
     for child in sorted(venv_root.iterdir()):
         if not child.name.startswith(STAGE_DIR_PREFIX):
             continue
@@ -290,9 +304,13 @@ def sweep_stale_stages(venv_root: Path, *, keep: Path | None = None) -> list[Pat
         if child.is_symlink() or not child.is_dir():
             continue
         shutil.rmtree(child, ignore_errors=True)
-        removed.append(child)
-        _say(f"  swept stale stage {child}")
-    return removed
+        if not child.exists():
+            removed.append(child)
+            _say(f"  swept stale stage {child}")
+        else:
+            kept.append(child)
+            _warn_unremovable_stage(child)
+    return removed, kept
 
 
 def stage(
@@ -515,8 +533,15 @@ def run_command(
     if command == "finalize":
         prune_git_checkouts(stage_dir)
         shutil.rmtree(stage_dir, ignore_errors=True)
-        swept = sweep_stale_stages(stage_dir.parent)
-        _say(f"  swept {len(swept)} stale stage dir(s)")
+        if stage_dir.exists():
+            _warn_unremovable_stage(stage_dir)
+        removed, kept = sweep_stale_stages(stage_dir.parent)
+        _say(f"  swept {len(removed)} stale stage dir(s)")
+        if kept:
+            _say(
+                f"  {len(kept)} stale stage dir(s) remain in {stage_dir.parent}",
+                file=sys.stderr,
+            )
         return EXIT_OK
     if command == "rollback":
         return rollback_stage(stage_dir)

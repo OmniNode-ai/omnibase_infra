@@ -10,6 +10,7 @@ venv's exclusive reconcile lock. The failure path keeps its own stage.
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -129,3 +130,41 @@ def test_installer_script_template_matches_engine_prefix() -> None:
     literal = ".atomic-stage.XXXXXX"
     assert literal in script, "the installer's mktemp template drifted from the engine"
     assert literal == plan.STAGE_DIR_PREFIX + "XXXXXX"
+
+
+def test_finalize_warns_and_keeps_a_stage_it_cannot_remove(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stage another user's files stick in stays, named on stderr (OMN-24899).
+
+    Root's bytecode inside the owner's venv made ``rmtree`` of that stage a
+    silent no-op under ``ignore_errors``; the sweep used to count it as swept
+    anyway and the folder outlived every "swept" line.
+    """
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    stuck = _leftover(venv, "stuck", journal=False, site=False)
+    gone = _leftover(venv, "dead00", journal=False, site=False)
+    stage = _leftover(venv, "current", journal=True, site=True)
+    real_rmtree = shutil.rmtree
+
+    def stuck_rmtree(path: Path, ignore_errors: bool = False) -> None:
+        if path.name.startswith(plan.STAGE_DIR_PREFIX) and path.name.endswith("stuck"):
+            return
+        real_rmtree(path, ignore_errors=ignore_errors)
+
+    monkeypatch.setattr(plan.shutil, "rmtree", stuck_rmtree)
+
+    status = plan.run_command("finalize", stage_dir=stage)
+
+    assert status == plan.EXIT_OK
+    assert stuck.is_dir(), "the unremovable stage was reported as swept anyway"
+    assert not gone.exists(), "the removable stage was not swept"
+    out, err = capsys.readouterr()
+    assert "swept 1 stale stage dir(s)" in out, out
+    assert f"  swept stale stage {stuck}" not in out, out
+    assert "WARNING" in err, err
+    assert str(stuck) in err, err
+    assert "1 stale stage dir(s) remain" in err, err
