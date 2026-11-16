@@ -25,7 +25,7 @@
 # design and are not pinned; they carry the label in their header.
 pins:
   omnibase_core: f43f97629182f463d233b564b19a2b27d4fc4888
-  omnimarket: fccc55217859f6091a2c746f7acbb06045ef54e3
+  omnimarket: 0238884e3849e2917bf79cc164a8e1cb9a2eaf82
   omniintelligence: 3fcbf795087a79081c0ceeb676216bf64c5d49ae
   omnimemory: c7175878b331628de9be9358cb178547d8247c34
   omniclaude: 3b8addff365b1a53e04106284b9275b6d5fad3c6
