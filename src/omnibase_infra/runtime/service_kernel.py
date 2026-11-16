@@ -139,17 +139,18 @@ from omnibase_infra.errors import (
 # Import from infra for type safety until core Part 1 merges; runtime bus
 # selection in select_event_bus() handles the core→infra fallback.
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-from omnibase_infra.event_bus.event_bus_kafka import (
-    EventBusKafka,
-    EventBusRecovering,
-)
+from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.handlers import boot_readiness_checks
+from omnibase_infra.handlers.event_bus_recovering import EventBusRecovering
 from omnibase_infra.handlers.handler_package_announcer import (
     build_registered_events,
     run_boot_step0,
+)
+from omnibase_infra.handlers.handler_runtime_introspection_startup import (
+    HandlerRuntimeIntrospectionStartup,
 )
 from omnibase_infra.handlers.handler_workspace_config_root_resolve import (
     DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH,
@@ -4289,47 +4290,51 @@ async def bootstrap() -> int:
         )
         runtime_config_dict["node_name"] = config.name
 
-        # 6.1 Create introspection service (OMN-5609)
+        # 6.1 Create introspection service (OMN-5609, OMN-24496)
         # Wire contract data into introspection so published events include
         # metadata.description, event_bus topics, and contract_capabilities.
-        # Without this, RuntimeHostProcess receives introspection_service=None
-        # and silently skips all introspection publishing.
-        #
         # The registration orchestrator contract is used as the primary
         # contract source because it is the principal node in the kernel
         # and declares all subscribe/publish topics.
-        introspection_service = None
-        if config.name:
-            try:
-                from omnibase_infra.services.service_node_introspection import (
-                    ServiceNodeIntrospection,
-                )
+        #
+        # OMN-24496: The heartbeat is mandatory. A kernel runtime without a
+        # working introspection service would run silently without
+        # heartbeats, so there is no None fallback here:
+        # build_required_service REFUSES the startup with a typed
+        # RuntimeHeartbeatRequiredError (carrying a refusal counter) and the
+        # exception propagates — the runtime does not start. Nothing is
+        # announced for a runtime that does not heartbeat.
+        from omnibase_infra.services.service_node_introspection import (
+            ServiceNodeIntrospection,
+        )
 
-                # Use registration orchestrator contract (primary kernel node)
-                _registration_contract_dir = (
-                    Path(__file__).resolve().parent.parent
-                    / "nodes"
-                    / "node_registration_orchestrator"
-                )
-                introspection_service = ServiceNodeIntrospection.from_contract_dir(
-                    contracts_dir=_registration_contract_dir,
-                    event_bus=event_bus,
-                    node_name=config.name,
-                    environment=environment,
-                )
-                logger.info(
-                    "Introspection service created for node '%s' (correlation_id=%s)",
-                    config.name,
-                    correlation_id,
-                )
-            except Exception as intro_err:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "Failed to create introspection service, introspection "
-                    "will be disabled: %s (correlation_id=%s)",
-                    intro_err,
-                    correlation_id,
-                    extra={"error_type": type(intro_err).__name__},
-                )
+        # Use registration orchestrator contract (primary kernel node)
+        _registration_contract_dir = (
+            Path(__file__).resolve().parent.parent
+            / "nodes"
+            / "node_registration_orchestrator"
+        )
+
+        def _build_introspection_service() -> ServiceNodeIntrospection:
+            return ServiceNodeIntrospection.from_contract_dir(
+                contracts_dir=_registration_contract_dir,
+                event_bus=event_bus,
+                node_name=config.name or "",
+                environment=environment,
+            )
+
+        introspection_service = (
+            HandlerRuntimeIntrospectionStartup().build_required_service(
+                runtime_name=config.name,
+                correlation_id=correlation_id,
+                build=_build_introspection_service,
+            )
+        )
+        logger.info(
+            "Introspection service created for node '%s' (correlation_id=%s)",
+            config.name,
+            correlation_id,
+        )
 
         runtime = RuntimeHostProcess(
             container=container,

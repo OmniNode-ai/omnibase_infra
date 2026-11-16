@@ -1,0 +1,31 @@
+schema_version: 1.0.0
+ticket_id: OMN-24215
+title: Seam test holding the runtime's lane overlay reader to the overlay home's checker
+summary: The overlay home validates overlays/runtime_contract_hotload/overlay.yaml through a model in omnimarket (merged); the runtime reads the same document through ModelContractHotloadLaneOverlay. This adds a test in this repository that spells the same accept and refuse corpus and the three row keys and the two document keys, so a key added to or dropped from the runtime reader fails here without the other repository on the runner. The test changes no code that runs.
+is_seam_ticket: true
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24215-runtime-reader-seam
+    statement: The runtime's lane overlay reader gives the corpus verdicts the overlay home's checker gives, and a key added or dropped on the runtime side fails a test in this repository.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the runtime reader accepts and refuses the seam corpus exactly as the checker's own test expects, and holds exactly the document keys schema_version and lanes and the row keys enabled, mode and allowed_environments -- falsifier: the seam test fails when a key is added to or dropped from ModelContractHotloadLaneOverlay or ModelContractHotloadConfig"
+evidence_requirements:
+  - kind: tests
+    description: The seam test passes at the pushed head.
+    command: uv run --frozen pytest tests/unit/models/test_model_contract_hotload_lane_overlay_seam_omn24215.py -q -n 0 --no-cov -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24215-seam-ac2
+    description: 'AC2: the seam test passes at the head (15 tests); at the merge base the test file does not exist.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/models/test_model_contract_hotload_lane_overlay_seam_omn24215.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra

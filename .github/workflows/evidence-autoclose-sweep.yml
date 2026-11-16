@@ -550,8 +550,8 @@ jobs:
       #
       # GitHub Actions checks a repo out to
       # `<runner-work-dir>/<repo>/<repo>` (the documented `github.workspace`
-      # convention — GitHub's own docs give `/home/runner/work/my-repo-name/
-      # my-repo-name` as the canonical example), so `github.workspace`'s OWN
+      # convention — GitHub's own docs give the runner's `work/my-repo-name/my-repo-name`
+      # as the canonical example), so `github.workspace`'s OWN
       # PARENT directory already satisfies
       # `${OMNI_HOME}/omnibase_infra == github.workspace` exactly, using the
       # real checkout with no symlink and no second checkout.
@@ -982,7 +982,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GIT_ASKPASS: ${{ runner.temp }}/git-askpass.sh
           GIT_TERMINAL_PROMPT: "0"
-          CONTRACT_REPOS: omniclaude omnibase_compat omnibase_core omnibase_infra omnibase_spi omnidash omnidash-v2 omniintelligence omnimarket omnimemory
+          CONTRACT_REPOS: omniclaude omnibase_core omnibase_infra omnibase_spi omnidash omnidash-v2 omniintelligence omnimarket omnimemory
           CONTRACT_REPOS_PRIVATE: ${{ vars.ONEX_CONTRACT_REPOS_PRIVATE }}
         run: |
           set -euo pipefail

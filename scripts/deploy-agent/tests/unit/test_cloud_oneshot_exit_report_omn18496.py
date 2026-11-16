@@ -93,6 +93,13 @@ def test_detached_up_then_exit_one_reports_code_and_redacted_log_tail(
         "cloud-migration-files": ("exited", 0),
         "cloud-migration": ("exited", 1),
     }
+    # OMN-24476 emptied the dev lane's cloud one-shots; restore the pair for this case.
+    monkeypatch.setattr(
+        executor_mod,
+        "DEV_LANE_ONLY_MIGRATION_SERVICES",
+        ("cloud-migration-files", "cloud-migration"),
+    )
+    monkeypatch.setattr(executor_mod, "DEV_LANE_CLOUD_DB_SERVICES", ("onex-api",))
     monkeypatch.setattr(executor_mod, "_run", run)
     monkeypatch.setattr(executor_mod, "_compose_env", lambda *args: {})
     monkeypatch.setattr(

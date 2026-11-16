@@ -24,6 +24,25 @@ _SCANNED_PATHS: list[str] = [
     ".github/workflows/docker-build.yml",
     "config/lab_proof_profiles.yaml",
     "src/omnibase_infra/nodes/node_lab_proof_plan_compute/contract.yaml",
+    # OMN-19998: operator ruling 2026-11-15T17:59:49Z removed omnibase_compat
+    # from every CI checkout, install, pin, list and workspace sibling set.
+    ".github/workflows/ci.yml",
+    ".github/workflows/hostile-review-judge.yml",
+    ".github/workflows/hostile-reviewer.yml",
+    ".github/workflows/build-workspace-candidate-runtime.yml",
+    ".github/workflows/evidence-autoclose-sweep.yml",
+    ".github/workflows/in-progress-probe-hygiene.yml",
+    ".github/workflows/sibling-lock-refresh.yml",
+    ".github/sibling-pins.yaml",
+    "docker/docker-compose.runners.yml",
+    "architecture-handshakes/validator-requirements.yaml",
+    "config/validation/stack_shape.yaml",
+    "scripts/version-matrix.yaml",
+    "scripts/install-node-skill-package.sh",
+    "scripts/check-pinned-wheels.py",
+    "scripts/check_dep_provenance.py",
+    "src/omnibase_infra/runtime_identity.py",
+    "src/omnibase_infra/validators/contract_topic_graph.py",
 ]
 
 # Tokens that must not appear in non-comment lines of the scanned files.

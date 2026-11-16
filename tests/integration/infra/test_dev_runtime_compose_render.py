@@ -1811,28 +1811,6 @@ def _render_dev_lane_runtime_services() -> dict[str, Any]:
 
 
 @pytest.mark.integration
-def test_dev_lane_cloud_migration_gates_only_onex_api() -> None:
-    """OMN-18496: a failed ancillary cloud migration gates only onex-api."""
-    services = _render_dev_lane_runtime_services()
-    expected = _CLOUD_ONE_SHOTS | {
-        _CLOUD_GATED_SERVICE,
-        "omninode-runtime",
-        "runtime-effects",
-    }
-    assert expected <= services.keys(), (
-        f"missing services: {expected - services.keys()}"
-    )
-    assert (
-        services[_CLOUD_GATED_SERVICE]["depends_on"]["cloud-migration"]["condition"]
-        == "service_completed_successfully"
-    )
-    reaching = _services_reaching(services, _CLOUD_ONE_SHOTS)
-    assert set(reaching) == {_CLOUD_GATED_SERVICE}, (
-        f"cloud one-shots must gate only {_CLOUD_GATED_SERVICE}; paths: {reaching!r}"
-    )
-
-
-@pytest.mark.integration
 def test_runtime_family_never_waits_on_a_cloud_one_shot() -> None:
     """OMN-18496: cloud migration failures cannot block the runtime family."""
     services = _render_dev_lane_runtime_services()

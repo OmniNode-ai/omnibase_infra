@@ -96,12 +96,11 @@ __all__ = [
 # DEFAULT_REQUIRED_PACKAGES is those three — the MINIMUM. This set is wider on
 # purpose: a runtime image's build-provenance manifest declares every vendored
 # sibling (measured live on the .201 dev lane, 2026-08-31: omnibase_core,
-# omnibase_compat, omnimarket), and a declared package the stamp is silent
+# omnimarket), and a declared package the stamp is silent
 # about is an UNKNOWN refusal in the probe-target assertion. Stamping the full
-# layer stack (compat -> core -> spi -> infra, plus omnimarket) means the
+# layer stack (core -> spi -> infra, plus omnimarket) means the
 # assertion compares content rather than refusing for lack of coverage.
 STAMPED_PACKAGES: tuple[str, ...] = (
-    "omnibase_compat",
     "omnibase_core",
     "omnibase_infra",
     "omnibase_spi",
