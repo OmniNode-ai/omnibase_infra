@@ -91,6 +91,7 @@ class _World:
             tracking_ref="dev",
             served_sha=served_sha,
             lab_overlay_source=str(self.root / "overlay-source"),
+            timeout_seconds=120.0,
         )
 
     def canonical_snapshot(self) -> tuple[str, str, str, str]:

@@ -29,16 +29,21 @@ THE RULES
    from this process's start-time environment (OMN-24677). With a required setting in
    neither place the unit is left as installed, the agent is not restarted, and one
    STATUS row names the gap. A re-exec goes through the same launcher, so it counts the
-   process environment or the files. The overlay source is required only for a fence
-   naming the lab dev lane. ``check_host`` runs the same check over every non-prod
-   agent installed on a host: the blocking per-host check a merge waits on.
+   process environment or the files, and a refused re-exec writes the same kind of
+   row. The overlay source is required only for a fence naming the lab dev lane.
+   ``check_host`` runs the same check over EVERY agent installed on a host, the
+   prod-fenced unit and each launchd instance included: the code running at a merge
+   restarts or re-execs all of them, so the check a merge waits on cannot skip one.
 3. The restart runs in a transient unit outside the agent's cgroup, which survives the
    agent's own stop. It restarts the unit, waits, and verifies the unit is active with
    no automatic restart since (a ``Type=simple`` start returns 0 on fork, so the exit
    code alone says nothing). When the start died it puts the code clone back on the
    loaded commit and the previous unit bytes, restarts and verifies again; when that
    fails too it exits non-zero and :class:`AgentLeftStoppedError` is raised to the
-   caller. No other agent is touched: an agent only restarts its own unit.
+   caller. No other agent is touched: an agent only restarts its own unit. The script's
+   first command stops the caller, so no exit code reaches it: after a rollback the
+   script itself leaves a marker naming the revision it rolled back from, and
+   ``self_update`` skips that revision (one STATUS row) until the remote moves on.
 
 The deploy agent loads this module from its own checkout, like the other host effects,
 and is handed its own module as ``execution`` where it needs the agent's unit-drift
@@ -48,6 +53,7 @@ functions, which are not copied here.
 from __future__ import annotations
 
 import logging
+import plistlib
 import re
 import shlex
 import signal
@@ -82,6 +88,11 @@ PROD_LANE = "prod"
 MANIFEST_RELPATH = "deploy/unit-drift-manifest.yaml"
 SETTLE_SECONDS = 45
 REFUSAL_MARKER = "restart-settings-refusal.txt"
+REEXEC_REFUSAL_MARKER = "reexec-settings-refusal.txt"
+#: Left by the transient unit after a rollback: the revision the agent died on.
+ROLLBACK_MARKER = "restart-rolled-back-revision.txt"
+ROLLBACK_STATUS_MARKER = "restart-rolled-back-status.txt"
+LAUNCHD_LABEL_PREFIX = "ai.omninode.deploy-agent-"
 _RESTART_OK = (0, -signal.SIGTERM)
 #: Transient-unit exit codes: the previous revision runs again / nothing runs.
 ROLLED_BACK = 2
@@ -214,13 +225,19 @@ def settings_gap(
     in_files: set[str] = set()
     for path in files:
         in_files |= env_file_names(path)
+    fence = declared_fence(entry, repo_root)
+    required = required_settings(fence)
     missing = tuple(
         name
-        for name in required_settings(declared_fence(entry, repo_root))
+        for name in required
         if not declared.get(name, "").strip() and name not in in_files
     )
     return ModelUnitSettingsGap(
-        unit=entry.name, env_files=tuple(str(p) for p in files), missing=missing
+        unit=entry.name,
+        env_files=tuple(str(p) for p in files),
+        missing=missing,
+        fence=tuple(sorted(fence)),
+        found=tuple(name for name in required if name not in missing),
     )
 
 
@@ -267,22 +284,66 @@ def assert_restartable(
 def check_host(
     entries: Sequence[ModelAgentUnit], repo_root: Path, home: Path
 ) -> tuple[ModelUnitSettingsGap, ...]:
-    """Every non-prod agent installed under ``home`` whose env files lack a setting."""
+    """Every agent unit installed under ``home`` whose env files lack a setting.
+
+    The prod-fenced unit is read too: it is never restarted by THIS module, but the
+    code running at a merge restarts every installed agent, and the prod unit takes
+    its deploy-source settings from an env file a merge cannot repair.
+    """
     installed = home / ".config" / "systemd" / "user"
     return tuple(
         gap
         for entry in agent_units(entries, repo_root)
         if (installed / entry.name).exists()
-        and PROD_LANE not in declared_fence(entry, repo_root)
         and (gap := settings_gap(entry, repo_root, home)).missing
+    )
+
+
+def launchd_readings(
+    home: Path,
+) -> tuple[tuple[str, ...], tuple[ModelUnitSettingsGap, ...]]:
+    """Every installed launchd agent instance, and the ones whose store lacks a setting.
+
+    A launchd instance re-execs through its launcher at a merge with no unit sync and
+    no guard in the code running then, so each one is named, and read the way the
+    launcher resolves its settings: the plist's environment, then the store it sources.
+    """
+    labels: list[str] = []
+    gaps: list[ModelUnitSettingsGap] = []
+    agents = home / "Library" / "LaunchAgents"
+    for plist in sorted(agents.glob(f"{LAUNCHD_LABEL_PREFIX}*.plist")):
+        try:
+            declared = plistlib.loads(plist.read_bytes())
+        except (OSError, plistlib.InvalidFileException, ValueError):
+            declared = {}
+        label = str(declared.get("Label") or plist.stem)
+        labels.append(label)
+        env = {
+            str(k): str(v)
+            for k, v in (declared.get("EnvironmentVariables") or {}).items()
+        }
+        missing = missing_runtime_settings(env)
+        if missing:
+            gaps.append(
+                ModelUnitSettingsGap(
+                    unit=label,
+                    env_files=(env.get(ENV_FILE_SETTING, ""),),
+                    missing=tuple(missing),
+                    fence=tuple(sorted(_fence_of(env))),
+                )
+            )
+    return tuple(labels), tuple(gaps)
+
+
+def _fence_of(env: Mapping[str, str]) -> frozenset[str]:
+    return frozenset(
+        token.strip() for token in env.get(FENCE_SETTING, "").split(",") if token
     )
 
 
 def missing_runtime_settings(env: Mapping[str, str]) -> list[str]:
     """Required settings neither the process nor the store the launcher re-sources has."""
-    fence = frozenset(
-        token.strip() for token in env.get(FENCE_SETTING, "").split(",") if token
-    )
+    fence = _fence_of(env)
     store = env.get(ENV_FILE_SETTING, "")
     in_store = env_file_names(Path(store)) if store else frozenset()
     return [
@@ -292,29 +353,74 @@ def missing_runtime_settings(env: Mapping[str, str]) -> list[str]:
     ]
 
 
-def reexec_blocked_by_settings(env: Mapping[str, str]) -> bool:
+def _marker(env: Mapping[str, str], name: str) -> Path | None:
+    state_dir = env.get("DEPLOY_AGENT_STATE_DIR", "")
+    return Path(state_dir) / name if state_dir else None
+
+
+def clear_refusal(env: Mapping[str, str], name: str = REFUSAL_MARKER) -> None:
+    """A refusal that no longer holds is forgotten, so its return writes a new row."""
+    marker = _marker(env, name)
+    if marker is not None:
+        marker.unlink(missing_ok=True)
+
+
+def reexec_blocked_by_settings(execution: ModuleType, env: Mapping[str, str]) -> bool:
     """Whether a re-exec would start code that refuses to run for want of settings.
 
     A re-exec keeps this process's environment and the launcher re-sources the store,
     so a setting in neither keeps the process on the revision it loaded: dying in the
-    new code is a stopped agent.
+    new code is a stopped agent. A refusal writes one STATUS row, as the unit sync's
+    refusal does (this path runs on every platform, the sync only on Linux), and a
+    pass clears the row's marker.
     """
     missing = missing_runtime_settings(env)
-    if missing:
-        logger.error(
-            "OMN-24626 not re-execing into the pulled revision: neither this process "
-            "nor its env store names %s",
-            ", ".join(missing),
-        )
-    return bool(missing)
+    if not missing:
+        clear_refusal(env, REEXEC_REFUSAL_MARKER)
+        return False
+    reason = (
+        "not re-execing into the pulled revision: neither this process nor its env "
+        f"store names {', '.join(missing)}"
+    )
+    logger.error("OMN-24626 %s", reason)
+    write_refusal_status(execution, reason, env, REEXEC_REFUSAL_MARKER)
+    return True
+
+
+def skip_refused_revision(
+    execution: ModuleType, remote_sha: str, env: Mapping[str, str]
+) -> bool:
+    """Whether ``remote_sha`` is the revision the last restart rolled back from.
+
+    The rolled-back agent runs the previous revision again, and would pull the same
+    head at every boundary and be restarted into it again. One STATUS row names the
+    refused revision; a remote that moved on clears the marker.
+    """
+    marker = _marker(env, ROLLBACK_MARKER)
+    if marker is None or not marker.is_file():
+        return False
+    if marker.read_text("utf-8").strip() != remote_sha:
+        marker.unlink(missing_ok=True)
+        clear_refusal(env, ROLLBACK_STATUS_MARKER)
+        return False
+    write_refusal_status(
+        execution,
+        f"revision {remote_sha} refused: the agent restarted on it died and was "
+        "rolled back; it is skipped until the remote moves on",
+        env,
+        ROLLBACK_STATUS_MARKER,
+    )
+    return True
 
 
 def write_refusal_status(
-    execution: ModuleType, reason: str, env: Mapping[str, str]
+    execution: ModuleType,
+    reason: str,
+    env: Mapping[str, str],
+    marker_name: str = REFUSAL_MARKER,
 ) -> None:
     """One STATUS row per distinct refusal, so a frozen agent is named on the ledger."""
-    state_dir = env.get("DEPLOY_AGENT_STATE_DIR", "")
-    marker = Path(state_dir) / REFUSAL_MARKER if state_dir else None
+    marker = _marker(env, marker_name)
     if marker is not None and marker.is_file() and marker.read_text("utf-8") == reason:
         return
     config = execution.dev_boot_report_config()
@@ -338,6 +444,11 @@ def write_refusal_status(
         marker.write_text(reason, "utf-8")
 
 
+def read_own_cgroup() -> str:
+    """This process's cgroup file: the unit systemd runs it in."""
+    return Path("/proc/self/cgroup").read_text("utf-8")
+
+
 def sync_own_unit_after_pull(
     execution: ModuleType, agent_dir: str, timeout: int, env: Mapping[str, str]
 ) -> str | None:
@@ -356,9 +467,7 @@ def sync_own_unit_after_pull(
     if sys.platform != "linux":
         return None
     try:
-        unit_name = drift.own_unit_name_from_cgroup(
-            Path("/proc/self/cgroup").read_text()
-        )
+        unit_name = drift.own_unit_name_from_cgroup(read_own_cgroup())
     except OSError:
         return None
     if unit_name is None:
@@ -374,6 +483,7 @@ def sync_own_unit_after_pull(
         logger.warning("self_update: unit not synced: %s", exc)
         write_refusal_status(execution, str(exc), env)
         return None
+    clear_refusal(env)
     changed = drift.sync_own_unit(
         entries,
         unit_name=unit_name,
@@ -392,28 +502,43 @@ def installed_unit_path(target: ModelRestartOnMerge) -> Path:
 
 
 def transient_restart_script(
-    unit: str, *, installed: Path, agent_dir: str, loaded_sha: str, settle: int
+    unit: str,
+    *,
+    installed: Path,
+    agent_dir: str,
+    loaded_sha: str,
+    settle: int,
+    refused_marker: Path | None = None,
 ) -> str:
     """The script a transient unit runs: restart, verify, roll back, verify again.
 
     Exit 0: the new revision is up. ``ROLLED_BACK``: it died and the previous revision
-    is up. ``LEFT_STOPPED``: neither is up.
+    is up; the script writes the revision it rolled back from to ``refused_marker``
+    first, because its caller was stopped by the first command and cannot read the
+    exit. ``LEFT_STOPPED``: neither is up.
     """
     q = shlex.quote
     up = (
         f"sleep {settle}; systemctl --user is-active --quiet {q(unit)} && "
         f'[ "$(systemctl --user show -p NRestarts --value {q(unit)})" = 0 ]'
     )
+    leave_marker = (
+        f"mkdir -p {q(str(refused_marker.parent))} && "
+        f'printf %s "$refused" > {q(str(refused_marker))}; '
+        if refused_marker is not None
+        else ""
+    )
     return "\n".join(
         (
             f"systemctl --user restart {q(unit)}",
             f"if {up}; then exit 0; fi",
+            f"refused=$(git -C {q(agent_dir)} rev-parse HEAD)",
             f"git -C {q(agent_dir)} checkout --quiet --detach {q(loaded_sha)}",
             f"backup=$(ls -1 {q(str(installed))}.bak-unit-drift-* 2>/dev/null | tail -n 1)",
             f'[ -n "$backup" ] && cp -p "$backup" {q(str(installed))}',
             "systemctl --user daemon-reload",
             f"systemctl --user restart {q(unit)}",
-            f"if {up}; then exit {ROLLED_BACK}; fi",
+            f"if {up}; then {leave_marker}exit {ROLLED_BACK}; fi",
             f"exit {LEFT_STOPPED}",
         )
     )
@@ -477,6 +602,7 @@ def restart_own_unit(
             agent_dir=agent_dir,
             loaded_sha=loaded_sha,
             settle=SETTLE_SECONDS,
+            refused_marker=_marker(env, ROLLBACK_MARKER),
         ),
         run_unit_command=lambda command: int(
             execution._run(command, timeout + 2 * SETTLE_SECONDS).returncode
@@ -500,10 +626,16 @@ class HandlerRestartOnMerge:
             )
         home = Path(request.home)
         if request.operation == "check_host":
-            gaps = check_host(entries, repo_root, home)
+            launchd, launchd_gaps = launchd_readings(home)
+            gaps = (*check_host(entries, repo_root, home), *launchd_gaps)
             reason = "; ".join(f"{g.unit}: {', '.join(g.missing)}" for g in gaps)
             return request.model_copy(
-                update={"gaps": gaps, "restartable": not gaps, "reason": reason}
+                update={
+                    "gaps": gaps,
+                    "restartable": not gaps,
+                    "reason": reason,
+                    "launchd_instances": launchd,
+                }
             )
         target = ModelRestartOnMerge(
             unit=request.unit, repo_root=str(repo_root), home=str(home)

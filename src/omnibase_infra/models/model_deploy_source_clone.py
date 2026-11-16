@@ -14,9 +14,11 @@ class ModelDeploySourceClone(BaseModel):
     """Request and result of the deploy-source clone effect.
 
     ``resolve`` reads the declared settings and refuses a deploy source that is a
-    canonical clone. ``ensure`` also creates the agent's own clone when it is absent.
+    canonical clone or the agent's own code checkout (``code_checkout``, the repository
+    root of ``DEPLOY_AGENT_DIR``). ``ensure`` also creates the agent's own clone when it is absent.
     ``served_sha`` is the commit the agent was serving when the clone is created (empty
-    means the tracked ref's head on origin); ``created`` and ``mirror_fallbacks`` are
+    means the tracked ref's head on origin); ``timeout_seconds`` bounds each git command of a creation and must be declared by the
+    caller of ``ensure`` (zero is refused); ``created`` and ``mirror_fallbacks`` are
     results; a request leaves them at zero.
     """
 
@@ -30,7 +32,9 @@ class ModelDeploySourceClone(BaseModel):
     served_sha: str = ""
     lab_overlay_source: str
     host_root: str = ""
+    code_checkout: str = ""
     registry_root: str = ""
+    timeout_seconds: float = 0.0
     created: bool = False
     mirror_fallbacks: int = 0
 

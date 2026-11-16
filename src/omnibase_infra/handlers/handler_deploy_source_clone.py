@@ -15,7 +15,9 @@ owns. Four settings, none with a hidden default (rule 8):
     The agent's OWN clone, a path under its state directory.
 ``DEPLOY_AGENT_CANONICAL_CLONE``
     The canonical clone. Never mutated and never read for a commit: it anchors the
-    guard. The first creation is seeded at the commit the agent was serving.
+    guard, together with the agent's own code checkout (the repository root of
+    ``DEPLOY_AGENT_DIR``), which the agent updates by pull and never by reset. The
+    first creation is seeded at the commit the agent was serving.
 ``DEPLOY_AGENT_LAB_OVERLAY_SOURCE``
     The overlay source clone, which used to be derived from the deploy source's parent.
     Required only when the fence names the lab dev lane; a non-lab fence never reads
@@ -52,6 +54,8 @@ ENV_GIT_MIRROR = "DEPLOY_AGENT_GIT_MIRROR_URL"
 ENV_TRACKING_REF = "DEPLOY_AGENT_TRACKING_REF"
 ENV_OVERLAY_STORE = "DEV_LANE_OVERLAY_STORE_ROOTS_DIR"
 ENV_FENCE = "DEPLOY_AGENT_ALLOWED_LANES"
+ENV_AGENT_DIR = "DEPLOY_AGENT_DIR"
+TIMED_OUT = 124
 MIRROR_FALLBACK_COUNT_FILE = "mirror-fallbacks.count"
 
 
@@ -65,6 +69,12 @@ class DeploySourceIsCanonicalCloneError(DeploySourceCloneError):
 
 def _fence(env: Mapping[str, str]) -> set[str]:
     return {token.strip() for token in env.get(ENV_FENCE, "").split(",")}
+
+
+def _code_checkout(env: Mapping[str, str]) -> str:
+    """The repository root of the agent's code (``<root>/scripts/deploy-agent``)."""
+    agent_dir = env.get(ENV_AGENT_DIR, "").strip()
+    return str(Path(agent_dir).parents[1]) if len(Path(agent_dir).parts) > 2 else ""
 
 
 def settings(env: Mapping[str, str]) -> ModelDeploySourceClone:
@@ -90,6 +100,7 @@ def settings(env: Mapping[str, str]) -> ModelDeploySourceClone:
         tracking_ref=env[ENV_TRACKING_REF].strip(),
         mirror_url=env.get(ENV_GIT_MIRROR, "").strip(),
         host_root=env.get("OMNI_HOME", "").strip(),
+        code_checkout=_code_checkout(env),
         registry_root=env.get("UNIT_DRIFT_REGISTRY_ROOT", "").strip(),
     )
     _refuse_canonical(declared)
@@ -99,17 +110,19 @@ def settings(env: Mapping[str, str]) -> ModelDeploySourceClone:
 def _git(
     *args: str, cwd: Path | None = None, timeout: float | None = None
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *(["-C", str(cwd)] if cwd else []), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=timeout,
-    )
+    argv = ["git", *(["-C", str(cwd)] if cwd else []), *args]
+    try:
+        return subprocess.run(
+            argv, capture_output=True, text=True, check=False, timeout=timeout
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            argv, TIMED_OUT, "", f"git {args[0]} timed out after {timeout}s"
+        )
 
 
-def _git_ok(*args: str, cwd: Path | None = None) -> str:
-    result = _git(*args, cwd=cwd)
+def _git_ok(*args: str, timeout: float, cwd: Path | None = None) -> str:
+    result = _git(*args, cwd=cwd, timeout=timeout)
     if result.returncode != 0:
         raise DeploySourceCloneError(
             f"git {args[0]} failed (rc={result.returncode}): {result.stderr.strip()}"
@@ -142,13 +155,16 @@ def _refuse_canonical(request: ModelDeploySourceClone) -> None:
     for root in (request.host_root, request.registry_root):
         if root:
             candidates.append(Path(root) / Path(request.canonical_clone).name)
+    if request.code_checkout:
+        candidates.append(Path(request.code_checkout))
     for candidate in candidates:
         real = Path(os.path.realpath(candidate))
         if clone_real == real or real in clone_real.parents:
             raise DeploySourceIsCanonicalCloneError(
                 f"{ENV_CLONE_DIR}={request.clone_dir} resolves to the canonical clone "
-                f"{candidate}: the agent resets and cleans its deploy source, and that "
-                "clone belongs to other tools"
+                f"or the agent's code checkout {candidate}: the agent resets and cleans "
+                "its deploy source, and that clone belongs to other tools or is the "
+                "code the agent runs"
             )
 
 
@@ -255,6 +271,12 @@ def _create(request: ModelDeploySourceClone) -> tuple[bool, int]:
     canonical = Path(request.canonical_clone)
     if (clone / ".git").exists():
         return False, read_mirror_fallback_count(clone)
+    timeout = request.timeout_seconds
+    if timeout <= 0:
+        raise DeploySourceCloneError(
+            f"cannot create {clone}: the request declares no timeout, and a clone "
+            "that never finishes would hang the agent's start"
+        )
     if not (canonical / ".git").exists():
         raise DeploySourceCloneError(
             f"cannot create {clone}: {canonical} is not a git clone, so there is "
@@ -262,28 +284,42 @@ def _create(request: ModelDeploySourceClone) -> tuple[bool, int]:
         )
     # The canonical clone is read for its origin url only, never for a commit: its
     # HEAD is whatever another tool left there, not what the agent was serving.
-    origin_url = _git_ok("remote", "get-url", "origin", cwd=canonical)
+    origin_url = _git_ok("remote", "get-url", "origin", cwd=canonical, timeout=timeout)
     fetch_url = _first_answering(
         request,
         origin_url,
-        lambda target: _git("ls-remote", "--exit-code", target, "HEAD").returncode,
+        lambda target: _git(
+            "ls-remote", "--exit-code", target, "HEAD", timeout=timeout
+        ).returncode,
     )
     clone.parent.mkdir(parents=True, exist_ok=True)
     partial = clone.with_name(clone.name + ".partial")
     if partial.exists():
         shutil.rmtree(partial)  # leftover of an interrupted creation, agent-owned
-    _git_ok("clone", "--no-checkout", fetch_url, str(partial))
+    _git_ok("clone", "--no-checkout", fetch_url, str(partial), timeout=timeout)
     if fetch_url != origin_url:
-        _git_ok("remote", "set-url", "--push", "origin", origin_url, cwd=partial)
+        _git_ok(
+            "remote",
+            "set-url",
+            "--push",
+            "origin",
+            origin_url,
+            cwd=partial,
+            timeout=timeout,
+        )
     served_sha = request.served_sha or _git_ok(
         "rev-parse",
         "--verify",
         f"refs/remotes/origin/{request.tracking_ref}^{{commit}}",
         cwd=partial,
+        timeout=timeout,
     )
-    if _git("cat-file", "-e", f"{served_sha}^{{commit}}", cwd=partial).returncode != 0:
-        _git_ok("fetch", origin_url, served_sha, cwd=partial)
-    _git_ok("checkout", "-B", request.tracking_ref, served_sha, cwd=partial)
+    has_commit = _git("cat-file", "-e", f"{served_sha}^{{commit}}", cwd=partial)
+    if has_commit.returncode != 0:
+        _git_ok("fetch", origin_url, served_sha, cwd=partial, timeout=timeout)
+    _git_ok(
+        "checkout", "-B", request.tracking_ref, served_sha, cwd=partial, timeout=timeout
+    )
     partial.rename(clone)
     logger.info("OMN-24562 created deploy-source clone %s at %s", clone, served_sha)
     return True, read_mirror_fallback_count(clone)

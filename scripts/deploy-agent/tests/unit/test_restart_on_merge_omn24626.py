@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -24,6 +25,12 @@ rom = executor_mod.load_dev_boot_guard("handler_restart_on_merge")
 MODELS = sys.modules["omnibase_infra.models.model_restart_on_merge"]
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+#: An execution with no ledger to write to: a refusal is logged as pending.
+NO_LEDGER = SimpleNamespace(
+    dev_boot_report_config=lambda: SimpleNamespace(
+        plugin_dir=None, ledger_via_bus=False
+    )
+)
 MANIFEST = REPO_ROOT / "deploy" / "unit-drift-manifest.yaml"
 PROD_UNIT = "deploy-agent.service"
 DEV_UNITS = {
@@ -96,6 +103,8 @@ def test_restart_on_merge_executor_syncs_and_restarts_nothing_for_a_prod_agent()
 ):
     refusals: list[str] = []
     with (
+        patch.object(rom.sys, "platform", "linux"),
+        patch.object(rom, "read_own_cgroup", return_value=""),
         patch.object(
             rom,
             "write_refusal_status",
@@ -124,7 +133,7 @@ def test_restart_on_merge_a_process_without_the_settings_keeps_its_revision() ->
         **dict.fromkeys(rom.REQUIRED_SETTINGS, "/x"),
         "DEPLOY_AGENT_ALLOWED_LANES": "dev",
     }
-    assert rom.reexec_blocked_by_settings(carried) is False
+    assert rom.reexec_blocked_by_settings(NO_LEDGER, carried) is False
     for name in rom.REQUIRED_SETTINGS:
         partial = {k: v for k, v in carried.items() if k != name}
-        assert rom.reexec_blocked_by_settings(partial) is True
+        assert rom.reexec_blocked_by_settings(NO_LEDGER, partial) is True

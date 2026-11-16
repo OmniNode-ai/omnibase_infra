@@ -32,6 +32,12 @@ clone = executor_mod.load_dev_boot_guard("handler_deploy_source_clone")
 models = sys.modules["omnibase_infra.models.model_restart_on_merge"]
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+#: An execution with no ledger to write to: a refusal is logged as pending.
+NO_LEDGER = SimpleNamespace(
+    dev_boot_report_config=lambda: SimpleNamespace(
+        plugin_dir=None, ledger_via_bus=False
+    )
+)
 STORE_TARGET = "/etc/onex/skill-overlays-store"
 SETTINGS = {
     "DEPLOY_AGENT_REPO_DIR": "/state/deploy-source/omnibase_infra",
@@ -102,11 +108,9 @@ def test_restart_on_merge_guard_check_host_names_each_agent_lacking_settings(
     assert handler.handle(request).restartable is True
 
 
-def test_restart_on_merge_guard_check_host_skips_the_prod_fence_and_absent_units(
+def test_restart_on_merge_guard_check_host_skips_absent_units(
     tmp_path: Path,
 ) -> None:
-    repo = _world(tmp_path, fence="prod", store={})
-    assert rom.check_host(_entries(repo), repo, tmp_path / "home") == ()
     other = _world(tmp_path / "other", store={})
     assert rom.check_host(_entries(other), other, tmp_path / "nobody") == ()
 
@@ -156,39 +160,6 @@ def test_restart_on_merge_guard_the_tracked_units_name_the_store_they_source() -
 # --- finding 3 -----------------------------------------------------------------
 
 
-@pytest.fixture
-def fake_systemd(tmp_path: Path) -> Iterator[SimpleNamespace]:
-    """``systemctl`` and ``git`` stand-ins on PATH; ``alive`` lists each check's answer."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    log = tmp_path / "calls.log"
-    alive = tmp_path / "alive"
-    (bin_dir / "systemctl").write_text(
-        "#!/bin/bash\n"
-        f'echo "systemctl $*" >> {log}\n'
-        'case "$*" in\n'
-        f"  *is-active*) a=$(head -n1 {alive}); sed -i 1d {alive}; "
-        '[ "$a" = up ] && exit 0 || exit 3;;\n'
-        "  *NRestarts*) echo 0;;\n"
-        "esac\nexit 0\n",
-        "utf-8",
-    )
-    (bin_dir / "git").write_text(f'#!/bin/bash\necho "git $*" >> {log}\n', "utf-8")
-    for tool in bin_dir.iterdir():
-        tool.chmod(0o755)
-    installed = tmp_path / "agent.service"
-    installed.write_text("new unit\n", "utf-8")
-    installed.with_name("agent.service.bak-unit-drift-20260101T000000Z").write_text(
-        "previous unit\n", "utf-8"
-    )
-
-    def run(argv: list[str]) -> int:
-        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
-        return subprocess.run(argv, env=env, check=False).returncode
-
-    return SimpleNamespace(log=log, alive=alive, installed=installed, run=run)
-
-
 def _restart(world: SimpleNamespace, tmp_path: Path) -> None:
     rom.restart_synced_unit(
         models.ModelRestartOnMerge(unit="agent.service", repo_root="/r", home="/h"),
@@ -235,14 +206,6 @@ def test_exit_zero_then_dead_a_live_start_runs_no_rollback(
     assert fake_systemd.installed.read_text("utf-8") == "new unit\n"
 
 
-def test_exit_zero_then_dead_is_raised_past_self_update() -> None:
-    """``self_update`` no longer swallows an agent left stopped."""
-    source = Path(executor_mod.__file__).read_text("utf-8")
-    block = source[source.index("restart_own_unit(") :]
-    block = block[: block.index("# STEP 2")]
-    assert '"AgentLeftStoppedError"' in block and "raise" in block
-
-
 # --- finding 4 -----------------------------------------------------------------
 
 
@@ -266,9 +229,9 @@ def test_settings_env_file_reexec_reads_the_store_the_launcher_sources(
         "".join(f"{k}={v}\n" for k, v in SETTINGS.items()) + "EMPTY=\n", "utf-8"
     )
     env = {"DEPLOY_AGENT_ENV_FILE": str(store), "DEPLOY_AGENT_ALLOWED_LANES": "dev"}
-    assert rom.reexec_blocked_by_settings(env) is False
+    assert rom.reexec_blocked_by_settings(NO_LEDGER, env) is False
     store.write_text("DEPLOY_AGENT_REPO_DIR=\n", "utf-8")
-    assert rom.reexec_blocked_by_settings(env) is True
+    assert rom.reexec_blocked_by_settings(NO_LEDGER, env) is True
 
 
 def test_settings_env_file_refusal_writes_one_status_row(tmp_path: Path) -> None:

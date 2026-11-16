@@ -10,7 +10,7 @@ runtime_profiles: [main]
 contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 description: >-
-  Host-local decision on whether a merge may sync and restart one deploy-agent unit (verify), and the blocking per-host check over every non-prod agent installed on a host (check_host). The restart set is the declared agent units whose own tracked fence does not name prod and whose tracked unit or env files (EnvironmentFile= and DEPLOY_AGENT_ENV_FILE, read when the check runs) assign the deploy-source settings the new code refuses to start without.
+  Host-local decision on whether a merge may sync and restart one deploy-agent unit (verify), and the blocking per-host check over every agent installed on a host, the prod-fenced unit and each launchd instance included (check_host). The restart set is the declared agent units whose own tracked fence does not name prod and whose tracked unit or env files (EnvironmentFile= and DEPLOY_AGENT_ENV_FILE, read when the check runs) assign the deploy-source settings the new code refuses to start without.
 input: "omnibase_infra.models.model_restart_on_merge.ModelRestartOnMerge"
 input_model:
   name: ModelRestartOnMerge
@@ -32,7 +32,7 @@ capabilities:
   - name: restart_on_merge.verify
     description: Keep a merge from restarting a prod agent or an agent whose new code would refuse to start.
   - name: restart_on_merge.check_host
-    description: List every non-prod agent installed on a host whose env files lack a required setting; a gap blocks the merge.
+    description: List every agent installed on a host, prod-fenced unit and launchd instances included, whose env files lack a required setting (names only); a gap blocks the merge.
 metadata:
   ticket: OMN-24677
   author: OmniNode Team

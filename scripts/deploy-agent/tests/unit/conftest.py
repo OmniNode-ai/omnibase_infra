@@ -25,6 +25,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import Executor, Future
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -921,3 +922,51 @@ def local_inspect_image() -> Iterator[str]:
             timeout=30,
             check=False,
         )
+
+
+@pytest.fixture
+def fake_systemd(tmp_path: Path) -> Iterator[SimpleNamespace]:
+    """``systemctl`` and ``git`` stand-ins on PATH; ``alive`` lists each check's answer."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "calls.log"
+    alive = tmp_path / "alive"
+    restarts = tmp_path / "nrestarts"
+    restarts.write_text("", "utf-8")
+    # Each answer is the first line of its file, then dropped with POSIX tools only
+    # (no ``sed -i``, which BSD sed reads differently).
+    (bin_dir / "systemctl").write_text(
+        "#!/bin/bash\n"
+        f'echo "systemctl $*" >> {log}\n'
+        'pop() { head -n1 "$1"; tail -n +2 "$1" > "$1.tmp"; mv "$1.tmp" "$1"; }\n'
+        'case "$*" in\n'
+        f'  *is-active*) a=$(pop {alive}); [ "$a" = up ] && exit 0 || exit 3;;\n'
+        f'  *NRestarts*) n=$(pop {restarts}); echo "${{n:-0}}";;\n'
+        "esac\nexit 0\n",
+        "utf-8",
+    )
+    (bin_dir / "git").write_text(
+        f'#!/bin/bash\necho "git $*" >> {log}\n'
+        f'case "$*" in *rev-parse*) echo {"b" * 40};; esac\n',
+        "utf-8",
+    )
+    for tool in bin_dir.iterdir():
+        tool.chmod(0o755)
+    installed = tmp_path / "agent.service"
+    installed.write_text("new unit\n", "utf-8")
+    installed.with_name("agent.service.bak-unit-drift-20260101T000000Z").write_text(
+        "previous unit\n", "utf-8"
+    )
+
+    def run(argv: list[str]) -> int:
+        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+        return subprocess.run(argv, env=env, check=False).returncode
+
+    return SimpleNamespace(
+        log=log,
+        alive=alive,
+        restarts=restarts,
+        installed=installed,
+        bin_dir=bin_dir,
+        run=run,
+    )

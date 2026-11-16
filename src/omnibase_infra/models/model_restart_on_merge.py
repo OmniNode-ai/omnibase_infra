@@ -15,8 +15,11 @@ class ModelRestartOnMerge(BaseModel):
     """The unit asked about (``verify``) or a whole host (``check_host``), and the decision.
 
     ``verify`` decides one unit, and names the unit a restart acts on; ``check_host``
-    reads every non-prod agent unit installed under ``home`` and lists each one whose
-    env files lack a required setting. ``restartable`` is true only with no gap.
+    reads every agent unit installed under ``home``, the prod-fenced one included (the
+    code running at the merge restarts every installed agent), and each launchd
+    instance, and lists each one whose env files lack a required setting. A launchd
+    instance re-execs through its launcher with no guard at all, so every installed one
+    is named in ``launchd_instances``. ``restartable`` is true only with no gap.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -28,3 +31,4 @@ class ModelRestartOnMerge(BaseModel):
     restartable: bool = False
     reason: str = ""
     gaps: tuple[ModelUnitSettingsGap, ...] = ()
+    launchd_instances: tuple[str, ...] = ()

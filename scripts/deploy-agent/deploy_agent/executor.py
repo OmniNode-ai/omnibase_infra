@@ -282,10 +282,9 @@ logger = logging.getLogger(__name__)
 @functools.cache
 def deploy_source() -> ModelDeploySourceClone:
     """The agent's OWN deploy-source settings (OMN-24562), read on first use, never at import."""
-    return cast(
-        "ModelDeploySourceClone",
-        load_dev_boot_guard("handler_deploy_source_clone").settings(os.environ),
-    )
+    declared = _clone_handler().settings(os.environ)
+    bound = {"timeout_seconds": 5 * PHASE_TIMEOUTS[Phase.GIT]}
+    return cast("ModelDeploySourceClone", declared.model_copy(update=bound))
 
 
 def deploy_repo_dir() -> str:
@@ -3827,6 +3826,9 @@ class DeployExecutor:
 
         disk_sha = head_result.stdout.strip()
         remote_sha = remote_result.stdout.strip()
+        guard = load_dev_boot_guard("handler_restart_on_merge")
+        if guard.skip_refused_revision(sys.modules[__name__], remote_sha, os.environ):
+            return
 
         # STEP 1 -- bring the CLONE up to the remote. This is the only thing the
         # clone-versus-remote comparison decides, and the only thing it ever
@@ -3905,7 +3907,7 @@ class DeployExecutor:
                 )
                 if on_before_reexec is not None:
                     on_before_reexec()
-                load_dev_boot_guard("handler_restart_on_merge").restart_own_unit(
+                guard.restart_own_unit(
                     sys.modules[__name__],
                     synced_unit,
                     agent_dir=agent_dir,
@@ -3915,7 +3917,7 @@ class DeployExecutor:
                 )
                 return
         except Exception as exc:
-            if type(exc).__name__ == "AgentLeftStoppedError":
+            if isinstance(exc, guard.AgentLeftStoppedError):
                 raise
             logger.warning(
                 "self_update[boundary=%s]: unit sync/restart failed: %s",
@@ -3945,9 +3947,7 @@ class DeployExecutor:
             disk_sha[:12],
         )
 
-        if load_dev_boot_guard("handler_restart_on_merge").reexec_blocked_by_settings(
-            os.environ
-        ):
+        if guard.reexec_blocked_by_settings(sys.modules[__name__], os.environ):
             return
 
         # Sync deps so new imports are available after re-exec.
