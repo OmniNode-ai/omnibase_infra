@@ -51,6 +51,24 @@ def test_plugin_pin_cascade_is_dispatch_only() -> None:
     assert set(_triggers("plugin-pin-cascade.yml")) == {"workflow_dispatch"}
 
 
+@pytest.mark.unit
+def test_plugin_pin_cascade_keeps_no_dead_dispatch_branch() -> None:
+    """With the release trigger gone, no step may read the dispatch payload.
+
+    A ``client_payload`` read or an ``EVENT_NAME`` branch on
+    ``repository_dispatch`` would be dead code that reads as live.
+    """
+    code = "\n".join(
+        line
+        for line in (WORKFLOWS / "plugin-pin-cascade.yml")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    assert "client_payload" not in code
+    assert "repository_dispatch" not in code
+
+
 def _other_workflows() -> list[Path]:
     return [
         path
