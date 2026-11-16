@@ -27,14 +27,14 @@ import pytest
 import yaml
 from deploy_agent import agent as agent_mod
 from deploy_agent import events as events_mod
-from deploy_agent.agent import JOB_READING_RUNTIME
+from deploy_agent.agent import JOB_READING
 from deploy_agent.events import DEPLOY_PHASE_ORDER, EnumRuntimeLane, Phase, PhaseStatus
 from deploy_agent.executor import load_dev_boot_guard
 from deploy_agent.job_state import JobState
 
 pytestmark = pytest.mark.unit
 
-runtime_mod = load_dev_boot_guard(JOB_READING_RUNTIME)
+runtime_mod = load_dev_boot_guard(JOB_READING)
 handler_mod = runtime_mod.handler_module
 request_mod = runtime_mod.request_module
 
@@ -205,9 +205,12 @@ def _fake_append_command(tmp_path: Path, exit_code: int = 0) -> tuple[str, Path]
     record = tmp_path / "record.json"
     script = tmp_path / "append.py"
     script.write_text(
-        "import json, sys\n"
-        f"open({str(record)!r}, 'w').write(json.dumps({{'argv': sys.argv[1:], "
-        "'stdin': sys.stdin.read()}))\n"
+        "import json, os, sys\n"
+        "body = sys.stdin.read()\n"
+        # the first invocation is the reading; a failed job's alarm row follows it (OMN-24562)
+        f"if not os.path.exists({str(record)!r}):\n"
+        f"    open({str(record)!r}, 'w').write(json.dumps({{'argv': sys.argv[1:], "
+        "'stdin': body}))\n"
         "print(json.dumps({'status': 'accepted'}))\n"
         f"sys.exit({exit_code})\n",
         encoding="utf-8",
@@ -254,7 +257,7 @@ def test_row_is_appended_through_the_reading_writers_append_command(
     assert cells["failing_step"] == "verification"
     assert cells["deploy_lane"] == STABILITY
     # a retry of the same job is the same request
-    again = _handler().request_id(_request(job))
+    again = handler_mod._request_id(_request(job))
     assert again == result.append_key
 
 
@@ -331,7 +334,7 @@ def test_publish_terminal_hands_the_settled_job_to_the_reading() -> None:
         if isinstance(call, ast.Call)
     ]
     assert "publish_result" in calls
-    reading = "load_dev_boot_guard(JOB_READING_RUNTIME).publish"
+    reading = "self._job_reading"
     assert reading in calls
     assert calls.index(reading) > calls.index("publish_result")
 
