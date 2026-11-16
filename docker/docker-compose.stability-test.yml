@@ -360,6 +360,7 @@ services:
         condition: service_completed_successfully
       redpanda-partition-cap:
         condition: service_completed_successfully
+      lane-redpanda-sasl-enable: *lane_sasl_enable_dependency
     environment:
       !!merge <<: [*stability_test_strict_wiring_env, *stability_test_lane_identity_env]
       # OMN-21288: carried over unchanged from runtime-effects.
@@ -475,6 +476,7 @@ services:
     depends_on:
       migration-gate:
         condition: service_healthy
+      lane-redpanda-sasl-enable: *lane_sasl_enable_dependency
     environment:
       # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
       ONEX_RUNTIME_LANE: "stability-test"
@@ -587,6 +589,7 @@ services:
     depends_on:
       migration-gate:
         condition: service_healthy
+      lane-redpanda-sasl-enable: *lane_sasl_enable_dependency
     environment:
       !!merge <<: *stability_test_strict_wiring_env
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED}

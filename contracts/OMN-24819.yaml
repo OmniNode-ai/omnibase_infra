@@ -70,17 +70,20 @@ dod_evidence:
     binds_ac: [AC4]
     checks:
       - check_type: command
-        check_value: "onex scm pr-view OmniNode-ai/omnibase_infra#5855 | grep -q 'Lab: head='"
+        check_value: "onex scm pr-view OmniNode-ai/omnibase_infra#5855 | grep -qF \"Lab: head=$(git rev-parse HEAD)\""
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24819-ac5-no-weakened-check
     description: >-
-      The diff from head 418b2cf0cd5a to the new head adds no skip or xfail marker to tests, edits no workflow and edits nothing under scripts/ci. Read at the local done gate, where that head is in the clone.
+      The diff from head 418b2cf0cd5a to the new head adds no skip or xfail marker to tests, edits no workflow and edits nothing under scripts/ci, and removes no assert line from the rollback-set test or the refresh-script test (OMN-24908). Read at the local done gate, where that head is in the clone.
     source: manual
     execution_scope: local_done_gate
     binds_ac: [AC5]
     checks:
       - check_type: command
         check_value: "! git diff 418b2cf0cd5a22d171021f78c56895e054aaa207 HEAD -- tests/ .github/ scripts/ci/ | grep -E '^\\+.*(pytest\\.mark\\.(skip|xfail)|pytest\\.skip|pytest\\.xfail)'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: "! git diff 418b2cf0cd5a22d171021f78c56895e054aaa207 HEAD -- tests/scripts/test_stability_lane_rollback_omn18061.py tests/unit/docker/test_refresh_stability_sasl_omn23363.py | grep -E '^-[[:space:]]*assert '"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24819-ac3-deploy-probe
     description: >-

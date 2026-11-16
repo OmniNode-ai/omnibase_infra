@@ -14,13 +14,18 @@ tests pin that wiring from the script text alone:
   one-shots (they run a pinned upstream image, so no
   ``<project>-<service>:latest`` anchor exists for them);
 * the deploy exit path is captured, guarded and re-raised;
-* the scope reaches the deploy through exactly one override line.
+* the scope reaches the deploy through exactly one override line;
+* the deploy step itself is RUN, with a stub deploy, so a nonzero deploy exit fails the
+  refresh, ``LANE_BROKER_AUTH_ENV_FILE`` reaches the deploy's environment and a ref
+  with no SASL flip is deployed without the flip one-shots (OMN-24908).
 """
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -182,3 +187,128 @@ def test_refresh_stability_scope_is_handed_to_the_deploy_as_one_override() -> No
         )
     if lines[matches[0]].strip() != OVERRIDE_EXPORT:
         pytest.fail(f"unexpected override line: {lines[matches[0]]!r}")
+
+
+DEPLOY_BLOCK_START = 'log "=== Build + restart (scoped to:'
+AUTH_FILE = "/lane/broker-auth.env"
+
+
+def _deploy_block(lines: list[str]) -> str:
+    """From the build-and-restart log line through the guard's closing ``fi``."""
+    start = _find_prefix(lines, DEPLOY_BLOCK_START)
+    guard = _line_index(lines, DEPLOY_GUARD, start)
+    exit_line = _stripped_line_index(lines, EXIT_LINE, guard + 1)
+    assert min(guard, exit_line) > 0, (guard, exit_line)
+    assert lines[exit_line + 1].strip() == "fi", lines[exit_line + 1]
+    return "\n".join(lines[start : exit_line + 2])
+
+
+def _run_deploy_block(
+    tmp_path: Path,
+    *,
+    deploy_exit: int,
+    pre_sasl_ref: bool = False,
+    auth_file: str | None = AUTH_FILE,
+) -> subprocess.CompletedProcess[str]:
+    """Run the script's own deploy step against a stub ``onex-runtime-deploy``.
+
+    The scope arrays are the script's real declarations. ``LANE_BROKER_AUTH_ENV_FILE``
+    is set as a plain shell variable (not exported), the way a sourced operator env
+    leaves it, so only the script's own pass-through can hand it to the deploy.
+    """
+    lines = _script_lines()
+    stub = tmp_path / "deploy-stub"
+    stub.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/bin/sh
+            {{
+              echo "auth=${{LANE_BROKER_AUTH_ENV_FILE-unset}}"
+              echo "scope=${{RUNTIME_BUILD_SERVICES_OVERRIDE-unset}}"
+            }} > "{tmp_path}/deploy.env"
+            exit {deploy_exit}
+            """
+        ),
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    auth = f'LANE_BROKER_AUTH_ENV_FILE="{auth_file}"' if auth_file else ":"
+    program = "\n".join(
+        [
+            "set -euo pipefail",
+            'log() { echo "$*"; }',
+            'err() { echo "$*" >&2; }',
+            _scope_block(lines),
+            f'DEPLOY_RUNTIME="{stub}"',
+            "OMNI_HOME=/omni REPO_ROOT=/repo COMPOSE_PROJECT=omnibase-infra-lane",
+            "REF=ref DEPLOY_SIBLING_REFS= RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS=5",
+            "NEW_INFRA_SHA_SHORT=abc",
+            f"PRE_SASL_REF={'true' if pre_sasl_ref else 'false'}",
+            auth,
+            _deploy_block(lines),
+            "echo REACHED_AFTER_DEPLOY",
+        ]
+    )
+    env = {k: v for k, v in os.environ.items() if k != "LANE_BROKER_AUTH_ENV_FILE"}
+    return subprocess.run(
+        ["bash", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        env=env,
+    )
+
+
+def _deploy_seen(tmp_path: Path) -> dict[str, str]:
+    seen = (tmp_path / "deploy.env").read_text(encoding="utf-8").splitlines()
+    return dict(line.split("=", 1) for line in seen)
+
+
+@pytest.mark.unit
+def test_refresh_stability_a_nonzero_deploy_fails_the_refresh_when_run(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "ok").mkdir()
+    ok = _run_deploy_block(tmp_path / "ok", deploy_exit=0)
+    assert ok.returncode == 0, ok.stderr
+    assert "REACHED_AFTER_DEPLOY" in ok.stdout
+    (tmp_path / "bad").mkdir()
+    bad = _run_deploy_block(tmp_path / "bad", deploy_exit=3)
+    assert bad.returncode == 3, (bad.stdout, bad.stderr)
+    assert "failing the refresh" in bad.stderr
+    assert "REACHED_AFTER_DEPLOY" not in bad.stdout
+
+
+@pytest.mark.unit
+def test_refresh_stability_lane_broker_auth_env_file_reaches_the_deploy(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "set").mkdir()
+    (tmp_path / "unset").mkdir()
+    run = _run_deploy_block(tmp_path / "set", deploy_exit=0)
+    assert run.returncode == 0, run.stderr
+    assert _deploy_seen(tmp_path / "set")["auth"] == AUTH_FILE
+    # A host with no auth file hands the deploy an empty value, which compose's
+    # `${LANE_BROKER_AUTH_ENV_FILE:-/dev/null}` reads as unset.
+    none = _run_deploy_block(tmp_path / "unset", deploy_exit=0, auth_file=None)
+    assert none.returncode == 0, none.stderr
+    assert _deploy_seen(tmp_path / "unset")["auth"] == ""
+
+
+@pytest.mark.unit
+def test_refresh_stability_a_ref_without_the_flip_is_deployed_without_the_one_shots(
+    tmp_path: Path,
+) -> None:
+    for name in ("sasl", "pre"):
+        (tmp_path / name).mkdir()
+    assert _run_deploy_block(tmp_path / "sasl", deploy_exit=0).returncode == 0
+    scope = _deploy_seen(tmp_path / "sasl")["scope"].split()
+    assert set(ONE_SHOTS) <= set(scope)
+    assert (
+        _run_deploy_block(tmp_path / "pre", deploy_exit=0, pre_sasl_ref=True).returncode
+        == 0
+    )
+    pre = _deploy_seen(tmp_path / "pre")["scope"].split()
+    assert not set(ONE_SHOTS) & set(pre), pre
+    assert set(pre) == set(scope) - set(ONE_SHOTS)

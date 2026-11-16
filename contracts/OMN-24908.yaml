@@ -1,0 +1,147 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24908
+title: "Review findings 1 to 8 on omnibase_infra PR 5855 at head deb4ed813238 are fixed or argued: the runtime family orders behind the SASL flip, the stability tests can fail, and AC2 is restored with the lab readback"
+summary: >-
+  Fixes for review findings 1 to 8 at head deb4ed813238 on omnibase_infra#5855 (OMN-23363, SASL on the stability lane's Redpanda). The runtime family carries a direct depends_on on the flip one-shot, the refresh tests run the script's deploy step against a stub deploy (nonzero exit, auth-file pass-through, scope), the flip test fixture carries the auth file's RPK variables, the client derivation reads the lane's real compose file list and extends targets, OMN-23363 AC2 is restored bound to the lab readback, and the refresh gains an un-flip step for a ref that predates the flip.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24908-review-findings
+    statement: >-
+      The blocking review findings 1 to 8 on omnibase_infra#5855 at head deb4ed813238 are fixed in the diff or answered with evidence, and each guard test fails on a fixture or mutation that breaks the behaviour it names.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: omninode-runtime, runtime-effects and runtime-worker in the proof lane's compose overlay each carry a direct depends_on on lane-redpanda-sasl-enable, and a test reads each service's own depends_on array, not the walked graph -- falsifier: `uv run pytest tests/unit/docker/test_stability_sasl_omn23363.py -q` still passes with the direct edge deleted from any one of the three services
+      - id: AC2
+        statement: >-
+          AC2: LANE_BROKER_AUTH_ENV_FILE reaches compose inside onex-runtime-deploy, and a test asserts the pass-through in scripts/runtime_build/refresh_stability_lane.sh -- falsifier: `uv run pytest tests/unit/docker -k refresh_stability -q` still passes with the pass-through removed
+      - id: AC3
+        statement: >-
+          AC3: the refresh test runs the script with a stub deploy that exits nonzero and asserts the refresh exits nonzero, so a guard in a dead branch fails it -- falsifier: `uv run pytest tests/unit/docker/test_refresh_stability_sasl_omn23363.py -q` still passes with the guard moved into a branch that never runs
+      - id: AC4
+        statement: >-
+          AC4: the AUTHED fixture in tests/unit/docker/test_stability_sasl_omn23363.py carries RPK_USER and RPK_PASS, so deleting `env -u RPK_USER -u RPK_PASS` in the flip one-shot fails a test -- falsifier: `uv run pytest tests/unit/docker/test_stability_sasl_omn23363.py -q` still passes with that deletion
+      - id: AC5
+        statement: >-
+          AC5: the client derivation reads the lane's real -f list, covers clients that use ${KAFKA_BOOTSTRAP_SERVERS}, reads environment on extends targets and includes redpanda, and asserts that broker-profile.yml sets RPK_USER and RPK_PASS in environment and that the redpanda healthcheck uses the Kafka API -- falsifier: `uv run pytest tests/unit/docker/test_stability_sasl_omn23363.py -q` still passes with a client added in an extends target that has no SASL settings
+      - id: AC6
+        statement: >-
+          AC6: contracts/OMN-23363.yaml restores AC2 bound to the lab readback of enable_sasl on h051, and OMN-23363 stays open until h051 reads true -- falsifier: `grep -c 'AC2' contracts/OMN-23363.yaml` prints 0
+      - id: AC7
+        statement: >-
+          AC7: contracts/OMN-24819.yaml greps the full head sha in `Lab: head=`, the Lab comment for the new head is on the PR, and CI at the new head is read with delegation-health-check red only for OMN-24788 -- falsifier: `grep -n 'Lab: head=' contracts/OMN-24819.yaml` lists a grep that carries no sha variable
+      - id: AC8
+        statement: >-
+          AC8: the loosened `rollback_set == build_set` in tests/scripts/test_stability_lane_rollback_omn18061.py:588-596 is justified on the PR, scripts/runtime_build/refresh_stability_lane.sh gains an un-flip step so a rollback to a pre-SASL release cannot strand PLAINTEXT clients on a SASL broker, and the probe at line 83 also greps removed assertions -- falsifier: `uv run pytest tests/scripts/test_stability_lane_rollback_omn18061.py -q` still passes when the rollback leaves PLAINTEXT clients on a SASL broker
+      - id: AC9
+        statement: >-
+          AC9: a PR comment starts `Lab: head=<full new head>` and names the red and green run of each new test and the parts of any suite run in parts, with the required suites run on the lab -- falsifier: `uv run pytest tests/unit/docker tests/scripts/test_stability_lane_rollback_omn18061.py -q` exits non-zero on the lab at the new head
+evidence_requirements:
+  - kind: tests
+    description: The SASL stability compose tests, the refresh script tests and the rollback tests.
+    command: uv run --frozen pytest tests/unit/docker tests/scripts/test_stability_lane_rollback_omn18061.py -q -n 0 --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24908-ac1-direct-flip-edge
+    description: >-
+      The three runtime services each carry their own depends_on edge on lane-redpanda-sasl-enable and the tests read the services' own arrays; deleting the edge from any one of them, even with the partition cap still carrying it, fails a test.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn23363.py -k \"waits_for_the_flip or runtime_family\" -q -n 0 --no-cov -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24908-ac2-auth-file-pass-through
+    description: >-
+      The refresh script's deploy step is run against a stub deploy and the stub sees LANE_BROKER_AUTH_ENV_FILE although the variable is an unexported shell variable; with the pass-through line removed the test fails.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/docker/test_refresh_stability_sasl_omn23363.py -k auth_env_file -q -n 0 --no-cov -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24908-ac3-deploy-exit-run
+    description: >-
+      The refresh script's deploy step is run with a stub deploy that exits nonzero and the block exits with that code and never reaches the line after it; a guard in a dead branch fails the test.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/docker/test_refresh_stability_sasl_omn23363.py -k \"nonzero_deploy or without_the_one_shots\" -q -n 0 --no-cov -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24908-ac4-rpk-credentials-fixture
+    description: >-
+      The AUTHED fixture carries RPK_USER and RPK_PASS and the test runs the flip with the `env -u RPK_USER -u RPK_PASS` text removed: the flip then fails on the first listener.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn23363.py -k unsets_the_auth_files_rpk_credentials -q -n 0 --no-cov -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24908-ac5-real-file-list-derivation
+    description: >-
+      The derivation reads the lane's file list from the resolver the refresh uses, covers the bootstrap-variable clients, reads environment and env_file through extends, and asserts the redpanda healthcheck stays on the admin API and that broker-profile.yml sets no auth key in environment; a client added through an extends target without SASL settings fails it.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn23363.py -k \"file_list or extends or bootstrap_variable or healthcheck\" -q -n 0 --no-cov -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24908-ac6-ac2-restored
+    description: >-
+      contracts/OMN-23363.yaml carries AC2 bound to the lab readback item (local done gate scope, the scope OMN-24819 gives its AC4 and AC5 items); OMN-23363 stays open until h051 reads enable_sasl true.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: command
+        check_value: "grep -q 'id: AC2' contracts/OMN-23363.yaml && grep -q 'binds_ac: \\[AC2\\]' contracts/OMN-23363.yaml"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24908-ac7-lab-comment-full-sha
+    description: >-
+      The OMN-24819 lab comment probe greps the full head sha. The Lab comment for the head is read from the pull request at the local done gate, not on the hosted runner.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC7]
+    checks:
+      - check_type: command
+        check_value: "grep -n 'Lab: head=' contracts/OMN-24819.yaml | grep -q 'git rev-parse HEAD'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: "onex scm pr-view OmniNode-ai/omnibase_infra#5855 | grep -qF \"Lab: head=$(git rev-parse HEAD)\""
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24908-ac8-unflip-step
+    description: >-
+      The refresh script reads the target ref's overlay before checking it out; a ref without the flip un-flips the broker (read back as false), stops the refresh when it cannot, and is deployed without the flip one-shots; the rollback-set test keeps its original equality assertion.
+    source: manual
+    binds_ac: [AC8]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/scripts/test_stability_lane_rollback_omn18061.py -k \"flip or un_flip\" -q -n 0 --no-cov -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: "! git diff 418b2cf0cd5a22d171021f78c56895e054aaa207 HEAD -- tests/scripts/test_stability_lane_rollback_omn18061.py | grep -E '^-[[:space:]]*assert '"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24908-ac9-lab-suites
+    description: >-
+      The required suites run on the lab at the pushed head and the PR comment starting Lab: head= names the head. Read at the local done gate.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC9]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/docker tests/scripts/test_stability_lane_rollback_omn18061.py -q -n 0 --no-cov -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24908-ac8-deploy-probe
+    description: >-
+      Deploy probe. The proof lane's refresh script that GitHub serves at the checked-out commit carries the un-flip step and the auth-file pass-through. The probe reads the file from GitHub at that commit and exits nonzero on a tree without them.
+    source: manual
+    binds_ac: [AC8]
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/refresh_stability_lane.sh?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cE 'SASL_UNFLIP_FAILED|export LANE_BROKER_AUTH_ENV_FILE=' | grep -qx 2"
+        cwd: ${OMNI_HOME}/omnibase_infra

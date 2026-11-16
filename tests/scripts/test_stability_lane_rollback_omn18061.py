@@ -32,6 +32,7 @@ read from disk; the re-probe clock is injected.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -585,14 +586,16 @@ def test_the_rollback_set_is_the_deployed_set() -> None:
     assert len(build_set) >= 10, sorted(build_set)
     assert "runtime-effects" not in core_set | build_set | rollback_set
     assert core_set < build_set, "CORE_SERVICES must be a strict subset of the build"
-    # OMN-23363: the two SASL one-shots run a pinned upstream image, so there is
-    # no <project>-<service>:latest image to anchor or retag; they are the ONLY
-    # deployed services a rollback does not touch (the flip lives in the broker).
+    # OMN-23363: the two SASL one-shots run a pinned upstream image, so there is no
+    # <project>-<service>:latest image to anchor or retag, and the flip they assert
+    # lives in the broker. They are the ONLY deployed services a rollback does not
+    # touch: the exemption is pinned by name below, and every other deployed service
+    # must still equal the rollback set exactly, as the assertion below has always said.
     sasl_one_shots = {"lane-redpanda-scram-user", "lane-redpanda-sasl-enable"}
     assert sasl_one_shots <= build_set
-    assert rollback_set == build_set - sasl_one_shots, (
-        f"rollback set {sorted(rollback_set)} != deployed set minus the SASL "
-        f"one-shots {sorted(build_set - sasl_one_shots)}"
+    build_set -= sasl_one_shots
+    assert rollback_set == build_set, (
+        f"rollback set {sorted(rollback_set)} != deployed set {sorted(build_set)}"
     )
     assert rollback_set > core_set, (
         "a rollback set equal to CORE_SERVICES is the mixed-revision defect"
@@ -787,3 +790,111 @@ def test_dlq_saturation_annotation_says_so_when_no_group_can_be_attributed() -> 
 
     assert annotated["consumer_groups"] == []
     assert "no consumer group" in str(annotated["detail"]).lower()
+
+
+# ---------------------------------------------------------------------------
+# 5. A ref that predates the SASL flip cannot strand PLAINTEXT clients (OMN-24908)
+# ---------------------------------------------------------------------------
+
+#: The un-flip step is the one script line that starts with the PRE_SASL_REF read.
+_UNFLIP_START = "PRE_SASL_REF=false;"
+_OVERLAY_WITH_FLIP = "services:\n  lane-redpanda-sasl-enable:\n    restart: no\n"
+_OVERLAY_WITHOUT_FLIP = "services:\n  redpanda:\n    restart: no\n"
+_AUTH_FILE = "/lane/broker-auth.env"
+
+
+def _unflip_block() -> str:
+    lines = REFRESH_STABILITY.read_text().splitlines()
+    starts = [line for line in lines if line.startswith(_UNFLIP_START)]
+    assert len(starts) == 1, starts
+    return starts[0]
+
+
+def _run_unflip(
+    tmp_path: Path, overlay: str, *, auth_file: str | None, docker_exit: int = 0
+) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
+    """Run the script's own un-flip step with a stub ``docker`` and a stub ``git grep``.
+
+    ``git_clone <clone> grep -q <pattern> <sha> -- <path>`` is answered from the overlay
+    text the target ref is said to hold.
+    """
+    overlay_file = tmp_path / "overlay.yml"
+    overlay_file.write_text(overlay)
+    calls = tmp_path / "docker.calls"
+    program = "\n".join(
+        [
+            "set -euo pipefail",
+            'err() { echo "$*" >&2; }',
+            f'git_clone() {{ grep -q "$4" "{overlay_file}"; }}',
+            f'docker() {{ echo "$*" >> "{calls}"; return {docker_exit}; }}',
+            "INFRA_CLONE=/clone RESOLVED_REF_SHA=abc REF=old",
+            "LANE_COMPOSE_FILE=/clone/docker/overlay.yml",
+            "COMPOSE_PROJECT=omnibase-infra-lane",
+            f'LANE_BROKER_AUTH_ENV_FILE="{auth_file}"' if auth_file else ":",
+            _unflip_block(),
+            'echo "PRE_SASL_REF=${PRE_SASL_REF}"',
+        ]
+    )
+    env = {k: v for k, v in os.environ.items() if k != "LANE_BROKER_AUTH_ENV_FILE"}
+    proc = subprocess.run(
+        ["bash", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        env=env,
+    )
+    recorded = calls.read_text().splitlines() if calls.exists() else []
+    return proc, recorded, proc.stdout
+
+
+@pytest.mark.unit
+def test_a_ref_with_the_flip_leaves_the_broker_alone(tmp_path: Path) -> None:
+    proc, calls, out = _run_unflip(tmp_path, _OVERLAY_WITH_FLIP, auth_file=_AUTH_FILE)
+    assert proc.returncode == 0, proc.stderr
+    assert calls == []
+    assert "PRE_SASL_REF=false" in out
+
+
+@pytest.mark.unit
+def test_a_ref_before_the_flip_un_flips_the_broker_its_clients_would_meet(
+    tmp_path: Path,
+) -> None:
+    """The clients of a pre-SASL ref start PLAINTEXT; the broker must stop requiring SASL.
+
+    Red control: with the step removed the broker keeps ``enable_sasl`` true while the
+    clients of that ref carry no SASL settings, and nothing in this file noticed.
+    """
+    proc, calls, out = _run_unflip(
+        tmp_path, _OVERLAY_WITHOUT_FLIP, auth_file=_AUTH_FILE
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "PRE_SASL_REF=true" in out
+    assert len(calls) == 1, calls
+    call = calls[0]
+    assert "enable_sasl false" in call
+    assert f"--env-file {_AUTH_FILE}" in call
+    assert "--network omnibase-infra-lane-network" in call
+    assert "grep -qx false" in call, "the un-flip must read enable_sasl back as false"
+
+
+@pytest.mark.unit
+def test_a_ref_before_the_flip_on_a_host_that_never_flipped_touches_no_broker(
+    tmp_path: Path,
+) -> None:
+    proc, calls, out = _run_unflip(tmp_path, _OVERLAY_WITHOUT_FLIP, auth_file=None)
+    assert proc.returncode == 0, proc.stderr
+    assert calls == []
+    assert "PRE_SASL_REF=true" in out
+
+
+@pytest.mark.unit
+def test_a_failed_un_flip_stops_the_refresh_before_anything_is_built(
+    tmp_path: Path,
+) -> None:
+    proc, _, out = _run_unflip(
+        tmp_path, _OVERLAY_WITHOUT_FLIP, auth_file=_AUTH_FILE, docker_exit=1
+    )
+    assert proc.returncode == 65, (proc.stdout, proc.stderr)
+    assert "SASL_UNFLIP_FAILED" in proc.stderr
+    assert "PRE_SASL_REF=" not in out

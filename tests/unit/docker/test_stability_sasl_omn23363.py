@@ -34,7 +34,8 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCKER_DIR = REPO_ROOT / "docker"
-BASE_COMPOSE = DOCKER_DIR / "docker-compose.infra.yml"
+COMPOSE_FILES_SH = REPO_ROOT / "scripts" / "runtime_build" / "compose_files.sh"
+BROKER_PROFILE = DOCKER_DIR / "docker-compose.broker-profile.yml"
 AUTH_ENV_FILE_PATH = "${LANE_BROKER_AUTH_ENV_FILE:-/dev/null}"
 SCRAM_USER = "lane-redpanda-scram-user"
 SASL_ENABLE = "lane-redpanda-sasl-enable"
@@ -69,7 +70,14 @@ AUTH_KEYS = (
 )
 # `environment:` beats `env_file`, so a client that sets any of AUTH_KEYS itself, in
 # either compose file, silently ignores the host auth file.
-BROKER_ADDRESS = re.compile(r"redpanda:(?:9092|19092|19093)|\brpk\b")
+BROKER_ADDRESS = re.compile(
+    r"redpanda:(?:9092|19092|19093)|\brpk\b|KAFKA_BOOTSTRAP_SERVERS"
+)
+# A healthcheck that reaches the Kafka API (or names a Kafka listener) fails once the
+# lane's broker requires SASL; the admin API (`rpk cluster health`) stays open.
+KAFKA_API_PROBE = re.compile(
+    r"rpk\s+(?:topic|group|cluster\s+info|security)|brokers|:(?:9092|19092|19093)\b"
+)
 # A service whose merged profiles are all inert is never started by this lane: a
 # profile that exists only to disable a service, or the carrier's opt-in profile.
 INERT_PROFILE = re.compile(r"-disabled$|^profile-carrier-optin$")
@@ -170,15 +178,6 @@ def _load_services(path: Path) -> dict[str, dict[str, object]]:
     return services
 
 
-def _extended_text(service: dict[str, object]) -> str:
-    """The text of the service a base service `extends:` (the partition cap does)."""
-    extends = service.get("extends")
-    if not isinstance(extends, dict) or "file" not in extends:
-        return ""
-    extended = _load_services(BASE_COMPOSE.parent / str(extends["file"]))
-    return str(extended.get(str(extends["service"]), {}))
-
-
 @dataclass
 class _Merged:
     """The parts of one service's merged definition these checks read."""
@@ -188,27 +187,107 @@ class _Merged:
     depends_on: dict[str, dict[str, object]]
     profiles: list[object]
     text: str
+    healthcheck: str = ""
+
+
+def _layer(
+    service: dict[str, object], siblings: dict[str, dict[str, object]], directory: Path
+) -> _Merged:
+    """One service as one file defines it, with its `extends:` target applied first.
+
+    Compose merges the target's ``environment`` (the service's own keys win),
+    ``env_file`` and ``depends_on`` under the service's own, so a client that gains
+    its broker address or its auth keys through an extends target is read here.
+    """
+    parent = _Merged({}, [], {}, [], "")
+    extends = service.get("extends")
+    if isinstance(extends, dict):
+        if "file" in extends:
+            target_file = directory / str(extends["file"])
+            target = _load_services(target_file)[str(extends["service"])]
+            parent = _layer(target, _load_services(target_file), target_file.parent)
+        else:
+            parent = _layer(siblings[str(extends["service"])], siblings, directory)
+    own_profiles = _as_list(service.get("profiles"))
+    health = service.get("healthcheck")
+    return _Merged(
+        environment={**parent.environment, **_env_map(service)},
+        env_file=[*parent.env_file, *_as_list(service.get("env_file"))],
+        depends_on={**parent.depends_on, **_depends_map(service)},
+        profiles=own_profiles or parent.profiles,
+        text=f"{parent.text} {service}",
+        healthcheck=str(health.get("test", "")) if isinstance(health, dict) else "",
+    )
+
+
+def _lane_project() -> str:
+    """The lane's compose project, from its overlay's name (docker-compose.<lane>.yml)."""
+    lane = (
+        _proof_lane_overlay().name.removeprefix("docker-compose.").removesuffix(".yml")
+    )
+    return f"omnibase-infra-{lane}"
+
+
+def _lane_compose_files() -> list[Path]:
+    """The lane's real ``-f`` list, from the resolver the refresh and the deploy use.
+
+    The host-broker overlay is switched on so the list is the longest one a host runs.
+    """
+    proc = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'set -euo pipefail; source "$1"; declare -a A; '
+            'resolve_compose_file_args A "$2" "$3"; printf "%s\\n" "${A[@]}"',
+            "_",
+            str(COMPOSE_FILES_SH),
+            str(REPO_ROOT),
+            _lane_project(),
+        ],
+        env={
+            **os.environ,
+            "STABILITY_TEST_REDPANDA_ADVERTISED_KAFKA_ADDR": "x",
+            "STABILITY_TEST_REDPANDA_ADVERTISED_PANDAPROXY_ADDR": "x",
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    return [Path(token) for token in proc.stdout.splitlines() if token != "-f"]
+
+
+def _merge_files(files: list[Path]) -> dict[str, _Merged]:
+    """The compose files merged in order the way Compose merges them.
+
+    Maps merge by key, ``env_file`` lists append, and a ``profiles:`` a later file
+    sets replaces the earlier one. That is the part of Compose's merge these checks read.
+    """
+    merged: dict[str, _Merged] = {}
+    for path in files:
+        services = _load_services(path)
+        for name, definition in services.items():
+            layer = _layer(definition, services, path.parent)
+            prior = merged.get(name)
+            if prior is None:
+                merged[name] = layer
+                continue
+            merged[name] = _Merged(
+                environment={**prior.environment, **layer.environment},
+                env_file=[*prior.env_file, *layer.env_file],
+                depends_on={**prior.depends_on, **layer.depends_on},
+                profiles=layer.profiles or prior.profiles,
+                text=f"{prior.text} {layer.text}",
+                healthcheck=layer.healthcheck or prior.healthcheck,
+            )
+    return merged
 
 
 def _merged_services() -> dict[str, _Merged]:
-    """The base file and the lane overlay merged the way Compose merges them.
-
-    Maps merge by key, ``env_file`` lists append, and a ``profiles:`` the overlay
-    sets replaces the base's. That is the part of Compose's merge these checks read.
-    """
-    base = _load_services(BASE_COMPOSE)
-    overlay = _services()
-    merged: dict[str, _Merged] = {}
-    for name in sorted(set(base) | set(overlay)):
-        b, o = base.get(name, {}), overlay.get(name, {})
-        merged[name] = _Merged(
-            environment={**_env_map(b), **_env_map(o)},
-            env_file=[*_as_list(b.get("env_file")), *_as_list(o.get("env_file"))],
-            depends_on={**_depends_map(b), **_depends_map(o)},
-            profiles=_as_list(o.get("profiles", b.get("profiles"))),
-            text=" ".join((str(b), str(o), _extended_text(b), _extended_text(o))),
-        )
-    return merged
+    files = _lane_compose_files()
+    assert _proof_lane_overlay() in files, files
+    assert DOCKER_DIR / "docker-compose.infra.yml" in files, files
+    return _merge_files(files)
 
 
 def _derived_clients(merged: dict[str, _Merged]) -> set[str]:
@@ -253,26 +332,26 @@ def _fail_open(merged: dict[str, _Merged]) -> list[str]:
     )
 
 
-def _reaches(merged: dict[str, _Merged], start: str, goal: str) -> bool:
-    seen: set[str] = set()
-    todo = [start]
-    while todo:
-        name = todo.pop()
-        for dep in merged[name].depends_on:
-            if dep == goal:
-                return True
-            if dep in merged and dep not in seen:
-                seen.add(dep)
-                todo.append(dep)
-    return False
+def _without_direct_flip_edge(merged: dict[str, _Merged]) -> list[str]:
+    """Readers whose OWN depends_on lacks the flip's completed-successfully edge.
 
-
-def _before_the_flip(merged: dict[str, _Merged]) -> list[str]:
-    """Readers that can start before lane-redpanda-sasl-enable has completed."""
+    Direct, not walked: a refresh runs ``up -d --no-deps`` over a selection, which
+    drops edges to services outside it, so an edge held only through another service
+    (the partition cap) is not an ordering the refresh keeps.
+    """
+    flip_edge = {"condition": "service_completed_successfully"}
     return sorted(
         n
         for n in _readers(merged) - {SCRAM_USER, SASL_ENABLE}
-        if not _reaches(merged, n, SASL_ENABLE)
+        if merged[n].depends_on.get(SASL_ENABLE) != flip_edge
+    )
+
+
+def _redpanda_kafka_api_probes(merged: dict[str, _Merged]) -> list[str]:
+    return sorted(
+        name
+        for name in ("redpanda",)
+        if KAFKA_API_PROBE.search(merged[name].healthcheck)
     )
 
 
@@ -349,11 +428,15 @@ def test_stability_sasl_auth_env_file_fails_closed(
     assert _fail_open(broken) == ["runtime-worker"]
 
 
+FLIP_EDGE = {"condition": "service_completed_successfully"}
+RUNTIME_FAMILY = ("omninode-runtime", "runtime-effects", "runtime-worker")
+
+
 @pytest.mark.unit
 def test_stability_sasl_every_client_waits_for_the_flip(
     merged: dict[str, _Merged],
 ) -> None:
-    assert _before_the_flip(merged) == []
+    assert _without_direct_flip_edge(merged) == []
     # The flip itself waits for the principal, and the principal for a healthy broker.
     assert merged[SASL_ENABLE].depends_on[SCRAM_USER] == {
         "condition": "service_completed_successfully"
@@ -363,12 +446,32 @@ def test_stability_sasl_every_client_waits_for_the_flip(
     # settings before the principal exists.
     broken = copy.deepcopy(merged)
     broken["projection-api"].depends_on.pop(SASL_ENABLE)
-    assert _before_the_flip(broken) == ["projection-api"]
-    # ... and so is a client that reaches the flip only through the partition cap,
-    # once the cap stops waiting for it.
+    assert _without_direct_flip_edge(broken) == ["projection-api"]
+    # The partition cap is not a substitute: dropping the edge from the cap is reported
+    # for the cap, and dropping a client's own edge is reported for the client even
+    # while the cap still carries it.
     broken = copy.deepcopy(merged)
     broken["redpanda-partition-cap"].depends_on.pop(SASL_ENABLE)
-    assert "omninode-runtime" in _before_the_flip(broken)
+    assert _without_direct_flip_edge(broken) == ["redpanda-partition-cap"]
+    for name in RUNTIME_FAMILY:
+        broken = copy.deepcopy(merged)
+        broken[name].depends_on.pop(SASL_ENABLE)
+        assert SASL_ENABLE in merged["redpanda-partition-cap"].depends_on
+        assert _without_direct_flip_edge(broken) == [name], name
+    # An edge on the wrong condition is no ordering either.
+    broken = copy.deepcopy(merged)
+    broken["runtime-worker"].depends_on[SASL_ENABLE] = {"condition": "service_started"}
+    assert _without_direct_flip_edge(broken) == ["runtime-worker"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", RUNTIME_FAMILY)
+def test_stability_sasl_runtime_family_carries_its_own_edge_on_the_flip(
+    name: str,
+) -> None:
+    """Read the service's own depends_on array in the overlay, not a walked graph."""
+    own = _depends_map(_services()[name])
+    assert own.get(SASL_ENABLE) == FLIP_EDGE, own
 
 
 @pytest.mark.unit
@@ -401,13 +504,17 @@ def test_stability_sasl_one_shot_is_a_no_op_without_the_auth_file(name: str) -> 
     )
 
 
-def _script(name: str, stub: Path) -> str:
+def _script(name: str, stub: Path, drop: str = "") -> str:
     """The one-shot's shell script as the container runs it, with rpk stubbed.
 
     Compose writes a literal ``$`` as ``$$``; the container's ``/usr/bin/rpk`` becomes
     the stub.
     """
-    return _command(name).replace("$$", "$").replace("/usr/bin/rpk", str(stub))
+    script = _command(name).replace("$$", "$").replace("/usr/bin/rpk", str(stub))
+    if drop:
+        assert drop in script, drop
+        script = script.replace(drop, "")
+    return script
 
 
 _STUB_RPK = """#!/bin/sh
@@ -428,8 +535,9 @@ case "$*" in
     printf '%s\n' "${STUB_ENABLE_SASL:-true}"; exit 0 ;;
   *"topic list"*)
     for a in "$@"; do case "$a" in brokers=*) broker="${a#brokers=}" ;; esac; done
+    # rpk with a user and password and no mechanism set defaults to SCRAM-SHA-256.
     if [ -n "${RPK_USER:-}" ] && [ -n "${RPK_PASS:-}" ] \
-       && [ "${RPK_SASL_MECHANISM:-}" = SCRAM-SHA-256 ]; then exit 0; fi
+       && [ "${RPK_SASL_MECHANISM:-SCRAM-SHA-256}" = SCRAM-SHA-256 ]; then exit 0; fi
     case " ${STUB_OPEN_LISTENERS:-} " in *" $broker "*) exit 0 ;; esac
     exit 1 ;;
 esac
@@ -451,7 +559,7 @@ class _Run:
         raise AssertionError(f"no rpk call containing {needle!r}: {self.calls}")
 
 
-def _run_one_shot(name: str, tmp_path: Path, **env: str) -> _Run:
+def _run_one_shot(name: str, tmp_path: Path, drop: str = "", **env: str) -> _Run:
     stub = tmp_path / "rpk"
     stub.write_text(_STUB_RPK, encoding="utf-8")
     stub.chmod(0o755)
@@ -461,7 +569,7 @@ def _run_one_shot(name: str, tmp_path: Path, **env: str) -> _Run:
         if not k.startswith(("KAFKA_", "RPK_", "STUB_"))
     }
     proc = subprocess.run(
-        ["sh", "-c", _script(name, stub)],
+        ["sh", "-c", _script(name, stub, drop)],
         env={**clean, "STUB_DIR": str(tmp_path), **env},
         capture_output=True,
         text=True,
@@ -473,7 +581,14 @@ def _run_one_shot(name: str, tmp_path: Path, **env: str) -> _Run:
     return _Run(proc, calls)
 
 
-AUTHED = {"KAFKA_SASL_USERNAME": PRINCIPAL, "KAFKA_SASL_PASSWORD": "pw"}
+# What the auth file gives the container: RPK_USER/RPK_PASS come with it, which is why the
+# flip's unauthenticated probe must unset them (`env -u RPK_USER -u RPK_PASS`).
+AUTHED = {
+    "KAFKA_SASL_USERNAME": PRINCIPAL,
+    "KAFKA_SASL_PASSWORD": "pw",
+    "RPK_USER": PRINCIPAL,
+    "RPK_PASS": "pw",
+}
 
 
 @pytest.mark.unit
@@ -580,3 +695,125 @@ def test_stability_sasl_scram_user_fails_when_the_principal_does_not_read_back(
     run = _run_one_shot(SCRAM_USER, tmp_path, STUB_CREATE_NOOP="1", **AUTHED)
     assert run.returncode != 0
     assert "readback confirms the principal exists" not in run.stdout
+
+
+@pytest.mark.unit
+def test_stability_sasl_unauthenticated_probe_unsets_the_auth_files_rpk_credentials(
+    tmp_path: Path,
+) -> None:
+    """The auth file hands the container RPK_USER/RPK_PASS; the probe must not use them.
+
+    With ``env -u RPK_USER -u RPK_PASS`` deleted, the "unauthenticated" probe carries
+    the principal's credentials, the broker admits it, and the flip must fail on the
+    first listener rather than read as a proof that SASL refuses anonymous clients.
+    """
+    drop = "env -u RPK_USER -u RPK_PASS "
+    for sub in ("ok", "mutant", "blind"):
+        (tmp_path / sub).mkdir()
+    ok = _run_one_shot(SASL_ENABLE, tmp_path / "ok", **AUTHED)
+    assert ok.returncode == 0, ok.stderr
+    mutant = _run_one_shot(SASL_ENABLE, tmp_path / "mutant", drop=drop, **AUTHED)
+    assert mutant.returncode == 1, mutant.stdout
+    assert "UNAUTHENTICATED client reached the Kafka listener" in mutant.stderr
+    # ... and the fixture is what makes the deletion visible: without the auth file's
+    # RPK variables the same deletion passes silently (the gap this test closes).
+    blind = _run_one_shot(
+        SASL_ENABLE,
+        tmp_path / "blind",
+        drop=drop,
+        KAFKA_SASL_USERNAME=PRINCIPAL,
+        KAFKA_SASL_PASSWORD="pw",
+    )
+    assert blind.returncode == 0, blind.stderr
+
+
+def _write_compose(path: Path, body: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+@pytest.mark.unit
+def test_stability_sasl_lane_file_list_comes_from_the_resolver_the_refresh_uses(
+    merged: dict[str, _Merged],
+) -> None:
+    files = _lane_compose_files()
+    assert [f.name for f in files] == [
+        "docker-compose.infra.yml",
+        _proof_lane_overlay().name,
+        "docker-compose.stability-host-broker.yml",
+    ]
+    # Services declared in the base file are derived from the same merged view.
+    assert "redpanda" in merged and "migration-gate" in merged
+
+
+@pytest.mark.unit
+def test_stability_sasl_derivation_reads_environment_through_extends(
+    merged: dict[str, _Merged], tmp_path: Path
+) -> None:
+    # The partition cap gets its environment from broker-profile.yml via `extends:`.
+    assert (
+        "REDPANDA_SEGMENT_FALLOCATION_STEP"
+        in merged["redpanda-partition-cap"].environment
+    )
+    # The extends target sets none of the auth keys in environment (which would beat
+    # the host auth file), so the file reaches the cap's rpk calls.
+    profile_env = _env_keys(_load_services(BROKER_PROFILE)["redpanda-settings"])
+    assert not profile_env & set(AUTH_KEYS), profile_env
+    assert _literal_auth(merged) == []
+    # Red on a fixture: a client that exists only through an extends target with no SASL
+    # settings is a client and is unwired.
+    ext = _write_compose(
+        tmp_path / "ext.yml",
+        "services:\n  base-client:\n    environment:\n"
+        "      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}\n",
+    )
+    lane = _write_compose(
+        tmp_path / "lane.yml",
+        f"services:\n  new-client:\n    extends:\n      file: {ext.name}\n"
+        "      service: base-client\n",
+    )
+    fixture = _merge_files([lane])
+    assert _unwired(fixture) == ["new-client"]
+    # An extends target that sets an auth key in environment is reported too.
+    ext.write_text(
+        ext.read_text(encoding="utf-8") + "      KAFKA_SASL_USERNAME: literal\n",
+        encoding="utf-8",
+    )
+    assert _literal_auth(_merge_files([lane])) == ["new-client"]
+
+
+@pytest.mark.unit
+def test_stability_sasl_derivation_covers_clients_that_use_the_bootstrap_variable(
+    tmp_path: Path,
+) -> None:
+    lane = _write_compose(
+        tmp_path / "lane.yml",
+        "services:\n  var-client:\n    environment:\n"
+        '      SOMETHING: "${KAFKA_BOOTSTRAP_SERVERS}"\n',
+    )
+    fixture = _merge_files([lane])
+    assert _readers(fixture) == {"var-client"}
+    assert _unwired(fixture) == ["var-client"]
+
+
+@pytest.mark.unit
+def test_stability_sasl_redpandas_healthcheck_uses_the_admin_api_not_the_kafka_api(
+    merged: dict[str, _Merged],
+) -> None:
+    """Once enable_sasl is true an anonymous Kafka-API healthcheck fails the broker.
+
+    The healthcheck is `rpk cluster health` (the admin API, open on this broker), so the
+    broker stays healthy and every ``service_healthy`` edge on it keeps holding.
+    """
+    assert merged["redpanda"].healthcheck, "redpanda must declare a healthcheck"
+    assert _redpanda_kafka_api_probes(merged) == []
+    assert not set(merged["redpanda"].environment) & set(AUTH_KEYS)
+    for kafka_api in (
+        "rpk cluster info",
+        "rpk topic list",
+        "rpk cluster health -X brokers=redpanda:9092",
+    ):
+        broken = copy.deepcopy(merged)
+        broken["redpanda"].healthcheck = kafka_api
+        assert _redpanda_kafka_api_probes(broken) == ["redpanda"], kafka_api
