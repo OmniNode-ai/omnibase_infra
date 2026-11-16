@@ -33,14 +33,17 @@ THE RULES
    row. The overlay source is required only for a fence naming the lab dev lane.
    ``check_host`` runs the same check over EVERY agent installed on a host, the
    prod-fenced unit and each launchd instance included: the code running at a merge
-   restarts or re-execs all of them, so the check a merge waits on cannot skip one.
+   restarts or re-execs all of them, so the reading cannot skip one.
 3. The restart runs in a transient unit outside the agent's cgroup, which survives the
    agent's own stop. It restarts the unit, waits, and verifies the unit is active with
    no automatic restart since (a ``Type=simple`` start returns 0 on fork, so the exit
    code alone says nothing). When the start died it puts the code clone back on the
    loaded commit and the previous unit bytes, restarts and verifies again; when that
    fails too it exits non-zero and :class:`AgentLeftStoppedError` is raised to the
-   caller. No other agent is touched: an agent only restarts its own unit. The script's
+   caller. Each restart is preceded by ``reset-failed``: a revision that died at start
+   under the unit's start limit leaves the unit failed, and systemd refuses a restart
+   of a failed unit until it is reset. No other agent is touched: an agent only
+   restarts its own unit. The script's
    first command stops the caller, so no exit code reaches it: after a rollback the
    script itself leaves a marker naming the revision it rolled back from, and
    ``self_update`` skips that revision (one STATUS row) until the remote moves on.
@@ -58,6 +61,7 @@ import re
 import shlex
 import signal
 import socket
+import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -183,27 +187,45 @@ def _expand(path: str, home: Path) -> Path:
     return Path(path.lstrip("-").replace("%h", str(home)))
 
 
+def systemd_env_files(
+    entry: ModelAgentUnit, repo_root: Path, home: Path
+) -> tuple[Path, ...]:
+    """The ``EnvironmentFile=`` paths systemd itself reads for the unit."""
+    return tuple(
+        _expand(line.removeprefix("EnvironmentFile="), home)
+        for text in _unit_texts(entry, repo_root)
+        for line in (raw.strip() for raw in text.splitlines())
+        if line.startswith("EnvironmentFile=")
+    )
+
+
+def launcher_store(entry: ModelAgentUnit, repo_root: Path, home: Path) -> Path | None:
+    """The store the unit's launcher sources (``DEPLOY_AGENT_ENV_FILE``), if declared."""
+    store = _declared(entry, repo_root).get(ENV_FILE_SETTING, "")
+    return _expand(store, home) if store else None
+
+
 def unit_env_files(
     entry: ModelAgentUnit, repo_root: Path, home: Path
 ) -> tuple[Path, ...]:
-    """The env files the unit's launcher sources: ``EnvironmentFile=`` and the store."""
-    files: list[Path] = []
-    for text in _unit_texts(entry, repo_root):
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("EnvironmentFile="):
-                files.append(_expand(stripped.removeprefix("EnvironmentFile="), home))
-    store = _declared(entry, repo_root).get(ENV_FILE_SETTING, "")
-    if store:
-        files.append(_expand(store, home))
-    return tuple(files)
+    """The env files a start reads: ``EnvironmentFile=`` and the launcher's store."""
+    store = launcher_store(entry, repo_root, home)
+    return (*systemd_env_files(entry, repo_root, home), *((store,) if store else ()))
 
 
-_ASSIGNMENT = re.compile(r"^\s*(?:export\s+)?(?P<name>[A-Za-z_]\w*)=(?P<value>.*)$")
+_ASSIGNMENT = re.compile(
+    r"^\s*(?P<export>export\s+)?(?P<name>[A-Za-z_]\w*)=(?P<value>.*)$"
+)
 
 
-def env_file_names(path: Path) -> frozenset[str]:
-    """The names an env file assigns a non-empty value; values are never returned."""
+def env_file_names(path: Path, *, shell_sourced: bool = True) -> frozenset[str]:
+    """The names an env file assigns a non-empty value; values are never returned.
+
+    A file the launcher sources counts ``export NAME=value`` lines. A file
+    systemd reads through ``EnvironmentFile=`` (``shell_sourced=False``) drops such a
+    line, so only a bare ``NAME=value`` counts there (measured: an exported name
+    arrives empty, OMN-24761).
+    """
     try:
         text = path.read_text("utf-8")
     except OSError:
@@ -211,8 +233,11 @@ def env_file_names(path: Path) -> frozenset[str]:
     names: set[str] = set()
     for line in text.splitlines():
         match = _ASSIGNMENT.match(line)
-        if match and match["value"].strip().strip("'\"").strip():
-            names.add(match["name"])
+        if not match or not match["value"].strip().strip("'\"").strip():
+            continue
+        if match["export"] and not shell_sourced:
+            continue
+        names.add(match["name"])
     return frozenset(names)
 
 
@@ -223,8 +248,11 @@ def settings_gap(
     declared = _declared(entry, repo_root)
     files = unit_env_files(entry, repo_root, home)
     in_files: set[str] = set()
-    for path in files:
-        in_files |= env_file_names(path)
+    for path in systemd_env_files(entry, repo_root, home):
+        in_files |= env_file_names(path, shell_sourced=False)
+    store = launcher_store(entry, repo_root, home)
+    if store is not None:
+        in_files |= env_file_names(store)
     fence = declared_fence(entry, repo_root)
     required = required_settings(fence)
     missing = tuple(
@@ -440,7 +468,18 @@ def write_refusal_status(
         "--append",
         row,
     ]
-    if execution._run(argv, 60).returncode == 0 and marker is not None:
+    try:
+        appended = execution._run(argv, 60).returncode == 0
+    except (subprocess.SubprocessError, OSError) as exc:
+        # A refusal row that cannot be appended is logged and left unmarked, so the
+        # next boundary tries again; it never raises out of ``self_update`` (OMN-24761).
+        logger.warning(
+            "OMN-24761 restart refusal STATUS append failed (%s): %s",
+            type(exc).__name__,
+            reason,
+        )
+        return
+    if appended and marker is not None:
         marker.write_text(reason, "utf-8")
 
 
@@ -518,6 +557,11 @@ def transient_restart_script(
     exit. ``LEFT_STOPPED``: neither is up.
     """
     q = shlex.quote
+    # A unit whose new revision died at start can sit in the failed state under its
+    # start limit, which refuses a restart until reset-failed (OMN-24761).
+    restart = (
+        f"systemctl --user reset-failed {q(unit)}; systemctl --user restart {q(unit)}"
+    )
     up = (
         f"sleep {settle}; systemctl --user is-active --quiet {q(unit)} && "
         f'[ "$(systemctl --user show -p NRestarts --value {q(unit)})" = 0 ]'
@@ -530,14 +574,14 @@ def transient_restart_script(
     )
     return "\n".join(
         (
-            f"systemctl --user restart {q(unit)}",
+            restart,
             f"if {up}; then exit 0; fi",
             f"refused=$(git -C {q(agent_dir)} rev-parse HEAD)",
             f"git -C {q(agent_dir)} checkout --quiet --detach {q(loaded_sha)}",
             f"backup=$(ls -1 {q(str(installed))}.bak-unit-drift-* 2>/dev/null | tail -n 1)",
             f'[ -n "$backup" ] && cp -p "$backup" {q(str(installed))}',
             "systemctl --user daemon-reload",
-            f"systemctl --user restart {q(unit)}",
+            restart,
             f"if {up}; then {leave_marker}exit {ROLLED_BACK}; fi",
             f"exit {LEFT_STOPPED}",
         )
