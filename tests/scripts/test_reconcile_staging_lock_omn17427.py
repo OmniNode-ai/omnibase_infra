@@ -13,7 +13,6 @@ the first.
 from __future__ import annotations
 
 import os
-import re
 import signal
 import socket
 import subprocess
@@ -23,13 +22,14 @@ from pathlib import Path
 import pytest
 
 from tests.scripts.test_reconcile_workspace_venvs import (
-    _EXIT_FAILED,
     _EXIT_OK,
     _drift_the_interpreter,
     _Workspace,
 )
 
 pytestmark = pytest.mark.unit
+
+_EXIT_DECLINED = 4
 
 _VENV_SCRIPT = (
     Path(__file__).resolve().parents[2] / "scripts" / "reconcile-workspace-venvs.sh"
@@ -49,7 +49,7 @@ def _record(pid: int, host: str) -> str:
     return f"pid={pid};host={host};at=2026-10-22T02:48:05Z"
 
 
-def test_a_live_holder_makes_a_second_run_refuse_without_touching_staging(
+def test_a_live_holder_makes_a_second_run_decline_without_touching_staging(
     workspace: _Workspace,
 ) -> None:
     staging = _drift_the_interpreter(workspace)
@@ -67,7 +67,8 @@ def test_a_live_holder_makes_a_second_run_refuse_without_touching_staging(
 
         result = workspace.run()
 
-        assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr
+        assert result.returncode == _EXIT_DECLINED, result.stdout + result.stderr
+        assert "DECLINED" in result.stdout, result.stdout
         assert f"pid {holder.pid}" in result.stdout, result.stdout
         assert sentinel.exists(), "the refused run deleted the live holder's staging"
         assert str(lock.readlink()) == record, (
@@ -88,8 +89,37 @@ def test_a_holder_on_another_host_is_never_reclaimed(workspace: _Workspace) -> N
 
     result = workspace.run()
 
-    assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr
+    assert result.returncode == _EXIT_DECLINED, result.stdout + result.stderr
+    assert "DECLINED" in result.stdout, result.stdout
     assert str(lock.readlink()) == record
+
+
+def test_a_declined_run_never_reaches_a_uv_write(workspace: _Workspace) -> None:
+    staging = _drift_the_interpreter(workspace)
+    staging.mkdir()
+    holder = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        start_new_session=True,
+    )
+    try:
+        lock = _lock_for(staging)
+        record = _record(holder.pid, socket.gethostname())
+        lock.symlink_to(record)
+
+        result = workspace.run()
+
+        assert result.returncode == _EXIT_DECLINED, result.stdout + result.stderr
+        assert "DECLINED" in result.stdout, result.stdout
+        mutating = [
+            call
+            for call in workspace.uv_calls()
+            if call.startswith("env=") and "--check" not in call
+        ]
+        assert not mutating, f"the declined run reached a uv write: {mutating}"
+        assert not workspace.install_refs(), "the declined run reached a uv install"
+    finally:
+        os.killpg(holder.pid, signal.SIGKILL)
+        holder.wait()
 
 
 def test_a_dead_holder_is_reclaimed_and_the_run_proceeds(
@@ -116,34 +146,10 @@ def test_the_lock_is_released_when_the_run_ends(workspace: _Workspace) -> None:
     )
 
 
-def _staging_lock_field_source() -> str:
+def test_the_holder_record_is_judged_by_the_node_not_the_shell() -> None:
+    """The lock logic moved into node_venv_atomic_install (OMN-16932): the shell
+    script calls it and keeps no parser of its own (the 200 KiB record case is
+    covered on the engine, tests/scripts/test_dispatch_venv_promotion_omn16932.py)."""
     source = _VENV_SCRIPT.read_text(encoding="utf-8")
-    match = re.search(r"^staging_lock_field\(\) \{\n.*?^\}\n", source, re.M | re.S)
-    assert match, "reconcile-workspace-venvs.sh defines no staging_lock_field()"
-    return match.group(0)
-
-
-def test_the_holder_record_is_parsed_through_process_substitution() -> None:
-    function = _staging_lock_field_source()
-    assert "< <(" in function, function
-    assert "<<<" not in function, (
-        "staging_lock_field feeds read through a here-string, which can deadlock "
-        "on a full pipe (OMN-19709)"
-    )
-    record = _record(4242, "lab-host") + ";note=" + "x" * 200 * 1024
-    # The record goes in on stdin: Linux refuses any single argv string over
-    # 128 KiB (MAX_ARG_STRLEN) with E2BIG, so a 200 KiB argument never runs.
-    fields = subprocess.run(
-        [
-            "bash",
-            "-c",
-            function + 'record="$(cat)"; for key in pid host at; do '
-            'staging_lock_field "$record" "$key"; printf \'\\n\'; done',
-        ],
-        input=record,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=True,
-    ).stdout.splitlines()
-    assert fields == ["4242", "lab-host", "2026-10-22T02:48:05Z"]
+    assert "staging_lock_field" not in source
+    assert 'staging-lock-acquire --path "$path" --pid "$$"' in source

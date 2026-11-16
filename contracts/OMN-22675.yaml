@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-22675"
+title: "the delegation savings view answers inside the projection API's 15 s read bound"
+summary: "omnimarket#5195 adds savings migration 101, which reads the unpriced call count in the one pass that builds combined_sessions instead of probing savings_sessions once per unpriced row. Its sibling release gate needs the migration in an omnibase_infra release first. This vendors 101 byte-identical, with its tenant ledger row and forward-only class, the way #5306 vendored 100."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn22675-infra-vendor-101"
+    statement: |-
+      Migration 101 is deployed byte-identical to the omnimarket source it was copied from, with one checksum-bound tenant ledger row and the forward-only class.
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: on a real Postgres seeded with the 096 cases the view returns the same unpriced_call_count, session_count and totals as before -- falsifier: uv run pytest tests/test_omn20717_savings_unpriced_call_count_real_postgres.py -q --no-cov"
+evidence_requirements:
+  - kind: "tests"
+    description: "Infra deployment half only; the vendored 101 bytes, tenant ledger checksum and forward-only class match the pinned omnimarket source."
+    command: "uv run pytest tests/unit/migrations/test_omn22675_savings_unpriced_single_pass_vendored.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn22675-ac1-infra-vendor-101"
+    description: "Infra half only. Pins 101's source bytes (omnimarket#5195 at 9681dee8b41dce3b97cd9827955be79919b740e9), its exact tenant ledger checksum and forward-only class; at the merge base the file is absent, so it fails there. It does not prove the view's counts or its read time, which omnimarket#5195's real-Postgres tests and the dev-lane read prove."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/migrations/test_omn22675_savings_unpriced_single_pass_vendored.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"

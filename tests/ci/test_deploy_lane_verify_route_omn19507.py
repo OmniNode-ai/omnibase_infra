@@ -74,7 +74,8 @@ PRE_CHANGE_201 = {
     "projection_url": "http://host.docker.internal:8085/projection-api",
     "compose_project": "omnibase-infra",
     "runtime_container": "omninode-runtime",
-    "effects_container": "omninode-runtime-effects",
+    # OMN-23333: the effects role is folded into main on the dev lane.
+    "effects_container": "omninode-runtime",
     "postgres_container": "omnibase-infra-postgres",
     "broker_container": "omnibase-infra-redpanda",
 }

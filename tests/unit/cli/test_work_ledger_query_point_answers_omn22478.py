@@ -95,7 +95,12 @@ async def test_golden_recorded_point_answer_is_returned(
 
 def test_golden_the_contract_names_the_point_queries() -> None:
     config = load_work_ledger_query_client_config()
-    assert set(config.point_queries) == {"open-claims", "holds", "inbox"}
+    assert set(config.point_queries) == {
+        "open-claims",
+        "holds",
+        "inbox",
+        "open-rulings",
+    }
     assert set(config.point_queries) <= set(config.queries)
 
 

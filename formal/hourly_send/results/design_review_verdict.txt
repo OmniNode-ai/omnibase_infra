@@ -1,0 +1,61 @@
+# Design-review verdict: the hourly check's send decisions and dedupe (OMN-23732)
+
+Verdict: **PASS with conditions.** The send design in `HourlySend.tla` may be built as the hourly
+check's send step, under the conditions below. It is not the code that runs today: the model
+shows today's shape (mut_as_built) sends one key twice.
+
+Reviewed against the committed TLC output in this directory, bound to `model.sha256`. TLC 2.19
+(rev 5a47802), `-workers 2`, lab host h201. Reviewer: Codex (read-only, high effort), two rounds:
+round 1 (thread 01a1d88e-7aac-7fc1-b2b2-8af90e79a147) FAIL on the first draft (a claim-stamp
+invariant too weak for the claim, the design not shown against the code); the draft was changed
+(the invariant now reads the send clock, the send refreshes the stamp, mut_as_built added);
+round 2 (thread 01a1d890-750e-7a11-a57c-a6a77b3e0377) PASS-WITH-CONDITIONS.
+
+| Config | Expected | TLC result | Distinct states |
+| --- | --- | --- | --- |
+| Model.cfg | pass TypeOK, NoKeyDoubleSend | No error has been found, 0 states left on queue | 2487204 |
+| once.cfg | pass NoKeySentTwice (Window outlasts the horizon) | No error has been found, 0 states left on queue | 237360 |
+| mut_as_built.cfg | counterexample | NoKeyDoubleSend violated | 2810 |
+| mut_nonatomic_claim.cfg | counterexample | NoKeyDoubleSend violated | 4940 |
+| mut_record_after_send.cfg | counterexample | NoKeyDoubleSend violated | 668 |
+| mut_unfenced_send.cfg | counterexample | NoKeyDoubleSend violated | 5347 |
+| mut_unguarded_rollback.cfg | counterexample | NoKeyDoubleSend violated | 34798 |
+| mut_w2_replace.cfg | counterexample | NoKeyDoubleSend violated | 16040 |
+| mut_unreadable_empty.cfg | counterexample | NoKeyDoubleSend violated | 3114 |
+| wit_sent.cfg | witness violated | NothingSent violated | 30 |
+| wit_resend.cfg | witness violated | NoResend violated | 5920 |
+
+## Findings
+
+1. No key is sent twice inside its dedupe window under the design, with two overlapping ticks,
+   a crash at any step, an unreadable record and a second writer of the file.
+2. Each design point is load-bearing: its mutant sends one key twice. The counterexamples are
+   short: as_built (two ticks snapshot, both decide, both send), nonatomic_claim (two snapshots,
+   two whole-record replaces), record_after_send (one tick: send, die, decide, send),
+   unfenced_send (a send after its own window, then a second claim), unguarded_rollback (a
+   refused send clears a later tick's claim), w2_replace (the other writer replaces the file from
+   an old snapshot and erases a claim), unreadable_empty (an unreadable record read as empty).
+3. The witnesses are violated, so a send and a resend of one key after its window are reachable;
+   the passing runs are not vacuous. The literal form (no key sent twice) holds only while the
+   window outlasts the run (once.cfg); across a window a key is sent again by design.
+4. The design changes what the tick does today in four places: check-and-claim is one atomic step
+   (a lock or compare-and-set, not a read at the start and a whole-file replace at the end), the
+   claim is written before the runner is called, every writer merges into the fresh record, and an
+   unreadable record sends nothing (read_sent() reads it as empty today).
+
+## Conditions the build must meet
+
+1. The runner call is idempotent on the claim token, or the claim and the send are one durable
+   step. The model makes the fence check, the runner accept and the stamp refresh one step; a file
+   replace cannot do that. A crash after the runner accepts and before the stamp is durable is not
+   in the model: recovery must retry with the same token, never a fresh claim (reviewer, round 2).
+2. A token is unique per claim (a generated id, not only a tick name and a timestamp).
+3. One clock and one window unit across writers: the model has one now and no skew or rollback.
+4. A claimed key whose send never happens stays blocked until its window ends: the design's
+   accepted cost, with no liveness property checked.
+5. The other writer's keys are separate slots; any writer of the record merges, never replaces.
+
+## Not shown
+
+What the runner does with a lane after the call, slot capacity, the choice among keys, the
+ledger rows, and liveness.

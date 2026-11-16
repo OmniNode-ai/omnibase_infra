@@ -1,0 +1,75 @@
+schema_version: 1.0.0
+ticket_id: OMN-22712
+title: The additive dispatch-venv reconcile pass updates only the moved packages in place with an atomic install and rollback
+summary: The additive pass of the dispatch-venv reconcile cloned the whole live venv to move a few packages. It now installs only the packages whose locked version moved into a staging directory and exchanges each package directory in place under a journal that restores every path when the readback fails. The behaviour lives in node_venv_atomic_install (contract, handler, runtime command line); the two baselined scripts keep only their calls.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn22712-additive-in-place
+    statement: A provider-only reconcile pass stages the moved packages, exchanges them in place, and rolls every exchange back from the journal when the install fails part-way.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the additive pass installs only the packages whose locked version moved, into a staging directory, and exchanges each package directory in place -- falsifier: uv run pytest -q on the new node''s unit test with a fixture venv of three packages of which one moved, red on main'
+      - id: AC2
+        statement: 'AC2: an install failure part-way restores every exchanged package from the journal and leaves the live venv''s file listing identical to the one before the pass -- falsifier: uv run pytest -q on the node''s error-chain test with an injected failure after the first exchange'
+      - id: AC3
+        statement: 'AC3: on a copy of a venv of about 37,000 files one pass makes at most 40,000 file events, against the recorded 121,929 before -- falsifier: strace -f -c on the pass over the copy on a lab host, read next to the recorded before figure'
+      - id: AC4
+        statement: 'AC4: the canonical-file-shape ratchet passes with no baseline entry raised -- falsifier: uv run pytest -q tests for the canonical-file-shape ratchet in omnibase_infra'
+evidence_requirements:
+  - kind: tests
+    description: The node's stage, overlay, commit, rollback and poller tests, and the reconcile script tests that take the in-place path for a provider-only pass and the clone path otherwise
+    command: uv run --frozen pytest tests/scripts/test_venv_atomic_install_omn22712.py tests/scripts/test_reconcile_workspace_venvs.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn22712-stage-and-exchange
+    description: Only the moved package is staged and exchanged in place; the live venv is untouched until the exchange.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_venv_atomic_install_omn22712.py tests/scripts/test_reconcile_workspace_venvs.py -q --no-cov -k "staging_writes_only_the_moved_package or provider_only_pass_updates_in_place"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22712-rollback
+    description: A failure part-way through the commit restores every exchanged path and the venv file listing is identical to the one before the pass.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_venv_atomic_install_omn22712.py -q --no-cov -k "failure_part_way_through_the_commit"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22712-file-events
+    description: The reconcile script takes the in-place path for a provider-only pass; the strace reading of one pass over a copy of a 37,875-file venv is in the pull request body (34,044 events, against 123,555 for the clone pass on the same copy).
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: grep -q 'ONEX_ATOMIC_INSTALL=..atomic' scripts/reconcile-workspace-venvs.sh
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22712-ratchet
+    description: The canonical-file-shape ratchet passes at head, and the two baselined scripts call the node with no baseline entry raised (the second test reads red on the tree before the change).
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_canonical_file_shape_ratchet_omn21523.py tests/scripts/test_venv_atomic_install_omn22712.py -q --no-cov -k "whole_tree_passes_at_head or baselined_scripts_call_the_node"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22712-deploy
+    description: Hosted-runner probe that reads the committed node contract from GitHub at the checked-out commit and requires the atomic install node to be declared.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_venv_atomic_install/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "node_venv_atomic_install" in src'
+        cwd: ${OMNI_HOME}/omnibase_infra

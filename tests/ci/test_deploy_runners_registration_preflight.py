@@ -20,6 +20,56 @@ import pytest
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/deploy-runners.sh"
+
+# OMN-22898 retired the primary host's general pool, so the repository's own compose
+# and fleet config declare no `omninode-runner-N` for `--rolling` to roll. The
+# roll is exercised in a sandbox copy of the entrypoint whose config and compose
+# declare a two-runner general pool; everything else the script reads is the
+# repository's own file.
+SANDBOX_FLEET_CONFIG = """\
+version: "1.0"
+github_org: FakeOrg
+runner_host: fake-host
+runner_group: fake-group
+runner_name_prefix: omninode-runner
+expected_count: 2
+burst_count: 2
+hosts:
+  - host: fake-host
+    arch: amd64
+    runner_name_prefix: omninode-runner
+    expected_count: 2
+    classes: [action]
+"""
+SANDBOX_COMPOSE = """\
+services:
+  omninode-runner-1:
+    environment:
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+  omninode-runner-2:
+    environment:
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+"""
+
+
+def _build_sandbox_repo(tmp_path: Path) -> Path:
+    """A repository root whose entrypoint, fleet config and compose are fixtures."""
+    sandbox = tmp_path / "repo"
+    for relative in (
+        "docker/runners/systemd",
+        "scripts",
+        "config",
+    ):
+        (sandbox / relative).mkdir(parents=True)
+    (sandbox / "scripts/deploy-runners.sh").write_text(SCRIPT.read_text())
+    (sandbox / "config/runner_fleet.yaml").write_text(SANDBOX_FLEET_CONFIG)
+    (sandbox / "docker/docker-compose.runners.yml").write_text(SANDBOX_COMPOSE)
+    (sandbox / "docker/runners/systemd/omnirunners.slice").write_text(
+        (ROOT / "docker/runners/systemd/omnirunners.slice").read_text()
+    )
+    return sandbox
+
+
 FAKE_TOKEN = "test-registration-handle"
 
 
@@ -90,6 +140,12 @@ def boundary(tmp_path: Path) -> tuple[dict[str, str], Path]:
             with (Path(os.environ["RUNNER_TEST_ROOT"]) / "calls").open("a") as log:
                 log.write("rsync\n")
         """,
+        # The sandbox root has no project for `uv run --project` to resolve; the
+        # runner temp-directory node it would start is not what these tests probe.
+        "uv": """
+            import sys
+            sys.exit(0)
+        """,
     }
     for name, body in programs.items():
         program = bindir / name
@@ -109,13 +165,21 @@ def boundary(tmp_path: Path) -> tuple[dict[str, str], Path]:
             values.append(f"{key}={value}")
     assert values
     env["RUNNER_TEST_SLICE"] = "\n".join(sorted(values))
+    _build_sandbox_repo(tmp_path)
     return env, tmp_path
 
 
 def run_roll(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
+    sandbox = Path(env["RUNNER_TEST_ROOT"]) / "repo"
     return subprocess.run(
-        ["bash", str(SCRIPT), "--rolling", "--only=omninode-runner-2", *args],
-        cwd=ROOT,
+        [
+            "bash",
+            str(sandbox / "scripts/deploy-runners.sh"),
+            "--rolling",
+            "--only=omninode-runner-2",
+            *args,
+        ],
+        cwd=sandbox,
         env=env,
         capture_output=True,
         text=True,

@@ -211,7 +211,7 @@ dod_evidence:
     binds_ac:
       - AC3
   - id: dod-omn-18595-core-dev-20261108014124-pin
-    description: The core dev-20261108014124-2fe30fd9dc47 bump keeps the core pin tests and the recorded dev-tag lineage consistent with pyproject.toml and uv.lock.
+    description: The core dev-20261109065232-cd128b790ec6 bump keeps the core pin tests and the recorded dev-tag lineage consistent with pyproject.toml and uv.lock.
     source: manual
     checks:
       - check_type: test_passes

@@ -28,7 +28,7 @@ from uuid import uuid4
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from deploy_agent import agent as agent_mod
-from deploy_agent.agent import BRANCH_INSTALL_HANDLER, DeployAgent
+from deploy_agent.agent import BRANCH_INSTALL_ENTRY, DeployAgent
 from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested, Scope
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
@@ -65,7 +65,7 @@ class _Exec:
     def __call__(
         self, argv: list[str], timeout: int, env: dict[str, str]
     ) -> subprocess.CompletedProcess[str]:
-        command = argv[argv.index(BRANCH_INSTALL_HANDLER) + 1]
+        command = argv[argv.index(BRANCH_INSTALL_ENTRY) + 1]
         self.calls.append((argv, timeout, env))
         self.timeline.append(f"handler {command}")
         return self.results.get(
@@ -73,9 +73,7 @@ class _Exec:
         )
 
     def commands(self) -> list[str]:
-        return [
-            argv[argv.index(BRANCH_INSTALL_HANDLER) + 1] for argv, _, _ in self.calls
-        ]
+        return [argv[argv.index(BRANCH_INSTALL_ENTRY) + 1] for argv, _, _ in self.calls]
 
 
 class _FakeExecutor:
@@ -118,6 +116,10 @@ class _FakeExecutor:
 
 
 REPO_SRC = Path(__file__).resolve().parents[4] / "src"
+REAPPLY_ENTRY = (
+    "omnibase_infra/nodes/node_dev_roll_events_effect/"
+    "runtime_dev_branch_install_reapply.py"
+)
 
 
 def _declare(state: Path, tmp_path: Path) -> None:
@@ -132,8 +134,7 @@ def _declare(state: Path, tmp_path: Path) -> None:
     done = subprocess.run(
         [
             sys.executable,
-            "-m",
-            BRANCH_INSTALL_HANDLER,
+            str(REPO_SRC / REAPPLY_ENTRY),
             "register",
             "--state-dir",
             str(state),
@@ -210,7 +211,7 @@ def test_a_dev_job_applies_the_record_after_the_recreate_and_the_verify(
     assert job is not None and job.status == "success"
     assert timeline == ["recreate", "verify", "handler apply"]
     argv, timeout, env = runner.calls[0]
-    assert argv[:4] == [sys.executable, "-m", BRANCH_INSTALL_HANDLER, "apply"]
+    assert argv[:3] == [sys.executable, BRANCH_INSTALL_ENTRY, "apply"]
     assert argv[argv.index("--state-dir") + 1] == str(tmp_path / "state")
     assert argv[argv.index("--compose-project") + 1] == (
         agent_mod.lane_config_for(EnumRuntimeLane.DEV).compose_project
@@ -479,3 +480,49 @@ async def test_an_agent_without_the_getter_says_indeterminate(tmp_path: Path) ->
     finally:
         await client.close()
     assert body["installs"] is None
+
+
+# --------------------------------------------------------------------------- #
+# OMN-24013: the start event of a reapply                                     #
+# --------------------------------------------------------------------------- #
+REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+def test_omn24013_the_agent_runs_the_reapply_entry_not_the_bare_handler() -> None:
+    assert BRANCH_INSTALL_ENTRY.endswith(f"/src/{REAPPLY_ENTRY}")
+    assert (REPO_SRC / REAPPLY_ENTRY).is_file()
+
+
+def _entry_reads_job(state_dir: Path) -> str:
+    """What the entry reads, run the way the agent runs it: a fresh interpreter on ``src``."""
+    code = (
+        "import sys; from pathlib import Path; "
+        "from omnibase_infra.nodes.node_dev_roll_events_effect"
+        ".runtime_dev_branch_install_reapply import active_job_id; "
+        "print(active_job_id(Path(sys.argv[1])))"
+    )
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+    done = subprocess.run(
+        [sys.executable, "-c", code, str(state_dir)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=120,
+    )
+    return done.stdout.strip()
+
+
+def test_omn24013_the_entry_reads_the_job_the_real_job_store_wrote(
+    tmp_path: Path,
+) -> None:
+    """Seam: the entry finds the in-flight job in the state dir the agent's JobStore fills."""
+    jobs = JobStore(tmp_path)
+    cid = uuid4()
+    assert _entry_reads_job(tmp_path) == "None"
+
+    jobs.accept(cid, {"correlation_id": str(cid), "requested_by": "test"})
+    assert _entry_reads_job(tmp_path) == str(cid)
+
+    jobs.complete(cid, status="success")
+    assert _entry_reads_job(tmp_path) == "None"

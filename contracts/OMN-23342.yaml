@@ -1,0 +1,53 @@
+schema_version: 1.0.0
+ticket_id: OMN-23342
+title: Self-hosted CI runners resolve the tool-cache libpython3.12 through the loader, so the tool-cache Python and venvs built from it start on every runner
+summary: The Actions tool-cache CPython builds on hp053-ci-runner-1 to -5 link a shared libpython and carry no RPATH. Until 2026-10-21 the image's deadsnakes python3.12 package put libpython3.12.so.1.0 on the system loader path; OMN-17427 replaced it with a uv-managed CPython whose shared library sits only in its own lib directory, so ldd of the tool-cache python3.12 read libpython3.12.so.1.0 not found and any step that ran it, or a venv built from it, without setup-python's LD_LIBRARY_PATH died with an error while loading shared libraries. The runner Dockerfile now registers the uv-managed CPython's lib directory with the loader (an ld.so.conf.d entry plus ldconfig in the same layer) and the image version moves to 14. The change reaches the five runners through the declared installer, a rebuild of the image and a recreate bracketed by the tool-cache seed script.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23342-toolcache-libpython-resolves
+    statement: A runner's tool-cache CPython resolves its own shared libpython through the loader, with no environment variable and no hand copy.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: on each of the five runners the tool-cache python3.12 starts and a venv built from it runs (the shared library resolves through the runner image or installer, never a hand copy) -- falsifier: run the tool-cache python3.12 -c ''import sys'' inside each runner container and read exit 0'
+      - id: AC2
+        statement: 'AC2: the runner image or its installer carries the fix with a test that fails on the old image -- falsifier: the runner image build test in omnibase_infra run under pytest or the image build check'
+      - id: AC3
+        statement: 'AC3: a pre-commit job that lands on one of the five runners passes after the fix -- falsifier: the check run of pre-commit on a pull request whose job ran on hp053-ci-runner-1 to -4 or omninode-runner-1'
+evidence_requirements:
+  - kind: tests
+    description: The libpython registration tests, which fail against the Dockerfile and lock at the merge base.
+    command: uv run pytest tests/ci/test_runner_toolcache_libpython_omn23342.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23342-registration-tests
+    description: The three registration tests pass on the branch; run against the Dockerfile and lock at the merge base, all three fail (no loader entry in the interpreter layer, no ldconfig, image version still 13).
+    source: manual
+    binds_ac:
+      - AC2
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_toolcache_libpython_omn23342.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn23342-dockerfile-registers
+    description: The Dockerfile interpreter layer writes the ld.so.conf.d entry for the uv-managed CPython lib directory and runs ldconfig.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: grep -qF 'onex-uv-python-libpython.conf' docker/runners/Dockerfile
+        cwd: .
+  - id: dod-omn23342-integration-proof-runner-image
+    description: After the installer rebuilds the image and recreates the runners, the pre-commit check of this change's pull request reads success on a job that ran on one of the rebuilt runners. Pending the roll; read from the PR watcher after it.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: onex scm pr-checks "OmniNode-ai/omnibase_infra#$PR_NUMBER" | grep -i 'pre-commit' | grep -i -E 'success|pass'
+        cwd: .

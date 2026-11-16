@@ -13,7 +13,11 @@
 # SAME RUNNER, ONE LABEL SET. The anchors are hp051-ci-runner's with these changes, each deliberate:
 #   - RUNNER_LABELS is self-hosted,omnibase-ci-mq,linux,x64,arch-amd64 and nothing else. There is no `omnibase-ci` and no
 #     `omnibase-ci-multiarch`, so no pull-request job can land here and the pool serves only the jobs that name the
-#     reserved label. The runner group is still omnibase-ci, the group the private repositories can use.
+#     reserved label. OMN-23387: the runner group is the private-only group the operator places, named by MQ_RUNNER_GROUP in
+#     the host's docker/.env, exactly as on the h053 pool (OMN-23156), and the unit refuses to render without it. The queue
+#     then rests on two hosts that one group serves, so neither host's stop can empty it. A runner that is already
+#     registered keeps its cached registration: moving the four existing h051 runners into the group is the operator's
+#     runner group setting, read back before anything depends on it.
 #   - its own container, runner and volume names (hp051-ci-mq-runner-N) and its own compose project (`-p hp051-ci-mq-runner`).
 #   - 10 GiB per runner (memswap the same, so nothing swaps), not 6: the job directories are tmpfs mounts charged to the
 #     container (next item). The pool shares the host's omnirunners.slice (96G high, 112G max); its four runners add at
@@ -113,7 +117,7 @@ x-runner-base: &runner-base
     LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET must be set for the omnibase-ci fleet (runner host docker/.env, mode 600) - see scripts/deploy-runners.sh CONSOLIDATED REQUIRED ENV VARS}
     LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST must be set for the omnibase-ci fleet (runner host docker/.env) - the LLM transport refuses to default its own trust boundary}
     RUNNER_TOKEN: ${RUNNER_TOKEN}
-    RUNNER_GROUP: omnibase-ci
+    RUNNER_GROUP: ${MQ_RUNNER_GROUP:?MQ_RUNNER_GROUP must be set (runner host docker/.env) to the private-only merge-queue runner group the operator placed}
     ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
     UV_CONCURRENT_DOWNLOADS: "1"
     UV_CONCURRENT_BUILDS: "1"

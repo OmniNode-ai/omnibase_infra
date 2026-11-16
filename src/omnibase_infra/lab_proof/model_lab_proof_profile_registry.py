@@ -12,12 +12,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from omnibase_infra.lab_proof.enum_lab_proof_exempt_class import (
-    EnumLabProofExemptClass,
-)
-from omnibase_infra.lab_proof.model_lab_proof_companion_rule import (
-    ModelLabProofCompanionRule,
-)
 from omnibase_infra.lab_proof.model_lab_proof_excluded_repo import (
     ModelLabProofExcludedRepo,
 )
@@ -39,7 +33,6 @@ class ModelLabProofProfileRegistry(BaseModel):
     registry_source: str = Field(min_length=1)
     registry_repos: tuple[str, ...] = Field(min_length=1)
     excluded_repos: tuple[ModelLabProofExcludedRepo, ...] = ()
-    change_control_companion: ModelLabProofCompanionRule
     profiles: tuple[ModelLabProofProfile, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -74,17 +67,6 @@ class ModelLabProofProfileRegistry(BaseModel):
         ids = [profile.profile_key for profile in self.profiles]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate profile_key")
-        companion_repo = self.change_control_companion.repo
-        for profile in self.profiles:
-            if (
-                EnumLabProofExemptClass.BOT_CHANGE_CONTROL_COMPANION
-                in profile.exempt_classes
-                and profile.repo != companion_repo
-            ):
-                raise ValueError(
-                    f"profile {profile.profile_key}: bot_change_control_companion is "
-                    f"only valid on {companion_repo}"
-                )
         return self
 
     def profile_for(self, repo: str) -> ModelLabProofProfile:

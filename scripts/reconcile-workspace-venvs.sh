@@ -761,19 +761,22 @@ clone_venv_to_staging() {
 # two-rename swap rather than failing the reconcile.
 exchange_dirs_atomically() {
   command -v python3 >/dev/null 2>&1 || return 1
-  python3 - "$1" "$2" <<'PYEOF'
-import ctypes, ctypes.util, os, sys
+  python3 "$_ATOMIC_TOOL" exchange "$1" "$2"
+}
 
-a, b = (os.fsencode(p) for p in sys.argv[1:3])
-libc = ctypes.CDLL(ctypes.util.find_library("c") or None, use_errno=True)
-if sys.platform == "darwin":
-    rc = libc.renamex_np(a, b, 2)  # RENAME_SWAP
-elif hasattr(libc, "renameat2"):
-    rc = libc.renameat2(-100, a, -100, b, 2)  # AT_FDCWD, RENAME_EXCHANGE
-else:
-    sys.exit(1)
-sys.exit(0 if rc == 0 else 1)
-PYEOF
+# Stage the additive pass on a clone of the live venv (copy-on-write where the
+# filesystem has it). Sets the caller's staging, target_venv and target_python.
+stage_additive_clone() {
+  staging="$DISPATCH_VENV.rebuilding"
+  target_venv="$staging"
+  target_python="$staging/bin/python"
+  say "dispatch venv: staging the additive pass at $staging"
+  trace "cp -c $DISPATCH_VENV $staging"
+  if ! clone_venv_to_staging "$DISPATCH_VENV" "$staging"; then
+    fail "could not stage the dispatch venv; the live venv is UNTOUCHED and" \
+      "still serving, and the gate venv was NOT touched." \
+      "Free the disk space or remove $staging and re-run."
+  fi
 }
 
 swap_dispatch_venv() {
@@ -825,43 +828,14 @@ release_staging_lock() {
   STAGING_LOCK=""
 }
 
-staging_lock_field() {
-  # $1 = holder record, $2 = key. Records are `pid=N;host=H;at=T`.
-  local part
-  local -a parts
-  IFS=';' read -r -a parts < <(printf '%s\n' "$1")
-  for part in "${parts[@]}"; do
-    [[ "$part" == "$2="* ]] && { printf '%s' "${part#"$2="}"; return 0; }
-  done
-  return 0
-}
-
+# The holder record, the live-or-dead judgement and the decline are the node's
+# (node_venv_atomic_install, OMN-16932): it exits 4 when a live peer holds the lock,
+# which this run reports as a skip and not a failure.
 acquire_staging_lock() {
-  local path="$1.lock" record holder holder_host attempt
-  record="pid=$$;host=$(hostname);at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  for attempt in 1 2; do
-    if ln -s "$record" "$path" 2>/dev/null; then
-      STAGING_LOCK="$path"
-      trap release_staging_lock EXIT
-      return 0
-    fi
-    local seen
-    seen="$(readlink "$path" 2>/dev/null || true)"
-    holder="$(staging_lock_field "$seen" pid)"
-    holder_host="$(staging_lock_field "$seen" host)"
-    if [[ -n "$holder" ]] \
-       && { [[ "$holder_host" != "$(hostname)" ]] || kill -0 "$holder" 2>/dev/null; }; then
-      fail "another run of this script (pid $holder on ${holder_host:-unknown host}, since $(staging_lock_field "$seen" at)) is staging $1;" \
-        "two runs on one staging directory delete each other's venv." \
-        "Wait for it to finish, or stop it if it is orphaned:" \
-        "  ps -p $holder -o pid,etime,command"
-    fi
-    # A dead or unreadable holder. Remove it only if it is still the record just
-    # read, so a run that reclaimed it first is not displaced.
-    [[ "$(readlink "$path" 2>/dev/null || true)" == "$seen" ]] && rm -f "$path"
-  done
-  fail "could not take the staging lock $path" \
-    "Remove it if no run of this script is live, then retry."
+  local path="$1.lock"
+  python3 "$_ATOMIC_TOOL" staging-lock-acquire --path "$path" --pid "$$" || exit $?
+  STAGING_LOCK="$path"
+  trap release_staging_lock EXIT
 }
 
 INSTALL_SCRIPT="${ONEX_RECONCILE_INSTALL_SCRIPT:-$INFRA_DIR/scripts/install-node-skill-package.sh}"
@@ -915,6 +889,7 @@ UV_SEARCHED=()
 # exit code.
 _VENV_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _PRIVILEGE_LIB="$_VENV_SCRIPT_DIR/reconcile_privilege_lib.sh"
+_ATOMIC_TOOL="$_VENV_SCRIPT_DIR/../src/omnibase_infra/nodes/node_venv_atomic_install/runtime_venv_atomic_install.py"
 if [[ ! -f "$_PRIVILEGE_LIB" ]]; then
   say "INDETERMINATE: privilege library missing at $_PRIVILEGE_LIB"
   say "  Without it there is no way to know who owns the venv, and writing as"
@@ -1184,23 +1159,7 @@ lock_layer_ok_in() {
 # supposed to be absent from it.
 installed_market_commit() {
   [[ -x "$DISPATCH_PYTHON" ]] || return 0
-  env -u PYTHONPATH "$DISPATCH_PYTHON" - <<'PYEOF' 2>/dev/null || true
-import json
-import sys
-from importlib.metadata import PackageNotFoundError, distribution
-
-try:
-    dist = distribution("omnimarket")
-except PackageNotFoundError:
-    print("")
-    sys.exit(0)
-raw = dist.read_text("direct_url.json") or ""
-try:
-    data = json.loads(raw) if raw else {}
-except json.JSONDecodeError:
-    data = {}
-print(data.get("vcs_info", {}).get("commit_id", ""))
-PYEOF
+  env -u PYTHONPATH "$DISPATCH_PYTHON" "$_ATOMIC_TOOL" installed-commit 2>/dev/null || true
 }
 
 # --------------------------------------------------------------------------- #
@@ -1958,18 +1917,25 @@ run_repair() {
   # The clone is copy-on-write where the filesystem has it, so the common tick
   # (the clone advanced, the interpreter did not) pays for a rename, not a
   # rebuild. A pass with nothing to do clones nothing.
-  if [[ "$rebuild" -eq 0 && -x "$DISPATCH_PYTHON" ]] \
+  #
+  # OMN-22712: ...EXCEPT when only the PROVIDER layer moved (the lock layer reads
+  # in sync, the interpreter is right, the venv is relocatable). That pass runs
+  # once per omnimarket merge, about 45 times a day on a lab Mac, and cloning the
+  # whole venv for it wrote and then deleted about 57,000 files each time -- the
+  # event volume that grew fseventsd to 43 GB. It now installs only the packages
+  # that moved into a side directory, reads the venv back with them overlaid and
+  # puts them in place with one exchange per package directory (the tool is
+  # nodes/node_venv_atomic_install; a journal restores them on a failure after
+  # that). The full clone stays for a rebuild and for a pass that moves the lock.
+  local atomic=0
+  if [[ "$rebuild" -eq 0 && "$need_lock" -eq 0 && "$need_provider" -eq 1 \
+        && -x "$DISPATCH_PYTHON" ]] && venv_is_relocatable "$DISPATCH_VENV" \
+        && python3 "$_ATOMIC_TOOL" supported; then
+    atomic=1
+    say "dispatch venv: additive pass in place -- only the moved packages are staged and exchanged in"
+  elif [[ "$rebuild" -eq 0 && -x "$DISPATCH_PYTHON" ]] \
      && [[ "$need_lock" -eq 1 || "$need_provider" -eq 1 ]]; then
-    staging="$DISPATCH_VENV.rebuilding"
-    target_venv="$staging"
-    target_python="$staging/bin/python"
-    say "dispatch venv: staging the additive pass at $staging"
-    trace "cp -c $DISPATCH_VENV $staging"
-    if ! clone_venv_to_staging "$DISPATCH_VENV" "$staging"; then
-      fail "could not stage the dispatch venv; the live venv is UNTOUCHED and" \
-        "still serving, and the gate venv was NOT touched." \
-        "Free the disk space or remove $staging and re-run."
-    fi
+    stage_additive_clone
   fi
 
   # What a refusal from here on can HONESTLY claim survived. A staged rebuild
@@ -1980,6 +1946,8 @@ run_repair() {
   local intact_note="the gate venv was NOT touched."
   if [[ -n "$staging" ]]; then
     intact_note="the live venv is UNTOUCHED and still serving, and the gate venv was NOT touched."
+  elif [[ "$atomic" -eq 1 ]]; then
+    intact_note="the live venv is still serving (an in-place install that fails its readback is rolled back) and the gate venv was NOT touched."
   fi
 
   # A dispatch venv that does not exist yet has no provider layer to install
@@ -2082,7 +2050,7 @@ run_repair() {
       # layer beneath, which this install exists NOT to re-resolve (hence its own
       # --no-deps). The workspace root carries no uv configuration on any host,
       # so this changes where the child stands without changing what it installs.
-      if ! (cd "$OMNI_HOME" && as_owner env OMNIMARKET_REF="$head" OMNI_HOME="$OMNI_HOME" \
+      if ! (cd "$OMNI_HOME" && as_owner env OMNIMARKET_REF="$head" OMNI_HOME="$OMNI_HOME" ONEX_ATOMIC_INSTALL="$atomic" \
           PATH="$(dirname "$UV_BIN"):$PATH" \
           bash "$INSTALL_SCRIPT" --execute "$target_python"); then
         fail "provider co-install did not complete; omnimarket is not installed." \
@@ -2096,6 +2064,16 @@ run_repair() {
       # The co-install just ran, so the lock pass is mandatory regardless of
       # what the pre-check said -- that is the whole OMN-16262 repair.
       need_lock=1
+      # An in-place install writes no lock pin down (it refuses a downgrade), so
+      # the lock pass is a READ there; a layer that moved is applied on a clone.
+      if [[ "$atomic" -eq 1 ]]; then
+        if lock_layer_ok_in "$INFRA_DIR" "$DISPATCH_VENV" --inexact; then
+          need_lock=0
+        else
+          say "dispatch venv: the co-install moved the lock layer; applying the lock on a staged clone"
+          stage_additive_clone
+        fi
+      fi
     fi
 
     if [[ "$need_lock" -eq 1 ]]; then
@@ -2142,6 +2120,15 @@ run_repair() {
     fi
     say "dispatch venv: swapping the proven rebuild into $DISPATCH_VENV"
     swap_dispatch_venv "$staging" "$DISPATCH_VENV"
+  fi
+
+  # OMN-16932: the floor follows the venv under the same staging lock, after a staged
+  # swap, an in-place exchange or a pass with nothing to do (an earlier run's lag heals).
+  if [[ "$MODE" == "repair" && "$PROVEN" -eq 0 ]]; then
+    local changed_flag=""
+    [[ "$rebuild" -eq 1 || "$need_lock" -eq 1 || "$need_provider" -eq 1 ]] && changed_flag="--changed"
+    as_owner python3 "$_ATOMIC_TOOL" promote-floor --venv "$DISPATCH_VENV" --uv-lock "$INFRA_DIR/uv.lock" \
+      --workspace-root "$OMNI_HOME" --floor "$OMNI_HOME/.onex-workspace-floor.json" $changed_flag || exit $?
   fi
 
   # ---- surface 2: the GATE venv, lock-governed ONLY (OMN-17819) ------------ #

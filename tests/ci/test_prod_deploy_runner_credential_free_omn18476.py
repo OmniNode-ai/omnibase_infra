@@ -44,7 +44,7 @@ from typing import Any
 import pytest
 import yaml
 
-from tests.ci._runner_compose_text import read_runner_compose
+from tests.ci._runner_compose_text import general_pool_control, read_runner_compose
 from tests.ci.test_customer_plane_runner_credential_free_omn18392 import (
     DOCKER_SOCKET,
     LAB_CREDENTIALS_TARGET,
@@ -58,20 +58,24 @@ COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.runners.yml"
 DOCKERFILE = REPO_ROOT / "docker" / "runners" / "Dockerfile"
 
 SERVICE = "omninode-prod-deploy-runner-1"
-CONTROL_SERVICE = "omninode-runner-1"
+# OMN-22898 retired the primary host's own general pool, so the positive control
+# is the first runner of the largest general pool on another host, which carries
+# the same fleet-wide wiring.
+CONTROL_SERVICE, CONTROL_FILE = general_pool_control()
 EXPECTED_LABELS = "self-hosted,omnibase-prod-deploy,linux,x64,arch-amd64"
 CLASS_LABEL = "omnibase-prod-deploy"
 
 
-def _compose() -> dict[str, Any]:
-    loaded = yaml.safe_load(read_runner_compose(COMPOSE_FILE))
+def _compose(path: Path = COMPOSE_FILE) -> dict[str, Any]:
+    loaded = yaml.safe_load(read_runner_compose(path))
     assert isinstance(loaded, dict)
     return loaded
 
 
 def _service(name: str) -> dict[str, Any]:
-    services = _compose()["services"]
-    assert name in services, f"{name} is not defined in {COMPOSE_FILE}"
+    path = CONTROL_FILE if name == CONTROL_SERVICE else COMPOSE_FILE
+    services = _compose(path)["services"]
+    assert name in services, f"{name} is not defined in {path}"
     return services[name]
 
 

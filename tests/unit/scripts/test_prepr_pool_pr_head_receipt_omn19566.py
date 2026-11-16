@@ -26,6 +26,12 @@ import pytest
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
+from tests.helpers.declared_changed_path import (
+    LIVE_TERM_DOT,
+    NODE_LIVE,
+    dead,
+    node_says,
+)
 from tests.helpers.prepr_pool_overlay import pool_overlay_env
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -87,6 +93,7 @@ def _run(
     probe_extra: str = "",
     build: str | None = None,
     verifier: str | None = "prepr_runtime_pool.judge@test-mac",
+    answer: dict[str, Any] | None = None,
 ) -> tuple[int, str, list[dict[str, Any]], list[dict[str, Any]]]:
     host = fakes.FakeHost()
     host.phases["clone"] = clone
@@ -94,19 +101,20 @@ def _run(
     if build is not None:
         host.phases["build"] = build
     out = tmp_path / "receipts"
-    code, text = pool.run_proof(
-        CFG,
-        fakes.FakeTransport({"pool-a": host}),
-        _params(tmp_path),
-        "plan-item-I7",
-        60,
-        "pool-a",
-        [],
-        now_fn=lambda: NOW,
-        log=lambda s: None,
-        receipt_dir=out,
-        verifier_identity=verifier,
-    )
+    with node_says(pool, answer):
+        code, text = pool.run_proof(
+            CFG,
+            fakes.FakeTransport({"pool-a": host}),
+            _params(tmp_path),
+            "plan-item-I7",
+            60,
+            "pool-a",
+            [],
+            now_fn=lambda: NOW,
+            log=lambda s: None,
+            receipt_dir=out,
+            verifier_identity=verifier,
+        )
     found = sorted(out.glob("*.receipt.json")) if out.exists() else []
     events = sorted(out.glob("*.event.json")) if out.exists() else []
     return (
@@ -123,6 +131,7 @@ def test_a_pass_mints_an_accepted_receipt_keyed_by_the_exact_head(
     code, text, found, events = _run(
         tmp_path,
         live="  omnibase-infra-local-omninode-runtime mentions node_x: 2\n",
+        answer=NODE_LIVE,
     )
     assert code == pool.EXIT_PASS, text
     assert len(found) == 1 and len(events) == 1
@@ -184,6 +193,7 @@ def test_a_changed_path_no_runtime_mentions_fails_the_proof(tmp_path: Path) -> N
             "  omnibase-infra-local-omninode-runtime mentions node_dead: 0\n"
             "  omnibase-infra-local-runtime-effects mentions node_dead: 0\n"
         ),
+        answer=dead("node_dead"),
     )
     assert code == pool.EXIT_FAIL, text
     assert "changed path not live, no runtime log mentions: node_dead" in text
@@ -193,7 +203,9 @@ def test_a_changed_path_no_runtime_mentions_fails_the_proof(tmp_path: Path) -> N
 
 
 def test_a_runner_that_is_its_own_verifier_is_refused(tmp_path: Path) -> None:
-    _, text, _, events = _run(tmp_path, verifier="PLAN-ITEM-I7@pool-a")
+    _, text, _, events = _run(
+        tmp_path, verifier="PLAN-ITEM-I7@pool-a", answer=NODE_LIVE
+    )
     assert events[0]["verifier_token"] == "RUNNER_IS_VERIFIER"
     assert "verifier=RUNNER_IS_VERIFIER" in text
 
@@ -509,7 +521,10 @@ def _infra_clone(*changed: str) -> str:
 
 
 def _infra_run(
-    tmp_path: Path, clone: str, live: str = ""
+    tmp_path: Path,
+    clone: str,
+    live: str = "",
+    answer: dict[str, Any] | None = None,
 ) -> tuple[int, str, list[dict[str, Any]]]:
     host = fakes.FakeHost()
     host.phases["clone"] = clone
@@ -517,19 +532,20 @@ def _infra_run(
     params = tmp_path / "p.env"
     params.write_text(f"INFRA_PR=4809\nINFRA_HEAD={HEAD}\n", encoding="utf-8")
     out = tmp_path / "receipts"
-    code, text = pool.run_proof(
-        CFG,
-        fakes.FakeTransport({"pool-a": host}),
-        params,
-        "labproof-gate",
-        60,
-        "pool-a",
-        [],
-        now_fn=lambda: NOW,
-        log=lambda s: None,
-        receipt_dir=out,
-        verifier_identity="prepr_runtime_pool.judge@test-mac",
-    )
+    with node_says(pool, answer):
+        code, text = pool.run_proof(
+            CFG,
+            fakes.FakeTransport({"pool-a": host}),
+            params,
+            "labproof-gate",
+            60,
+            "pool-a",
+            [],
+            now_fn=lambda: NOW,
+            log=lambda s: None,
+            receipt_dir=out,
+            verifier_identity="prepr_runtime_pool.judge@test-mac",
+        )
     events = [json.loads(p.read_text()) for p in sorted(out.glob("*.event.json"))]
     return code, text, events
 
@@ -569,13 +585,13 @@ def test_a_node_change_with_no_live_line_is_missing_changed_path_live(
 def test_a_node_change_whose_derived_term_is_live_is_accepted(
     tmp_path: Path,
 ) -> None:
-    term = pool.LIVE_TERM_DOT + "node_runtime_error_triage_effect" + pool.LIVE_TERM_DOT
+    term = LIVE_TERM_DOT + "node_runtime_error_triage_effect" + LIVE_TERM_DOT
     live = (
         f"live-grep derived from the diff: {term} \n"
         f"  omnibase-infra-local-omninode-runtime mentions {term}: 4\n"
         f"  omnibase-infra-local-runtime-effects mentions {term}: 0\n"
     )
-    code, text, events = _infra_run(tmp_path, _infra_clone(NODE), live)
+    code, text, events = _infra_run(tmp_path, _infra_clone(NODE), live, NODE_LIVE)
     assert code == pool.EXIT_PASS, text
     assert events[0]["verifier_token"] == "ACCEPTED", text
     assert "changed_path_live" in events[0]["mandatory_checks"]
@@ -584,12 +600,17 @@ def test_a_node_change_whose_derived_term_is_live_is_accepted(
 def test_a_node_change_whose_derived_term_is_dead_fails_naming_the_node(
     tmp_path: Path,
 ) -> None:
-    term = pool.LIVE_TERM_DOT + "node_runtime_error_triage_effect" + pool.LIVE_TERM_DOT
+    term = LIVE_TERM_DOT + "node_runtime_error_triage_effect" + LIVE_TERM_DOT
     live = (
         f"  omnibase-infra-local-omninode-runtime mentions {term}: 0\n"
         f"  omnibase-infra-local-runtime-effects mentions {term}: 0\n"
     )
-    code, text, events = _infra_run(tmp_path, _infra_clone(NODE), live)
+    code, text, events = _infra_run(
+        tmp_path,
+        _infra_clone(NODE),
+        live,
+        dead("node_runtime_error_triage_effect"),
+    )
     assert code == pool.EXIT_FAIL
     assert (
         "changed path not live, no runtime log mentions: "
@@ -601,9 +622,11 @@ def test_a_node_change_whose_derived_term_is_dead_fails_naming_the_node(
 def test_a_forwarder_change_stays_missing_the_check_no_pool_stack_can_run(
     tmp_path: Path,
 ) -> None:
-    term = pool.LIVE_TERM_DOT + "node_bus_forwarder_effect" + pool.LIVE_TERM_DOT
+    term = LIVE_TERM_DOT + "node_bus_forwarder_effect" + LIVE_TERM_DOT
     live = f"  omnibase-infra-local-runtime-effects mentions {term}: 2\n"
-    _, _, events = _infra_run(tmp_path, _infra_clone(FORWARDER_CONTRACT), live)
+    _, _, events = _infra_run(
+        tmp_path, _infra_clone(FORWARDER_CONTRACT), live, NODE_LIVE
+    )
     assert events[0]["verifier_token"] == "MISSING_MANDATORY_CHECK"
     assert events[0]["missing_mandatory_checks"] == ["forwarder_refused_topic"]
 
@@ -701,7 +724,7 @@ def test_live_terms_are_derived_from_changed_nodes_that_exist_at_the_head(
         capture_output=True,
         text=True,
     ).stdout
-    assert out.split() == [pool.LIVE_TERM_DOT + "node_kept" + pool.LIVE_TERM_DOT]
+    assert out.split() == [LIVE_TERM_DOT + "node_kept" + LIVE_TERM_DOT]
     # live means the node ran (its consumer group, its own logger), never that
     # it was discovered; and node_kept is not live on node_kept_more's lines
     for line, expected in (

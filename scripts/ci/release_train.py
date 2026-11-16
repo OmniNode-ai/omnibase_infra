@@ -445,6 +445,10 @@ class ModelRepoFacts:
     dev_head_sha: str
     unreleased_count: int
     unreleased_subjects: tuple[str, ...]
+    # True when the manifest declares ``dynamic = ["version"]`` and carries no
+    # version line (OMN-23841): the version is the newest release tag, and the
+    # cut writes no version line.
+    version_from_git: bool = False
 
 
 @dataclass(frozen=True)
@@ -779,6 +783,8 @@ def _read_pyproject_version(raw: str, repo: str, ref: str) -> str | None:
     except tomllib.TOMLDecodeError as exc:
         msg = f"{repo}: pyproject.toml at {ref} does not parse: {exc}"
         raise ReleaseTrainConfigError(msg) from exc
+    if "version" in parsed.get("project", {}).get("dynamic", []):
+        return None  # OMN-23841: the version comes from git, not this file
     version = parsed.get("project", {}).get("version")
     if not isinstance(version, str) or not version.strip():
         msg = f"{repo}: pyproject.toml at {ref} declares no [project].version"
@@ -799,8 +805,10 @@ def _read_package_json_version(raw: str, repo: str, ref: str) -> str | None:
     return version.strip()
 
 
-def resolve_declared_version(repo: str, clone: Path, ref: str) -> str:
+def resolve_declared_version(repo: str, clone: Path, ref: str) -> str | None:
     """The version this repo declares at ``ref``, from whichever manifest it has.
+
+    None means the manifest declares it dynamic and git is the source (OMN-23841).
 
     Refuses when NEITHER manifest is present: a repo whose version cannot be
     read is a repo whose next release is already broken, and reporting that as
@@ -833,7 +841,6 @@ def resolve_declared_version(repo: str, clone: Path, ref: str) -> str:
         )
         raise ReleaseTrainConfigError(msg)
 
-    assert resolved is not None
     return resolved
 
 
@@ -900,10 +907,11 @@ def collect_repo_facts(policy: ModelRepoReleasePolicy, clone: Path) -> ModelRepo
     return ModelRepoFacts(
         repo=policy.repo,
         latest_tag=latest_tag,
-        dev_version=version.strip(),
+        dev_version=(version or latest_tag).strip(),
         dev_head_sha=head_sha,
         unreleased_count=len(subjects),
         unreleased_subjects=subjects,
+        version_from_git=version is None,
     )
 
 
@@ -1588,29 +1596,21 @@ def decide(
         )
 
     try:
-        dev_tuple = parse_final_version(facts.dev_version, label="[project].version")
+        dev_tuple = parse_final_version(facts.dev_version, label="version")
+        latest_tuple = (
+            parse_final_version(facts.latest_tag, label="latest published tag")
+            if facts.latest_tag
+            else None
+        )
     except ReleaseTrainConfigError as exc:
         return _build(
             EnumTrainVerdict.REFUSE, EnumTrainReason.VERSION_UNREADABLE, str(exc)
         )
 
     dev_normalized = ".".join(str(part) for part in dev_tuple)
-    if facts.latest_tag:
-        try:
-            latest_tuple = parse_final_version(
-                facts.latest_tag, label="latest published tag"
-            )
-        except ReleaseTrainConfigError as exc:
-            return _build(
-                EnumTrainVerdict.REFUSE, EnumTrainReason.VERSION_UNREADABLE, str(exc)
-            )
-        needs_bump = dev_tuple <= latest_tuple
-        candidate_version = (
-            next_patch(facts.latest_tag) if needs_bump else dev_normalized
-        )
-    else:
-        needs_bump = False
-        candidate_version = dev_normalized
+    behind = latest_tuple is not None and dev_tuple <= latest_tuple
+    needs_bump = behind and not facts.version_from_git
+    candidate_version = next_patch(facts.latest_tag) if behind else dev_normalized
 
     if facts.unreleased_count == 0:
         return _build(

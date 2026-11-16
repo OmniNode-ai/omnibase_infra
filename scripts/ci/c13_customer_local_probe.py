@@ -26,7 +26,7 @@ THE FOUR CLAUSES
                      no ``direct_url.json`` exists, which pip writes for any
                      VCS, local-path or editable install), the working
                      directory is not inside a git work tree, and no source
-                     tree of any of the five distributions exists under the
+                     tree of any of the four distributions exists under the
                      scanned roots.
     three_files      ``result.txt``, ``receipt.json`` and ``run.json`` exist
                      under the run's own directory, parse, agree with each
@@ -111,10 +111,9 @@ EXIT_OK: Final[int] = 0
 EXIT_FINDINGS: Final[int] = 1
 EXIT_INPUT: Final[int] = 2
 
-#: The five distributions a delegation imports. The no-checkout clause requires
+#: The four distributions a delegation imports. The no-checkout clause requires
 #: every one of them to have come from the package index.
 ONEX_DISTRIBUTIONS: Final[tuple[str, ...]] = (
-    "omnibase_compat",
     "omnibase_core",
     "omnibase_infra",
     "omnibase_spi",

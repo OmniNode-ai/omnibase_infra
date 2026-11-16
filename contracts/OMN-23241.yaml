@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: OMN-23241
+title: omnibase_infra workflows that touch no lab service run on a hosted runner, family 5
+summary: 'Family 5 of the hosted-runner migration of this public repository. 8 workflows (15 jobs) that read no lab service on a read of their steps select the literal ubuntu-latest in every job and are listed in the routing policy''s hosted_runner_allowlist, so omnibase_core''s public_runner_placement validator reports none for them.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23235-ci-hosted
+    statement: Every job of the 8 family workflows selects only a GitHub-hosted label.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the core validator reports no finding for the 8 moved workflows at the pull request head and 15 findings on their copies at its base -- falsifier: uv run python -m omnibase_core.validation.validator_public_runner_placement over the 8 files at each commit'
+      - id: AC2
+        statement: 'AC2: the family 5 test passes at the head and fails with the 8 workflows restored from the previous commit -- falsifier: uv run pytest tests/ci/test_public_runner_family_hostable_omn22867.py'
+evidence_requirements:
+  - kind: tests
+    description: Family 5 workflow shape test and the routing audit tests.
+    command: uv run pytest tests/ci/test_public_runner_family_hostable_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23235-ac1-ci-hosted
+    description: Every job of each family workflow selects a hosted label and the file is allowlisted with a reason.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_hostable_omn22867.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23235-ac2-route-wiring
+    description: The routing audit tests pass beside the family 5 test.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_hostable_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra

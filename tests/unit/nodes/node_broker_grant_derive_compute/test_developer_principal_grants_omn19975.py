@@ -163,7 +163,7 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "topic",
         "onex.cmd.omnimarket.work-ledger-query-requested.v1",
         "literal",
-        ("write", "describe"),
+        ("read", "write", "describe"),
     ),
     (
         "topic",
@@ -347,6 +347,92 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ),
     ("group", "receipt-mode-client.", "prefixed", ("read", "describe")),
 )
+# The landing decision chain (OMN-23395): the piece 9 chain tests serve the landing decision
+# node over the dev lane as the machine's issued principal, so it produces and consumes the
+# node's command topic, its success terminal and (OMN-23459) its failure terminal, each read
+# under a run-named group prefix.
+LANDING_DECISION_COMMAND = "onex.cmd.omnimarket.pr-landing-decision-requested.v1"
+LANDING_DECISION_SUCCESS = "onex.evt.omnimarket.pr-landing-decision-completed.v1"
+LANDING_DECISION_FAILURE = "onex.evt.omnimarket.pr-landing-decision-failed.v1"
+LANDING_DECISION_GROUP_PREFIXES: tuple[str, ...] = (
+    "landing-chain-node-",
+    "landing-chain-controller-",
+)
+LANDING_DECISION_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", LANDING_DECISION_COMMAND, "literal", ("read", "write", "describe")),
+    ("topic", LANDING_DECISION_SUCCESS, "literal", ("read", "write", "describe")),
+    ("topic", LANDING_DECISION_FAILURE, "literal", ("read", "write", "describe")),
+    *(
+        ("group", prefix, "prefixed", ("read", "describe"))
+        for prefix in LANDING_DECISION_GROUP_PREFIXES
+    ),
+)
+# The landing snapshot record (OMN-23458): the snapshot step runs on the controller's
+# host as the host's issued principal, so it produces the record topic each tick and its
+# failure terminal; the tick orchestrator and the snapshot-to-orchestrator join test
+# consume the record topic under their run-named groups. The principal holds no read on
+# the failure terminal.
+LANDING_SNAPSHOT_RECORD = "onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1"
+LANDING_SNAPSHOT_FAILED = "onex.evt.omnimarket.pr-landing-snapshot-failed.v1"
+LANDING_SNAPSHOT_GROUP_PREFIXES: tuple[str, ...] = (
+    "landing-snapshot-join-",
+    "landing-tick-orchestrator-",
+)
+LANDING_SNAPSHOT_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", LANDING_SNAPSHOT_RECORD, "literal", ("read", "write", "describe")),
+    ("topic", LANDING_SNAPSHOT_FAILED, "literal", ("write", "describe")),
+    *(
+        ("group", prefix, "prefixed", ("read", "describe"))
+        for prefix in LANDING_SNAPSHOT_GROUP_PREFIXES
+    ),
+)
+# The tick orchestrator's compared events (OMN-23458): the tick orchestrator publishes each
+# tick's compared result and its compare failure through the declared bus publisher. The
+# principal writes both and reads neither: nothing on this principal consumes them.
+LANDING_TICK_COMPARED = "onex.evt.omnimarket.pr-landing-tick-compared.v1"
+LANDING_TICK_COMPARE_FAILED = "onex.evt.omnimarket.pr-landing-tick-compare-failed.v1"
+LANDING_TICK_COMPARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", LANDING_TICK_COMPARED, "literal", ("write", "describe")),
+    ("topic", LANDING_TICK_COMPARE_FAILED, "literal", ("write", "describe")),
+)
+# The lane ticket mint (OMN-23410): a lab lane's principal asks the ticket node for the child
+# ticket its pull request needs. It writes the node's command topic and reads the completed and
+# failed terminals; it gets no write on either terminal, so it cannot answer for the node.
+TICKET_WRITE_COMMAND = "onex.cmd.omnimarket.linear-ticket-write-requested.v1"
+TICKET_WRITE_COMPLETED = "onex.evt.omnimarket.linear-ticket-write-completed.v1"
+TICKET_WRITE_FAILED = "onex.evt.omnimarket.linear-ticket-write-failed.v1"
+TICKET_WRITE_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", TICKET_WRITE_COMMAND, "literal", ("write", "describe")),
+    ("topic", TICKET_WRITE_COMPLETED, "literal", ("read", "describe")),
+    ("topic", TICKET_WRITE_FAILED, "literal", ("read", "describe")),
+)
+# The floor projection snapshots (OMN-23402): the controller host's owner map publisher
+# and each host's overlay store fleet reader publish a snapshot of their projection on
+# the two topics, and the floor's projection reader reads both from the earliest
+# retained offset under a fresh group per pass. The prefix is the grant for those
+# groups, and no other onex.snapshot.projection.* topic is granted.
+FLOOR_OWNER_MAP = "onex.snapshot.projection.floor-owner-map.v1"
+FLOOR_OVERLAY_STORE_FLEET = "onex.snapshot.projection.floor-overlay-store-fleet.v1"
+FLOOR_PROJECTION_GROUP_PREFIX = "node_floor_projection_read_effect."
+FLOOR_PROJECTION_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", FLOOR_OWNER_MAP, "literal", ("read", "write", "describe")),
+    ("topic", FLOOR_OVERLAY_STORE_FLEET, "literal", ("read", "write", "describe")),
+    ("group", FLOOR_PROJECTION_GROUP_PREFIX, "prefixed", ("read", "describe")),
+)
+# The floor task ticket mint (OMN-23471): a lab lane's principal asks the floor task
+# ticket node (omnimarket node_floor_task_ticket_effect) for the one ticket of a floor
+# task. It writes the node's command topic and reads the completed terminal under the
+# per-call group `local.omnibase_core.cli_run_node.consume.v1.<id>` that run-node
+# derives; it gets no write on the terminal, so it cannot answer for the node, and
+# no grant on any Linear credential.
+FLOOR_TASK_TICKET_COMMAND = "onex.cmd.omnimarket.floor-task-ticket-mint-requested.v1"
+FLOOR_TASK_TICKET_COMPLETED = "onex.evt.omnimarket.floor-task-ticket-mint-completed.v1"
+FLOOR_TASK_TICKET_GROUP_PREFIX = "local.omnibase_core.cli_run_node.consume.v1."
+FLOOR_TASK_TICKET_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", FLOOR_TASK_TICKET_COMMAND, "literal", ("write", "describe")),
+    ("topic", FLOOR_TASK_TICKET_COMPLETED, "literal", ("read", "describe")),
+    ("group", FLOOR_TASK_TICKET_GROUP_PREFIX, "prefixed", ("read", "describe")),
+)
 # The Claude Code hook edge (OMN-17427): a developer machine's emit drainer publishes
 # its own hook events to the dev lane, so the lab projections (claude_hook_events among
 # them) see every person's sessions and not only the operator's. These are the
@@ -434,7 +520,15 @@ def typed_rows() -> set[tuple[str, str, str, str, str]]:
     return {
         (BROKER, resource.upper(), name, pattern.upper(), operation.upper())
         for resource, name, pattern, operations in (
-            TYPED_GRANTS + DECLARED_GRANTS + HOOK_EDGE_GRANTS
+            TYPED_GRANTS
+            + DECLARED_GRANTS
+            + LANDING_DECISION_GRANTS
+            + LANDING_SNAPSHOT_GRANTS
+            + LANDING_TICK_COMPARED_GRANTS
+            + TICKET_WRITE_GRANTS
+            + FLOOR_PROJECTION_GRANTS
+            + FLOOR_TASK_TICKET_GRANTS
+            + HOOK_EDGE_GRANTS
         )
         for operation in operations
     }
@@ -666,6 +760,162 @@ def test_the_dod_closeout_grants_are_declared_and_nothing_wider() -> None:
         ("TOPIC", "onex.evt.omnimarket.dod-closeout-sweep-decided.v1", "READ"),
         ("TOPIC", "onex.evt.omnimarket.dod-closeout-sweep-decided.v1", "DESCRIBE"),
     }
+
+
+def test_the_landing_decision_grants_are_declared_and_nothing_wider() -> None:
+    """The chain may produce and consume the decision command, its success terminal
+    and its failure terminal.
+
+    A prefix is the grant for the run-named groups, and the lab runtime's own group for
+    the node starts with neither prefix.
+    """
+    rows = derive(shipped_bindings())
+    landing = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "pr-landing-decision" in resource or "landing-chain" in resource
+    }
+    assert landing == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in LANDING_DECISION_GRANTS
+        for operation in operations
+    }
+    assert {row[4] for row in rows if row[2] == LANDING_DECISION_FAILURE} == {
+        "READ",
+        "WRITE",
+        "DESCRIBE",
+    }
+    runtime_group = "local.omnimarket.node_pr_landing_decision_compute.consume.v1"
+    assert not any(
+        runtime_group.startswith(prefix) for prefix in LANDING_DECISION_GROUP_PREFIXES
+    )
+
+
+def test_the_landing_snapshot_grants_are_declared_and_nothing_wider() -> None:
+    """The snapshot step may publish the record topic and its failure terminal.
+
+    The orchestrator and the join test read the record under run-named groups, so the
+    two prefixes are the grant for their reads. The lab runtime's own group for the
+    tick orchestrator starts with neither prefix. The principal holds no read on the
+    failure terminal.
+    """
+    rows = derive(shipped_bindings())
+    snapshot = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "pr-landing-tick-facts" in resource
+        or "pr-landing-snapshot" in resource
+        or "landing-snapshot-join" in resource
+        or "landing-tick-orchestrator" in resource
+    }
+    assert snapshot == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in LANDING_SNAPSHOT_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        row[2] == LANDING_SNAPSHOT_FAILED and row[4] == "READ" for row in rows
+    )
+    runtime_group = "local.omnimarket.node_pr_landing_tick_orchestrator.consume.v1"
+    assert not any(
+        runtime_group.startswith(prefix) for prefix in LANDING_SNAPSHOT_GROUP_PREFIXES
+    )
+
+
+def test_the_tick_compared_grants_are_produce_only_and_nothing_wider() -> None:
+    """The tick orchestrator writes its compared and compare-failed events; no read."""
+    rows = derive(shipped_bindings())
+    compared = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "pr-landing-tick-compare" in resource
+    }
+    assert compared == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in LANDING_TICK_COMPARED_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        row[2] in (LANDING_TICK_COMPARED, LANDING_TICK_COMPARE_FAILED)
+        and row[4] == "READ"
+        for row in rows
+    )
+
+
+def test_the_lane_ticket_mint_grants_are_declared_and_nothing_wider() -> None:
+    """A lane may write the ticket node's command and read its two terminals, and no more.
+
+    The principal gets no write on either terminal, so it cannot answer a request for the node.
+    """
+    rows = derive(shipped_bindings())
+    ticket = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "linear-ticket-write" in resource
+    }
+    assert ticket == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in TICKET_WRITE_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        row[2] in (TICKET_WRITE_COMPLETED, TICKET_WRITE_FAILED) and row[4] == "WRITE"
+        for row in rows
+    )
+
+
+def test_the_floor_task_ticket_grants_are_declared_and_nothing_wider() -> None:
+    """A lane may write the node's command and read its completed terminal, and no more.
+
+    The principal gets no write on the terminal, so it cannot answer a request for the
+    node, and the lab runtime's own group for the node does not start with the prefix.
+    """
+    rows = derive(shipped_bindings())
+    floor_task_ticket = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "floor-task-ticket-mint" in resource
+        or resource.startswith(FLOOR_TASK_TICKET_GROUP_PREFIX)
+    }
+    assert floor_task_ticket == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in FLOOR_TASK_TICKET_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        row[2] == FLOOR_TASK_TICKET_COMPLETED and row[4] == "WRITE" for row in rows
+    )
+    runtime_group = "local.omnimarket.node_floor_task_ticket_effect.consume.v1"
+    assert not runtime_group.startswith(FLOOR_TASK_TICKET_GROUP_PREFIX)
+
+
+def test_the_floor_projection_grants_are_declared_and_nothing_wider() -> None:
+    """The lane may read and write the two floor snapshot topics and nothing wider.
+
+    The prefix is the grant for the reader's fresh per-pass groups, and the lab
+    runtime's own group for the reader does not start with it. No other
+    onex.snapshot.projection.* topic is granted.
+    """
+    rows = derive(shipped_bindings())
+    floor = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "projection.floor-" in resource
+        or "node_floor_projection_read_effect" in resource
+    }
+    assert floor == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in FLOOR_PROJECTION_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        resource_type == "TOPIC"
+        and resource.startswith("onex.snapshot.projection.")
+        and resource not in (FLOOR_OWNER_MAP, FLOOR_OVERLAY_STORE_FLEET)
+        for _, resource_type, resource, _, _ in rows
+    )
+    runtime_group = "local.omnimarket.node_floor_projection_read_effect.consume.v1"
+    assert not runtime_group.startswith(FLOOR_PROJECTION_GROUP_PREFIX)
 
 
 def test_committed_derived_grants_are_the_nodes_output() -> None:
@@ -946,7 +1196,12 @@ def test_compaction_replies_are_not_implicitly_granted_to_other_principals() -> 
 
 
 def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> None:
-    """A query writes one request and reads one terminal under its own prefix."""
+    """A query writes one request and reads one terminal under its own prefix.
+
+    OMN-23418: the same prefix reads the request topic too (READ is the one added row), so
+    the seam deadline probe can measure when a request reached the broker; the client still
+    produces no result and the runtime's own group is not under the prefix.
+    """
     bindings = shipped_bindings()
     prefix = "local.omnimarket.work_ledger_query_client.consume.v1."
     request = "onex.cmd.omnimarket.work-ledger-query-requested.v1"
@@ -966,6 +1221,7 @@ def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> N
         for binding in query_bindings
     } == {
         (BROKER, request, "produce", None),
+        (BROKER, request, "consume", prefix + "call"),
         (BROKER, terminal, "consume", prefix + "call"),
     }
     before = bindings.model_copy(
@@ -978,6 +1234,7 @@ def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> N
     )
     expected = {
         (BROKER, "TOPIC", request, "LITERAL", "WRITE"),
+        (BROKER, "TOPIC", request, "LITERAL", "READ"),
         (BROKER, "TOPIC", request, "LITERAL", "DESCRIBE"),
         (BROKER, "TOPIC", terminal, "LITERAL", "READ"),
         (BROKER, "TOPIC", terminal, "LITERAL", "DESCRIBE"),

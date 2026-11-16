@@ -54,7 +54,7 @@ from omnibase_infra.services.service_llm_endpoint_health import (
     ServiceLlmEndpointHealth,
 )
 
-_GLM_BASE = "https://api.z.ai/api/coding/paas/v4"
+_GLM_BASE = "https://api.z.ai/api/paas/v4"
 # Assembled at runtime so no credential-shaped literal exists in the source.
 _SENTINEL_SECRET = "-".join(("sentinel", "probe", "credential", "value"))
 

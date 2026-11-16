@@ -1298,9 +1298,11 @@ jobs:
       # 14,400 s after this run's first gate read refuses TIMED_OUT, never a
       # pass. The verdict JSON is uploaded below for that re-run selector.
       #
-      # OMN-18276: the exact-sha premise comes only from the persistent lab
-      # apply receipt. The compose-dev required subject is resolved separately. No `if:`,
-      # no force, skip or override (tests/scripts/ci/test_lab_pass_gate_no_force_skip.py).
+      # OMN-23508 (operator ruling 2026-11-10): the k3s lab overlay job is
+      # retired and its receipt is no longer waited on, so the exact-sha premise
+      # is the gate's default any-of read of the delivered sha, and the required
+      # proof subject is resolved separately. No `if:`, no force, skip or override
+      # (tests/scripts/ci/test_lab_pass_gate_no_force_skip.py).
       - name: Read the lab-pass receipt for the delivered sha
         id: own-sha-gate
         env:
@@ -1311,7 +1313,6 @@ jobs:
             python3 scripts/ci/lab_pass_receipt.py gate \
             --sha "${GITHUB_SHA}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --lane onex-lab-k3s \
             --require-lane compose-dev \
             --resolve-runtime-ancestor \
             --clone . \

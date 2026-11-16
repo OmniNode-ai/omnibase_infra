@@ -159,34 +159,6 @@ def test_it_promotes_nothing_applies_nothing_and_imports_nothing(
         "reads the host Docker daemon and this run pins nothing"
     )
     assert runner.argv_containing("kubectl") == []
-    # `docker save` is piped, so it goes through the popen double rather than the
-    # runner -- asserting it on the runner would be a zero that can never be
-    # anything else.
-    assert applier._popen.refs == []
-
-
-def test_the_negative_assertions_above_are_not_vacuous(
-    tmp_path: Path, overlay_source: Path
-) -> None:
-    """The positive control for the test above (rule 16).
-
-    Every call that test asserts ABSENT is asserted PRESENT here, from a full
-    apply driven through the same doubles. Without this, a renamed argv or a
-    mistyped needle would turn each of those assertions into a zero that can
-    never be anything else -- which is exactly how the first draft of this file
-    "proved" the repair build skipped a containerd import that the apply path
-    also appeared to skip.
-    """
-    runner = FakeRunner()
-    applier = _applier(tmp_path, overlay_source, runner)
-
-    applier.apply(sha=SHA, stamp=STAMP, correlation_id="cid-apply")
-
-    assert len(runner.argv_containing("docker tag")) == 1
-    assert len(runner.argv_containing("apply_lab_lane.sh")) == 1
-    assert len(runner.argv_containing("images import")) == 4
-    assert runner.argv_containing("kubectl") != []
-    assert len(applier._popen.refs) == 4
 
 
 def test_the_store_binding_is_never_written(
@@ -256,6 +228,20 @@ def test_an_unresolvable_overlay_source_still_writes_a_record(
 # --------------------------------------------------------------------------- #
 # the repair record lives under its own key                                   #
 # --------------------------------------------------------------------------- #
+def _write_applied_record(state: Path) -> None:
+    """A passing applied record, as the agent's records directory still holds
+    one from before the apply was retired (OMN-23521)."""
+    path = record_path(state, SHA)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "sha": SHA,
+        "agent_command_id": "cid-apply",
+        "finished_at": "2026-09-15T09:00:00Z",
+        "checks": [{"name": "overlay_source_resolved", "ok": True, "evidence": "x"}],
+    }
+    path.write_text(json.dumps(record))
+
+
 def test_a_repair_never_overwrites_a_passing_apply_record(
     tmp_path: Path, overlay_source: Path
 ) -> None:
@@ -270,8 +256,8 @@ def test_a_repair_never_overwrites_a_passing_apply_record(
     with a FAIL on the next emit.
     """
     applier = _applier(tmp_path, overlay_source, FakeRunner())
-    applier.apply(sha=SHA, stamp=STAMP, correlation_id="cid-apply")
     state = tmp_path / "state"
+    _write_applied_record(state)
     applied = load_record(state, SHA)
     assert applied is not None
     assert all(check["ok"] for check in applied["checks"])
@@ -302,8 +288,8 @@ def test_a_repair_record_never_becomes_the_latest_applied_record(
     never happened -- turning a later merge's receipt red on a lane the earlier
     coalesced apply had in fact advanced.
 
-    The positive control is the apply below: the same function DOES return a
-    record once a real apply has written one, so the ``None`` above is an
+    The positive control is the record below: the same function DOES return a
+    record once an applied one exists, so the ``None`` above is an
     exclusion and not a broken reader.
     """
     applier = _applier(tmp_path, overlay_source, FakeRunner())
@@ -317,7 +303,7 @@ def test_a_repair_record_never_becomes_the_latest_applied_record(
         "never applied"
     )
 
-    applier.apply(sha=SHA, stamp=STAMP, correlation_id="cid-apply")
+    _write_applied_record(state)
     latest = load_latest_record(state)
     assert latest is not None
     assert latest["agent_command_id"] == "cid-apply"

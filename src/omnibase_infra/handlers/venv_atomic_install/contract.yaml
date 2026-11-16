@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# This package owns the atomic in-place install of the dispatch venv (OMN-22712):
+# stage the moved packages, exchange them in, restore them on failure. Its boundary covers only this package.
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect

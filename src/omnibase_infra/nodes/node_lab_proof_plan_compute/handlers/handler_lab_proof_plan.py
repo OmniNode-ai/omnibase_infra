@@ -8,7 +8,7 @@ ModelLabProofPlan``. Pure: it reads nothing from disk or network, and the same
 request always renders the same plan, so a recorded plan replays exactly.
 
 WHAT A foundation_override PROOF IS (OMN-19572). A foundation repository
-(omnibase_core, omnibase_spi, omnibase_compat) reaches the runtime only as a
+(omnibase_core, omnibase_spi) reaches the runtime only as a
 package pinned by omnibase_infra's lock. CI proves the package against its own
 tests; it cannot see a change that breaks the runtime that installs it. So the
 plan builds the laptop-bundle runtime image from omnibase_infra at a pinned

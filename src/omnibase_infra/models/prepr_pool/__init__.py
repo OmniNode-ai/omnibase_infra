@@ -4,8 +4,11 @@
 
 from __future__ import annotations
 
+from omnibase_infra.models.prepr_pool.model_prepr_pool_judge_overlay import (
+    ModelPreprPoolJudgeOverlay,
+)
 from omnibase_infra.models.prepr_pool.model_prepr_pool_overlay import (
     ModelPreprPoolOverlay,
 )
 
-__all__: list[str] = ["ModelPreprPoolOverlay"]
+__all__: list[str] = ["ModelPreprPoolJudgeOverlay", "ModelPreprPoolOverlay"]

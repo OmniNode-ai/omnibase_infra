@@ -48,7 +48,9 @@ def _config() -> ModelRunnerFleetConfig:
 # resolved in the test, so this table needs no second copy of that address.
 _PRIMARY = "<runner_host>"
 EXPECTED_HOSTS: tuple[tuple[str, str, int], ...] = (
-    (_PRIMARY, "amd64", 10),
+    # OMN-22898: no general runner on the primary host; its verify and customer-plane
+    # pools stay declared under the row.
+    (_PRIMARY, "amd64", 0),
     ("192.168.86.202", "amd64", 1),
     ("stickybeatz-studio.tail75df5e.ts.net", "arm64", 1),
     # OMN-17232: the HP DL560 Gen8 (h051) pool, four `omnibase-ci-multiarch` runners.
@@ -132,7 +134,9 @@ def test_declared_total_sums_only_the_hosts_carrying_that_class() -> None:
     # OMN-19077 then cut the primary host's share 44 -> 10, so 10 + 16.
     # OMN-22111 declares h053's 8 before the primary host's share is lowered, so 10 + 16 + 8;
     # OMN-19998 sizes it to 5 from the host's measured memory, so 10 + 16 + 5.
-    assert config.declared_total("action") == 31
+    # OMN-22898 cuts the primary host's share 10 -> 0 (h201 swaps under load), so
+    # 0 + 16 + 5 = 21.
+    assert config.declared_total("action") == 21
     assert config.declared_total("customer-plane") == 3
     # The h101 mini host's one verify runner was retired with Docker on the Macs: 6 - 1.
     assert config.declared_total("verify") == 5

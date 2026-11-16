@@ -5,15 +5,16 @@
 Step 4 of ``install-node-skill-package.sh`` loads every advertised ``onex.cli``
 entry point and exits non-zero naming the ones that raise. The 2026-09-18
 breakage was exactly this shape: an entry point whose module had vanished from
-a downgraded dependency. These tests run the script's own step-4 program,
-extracted from the script text, against a synthetic distribution carrying a
-healthy and a broken entry point. Nothing is installed.
+a downgraded dependency. The step now lives in
+``handlers/venv_atomic_install/skill_install_verify.py`` (OMN-22712 moved
+it out of the script, which may not grow); these tests run its step-4 function
+against a synthetic distribution carrying a healthy and a broken entry point.
+Nothing is installed.
 """
 
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -27,13 +28,26 @@ _SCRIPT = (
 )
 
 
+_VERIFY = (
+    Path(__file__).resolve().parents[2]
+    / "src/omnibase_infra/handlers/venv_atomic_install/skill_install_verify.py"
+)
+
+
+_RUNTIME = (
+    Path(__file__).resolve().parents[2]
+    / "src/omnibase_infra/nodes/node_venv_atomic_install/runtime_venv_atomic_install.py"
+)
+
+
 def _step4_program() -> str:
-    text = _SCRIPT.read_text(encoding="utf-8")
-    marker = "== step 4: verify every advertised onex.cli entry point imports =="
-    tail = text[text.index(marker) :]
-    match = re.search(r"<<'PYEOF'\n(.*?)\nPYEOF\n", tail, re.DOTALL)
-    assert match, "step 4 heredoc not found in install-node-skill-package.sh"
-    return match.group(1)
+    return (
+        "import importlib.util, sys\n"
+        f"spec = importlib.util.spec_from_file_location('verify', {str(_VERIFY)!r})\n"
+        "mod = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(mod)\n"
+        "sys.exit(mod.verify_cli())\n"
+    )
 
 
 def _site(root: Path, entry_points: dict[str, str]) -> Path:
@@ -83,6 +97,11 @@ def test_healthy_cli_entry_points_pass(tmp_path: Path) -> None:
 
 
 def test_step4_runs_before_the_success_readback() -> None:
-    """The check must gate success: it precedes the step-5 readback in the script."""
+    """The check must gate success: the script runs the verify tool (steps 3 and 4)
+    before its step-5 readback, and the tool checks the nodes before the CLI."""
     text = _SCRIPT.read_text(encoding="utf-8")
-    assert text.index("== step 4:") < text.index("== step 5:")
+    assert text.index('"$ATOMIC_TOOL" verify || exit 1') < text.index("== step 5:")
+    tool = _VERIFY.read_text(encoding="utf-8")
+    assert tool.index("== step 4:") > tool.index("== step 3:")
+    runtime = _RUNTIME.read_text(encoding="utf-8")
+    assert runtime.index("verify.verify_nodes() or verify.verify_cli()")

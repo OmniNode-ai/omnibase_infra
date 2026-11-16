@@ -33,6 +33,17 @@ from deploy_agent import executor as executor_mod
 
 
 @pytest.fixture(autouse=True)
+def _no_ledger_append_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A unit test never appends a job reading row to the host's real ledger (OMN-24617).
+
+    The agent's terminal publish writes a reading row through the bus append command named
+    by the host's environment; on a lab host that variable is set, so a test that settles a
+    job would otherwise write to the live ledger. The reading's own tests set a stand-in.
+    """
+    monkeypatch.delenv("ONEX_LEDGER_BUS_APPEND_COMMAND", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _stub_cost_estimator_build_settings(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -47,6 +58,23 @@ def _stub_cost_estimator_build_settings(
         "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
     )
     monkeypatch.setattr(effect, "dev_lane_build_settings", lambda *args: None)
+
+
+@pytest.fixture(autouse=True)
+def _stub_llm_endpoint_env_render(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unrelated deploy tests render no embedding address from the llm_endpoints overlay (OMN-24025).
+
+    A dev-fenced compose environment refuses without that overlay, and these tests
+    carry none. The render's own suite opts out with the ``llm_endpoint_env_render``
+    marker and drives the real step.
+    """
+    if request.node.get_closest_marker("llm_endpoint_env_render") is not None:
+        return
+    monkeypatch.setattr(
+        executor_mod, "_llm_endpoint_env_overlay", lambda env: ({}, None)
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -113,6 +141,25 @@ def _stub_promotion_guard(
     if request.node.get_closest_marker("promotion_guard") is not None:
         return
     monkeypatch.setattr(executor_mod, "_load_promotion_guard", _NoopPromotionGuard)
+
+
+@pytest.fixture(autouse=True)
+def _stub_service_pin_guard(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep unrelated rebuild tests off the host's compose files and code clone.
+
+    The guard (OMN-23368) reads the lane's compose files and counts commits in the
+    agent's code clone, neither of which exists in the unit sandbox. The marked
+    tests drive the real guard through ``rebuild_scope``.
+    """
+    if request.node.get_closest_marker("service_pin_guard") is not None:
+        return
+    monkeypatch.setattr(
+        executor_mod.load_dev_boot_guard("handler_dev_lane_pin_compose_guard"),
+        "guard_before_build",
+        lambda *args, **kwargs: "",
+    )
 
 
 @pytest.fixture(autouse=True)

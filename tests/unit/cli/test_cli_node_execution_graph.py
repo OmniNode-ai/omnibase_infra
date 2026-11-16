@@ -188,7 +188,9 @@ def test_a_stage_node_the_registry_cannot_resolve_fails_the_run_by_name(
     result, _, elapsed = _invoke(tmp_path, SWEEP, stage_deadline_s=STAGE_DEADLINE_S)
 
     assert result.exit_code == 1, result.output
-    envelope = json.loads(result.output[result.output.index("{") :])
+    envelope = json.JSONDecoder().raw_decode(result.output[result.output.index("{") :])[
+        0
+    ]
     assert envelope["error_type"] == "SkillRoutingError"
     assert "execution_graph" in envelope["message"]
     assert "node_stand_in_stage_beta" in envelope["message"]

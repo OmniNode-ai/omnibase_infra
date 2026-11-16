@@ -157,7 +157,7 @@ class TestConfigAuthPartition:
     ) -> None:
         """Negative control: a resolvable key leaves the endpoint in the probe set."""
         env = {
-            "LLM_GLM_URL": "https://api.z.ai/api/coding/paas/v4",
+            "LLM_GLM_URL": "https://api.z.ai/api/paas/v4",
             "LLM_GLM_API_KEY": "a-real-key",
         }
 
@@ -290,7 +290,7 @@ class TestTerminalAuthFailure:
         """After the threshold, further cycles issue no HTTP until backoff elapses."""
         clock = FakeClock()
         cfg = ModelLlmEndpointHealthConfig(
-            endpoints={"glm": "https://api.z.ai/api/coding/paas/v4/chat/completions"},
+            endpoints={"glm": "https://api.z.ai/api/paas/v4/chat/completions"},
             probe_interval_seconds=30.0,
             auth_failure_threshold=2,
         )
@@ -343,7 +343,7 @@ class TestTerminalAuthFailure:
         """
         clock = FakeClock()
         cfg = ModelLlmEndpointHealthConfig(
-            endpoints={"glm": "https://api.z.ai/api/coding/paas/v4/chat/completions"},
+            endpoints={"glm": "https://api.z.ai/api/paas/v4/chat/completions"},
             circuit_breaker_threshold=1,
             auth_failure_threshold=1,
         )

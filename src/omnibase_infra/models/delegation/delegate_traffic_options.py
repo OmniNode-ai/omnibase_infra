@@ -5,13 +5,15 @@
 
 ``--traffic-class`` and ``--source-surface`` are stamped on the request's typed
 provenance by :func:`~omnibase_infra.models.delegation.delegate_request_payload.build_delegate_provenance`.
-The command line module only shrinks, so the two option declarations live here
-and are applied as one decorator.
+``--probe-ladder`` (OMN-23164) names a committed ladder file and rides with
+them, since only synthetic traffic may carry one. The command line module only
+shrinks, so the option declarations live here and are applied as one decorator.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 import click
 
@@ -46,4 +48,15 @@ def traffic_options[F: Callable[..., object]](command: F) -> F:
             "--source-surface; omit to leave the run unclassified."
         ),
     )
-    return traffic(surface(command))
+    ladder = click.option(
+        "--probe-ladder",
+        "probe_ladder",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        default=None,
+        help=(
+            "Committed ladder file (YAML or JSON) sent with the request so a "
+            "probe walks the rungs it names. Refused unless --traffic-class "
+            "synthetic is given."
+        ),
+    )
+    return traffic(surface(ladder(command)))

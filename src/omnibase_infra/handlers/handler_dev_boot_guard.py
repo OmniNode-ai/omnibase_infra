@@ -12,19 +12,22 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import hashlib
 import json
 import logging
 import math
 import re
+import sys
 import time
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
-from typing import cast
+from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import NAMESPACE_URL, uuid5
 
-from pydantic import JsonValue, RootModel
+from pydantic import BaseModel, JsonValue, RootModel
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.coding_agent.model_subprocess_outcome import (
@@ -36,13 +39,73 @@ from omnibase_infra.models.model_dev_boot_point import ModelDevBootPoint
 from omnibase_infra.models.model_dev_boot_report_config import ModelDevBootReportConfig
 from omnibase_infra.models.model_dev_boot_request import ModelDevBootRequest
 from omnibase_infra.models.model_dev_boot_result import ModelDevBootResult
-from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+from omnibase_infra.utils.util_error_sanitization import (
+    sanitize_error_message,
+    sanitize_error_string,
+)
+
+if TYPE_CHECKING:
+    from omnibase_infra.protocols.protocol_dev_preflight_runner import (
+        ProtocolDevPreflightRunner,
+    )
+    from omnibase_infra.protocols.protocol_dev_roll_events import ProtocolDevRollEvents
 
 logger = logging.getLogger(__name__)
 DEV_BOOT_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
 POLL_SECONDS = 5
 DOCKER_READ_SECONDS = 10
 REPORT_SECONDS = 20
+# A full container log (json-file rotation holds up to 30 MB) is read before recovery.
+LOG_READ_SECONDS = 60
+
+# OMN-24127: the kept copy of a failed container's log loses credential-shaped
+# spans only. The whole-text sanitizer (sanitize_error_string) replaced an 8 MB
+# real boot log with its 39-byte notice because the log held one of its sensitive
+# words, so the kept log held no cause. The regexes below are the ones
+# cli_delegate._redact_refusal_text uses for the same reason.
+# The deploy agent runs this module against the published omnibase_infra, which
+# may predate the shared helper, so the credential value shapes are held here
+# (same list as util_dlq_credential_redaction.CREDENTIAL_VALUE_PATTERNS).
+_REDACTION_MARKER: Final[str] = "[REDACTED]"
+_CREDENTIAL_VALUE_SHAPES: Final[tuple[re.Pattern[str], ...]] = (
+    re.compile(r"onxk_[A-Za-z0-9_-]{20,}"),
+    re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"AIza[A-Za-z0-9_-]{35,}"),
+    re.compile(
+        r"(?<![A-Za-z0-9_.-])[A-Fa-f0-9]{32}\.[A-Za-z0-9_-]{16,}"
+        r"(?![A-Za-z0-9_.-])"
+    ),
+    re.compile(r"(?i:\bbearer)\s+[A-Za-z0-9._~+/-]{16,}=*"),
+)
+_PEM_KEY_MATERIAL: Final[re.Pattern[str]] = re.compile(
+    r"-----BEGIN[^-]*-----.*?(?:-----END[^-]*-----|$)", re.DOTALL
+)
+_URL_USERINFO: Final[re.Pattern[str]] = re.compile(
+    r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/\s@]+@"
+)
+_SECRET_PAIR: Final[re.Pattern[str]] = re.compile(
+    r"(?P<key>(?:pass(?:word|wd)?|secret|(?:api[_-]?|access[_-]?|auth[_-]?)?"
+    r"(?:key|token))\s*=\s*)(?P<value>[^\s,;]+)",
+    re.IGNORECASE,
+)
+
+
+def redact_credential_spans(text: str) -> str:
+    """Replace only the credential-shaped spans of ``text`` and keep every other line.
+
+    Applied in order: the shared credential value shapes (an ``sk-`` key, a JWT,
+    a Bearer value, ...), PEM key material, URL userinfo (keeping scheme and
+    host), and the value of a ``key=value`` pair whose key names a secret
+    (keeping the key). No truncation: an incident log stays whole and only the
+    credential spans shrink.
+    """
+    redacted = text
+    for shape in _CREDENTIAL_VALUE_SHAPES:
+        redacted = shape.sub(_REDACTION_MARKER, redacted)
+    redacted = _PEM_KEY_MATERIAL.sub("[REDACTED key material]", redacted)
+    redacted = _URL_USERINFO.sub(r"\g<scheme>[REDACTED]@", redacted)
+    return _SECRET_PAIR.sub(r"\g<key>[REDACTED]", redacted)
 
 
 class DevBootFailedError(RuntimeError):
@@ -61,6 +124,73 @@ class DevCompanionLaneFailedError(RuntimeError):
     runtime that is up and healthy (OMN-21645). The guard still restores the
     retained family when the runtime is unhealthy or absent.
     """
+
+
+class DevOnexApiStepFailedError(DevBootFailedError):
+    """The onex-api step of a dev roll stopped the job.
+
+    onex-api is not the runtime (it is not in DEV_BOOT_SERVICES), so its
+    failure fails the job and is reported, but it is not by itself a reason to
+    replace a runtime that is up and healthy (OMN-24471). The guard still
+    restores the retained family when the runtime is unhealthy or absent.
+    """
+
+    def __init__(self, message: str, service: str) -> None:
+        super().__init__(message)
+        self.service = service
+
+
+def roll_expected(expected: list[str], roll_error: RuntimeError | None) -> list[str]:
+    """The services the executor verifies after a roll stopped at ``roll_error``.
+
+    A failed onex-api step is raised as itself: the step already waited on that
+    service, and verifying or starting it again would let a crash-looping
+    container replace the typed error with a census error, which recovers as a
+    runtime failure (OMN-24471).
+    """
+    if isinstance(roll_error, DevOnexApiStepFailedError):
+        return [service for service in expected if service != roll_error.service]
+    return expected
+
+
+def _roll_events_module(execution: ModuleType) -> ModuleType:
+    """The dev roll events composition root, loaded by the agent's own effect loader."""
+    return execution.load_dev_boot_guard(
+        "nodes.node_dev_roll_events_effect.runtime_dev_roll_events"
+    )
+
+
+def _load_roll_events(execution: ModuleType) -> ProtocolDevRollEvents:
+    """The real events object of the running deploy agent."""
+    return cast(
+        "ProtocolDevRollEvents",
+        _roll_events_module(execution).build_events(execution),
+    )
+
+
+def run_preflight(
+    executor: ProtocolDevPreflightRunner,
+    command: BaseModel,
+    on_phase_update: Callable[[StrEnum, StrEnum], None],
+) -> None:
+    """Run the deploy preflight; a dev roll that fails it is announced, then the error goes on.
+
+    The preflight runs before the boot guard is prepared, so nothing else announces a
+    dev roll that fails there: the roll events publish its manifest and an incident
+    naming the issuer and the failed phase (OMN-24048). Evidence only: announcing never
+    raises and never replaces the preflight's own error.
+    """
+    try:
+        executor.preflight(on_phase_update=on_phase_update)
+    except Exception as error:
+        execution = sys.modules["deploy_agent.executor"]
+        _roll_events_module(execution).announce_preflight_failure(
+            execution,
+            command.model_dump(mode="json"),
+            str(error),
+            execution.Phase.PREFLIGHT.value,
+        )
+        raise
 
 
 def _checked(
@@ -88,6 +218,15 @@ def _safe(text: str) -> str:
         .replace("|", " ")
         .split()
     )[:2000]
+
+
+def _step_failed(
+    service: str, execution: ModuleType, message: str
+) -> DevBootFailedError:
+    """OMN-24471: a failed onex-api step stays distinguishable from a runtime step's."""
+    if service == execution.ONEX_API_SERVICE:
+        return DevOnexApiStepFailedError(message, service)
+    return DevBootFailedError(message)
 
 
 def run_runtime_roll_step(
@@ -119,19 +258,25 @@ def run_runtime_roll_step(
             env=execution._compose_env(extra_env),
         )
     except execution.subprocess.TimeoutExpired as exc:
-        raise DevBootFailedError(
-            f"Runtime roll stopped at {service}: compose up timed out"
+        raise _step_failed(
+            service,
+            execution,
+            f"Runtime roll stopped at {service}: compose up timed out",
         ) from exc
     if result.returncode != 0:
-        raise DevBootFailedError(
+        raise _step_failed(
+            service,
+            execution,
             f"Runtime roll stopped at {service}: "
-            f"{_safe(result.stderr) or 'compose health wait failed'}"
+            f"{_safe(result.stderr) or 'compose health wait failed'}",
         )
     if not execution.verify_containers_up(
         [service], timeout_s=execution.CONTAINER_VERIFY_TIMEOUT_SECONDS, lane=lane
     )[0]:
-        raise DevBootFailedError(
-            f"Runtime roll stopped at {service}: container did not reach running state"
+        raise _step_failed(
+            service,
+            execution,
+            f"Runtime roll stopped at {service}: container did not reach running state",
         )
     return ModelSubprocessOutcome(
         returncode=int(result.returncode),
@@ -293,12 +438,35 @@ def _all_healthy(
         return False
 
 
-def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> set[str]:
+def retire_lane_services[LaneT: BaseModel](
+    config: LaneT, retired: Collection[str], phase_by_service: Mapping[str, StrEnum]
+) -> LaneT:
+    """``config`` with ``retired`` services disabled and their settle phases off.
+
+    A service the policy retires by name is never recreated, so the phase that
+    only builds or pins its image has nothing to deliver (OMN-24476).
+    """
+    current = config.model_dump(
+        mode="json", include={"disabled_services", "disabled_phases"}
+    )
+    phases = {phase_by_service[s] for s in retired if s in phase_by_service}
+    return config.model_copy(
+        update={
+            "disabled_services": frozenset(current["disabled_services"]).union(retired),
+            "disabled_phases": frozenset(current["disabled_phases"]).union(phases),
+        }
+    )
+
+
+def folded_dev_services(
+    policy: Mapping[str, str], folded: frozenset[str], prefix: str = "DEV"
+) -> set[str]:
     """Retirement uses the same contract mapping as the compose gates.
 
     A lane that folds nothing (any other dev instance) retires nothing. On the
     lane that folds, the services main carries with no profile of its own
-    (``DEV_RUNTIME_MAIN_RETIRED_SERVICES``) are retired with the folded ones.
+    (``<prefix>_RUNTIME_MAIN_RETIRED_SERVICES``) are retired with the folded
+    ones; a lane that declares none (stability) retires only the mapped ones.
     """
     if not folded:
         return set()
@@ -318,7 +486,9 @@ def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> se
         raise RuntimeError(f"fold policy maps no service for {sorted(missing)}")
     retired = {
         service.strip()
-        for service in policy.get("DEV_RUNTIME_MAIN_RETIRED_SERVICES", "").split(",")
+        for service in policy.get(f"{prefix}_RUNTIME_MAIN_RETIRED_SERVICES", "").split(
+            ","
+        )
         if service.strip()
     }
     if any(not re.fullmatch(r"[a-z][a-z0-9-]*", service) for service in retired):
@@ -460,11 +630,18 @@ class HandlerDevBootGuard:
         verify_recovery: Callable[[Callable[[StrEnum, StrEnum], None]], None],
         execution: ModuleType,
         reporting: ModelDevBootReportConfig,
+        log_byte_cap: int | None = None,
     ) -> None:
         self.execution = execution
         self.reporting = reporting
         self.config_hashes = config_hashes
         self.verify_recovery = verify_recovery
+        if log_byte_cap is not None and log_byte_cap <= 0:
+            raise ValueError("log_byte_cap must be positive when set")
+        self.log_byte_cap = log_byte_cap
+        self.events: ProtocolDevRollEvents | None = None
+        self._command: Mapping[str, JsonValue] | None = None
+        self._prepared_at: datetime | None = None
         self.config = self.execution.lane_config_for(self.execution.EnumRuntimeLane.DEV)
         self.services = _dev_lane_services(self.config.disabled_services)
         self._retained_services = self.services
@@ -497,46 +674,6 @@ class HandlerDevBootGuard:
             deliver_reports(self.root, execution=self.execution, config=self.reporting)
         return ModelDevBootResult(operation=request.operation, status="pass")
 
-    def _containers(self) -> list[ModelDevBootContainer]:
-        ids = _checked(
-            [
-                "docker",
-                "ps",
-                "--all",
-                "-q",
-                "--no-trunc",
-                "--filter",
-                f"label=com.docker.compose.project={self.config.compose_project}",
-                "--filter",
-                "label=com.docker.compose.oneoff=False",
-            ],
-            execution=self.execution,
-        ).split()
-        if not ids:
-            raise DevBootFailedError("dev runtime containers are absent")
-        raw = (
-            RootModel[list[ModelDevBootContainer]]
-            .model_validate_json(
-                _checked(["docker", "inspect", *ids], execution=self.execution)
-            )
-            .root
-        )
-        containers: list[ModelDevBootContainer] = []
-        for container in raw:
-            labels = container["Config"]["Labels"]
-            if labels.get("com.docker.compose.project") != self.config.compose_project:
-                raise DevBootFailedError("container belongs to another compose project")
-            if labels.get("com.docker.compose.service") in self.services:
-                containers.append(container)
-        found = {
-            c["Config"]["Labels"]["com.docker.compose.service"] for c in containers
-        }
-        if found != set(self.services):
-            raise DevBootFailedError(
-                f"dev runtime containers absent: {sorted(set(self.services) - found)}"
-            )
-        return containers
-
     def wait(self, *, deployed_generation: bool = False) -> None:
         """All replicas must be Docker healthy; exhausted boots fail immediately.
 
@@ -556,7 +693,7 @@ class HandlerDevBootGuard:
             )
             self.services = _dev_lane_services(self.config.disabled_services)
         started = self.execution._dev_boot_clock()
-        containers = self._containers()
+        containers = _dev_containers(self)
         window = max(_window(c) for c in containers)
         logger.info(
             "Dev boot window project=%s seconds=%d", self.config.compose_project, window
@@ -598,10 +735,10 @@ class HandlerDevBootGuard:
                     f"dev boot window exhausted ({window}s): {', '.join(failures)}"
                 )
             time.sleep(min(POLL_SECONDS, remaining))
-            containers = self._containers()
+            containers = _dev_containers(self)
 
     def _capture(self) -> ModelDevBootPoint:
-        containers = self._containers()
+        containers = _dev_containers(self)
         if not all(_healthy(c) for c in containers):
             raise DevBootFailedError("cannot capture an unhealthy dev runtime")
         rendered = (
@@ -701,8 +838,35 @@ class HandlerDevBootGuard:
         )
         return point
 
-    def prepare(self) -> None:
-        """Retain the live healthy family BEFORE git updates compose settings."""
+    def prepare(self, command: Mapping[str, JsonValue] | None = None) -> None:
+        """Retain the live healthy family BEFORE git updates compose settings.
+
+        Given the roll's command (the deploy agent always gives it) this is a real
+        roll with an issuer: the guard then announces the roll through the dev roll
+        events and keeps each failing container's log (OMN-24013). Without one it
+        behaves as it always did and announces nothing.
+        """
+        if command is not None:
+            self._command = command
+            if self.events is None:
+                try:
+                    self.events = _load_roll_events(self.execution)
+                except Exception:
+                    # The events are evidence; a sender that cannot be built (no
+                    # broker settings) never fails or delays a roll.
+                    logger.exception(
+                        "dev roll events unavailable friction_type=dev_event_publish_failed"
+                    )
+            if self.log_byte_cap is None:
+                self.log_byte_cap = _roll_events_module(self.execution).log_byte_cap(
+                    self.execution
+                )
+            self._prepared_at = datetime.now(UTC)
+        self._retain()
+        if command is not None:
+            _announce(self.events, lambda events: events.manifest(command))
+
+    def _retain(self) -> None:
         try:
             self.point.hold(self._capture())
             return
@@ -784,7 +948,9 @@ class HandlerDevBootGuard:
                 raise DevBootFailedError("no last healthy dev revision")
             with_new_ids = last_healthy.model_copy(
                 update={
-                    "container_ids": tuple(sorted(c["Id"] for c in self._containers()))
+                    "container_ids": tuple(
+                        sorted(c["Id"] for c in _dev_containers(self))
+                    )
                 }
             )
             self.execution._atomic_write_private_json(
@@ -812,28 +978,78 @@ class HandlerDevBootGuard:
         try:
             yield
             self.point.hold(self._capture())
+            _announce_start(self, job, success=True)
         except Exception as exc:
+            _announce_start(self, job, success=False)
             # Recovery restores the retained generation, which ran the services
             # the guard was built with, not the ones the failed candidate runs.
             self.services = self._retained_services
             boot_causes: list[str] = []
+            # OMN-23431: recovery recreates the failed container, which destroys
+            # Docker's probe history; keep it on the incident first.
+            health_probes: list[JsonValue] = []
+            log_captures: list[dict[str, JsonValue]] = []
+            # The kept log text goes to the sink only; the incident file holds the
+            # artifact path and the digest, not a second copy of the log.
+            captured_logs: dict[str, str] = {}
             try:
-                for container in self._containers():
+                for container in _dev_containers(self):
+                    reading = health_probe_reading(container)
+                    health_probes.append(reading)
+                    summary = health_probe_summary(reading)
+                    if summary is not None:
+                        boot_causes.append(summary)
                     logs = _checked(
-                        ["docker", "logs", "--tail", "80", container["Id"]],
+                        ["docker", "logs", "--timestamps", container["Id"]],
+                        LOG_READ_SECONDS,
                         execution=self.execution,
                     )
+                    tail = "\n".join(logs.splitlines()[-80:])
                     # Some entrypoints summarize the counter as "preflight
                     # exited 1" and log the setting diagnosis separately.
                     boot_causes.extend(
                         line
-                        for line in logs.splitlines()
+                        for line in tail.splitlines()
                         if "BIFROST_BASE_CONTRACT_PATH" in line
                         or "ONEX_ACTIVE_RUNTIME_PACKAGES" in line
                     )
                     boot_causes.extend(
-                        line for line in logs.splitlines() if "BOOT FAILED" in line
+                        line for line in tail.splitlines() if "BOOT FAILED" in line
                     )
+                    if self.log_byte_cap is not None and summary is not None:
+                        encoded = logs.encode("utf-8")
+                        bytes_total = len(encoded)
+                        raw_text = encoded[-self.log_byte_cap :].decode(
+                            "utf-8", errors="replace"
+                        )
+                        # Logs can hold secrets; only credential-shaped spans are
+                        # replaced and every other line is kept.
+                        kept_text = redact_credential_spans(raw_text)
+                        kept_bytes = kept_text.encode("utf-8")
+                        artifact_path = (
+                            self.root / f"incident-{job}-{reading['service']}.log"
+                        )
+                        error: str | None = None
+                        try:
+                            artifact_path.parent.mkdir(parents=True, exist_ok=True)
+                            artifact_path.write_text(kept_text, encoding="utf-8")
+                        except OSError as write_error:
+                            error = sanitize_error_string(str(write_error))
+                        log_captures.append(
+                            {
+                                "service": reading["service"],
+                                "container": reading["container"],
+                                "bytes_total": bytes_total,
+                                "bytes_kept": len(kept_bytes),
+                                "complete": bytes_total <= self.log_byte_cap
+                                and kept_text == raw_text,
+                                "redacted": kept_text != raw_text,
+                                "sha256": hashlib.sha256(kept_bytes).hexdigest(),
+                                "artifact_path": str(artifact_path),
+                                "error": error,
+                            }
+                        )
+                        captured_logs[str(reading["service"])] = kept_text
             except (
                 OSError,
                 ValueError,
@@ -853,7 +1069,10 @@ class HandlerDevBootGuard:
                 "recovery_verified": False,
                 "ledger_pending": True,
                 "exception_pending": True,
+                "health_probes": health_probes,
             }
+            if self.log_byte_cap is not None:
+                incident["log_captures"] = cast("JsonValue", log_captures)
             path = self.root / f"incident-{job}.json"
             # Best effort reporting must never get in front of lane recovery.
             try:
@@ -863,20 +1082,29 @@ class HandlerDevBootGuard:
                 logger.exception("Cannot persist failed dev deploy before recovery")
             try:
                 unchanged = _unchanged_and_healthy(
-                    self.point.current, self._containers, execution=self.execution
+                    self.point.current,
+                    lambda: _dev_containers(self),
+                    execution=self.execution,
                 )
                 kept_revision: str | None = None
+                left_running = False
                 if (
-                    isinstance(exc, DevCompanionLaneFailedError)
+                    isinstance(
+                        exc, (DevCompanionLaneFailedError, DevOnexApiStepFailedError)
+                    )
                     and not unchanged
-                    and _all_healthy(self._containers, execution=self.execution)
+                    and _all_healthy(
+                        lambda: _dev_containers(self), execution=self.execution
+                    )
                 ):
-                    # OMN-21645: the companion lane failed after the new
-                    # runtime was replaced and verified. Rolling that healthy
-                    # family back recreates the runtime a second time and ends
-                    # every in-flight run with runtime_shutdown. A capture that
-                    # refuses leaves kept_revision unset, so the retained
-                    # family is restored as before.
+                    # OMN-21645 (the gateway companion lane) and OMN-24471
+                    # (the onex-api step): neither failure is the runtime's,
+                    # and both can arrive after the new runtime was replaced
+                    # and verified. Rolling that healthy family back recreates
+                    # the runtime a second time and ends every in-flight run
+                    # with runtime_shutdown. A capture that refuses leaves
+                    # kept_revision unset, so the retained family is restored
+                    # as before.
                     try:
                         captured = self._capture()
                         self.point.hold(captured)
@@ -888,8 +1116,19 @@ class HandlerDevBootGuard:
                         self.execution.subprocess.SubprocessError,
                     ):
                         kept_revision = None
+                    # OMN-24471: onex-api is not the runtime. A runtime that is
+                    # up and healthy is left running even when the family
+                    # cannot become the recovery point (a partial roll reads as
+                    # mixed revisions): a restore here is the recreate the
+                    # onex-api failure never justified. The failure stays
+                    # failed and reported; the next roll rolls the rest.
+                    left_running = kept_revision is None and isinstance(
+                        exc, DevOnexApiStepFailedError
+                    )
                 if kept_revision is not None:
                     incident["runtime_kept_revision"] = kept_revision
+                elif left_running:
+                    incident["runtime_left_running"] = True
                 elif not unchanged:
                     self._restore()
                 incident["recovery_skipped_healthy"] = unchanged
@@ -909,10 +1148,93 @@ class HandlerDevBootGuard:
                 )
             except (OSError, RuntimeError):
                 logger.exception("Dev deploy failure report remains pending")
+            if self.events is not None and self._command is not None:
+                try:
+                    sunk_incident: Mapping[str, JsonValue] = (
+                        {
+                            **incident,
+                            "log_captures": [
+                                {
+                                    **capture,
+                                    "log": captured_logs.get(
+                                        str(capture["service"]), ""
+                                    ),
+                                }
+                                for capture in log_captures
+                            ],
+                        }
+                        if self.log_byte_cap is not None
+                        else incident
+                    )
+                    self.events.incident(
+                        sunk_incident,
+                        issuer=str(self._command["requested_by"]),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Dev boot incident publish failed; recovery already ran"
+                    )
             raise DevBootRecoveryError(
                 f"commit={commit}: {reason}; forward redeploy revision={self.point.current.revision} "
                 f"verified={incident['recovery_verified']}"
             ) from exc
+
+
+def health_probe_reading(container: ModelDevBootContainer) -> dict[str, JsonValue]:
+    """Docker's own record of one container's boot health, as inspect reported it."""
+    state = container.get("State", {})
+    health = state.get("Health", {})
+    declared = container["Config"].get("Healthcheck", {})
+    probes: list[JsonValue] = [
+        {
+            "start": probe.get("Start"),
+            "end": probe.get("End"),
+            "exit_code": probe.get("ExitCode"),
+            "output": " ".join(
+                sanitize_error_string(str(probe.get("Output", "")))
+                .replace("|", " ")
+                .split()
+            ),
+        }
+        for probe in health.get("Log", [])
+    ]
+    return {
+        "service": container["Config"]["Labels"].get("com.docker.compose.service"),
+        "container": container["Id"][:12],
+        "status": state.get("Status"),
+        "started_at": state.get("StartedAt"),
+        "exit_code": state.get("ExitCode"),
+        "oom_killed": state.get("OOMKilled"),
+        "restart_count": container.get("RestartCount"),
+        "health_status": health.get("Status"),
+        "failing_streak": health.get("FailingStreak"),
+        "healthcheck": {
+            "start_period_ns": declared.get("StartPeriod"),
+            "interval_ns": declared.get("Interval"),
+            "retries": declared.get("Retries"),
+            "timeout_ns": declared.get("Timeout"),
+        },
+        "probes": probes,
+    }
+
+
+def health_probe_summary(reading: Mapping[str, JsonValue]) -> str | None:
+    """One line naming a not-healthy container's last probe, or None when healthy."""
+    if reading.get("health_status") == "healthy":
+        return None
+    line = (
+        f"{reading.get('service')} health={reading.get('health_status')} "
+        f"streak={reading.get('failing_streak')} started={reading.get('started_at')} "
+        f"restarts={reading.get('restart_count')} oom={reading.get('oom_killed')}"
+    )
+    probes = reading.get("probes")
+    last = probes[-1] if isinstance(probes, list) and probes else None
+    if not isinstance(last, dict):
+        return f"{line} last_probe=none"
+    return (
+        f"{line} last_probe={last.get('start')} exit={last.get('exit_code')} "
+        f"{last.get('output')}"
+    )
 
 
 def causes_from_logs(logs: str) -> str:
@@ -1012,3 +1334,98 @@ def deliver_reports(
                     incident["job"],
                     pending,
                 )
+
+
+def _dev_containers(guard: HandlerDevBootGuard) -> list[ModelDevBootContainer]:
+    ids = _checked(
+        [
+            "docker",
+            "ps",
+            "--all",
+            "-q",
+            "--no-trunc",
+            "--filter",
+            f"label=com.docker.compose.project={guard.config.compose_project}",
+            "--filter",
+            "label=com.docker.compose.oneoff=False",
+        ],
+        execution=guard.execution,
+    ).split()
+    if not ids:
+        raise DevBootFailedError("dev runtime containers are absent")
+    raw = (
+        RootModel[list[ModelDevBootContainer]]
+        .model_validate_json(
+            _checked(["docker", "inspect", *ids], execution=guard.execution)
+        )
+        .root
+    )
+    containers: list[ModelDevBootContainer] = []
+    for container in raw:
+        labels = container["Config"]["Labels"]
+        if labels.get("com.docker.compose.project") != guard.config.compose_project:
+            raise DevBootFailedError("container belongs to another compose project")
+        if labels.get("com.docker.compose.service") in guard.services:
+            containers.append(container)
+    found = {c["Config"]["Labels"]["com.docker.compose.service"] for c in containers}
+    if found != set(guard.services):
+        raise DevBootFailedError(
+            f"dev runtime containers absent: {sorted(set(guard.services) - found)}"
+        )
+    return containers
+
+
+def _announce(
+    events: ProtocolDevRollEvents | None, call: Callable[[ProtocolDevRollEvents], None]
+) -> None:
+    """Run one announcement; evidence never fails or delays a roll."""
+    if events is None:
+        return
+    try:
+        call(events)
+    except Exception:
+        logger.exception("dev roll event failed friction_type=dev_event_publish_failed")
+
+
+def _announce_start(guard: HandlerDevBootGuard, job: str, *, success: bool) -> None:
+    if guard.events is None or guard._command is None:
+        return
+    try:
+        raw = runtime_started_at(guard)
+        now = datetime.now(UTC)
+        events_module = _roll_events_module(guard.execution)
+        started = events_module.docker_started_at(raw, fallback=now)
+        if raw is not None:
+            if guard._prepared_at is not None and started < guard._prepared_at:
+                return
+        elif not success:
+            return
+        guard.events.started(
+            job, started, events_module.EnumDevStartCause.ROLL_RECREATE
+        )
+    except Exception:
+        logger.exception(
+            "Dev boot start announce failed",
+            extra={"friction_type": "dev_event_publish_failed"},
+        )
+
+
+def runtime_started_at(guard: HandlerDevBootGuard) -> str | None:
+    """The runtime container's Docker start time, or None when unreadable."""
+    try:
+        for container in _dev_containers(guard):
+            service = container["Config"]["Labels"].get("com.docker.compose.service")
+            if service != "omninode-runtime":
+                continue
+            started_at = container.get("State", {}).get("StartedAt")
+            if isinstance(started_at, str) and started_at:
+                return started_at
+            return None
+    except (
+        OSError,
+        ValueError,
+        RuntimeError,
+        guard.execution.subprocess.SubprocessError,
+    ):
+        return None
+    return None

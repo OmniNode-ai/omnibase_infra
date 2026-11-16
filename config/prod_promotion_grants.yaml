@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# prod_promotion_grants.yaml: the prod-promotion grant registry (OMN-13418, OMN-23362).
+#
+# scripts/preflight_lane_deploy_attribution.py (GRANTS_REPO_RELPATH) reads this file from
+# omnibase_infra origin/main before every governed-lane deploy (OMN-15218). OMN-17427 (#5118)
+# moved that read to this repository on 2026-10-18 and left the registry itself behind, so
+# every governed refresh failed closed with grant verdict UNREADABLE. The registry it replaced
+# held no entries, and this file restores it exactly as that: no grant, no approval.
+#
+# A missing or malformed file still reads as UNREADABLE, never as "no grants". An empty
+# `entries` list reads as CLEAR. Adding a grant is an approval: .github/CODEOWNERS routes
+# every change to this directory to the platform leads.
+entries: []

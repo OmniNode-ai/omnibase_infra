@@ -47,6 +47,9 @@ from omnibase_infra.handlers.handler_dev_lane_branch_install import (
 from omnibase_infra.models.model_dev_lane_branch_install import (
     ModelDevLaneBranchInstall,
 )
+from omnibase_infra.nodes.node_dev_roll_events_effect import (
+    runtime_dev_branch_install_reapply as reapply,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -816,3 +819,74 @@ def test_the_command_line_registers_applies_and_exits_not_whole_on_a_failed_read
     assert bi.main(check, run=lane) == bi.EXIT_NOT_WHOLE
     apply = ["apply", "--state-dir", state, "--compose-project", "omnibase-infra-prod"]
     assert bi.main(apply, run=lane) == bi.EXIT_REFUSED
+
+
+class _Starts:
+    """Records the start events the reapply entry publishes."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def started(self, job_id: str, started_at: datetime, cause: str) -> None:
+        self.calls.append((job_id, str(cause)))
+
+
+def _reapply_argv(tmp_path: Path) -> list[str]:
+    return [
+        "apply",
+        "--state-dir",
+        str(tmp_path / "state"),
+        "--compose-project",
+        PROJECT,
+    ]
+
+
+def _run_reapply_entry(tmp_path: Path, lane: _Lane, starts: _Starts) -> int:
+    def announce(state_dir: Path, stdout: str, *, repo_root: Path) -> bool:
+        return reapply.announce_reapply_start(
+            state_dir, stdout, repo_root=repo_root, build=lambda _root: starts
+        )
+
+    return reapply.main(
+        _reapply_argv(tmp_path),
+        handler_main=lambda argv: bi.main(
+            argv, run=lane, clock=lambda: NOW, sleep=lambda _s: None
+        ),
+        announce=announce,
+    )
+
+
+def test_omn24013_a_reapply_that_restarts_the_runtime_publishes_one_start_for_the_running_job(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    lane = _lane()
+    _declare(tmp_path, store)
+    lane.install_by_hand(WRITER, BRANCH_COPY)
+    lane.recreate()  # the refresh drops the fix; the apply restarts the container
+    (tmp_path / "state" / "job-7.json").write_text(
+        '{"correlation_id": "job-7", "status": "in_progress"}', encoding="utf-8"
+    )
+    starts = _Starts()
+
+    code = _run_reapply_entry(tmp_path, lane, starts)
+
+    assert code == bi.EXIT_OK
+    assert lane.restarts == [lane.container]
+    assert starts.calls == [("job-7", "branch_install_reapply")]
+
+
+def test_omn24013_a_whole_lane_restarts_nothing_and_publishes_no_start(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    lane = _lane()
+    _declare(tmp_path, store)
+    lane.install_by_hand(WRITER, BRANCH_COPY)
+    starts = _Starts()
+
+    code = _run_reapply_entry(tmp_path, lane, starts)
+
+    assert code == bi.EXIT_OK
+    assert lane.restarts == []
+    assert starts.calls == []

@@ -9,4 +9,7 @@ from omnibase_infra.models.model_dev_boot_health_status import ModelDevBootHealt
 
 class ModelDevBootState(TypedDict, total=False):
     Status: str
+    StartedAt: str
+    ExitCode: int
+    OOMKilled: bool
     Health: ModelDevBootHealthStatus

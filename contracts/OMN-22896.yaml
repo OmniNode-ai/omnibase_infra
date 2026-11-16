@@ -3,7 +3,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-22896
 title: omnibase_infra's security scan runs TruffleHog and a planted secret turns it red
-summary: security-scan.yml gains a secret-scan job on a hosted runner at the action pin the reference security-scan.yml carries, with a planted-control step that reads a declared detector, so a commit adding the control token turns the job red and a head without it reads green.
+summary: security-scan.yml gains a secret-scan job on a hosted runner that runs the TruffleHog image by the digest the reference security-scan.yml pins, with a planted-control step that reads a declared detector, so a commit adding the control token turns the job red and a head without it reads green.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -25,7 +25,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn22896-ac1-workflow-shape
-    description: The secret-scan job runs on a hosted runner and every TruffleHog step carries the pinned action.
+    description: The secret-scan job runs on a hosted runner and every TruffleHog scanner step runs the image at the pinned digest and no step uses the TruffleHog action.
     source: manual
     binds_ac: [AC1]
     checks:

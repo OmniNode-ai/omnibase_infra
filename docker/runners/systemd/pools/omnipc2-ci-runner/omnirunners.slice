@@ -23,7 +23,17 @@
 #                      20 GiB in aggregate, well inside the 33 GiB available.
 #   MemoryMax=24G      a burst beyond it is an OOM kill inside a CI job, never
 #                      the model server or a lane broker.
-#   MemorySwapMax=2G   the host's swap is only 7 GiB; CI may not fill it.
+#   MemorySwapMax=0    (OMN-24186) the pool's pages must not reach the host swap
+#                      file, which sits on the same SATA SSD as the runners'
+#                      /scratch temp and cache directories (the hp053 pool
+#                      declares the same, see its slice file). Read on this host
+#                      on 2026-11-13, 22 hours after boot, against the old 2G
+#                      cap: the slice hit the cap 323,840 times, its swap peak
+#                      equalled the cap, and it accounted for 6,531,559 of the
+#                      host's 14,348,433 swap-in pages (45 percent) and
+#                      9,479,792 of its 30,216,307 swap-out pages (31 percent).
+#                      The lane admission refused a lane at 11:49Z on swap-in
+#                      43,800 KB/s against its 20,000 bar.
 #   CPUWeight=25       the same yield the primary pool has: under contention CI
 #                      gets a quarter of a default (100) sibling's share, and
 #                      every idle core when there is none.
@@ -37,6 +47,6 @@ Before=slices.target
 MemoryAccounting=yes
 MemoryHigh=20G
 MemoryMax=24G
-MemorySwapMax=2G
+MemorySwapMax=0
 CPUAccounting=yes
 CPUWeight=25

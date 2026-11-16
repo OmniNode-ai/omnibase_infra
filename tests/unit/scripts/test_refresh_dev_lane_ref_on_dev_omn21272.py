@@ -120,6 +120,14 @@ class _Lane:
         env["HOME"] = str(root)
         env["OMNI_HOME"] = str(self.workspace)
         env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(NEUTRAL_CONFIG_ROOT)
+        # The refresh renders the embedding address from the llm_endpoints overlay and
+        # refuses without one (OMN-24081): a synthetic root, a documentation address.
+        overlay_root = root / "overlay-root"
+        (overlay_root / "llm_endpoints").mkdir(parents=True)
+        (overlay_root / "llm_endpoints" / "overlay.yaml").write_text(
+            "schema_version: 1\nendpoint_urls:\n  embeddings-201: http://192.0.2.50:8100\n"
+        )
+        env["ONEX_SKILL_OVERLAY_ROOTS"] = str(overlay_root)
         env["LANE_CENSUS_HOST"] = NEUTRAL_HOSTNAME
         env["LANE_CENSUS_PYTHON"] = sys.executable
         env["LANE_CENSUS_DOCKER_SOCKET"] = "/nonexistent/refresh-dev-lane-test.sock"

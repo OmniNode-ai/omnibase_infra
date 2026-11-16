@@ -30,7 +30,6 @@ from omnibase_core.models.contracts.subcontracts.model_db_table_declaration impo
     ModelDbTableDeclaration,
 )
 from omnibase_infra.event_bus import kafka_transport
-from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.handlers import handler_kafka_topic_demand_source as module
 from omnibase_infra.handlers import kafka_idle_topic_watches
 from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
@@ -51,6 +50,7 @@ from omnibase_infra.services.service_runtime_health_monitor import (
     ConsumerGroupSnapshot,
     ServiceRuntimeHealthMonitor,
 )
+from tests.helpers.kafka_demand_source_container import demand_source_for
 
 PROJECTION_TOPIC = "onex.evt.omniclaude.tool-executed.v1"
 ORCHESTRATOR_TOPIC = "onex.cmd.omnimarket.contract-sweep-start.v1"
@@ -211,9 +211,7 @@ async def _until(condition: Callable[[], bool]) -> None:
 
 
 def _source() -> HandlerKafkaTopicDemandSource:
-    return HandlerKafkaTopicDemandSource(
-        ModelKafkaEventBusConfig(bootstrap_servers="localhost:9092")
-    )
+    return demand_source_for("localhost:9092")
 
 
 async def test_a_deferred_projection_is_healthy_until_its_first_record(

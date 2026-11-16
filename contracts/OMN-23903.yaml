@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23903
+title: "The dev runtime resolver maps omnidash.analytics.db_url, the analytics DSN the tenant read nodes name"
+summary: "The dev profile of the runtime policy contract maps the logical name omnidash.analytics.db_url, which omnimarket's node_tenant_savings_read_effect and node_tenant_delegations_read_effect name in config.analytics_dsn_secret, to the environment variable OMNIDASH_ANALYTICS_DB_URL that the dev containers already hold. docker/runtime-policy.env is re-rendered from it. The value is never in this repository."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23903-analytics-dsn-resolver-mapping
+    statement: Every dev runtime resolver config must map every logical secret a dev node contract names, starting with omnidash.analytics.db_url, to an environment source, so the node resolves it under enable_convention_fallback false.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the dev profile maps omnidash.analytics.db_url to the environment variable OMNIDASH_ANALYTICS_DB_URL and docker/runtime-policy.env is the render of the contract -- falsifier: uv run pytest tests/ci/test_runtime_policy_contract.py tests/ci/test_runtime_env_anchor.py -q'
+      - id: AC2
+        statement: 'AC2: every dev resolver config rendered through the container renderer resolves each contract-named logical secret through SecretResolver, and the same check fails when the mapping is removed -- falsifier: uv run pytest tests/ci/test_runtime_policy_contract_secret_refs_omn23903.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The mapping and render tests pass at the head; the contract-named secret check fails without the mapping.
+    command: uv run pytest tests/ci/test_runtime_policy_contract_secret_refs_omn23903.py tests/ci/test_runtime_policy_contract.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23903-mapping-tests
+    description: The mapping, render and contract-named secret tests pass at the head.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runtime_policy_contract_secret_refs_omn23903.py tests/ci/test_runtime_policy_contract.py tests/ci/test_runtime_env_anchor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra

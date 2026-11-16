@@ -56,7 +56,8 @@ CIDR_ENV_VAR = "LLM_ENDPOINT_CIDR_ALLOWLIST"
 REQUIRED_REVIEWER_ENV_VARS = (SECRET_ENV_VAR, CIDR_ENV_VAR)
 # OMN-18411: fleet capped 88 -> 60.
 # OMN-19077: the primary host's pool cut 44 -> 10, so the fleet is 10 + 16.
-FLEET_SERVICE_COUNT = 26
+# OMN-22898 cut the primary host's pool 10 -> 0, so the fleet is the 16 of the second host.
+FLEET_SERVICE_COUNT = 16
 # OMN-19895: the 60 are spread across two hosts -- 44 in the primary file and
 # 16 in .202's pool file -- and every one of them carries the same wiring, so
 # both files are read as one fleet here.

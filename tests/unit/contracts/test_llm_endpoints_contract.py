@@ -135,9 +135,19 @@ class TestLlmEndpointsContract:
         url_env_var and role_env_alias are allowed to be null on running slots
         (Docker-internal slots have no external env-var; aliases may be unassigned).
         disabled, on_demand, and planned slots are explicitly exempt.
+
+        Slots flagged ``endpoint_from_overlay`` keep host/port/endpoint_url null
+        in the public contract (the address is read from the llm_endpoints overlay
+        at run time, OMN-24017); only model_hf_id stays required.
         """
         for slot in _load_endpoints():
             if slot["status"] == "running":
+                if slot.get("endpoint_from_overlay"):
+                    assert slot["model_hf_id"] is not None, (
+                        f"running overlay slot {slot['slot_id']!r} must have "
+                        "non-null model_hf_id"
+                    )
+                    continue
                 for key in _PLANNED_NULLABLE_FIELDS:
                     assert slot[key] is not None, (
                         f"running slot {slot['slot_id']!r} must have non-null {key}"
@@ -156,6 +166,16 @@ class TestLlmEndpointsContract:
             assert slot["status"], (
                 f"slot {slot['slot_id']!r} must declare deployment status"
             )
+
+            # Overlay slots keep host/port/endpoint_url null in the public
+            # contract; their address is read from the llm_endpoints overlay at
+            # run time (OMN-24017). The endpoint_url consistency check below
+            # is skipped for them; model_hf_id is still checked below.
+            if slot.get("endpoint_from_overlay"):
+                for key in ("host", "port", "endpoint_url"):
+                    assert slot[key] is None, (
+                        f"overlay slot {slot['slot_id']!r} must keep {key} null"
+                    )
 
             if slot["endpoint_url"] is not None:
                 parsed = urlparse(slot["endpoint_url"])
@@ -210,6 +230,33 @@ class TestLlmEndpointsContract:
             assert ep["role"] in _ROLE_TAXONOMY, (
                 f"Entry {ep['slot_id']!r} role {ep['role']!r} outside taxonomy"
             )
+
+    def test_lane_overlay_binding_on_overlay_slots(self) -> None:
+        for slot in _load_endpoints():
+            if slot.get("endpoint_from_overlay"):
+                binding = slot.get("lane_overlay_binding")
+                if binding is not None:
+                    assert isinstance(binding, dict)
+                    assert binding.get("backend"), (
+                        f"slot {slot['slot_id']!r} lane_overlay_binding.backend must be non-empty"
+                    )
+                    assert binding.get("env_var"), (
+                        f"slot {slot['slot_id']!r} lane_overlay_binding.env_var must be non-empty"
+                    )
+
+    def test_embeddings_201_has_lane_overlay_binding(self) -> None:
+        for slot in _load_endpoints():
+            if slot["slot_id"] == "embeddings-201":
+                assert slot["endpoint_from_overlay"] is True
+                binding = slot.get("lane_overlay_binding")
+                assert binding is not None, (
+                    "embeddings-201 must have lane_overlay_binding"
+                )
+                assert binding["backend"] == "local-embedding"
+                assert binding["env_var"] == "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL"
+                assert slot["host"] is None
+                assert slot["port"] is None
+                assert slot["endpoint_url"] is None
 
     def test_reasoning_moe_35b_is_disabled_after_endpoint_loss(self) -> None:
         """OMN-16442 (supersedes the OMN-9292 running-slot field pins).
@@ -297,29 +344,49 @@ class TestLlmEndpointsContract:
         assert coder["model_hf_id"] == "Qwen/Qwen3.8-27B"
         assert coder["context_window_budgeted"] == 131072
 
-        # GET .201:8002/v1/models -> id "text-embedding-qwen3",
-        # artifact Qwen/Qwen3-Embedding-0.6B, 1024-dim output.
+        # OMN-24017: the embedding slot's address left the public contract and
+        # moved to the llm_endpoints overlay; the entry keeps its served
+        # identity (Qwen/Qwen3-Embedding-0.6B, 1024-dim) but no address.
         emb = by_slot["embeddings-201"]
         assert emb["status"] == "running"
-        assert emb["endpoint_url"] == "http://192.168.86.201:8002"
         assert emb["model_hf_id"] == "Qwen/Qwen3-Embedding-0.6B"
 
-    def test_embeddings_201_endpoint_reconciled_to_8002(self) -> None:
-        """LLM_EMBEDDING_URL slot resolves to :8002, not the dead :8100.
+    def test_embeddings_201_address_moves_to_the_llm_endpoints_overlay(self) -> None:
+        """The embeddings-201 slot carries no address; the overlay owns it.
 
-        The .201 embedding backend moved from :8100 to :8002 (vllm-embeddings)
-        per OMN-13664/OMN-13807. The legacy :8100 process is down, so the
-        canonical LLM_EMBEDDING_URL slot must point at :8002.
+        OMN-24017: the embedding server on the first GPU shared it with the
+        27B chat model and pushed it into CUDA out of memory, so its
+        address is the llm_endpoints overlay value (key embeddings-201), read
+        by the deploy guard. The public contract must carry no address on
+        this slot.
         """
         by_slot = {ep["slot_id"]: ep for ep in _load_endpoints()}
         ep = by_slot.get("embeddings-201")
         assert ep is not None, "Missing required slot 'embeddings-201'"
+        assert ep["endpoint_from_overlay"] is True
         assert ep["url_env_var"] == "LLM_EMBEDDING_URL"
-        assert ep["port"] == 8002, (
-            "embeddings-201 must resolve to :8002 (not dead :8100)"
-        )
-        assert ep["endpoint_url"] == "http://192.168.86.201:8002"
+        assert ep["host"] is None
+        assert ep["port"] is None
+        assert ep["endpoint_url"] is None
+        assert ep["hardware"] is None
         assert ep["role"] == "embedding"
+
+    def test_no_slot_names_the_removed_embedding_port(self) -> None:
+        """No slot and no line of the contract file names the removed port.
+
+        The embedding server on the first GPU is gone (OMN-24017); the
+        removed port must not survive on any slot, in the notes, or in the
+        file header.
+        """
+        text = _CONTRACT_PATH.read_text(encoding="utf-8")
+        assert "8002" not in text, (
+            "contracts/llm_endpoints.yaml must not name the removed "
+            "embedding port on the lab model host"
+        )
+        for ep in _load_endpoints():
+            assert ep.get("port") != 8002, (
+                f"slot {ep.get('slot_id')!r} must not name the removed port"
+            )
 
     def test_runtime_required_env_vars_are_owned_by_running_slots(self) -> None:
         """Runtime-required URL env vars must point at running canonical slots."""

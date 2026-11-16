@@ -48,6 +48,14 @@ _REPO_ROOT = _SCRIPT_DIR.parents[1]
 _SCRIPT = _SCRIPT_DIR / "repoint_dev_lane_onex_api.py"
 _REFRESH_DEV = _SCRIPT_DIR / "refresh_dev_lane.sh"
 _REFRESH_STABILITY = _SCRIPT_DIR / "refresh_stability_lane.sh"
+_AGENT = _REPO_ROOT / "scripts" / "deploy-agent" / "deploy_agent" / "agent.py"
+_BUILD_HANDLER = (
+    _REPO_ROOT
+    / "src"
+    / "omnibase_infra"
+    / "handlers"
+    / "handler_onex_api_image_build.py"
+)
 _LAB_OVERLAY = (
     _REPO_ROOT / "scripts" / "deploy-agent" / "deploy_agent" / "lab_overlay.py"
 )
@@ -650,8 +658,8 @@ def test_the_builder_stamps_the_omninode_sha_as_an_oci_label(mod: ModuleType) ->
     """
     source = _LAB_OVERLAY.read_text(encoding="utf-8")
     assert f'API_REVISION_LABEL = "{mod.REVISION_LABEL}"' in source
-    assert "labels={" in source
-    assert "API_REVISION_LABEL: manifest_sha" in source
+    assert "revision_label=API_REVISION_LABEL" in _AGENT.read_text(encoding="utf-8")
+    assert "source_revision=revision" in _AGENT.read_text(encoding="utf-8")
 
 
 def test_build_and_import_puts_labels_on_the_argv_it_builds() -> None:
@@ -661,8 +669,9 @@ def test_build_and_import_puts_labels_on_the_argv_it_builds() -> None:
     shells out to docker and containerd, and a test that stubbed both would be
     asserting the stub. What is checked here is the one line that can be wrong.
     """
-    source = _LAB_OVERLAY.read_text(encoding="utf-8")
-    assert 'argv += ["--label", f"{name}={value}"]' in source
+    source = _BUILD_HANDLER.read_text(encoding="utf-8")
+    assert 'f"{request.revision_label}={request.source_revision}"' in source
+    assert source.count('"--label"') == 2
 
 
 def test_the_script_is_executable_and_self_documenting() -> None:

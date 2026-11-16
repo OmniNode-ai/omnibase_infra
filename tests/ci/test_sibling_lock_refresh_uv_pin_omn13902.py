@@ -36,6 +36,19 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "sibling-lock-refresh.yml"
 COMMITTED_LOCK = 'version = 1\nrevision = 3\nrequires-python = ">=3.12"\n\n[[package]]\nname = "omnimarket"\nversion = "0.4.1"\n'
 
 
+def test_refresh_runs_only_on_manual_dispatch() -> None:
+    """RULING 2026-11-09T21:54:25Z lane=orchestrator-31d9 (OMN-18594).
+
+    Downstream pins move only when the downstream needs something new, so the
+    daily cron that ran ``uv lock --upgrade-package`` is gone. A needed refresh
+    stays one command: ``workflow_dispatch``.
+    """
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    triggers = workflow[True] if True in workflow else workflow["on"]
+    assert "workflow_dispatch" in triggers
+    assert set(triggers) == {"workflow_dispatch"}, sorted(triggers)
+
+
 def _refresh_script() -> str:
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     steps = workflow["jobs"]["refresh"]["steps"]

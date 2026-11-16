@@ -10,7 +10,7 @@ import configparser
 import json
 import site
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from email.parser import Parser
 from pathlib import Path
@@ -19,6 +19,11 @@ DEFAULT_ALLOWED_DISTRIBUTIONS = frozenset({"omnibase-infra", "omnimarket"})
 DEFAULT_STRIPPED_GROUPS = frozenset(
     {"onex.domain_plugins", "onex.node_package", "onex.nodes"}
 )
+# The runtime serves omniintelligence's API through the http_mount that its node
+# contract declares and finds that contract through ``onex.nodes``: a dist stripped
+# of it is never mounted (OMN-22391: /api/v1/patterns answered 404). Its domain
+# plugins and node-package roots stay stripped.
+DEFAULT_KEPT_GROUPS = {"omninode-intelligence": frozenset({"onex.nodes"})}
 
 
 @dataclass(
@@ -51,17 +56,8 @@ def normalize_distribution_name(name: str) -> str:
 
 
 def _iter_site_packages() -> list[Path]:
-    paths: list[Path] = []
-    for raw_path in site.getsitepackages():
-        path = Path(raw_path)
-        if path.exists():
-            paths.append(path)
-    usersite = site.getusersitepackages()
-    if usersite:
-        path = Path(usersite)
-        if path.exists():
-            paths.append(path)
-    return paths
+    raw = [*site.getsitepackages(), site.getusersitepackages()]
+    return [Path(path) for path in raw if path and Path(path).exists()]
 
 
 def _dist_name(dist_info_dir: Path) -> str:
@@ -101,13 +97,17 @@ def strip_runtime_entry_points(
     *,
     allowed_distributions: Iterable[str] = DEFAULT_ALLOWED_DISTRIBUTIONS,
     stripped_groups: Iterable[str] = DEFAULT_STRIPPED_GROUPS,
+    kept_groups: Mapping[str, frozenset[str]] = DEFAULT_KEPT_GROUPS,
 ) -> StripEntryPointReport:
-    """Remove ONEX runtime discovery groups from non-allowed distributions."""
+    """Remove ONEX runtime discovery groups from non-allowed distributions.
+
+    ``kept_groups`` names, per distribution, the groups it keeps regardless.
+    """
 
     allowed = frozenset(
         normalize_distribution_name(name) for name in allowed_distributions
     )
-    groups = frozenset(stripped_groups)
+    all_groups = frozenset(stripped_groups)
     stripped: list[StrippedEntryPointDist] = []
 
     for site_package_path in site_package_paths:
@@ -119,6 +119,7 @@ def strip_runtime_entry_points(
             entry_points_path = dist_info_dir / "entry_points.txt"
             if not entry_points_path.exists():
                 continue
+            groups = all_groups - kept_groups.get(dist_name, frozenset())
 
             parser = _read_entry_points(entry_points_path)
             removed_groups = tuple(

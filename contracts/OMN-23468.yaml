@@ -1,0 +1,56 @@
+schema_version: 1.0.0
+ticket_id: OMN-23468
+title: The lab machines' login may publish and read the landing snapshot record
+summary: The developer principal wire bindings (deploy/lab/developer-principal-bindings.yaml) declare the landing snapshot record topic onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1 as produce and consume, its failure topic onex.evt.omnimarket.pr-landing-snapshot-failed.v1 as produce, and two run-named consumer group prefixes (landing-snapshot-join-, landing-tick-orchestrator-). The derived grants file is regenerated from the derivation node, never typed. The grants take effect on the dev broker when the issuer's apply-grants runs the derived file on the broker host; that step is the operator's and is recorded in the pull request, not claimed here.
+is_seam_ticket: true
+interface_change: false
+interfaces_touched:
+  - topics
+  - public_api
+  - infrastructure
+requirements:
+  - id: req-omn23468-landing-snapshot-grants
+    statement: The dev lane principal's declared grants include the landing snapshot record topics, and the derived grants file is the derivation node's output over the bindings.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: deploy/lab/developer-principal-bindings.yaml binds the dev principal to produce and consume onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1, produce onex.evt.omnimarket.pr-landing-snapshot-failed.v1, and the group prefixes landing-snapshot-join- and landing-tick-orchestrator-, and the derived grants file is the derivation node''s output -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py fails with the dev bindings restored'
+      - id: AC2
+        statement: 'AC2: the discovered derivation''s ACL row count moves from 189 to 198 in the same change -- falsifier: tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py fails at the merge base bindings'
+      - id: AC3
+        statement: 'AC3: integrated: after the issuer applies the derived grants on the dev broker, the snapshot step publishes a tick record on onex.evt.omnimarket.pr-landing-tick-facts-recorded.v1 and the tick orchestrator reads it on the dev lane -- falsifier: the snapshot-to-orchestrator join test''s real-broker leg on lane dev refuses with a topic authorization error'
+evidence_requirements:
+  - kind: tests
+    description: The derivation, discovery and issuer tests over the landing snapshot bindings.
+    command: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23468-ac1-declared-grants
+    description: The bindings declare the record topic (READ, WRITE, DESCRIBE), the failure topic (WRITE, DESCRIBE) and two run-named group prefixes (READ, DESCRIBE); the committed derived grants JSON is byte-equal to the derivation node's output. With the dev bindings restored the focused tests fail 5.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23468-ac2-row-count
+    description: The discovered derivation's row count is 198 (189 plus 9).
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23468-ac3-integrated
+    description: 'Integrated: pending the operator''s apply-grants on the broker host; then the snapshot-to-orchestrator join test''s real-broker leg on lane dev reads the record. Not claimed by this pull request.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra

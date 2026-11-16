@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Work-ledger queries as a granted developer and an unrelated SCRAM principal.
 
-Only the six dev query grants derived from the shipped bindings are installed.
+Only the seven dev query grants derived from the shipped bindings are installed.
 The responder uses the read node's wire shape; its domain replay is owned and
 tested by omnimarket. This exercises real Kafka authorization and the actual
 infra client, without a database, private checkout, or hosted-runner secret.
@@ -79,7 +79,7 @@ def _query_grants():
 
 def _grant_query(broker: RedpandaSasl, principal: RuntimePrincipal) -> None:
     grants = _query_grants()
-    assert len(grants) == 6
+    assert len(grants) == 7
     assert {g.broker for g in grants} == {"dev"}
     for grant in grants:
         broker.rpk(

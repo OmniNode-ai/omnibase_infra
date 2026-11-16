@@ -123,10 +123,8 @@ DEFAULT_REPOS = (
     "omnibase_core",
     "omnibase_infra",
     "omnibase_spi",
-    "omnibase_compat",
     "omniclaude",
     "omnimarket",
-    "onex_change_control",
     "omnidash",
 )
 

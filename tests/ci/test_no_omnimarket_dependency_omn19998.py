@@ -362,7 +362,7 @@ def test_ci_install_steps_install_no_omnimarket() -> None:
         sum(len(list(_workflow_steps(yaml.safe_load(p.read_text())))) for p in files)
         > 300
     )
-    assert "uv pip install --no-deps -e ../omnibase_compat" in files[0].read_text(
+    assert "uv pip install --no-deps -e ../omnimemory" in files[0].read_text(
         encoding="utf-8"
     )
     findings = [
@@ -545,7 +545,7 @@ def _workflow(run: str) -> str:
         "uv pip install --no-deps omnimarket",
         'uv pip install --quiet --no-deps "omnimarket==0.4.310"',
         "pip install -e ../omnimarket",
-        "uv pip install --no-deps -e ../omnibase_compat -e ../omnimarket -e ../omnimemory",
+        "uv pip install --no-deps -e ../omnimemory -e ../omnimarket -e ../omniintelligence",
         'uv pip install --python "$PY" --no-deps \\\n  "omnimarket @ git+https://example.invalid/omnimarket@abc"',
         "uv sync --project omnimarket",
         "uv add OmniMarket",
@@ -564,7 +564,7 @@ def test_workflow_checker_fires_in_a_composite_action() -> None:
 
 
 def test_workflow_checker_ignores_non_install_mentions() -> None:
-    clean = _workflow("uv pip install --no-deps -e ../omnibase_compat")
+    clean = _workflow("uv pip install --no-deps -e ../omnimemory")
     assert workflow_findings(clean, "wf.yml") == []
     # Positive control: the same step shape does fire once omnimarket is added.
     assert workflow_findings(clean + "          uv pip install omnimarket\n", "wf.yml")

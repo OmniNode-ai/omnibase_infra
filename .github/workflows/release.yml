@@ -15,14 +15,14 @@ on:
       # step of the `release` job, sequenced behind `Publish to PyPI` and
       # `Create GitHub Release`, so neither a `--failed` re-run nor a plain
       # `-f tag=` dispatch can reach it without re-executing the publish,
-      # re-cutting the GitHub Release, re-firing the dependency cascade and
-      # re-dispatching the runtime image rebuild. When the sync is the ONLY
+      # re-cutting the GitHub Release and re-dispatching the runtime image
+      # rebuild. When the sync is the ONLY
       # thing that failed -- run 34037128862 (v0.38.19): publish SUCCESS,
       # GitHub Release SUCCESS, `Mint onexbot-occ-writer app token` FAILURE
       # with HTTP 422 because the App installation lacked `workflows: write`
       # -- this input runs the mint + fast-forward and nothing else.
       sync_main_to_tag:
-        description: 'Sync-only: fast-forward main to this EXISTING release tag. No build, no publish, no GitHub Release, no cascade, no runtime rebuild.'
+        description: 'Sync-only: fast-forward main to this EXISTING release tag. No build, no publish, no GitHub Release, no runtime rebuild.'
         required: false
         default: ''
 
@@ -36,8 +36,8 @@ concurrency:
 jobs:
   release:
     # OMN-16289: a sync-only dispatch (`-f sync_main_to_tag=vX.Y.Z`) must not
-    # re-publish an already-published version, re-cut its GitHub Release,
-    # re-fire the dependency cascade or re-dispatch the runtime image rebuild.
+    # re-publish an already-published version, re-cut its GitHub Release
+    # or re-dispatch the runtime image rebuild.
     # This job IS the release; skip it whole and let `sync-main` below perform
     # the pointer move on its own.
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.sync_main_to_tag == '' }}
@@ -129,7 +129,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      # OMN-16286 / OMN-18596 / OMN-20959: the dependency cascade carries the
+      # OMN-16286 / OMN-18596 / OMN-20959: the dependency cascade (now run by
+      # hand through dependency-cascade-dispatch.yml) carries the
       # release's own ticket into each downstream bump branch and title, so the
       # release must name the ticket that closed its merged PR and the evidence
       # record that proved it. Resolving that here means a release that cannot
@@ -743,23 +744,9 @@ jobs:
             }
 
   # ---------------------------------------------------------------------------
-  # Post-release: open dependency bump PRs in downstream repos (OMN-2751)
+  # RULING 2026-11-09T21:54:25Z lane=orchestrator-31d9 (OMN-18594): downstream
+  # pins move only when the downstream needs something new; run by
+  # workflow_dispatch. The `dependency-cascade` job (OMN-2751) that called
+  # ./.github/workflows/dependency-cascade.yml after every release is removed.
+  # The manual path is dependency-cascade-dispatch.yml.
   # ---------------------------------------------------------------------------
-  dependency-cascade:
-    name: Dependency Cascade
-    needs: release
-    # OMN-16289: see trigger-runtime-rebuild -- a sync-only dispatch skips
-    # `release`, and must therefore open no downstream bump PRs.
-    if: ${{ needs.release.result == 'success' && !contains(needs.release.outputs.version, 'rc') }}
-    uses: ./.github/workflows/dependency-cascade.yml
-    with:
-      package: omnibase_infra
-      version: ${{ needs.release.outputs.version }}
-      ticket: ${{ needs.release.outputs.ticket }}
-      evidence_source: ${{ needs.release.outputs.evidence_source }}
-    secrets:
-      # OMN-16373: CROSS_REPO_PAT retired — pass the onexbot-occ-writer App
-      # credentials through so dependency-cascade.yml can mint its own
-      # per-repo installation token.
-      onexbot-occ-app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
-      onexbot-occ-private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}

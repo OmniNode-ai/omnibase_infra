@@ -1,0 +1,33 @@
+schema_version: 1.0.0
+ticket_id: OMN-23471
+title: The dev lane principal can ask the floor task ticket node for a ticket (broker grants)
+summary: >-
+  The developer principal wire bindings (deploy/lab/developer-principal-bindings.yaml) declare the floor task ticket node's command topic (onex.cmd.omnimarket.floor-task-ticket-mint-requested.v1) as a produce binding, its completed topic (onex.evt.omnimarket.floor-task-ticket-mint-completed.v1) as a consume binding, and the group prefix of the per-call group onex run-node reads under (local.omnibase_core.cli_run_node.consume.v1.). The derived grants file is regenerated from the derivation node, never typed. The command topic joins the read-only principal's withheld set because its consumer mints a Linear ticket on the publisher's behalf. The grants take effect on the dev broker when the issuer's apply-grants runs the derived file; that step needs the operator's broker admin credential and is recorded in the pull request, not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23471-floor-task-ticket-grants
+    statement: The dev lane principal's declared grants include the floor task ticket node's command and completed topics and the run-node group prefix, and the derived grants file is the derivation node's output over the bindings.
+    acceptance:
+      - id: AC4
+        statement: "AC4: the dev lane principal's declared grants include the floor task ticket command topic (write), its completed topic (read) and the run-node group prefix (read), with no write on the terminal, so a lane can ask the node for a ticket once the grants are applied on the dev broker -- falsifier: the declared grants test fails when either topic binding or the group prefix is removed from developer-principal-bindings.yaml, and the issuer row count test moves with it"
+evidence_requirements:
+  - kind: tests
+    description: The derivation and issuer tests over the floor task ticket bindings.
+    command: PYTHONPATH=src pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23471-ac4-declared-grants
+    description: >-
+      The bindings declare the command topic (WRITE, DESCRIBE), the completed topic (READ, DESCRIBE) and the run-node group prefix (READ, DESCRIBE); the committed derived grants JSON is byte-equal to the derivation node's output; no write on the completed topic. On the parent commit the committed derivation holds none of the six rows and the issuer row count is 189.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra

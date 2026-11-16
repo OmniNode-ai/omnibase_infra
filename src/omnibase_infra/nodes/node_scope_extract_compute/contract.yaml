@@ -6,14 +6,16 @@
 #   - OMN-14832: HandlerScopeExtract exposes the canonical def-B
 #     ModelScopeExtractInput handle(request) entrypoint while preserving scope
 #     extraction semantics and golden outputs.
+#   - OMN-23579: the handler's known-repository set drops two retired
+#     repositories.
 name: "node_scope_extract_compute"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
   minor: 1
-  patch: 2
-node_version: "1.1.2"
-description: "Pure computation: extracts scope items (files, directories, repos, systems) from plan content. Contract patch 1 records the OMN-14832 canonical def-B ModelScopeExtractInput handle(request) entrypoint while preserving extraction semantics."
+  patch: 3
+node_version: "1.1.3"
+description: "Pure computation: extracts scope items (files, directories, repos, systems) from plan content. Contract patch 1 records the OMN-14832 canonical def-B ModelScopeExtractInput handle(request) entrypoint while preserving extraction semantics. Contract patch 3 records OMN-23579: the known-repository set the handler matches in plan content no longer lists two retired repositories."
 input_model:
   name: "ModelScopeExtractInput"
   module: "omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extract_input"

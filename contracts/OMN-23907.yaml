@@ -1,0 +1,70 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-23907"
+title: "A projection loses no rows when its contract version changes"
+summary: "A contract version bump names a new consumer group that starts at the bus default and never reads the rows published while no version was joined (work ledger projection: 39 rows lost at 1.1.1 to 1.1.2, 16 at 1.1.2 to 1.2.0). When a contract declares no consumer_group_handover, the subscribe preflight now lists the broker's groups, picks those that differ from the new group only in the version segment, and copies their committed offsets into it with the last_ran rule before subscribe. A predecessor that still has members is skipped with a warning. The policy is read from ONEX_RUNTIME_VERSION_HANDOVER and can be switched off."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-version-bump-handover"
+    statement: "A contract version bump loses no row published between the old version stopping and the new one joining, on the in-process substrate and on a real broker."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: a contract version bump on the in-memory group substrate loses no row published between the old version stopping and the new one joining -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_consumer_group_version_bump_handover.py -q fails on dev where the new reader projects only the row after the bump"
+      - id: "AC2"
+        statement: "AC2: failing control: with the handover policy switched off the same scenario loses the gap rows -- falsifier: test_without_version_handover_the_gap_is_lost passes only while the switched-off path loses them"
+      - id: "AC3"
+        statement: "AC3: error chain: an unreadable policy refuses the wiring and a predecessor that still has members is skipped with a warning, not raised -- falsifier: test_an_unreadable_policy_refuses_the_wiring and test_a_predecessor_with_members_is_skipped_not_fatal fail if either path raises or passes silently"
+      - id: "AC4"
+        statement: "AC4: on a real broker the same scenario loses nothing and the successor group's own committed offsets are not rewound -- falsifier: uv run pytest tests/integration/event_bus/test_consumer_group_version_bump_redpanda_omn19998.py -q fails on dev"
+      - id: "AC5"
+        statement: "AC5: integrated: after the change is running on the development runtime, the next contract version bump of a projection leaves no row missing, read as the successor group's committed offsets equalling the predecessor's at the first start and the projection table having every ledger sequence -- falsifier: a read-only group listing after the bump still shows an older-version group of a running projection with committed offsets below the log end"
+evidence_requirements:
+  - kind: "tests"
+    description: "The version bump tests pass at the head; on the merge base the new module does not exist."
+    command: "uv run pytest tests/unit/runtime/auto_wiring/test_consumer_group_version_bump_handover.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn23907-ac1-bump-loses-nothing"
+    description: "AC1 hosted probe. The new version projects the gap and what follows, nothing twice."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_version_bump_handover.py -k test_version_bump_loses_nothing -q"
+        cwd: "."
+    binds_ac: ["AC1"]
+  - id: "dod-omn23907-ac2-control"
+    description: "AC2 hosted probe. The switched-off path loses the gap rows."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_version_bump_handover.py -k test_without_version_handover_the_gap_is_lost -q"
+        cwd: "."
+    binds_ac: ["AC2"]
+  - id: "dod-omn23907-ac3-error-chain"
+    description: "AC3 hosted probe. An unreadable policy refuses the wiring; a live predecessor is skipped, not fatal."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_version_bump_handover.py -k 'unreadable_policy or with_members' -q"
+        cwd: "."
+    binds_ac: ["AC3"]
+  - id: "dod-omn23907-hosted-proxy-ac4"
+    description: "Hosted proxy for AC4. The in-process substrate scenario and the pure predecessor selection pass; the broker run is the service-integration suite and the lab proof below."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_version_bump_handover.py -q"
+        cwd: "."
+    binds_ac: ["AC4"]
+  - id: "dod-omn23907-hosted-proxy-ac5"
+    description: "Hosted proxy for AC5. The running-runtime reading is not reachable from a hosted runner; the unit scenario stands in until the dev runtime reading is taken."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_version_bump_handover.py -q"
+        cwd: "."
+    binds_ac: ["AC5"]

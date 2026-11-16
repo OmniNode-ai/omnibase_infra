@@ -1,7 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# Shipped runtime fallback policy; override through event_bus.recovery.
+# Shipped runtime recovery policy; override through event_bus.recovery.
+# lost_broker_policy: refuse_ready for a runtime that serves other processes;
+# a runtime declared single-process sets local_fallback in its own overlay.
 initial_backoff_seconds: 1
 max_backoff_seconds: 30
 backoff_multiplier: 2
 attempt_timeout_seconds: 120
+lost_broker_policy: refuse_ready

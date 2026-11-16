@@ -69,3 +69,44 @@ node_runtime_sweep = omnimarket.nodes.node_runtime_sweep
     market_entry_points = (market_dist / "entry_points.txt").read_text(encoding="utf-8")
     assert "[onex.node_package]" in market_entry_points
     assert "[onex.nodes]" in market_entry_points
+
+
+def test_runtime_entry_point_stripper_cli_keeps_intelligence_onex_nodes(
+    tmp_path: Path,
+) -> None:
+    """OMN-22391: the image's omninode-intelligence still lists its onex.nodes."""
+    site_packages = tmp_path / "site-packages"
+    intelligence_dist = _write_dist(
+        site_packages,
+        "omninode-intelligence",
+        """
+[onex.domain_plugins]
+intelligence = omniintelligence.runtime.plugin:PluginIntelligence
+
+[onex.node_package]
+omniintelligence = omniintelligence.nodes
+
+[onex.nodes]
+node_pattern_storage_effect = omniintelligence.nodes.node_pattern_storage_effect
+""".lstrip(),
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "omnibase_infra.runtime.strip_runtime_entry_points",
+            "--site-packages",
+            str(site_packages),
+        ],
+        check=True,
+        capture_output=True,
+        env={**environ, "PYTHONPATH": str(Path.cwd() / "src")},
+        text=True,
+    )
+
+    entry_points = (intelligence_dist / "entry_points.txt").read_text(encoding="utf-8")
+    assert "[onex.nodes]" in entry_points
+    assert "node_pattern_storage_effect" in entry_points
+    assert "[onex.domain_plugins]" not in entry_points
+    assert "[onex.node_package]" not in entry_points

@@ -1,0 +1,50 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23387
+title: The h051 merge-queue runners register into the same private-only group as the h053 pool, and the hourly fleet probe goes red when the merge-queue label sits on one host
+summary: >-
+  The h051 merge-queue compose file no longer spells the shared runner group; like the h053 file it reads the private-only group's name from MQ_RUNNER_GROUP in the runner host's docker/.env and refuses to render without it. The runner-pool-spread probe adds the merge-queue label to the labels it requires on two hosts. A test holds that the fleet config declares the merge-queue class on two hosts and refuses a declaration with one. Moving the four already-registered h051 runners into the group is the operator's runner group setting; the installer run and the drill that stops one host are not part of this change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23387-two-hosts
+    statement: The merge-queue pools of both hosts register into the private-only group, the fleet config declares the class on two hosts, and the hourly probe requires the label on two hosts.
+    acceptance:
+      - id: AC1
+        statement: "AC1: each repository's merge-queue runners are declared on two or more hosts in the runner overlay -- falsifier: a repository whose merge-queue runner labels resolve to one host in the overlay"
+      - id: AC2
+        statement: "AC2: a merge-group run succeeds with one runner host stopped -- falsifier: the drill's merge-group run waits for a runner on the stopped host"
+evidence_requirements:
+  - kind: tests
+    description: The merge-queue pool declaration test and the pool spread probe test pass.
+    command: uv run pytest tests/ci/test_ci_mq_pool_omn22123.py tests/ci/test_runner_pool_spread_omn19895.py -q --no-cov -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23387-fleet-two-hosts
+    description: The fleet config declares the merge-queue class on h051 and h053, both compose files read the group from MQ_RUNNER_GROUP, and the declaration test fails when the class sits on one host.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_ci_mq_pool_omn22123.py -q --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23387-probe-merge-queue-label
+    description: At the probe fixture only, not the live registry. The probe goes red when every online omnibase-ci-mq runner sits on h053 and green when they sit on h051 and h053. The drill that stops one host's runners and reads a real merge-group run is a separate step on the lab.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_runner_pool_spread_omn19895.py -q --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23387-hp051-group-source-readback
+    description: Hermetic readback of the h051 merge-queue compose file at the evaluated commit through the GitHub contents API. It requires the MQ_RUNNER_GROUP form on RUNNER_GROUP and fails when the file spells the shared group there, as the merge base does. It needs no Docker daemon or lab access and checks the published deployment definition only.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'f=$(gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-hp051-ci-mq-runner.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d); printf "%s\n" "$f" | grep -F "RUNNER_GROUP: \${MQ_RUNNER_GROUP:?" > /dev/null && ! printf "%s\n" "$f" | grep -E "^[[:space:]]+RUNNER_GROUP: omnibase-ci$" > /dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra

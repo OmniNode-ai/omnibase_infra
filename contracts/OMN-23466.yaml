@@ -1,0 +1,57 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23466
+title: Stop the automatic sibling pin refresh and the post-release downstream bumps
+summary: >-
+  RULING 2026-11-09T21:54:25Z (lane=orchestrator-31d9, OMN-23386). Downstream pins move only when the downstream needs something new. sibling-lock-refresh.yml loses its daily schedule trigger and keeps workflow_dispatch; release.yml loses the dependency-cascade job that called dependency-cascade.yml after every release. The cascade stays reachable by hand through dependency-cascade-dispatch.yml.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23466-no-automatic-pin-moves
+    statement: Neither a schedule nor a release moves a downstream pin on its own; both stay reachable by workflow_dispatch.
+    acceptance:
+      - id: AC1
+        statement: "AC1: sibling-lock-refresh.yml has workflow_dispatch as its only trigger at the pull request head -- falsifier: tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py::test_refresh_runs_only_on_manual_dispatch fails when a schedule trigger is present"
+      - id: AC2
+        statement: "AC2: release.yml has no dependency-cascade job and no job that calls dependency-cascade.yml -- falsifier: tests/ci/test_release_sync_main_dispatch.py::test_a_release_cannot_fire_the_dependency_cascade fails when either returns"
+evidence_requirements:
+  - kind: tests
+    description: The two workflow shape tests pass at the head and fail at the merge base.
+    command: uv run --frozen pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py tests/ci/test_release_sync_main_dispatch.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23466-ac1-refresh-manual-only
+    description: sibling-lock-refresh.yml triggers only on workflow_dispatch. At the merge base it also carries the daily schedule trigger, so this test is red there.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -k test_refresh_runs_only_on_manual_dispatch -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23466-ac2-no-release-cascade
+    description: release.yml holds no dependency-cascade job and no call to dependency-cascade.yml. At the merge base the job exists, so this test is red there.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_release_sync_main_dispatch.py -k test_a_release_cannot_fire_the_dependency_cascade -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn23466-lab-runtime-observation
+    description: After merge, the workflow-run list for Sibling lock refresh shows no schedule-event run after the merge time and a manual dispatch still starts a run. Read on the default branch; not runnable on a hosted runner, so it is bound to no criterion.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: test -f .github/workflows/sibling-lock-refresh.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-deploy
+    description: Both workflow files parse and their trigger and job shapes are asserted by the two tests above; this hosted-runner check needs no deployed services and no deploy is triggered.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py tests/ci/test_release_sync_main_dispatch.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra

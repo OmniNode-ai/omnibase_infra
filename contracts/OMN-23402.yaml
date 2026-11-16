@@ -1,0 +1,33 @@
+schema_version: 1.0.0
+ticket_id: OMN-23402
+title: The dev lane principal can read and write the two floor snapshot topics the owner map projection runs on (broker grants)
+summary: >-
+  The developer principal wire bindings (deploy/lab/developer-principal-bindings.yaml) declare the floor owner map snapshot topic (onex.snapshot.projection.floor-owner-map.v1) and the overlay store fleet snapshot topic (onex.snapshot.projection.floor-overlay-store-fleet.v1) as produce and consume bindings, with the floor projection reader's group prefix (node_floor_projection_read_effect.). The derived grants file is regenerated from the derivation node, never typed. No other snapshot projection topic is granted. The grants take effect on the dev broker when the issuer's apply-grants runs the derived file; that step needs the operator's broker admin credential and is recorded in the pull request, not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23402-floor-snapshot-grants
+    statement: The dev lane principal's declared grants include the two floor snapshot topics, and the derived grants file is the derivation node's output over the bindings.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the dev lane principal's declared grants include the floor owner map and overlay store fleet snapshot topics through the developer-principal bindings, so the owner map publisher and the floor projection reader are not refused with TopicAuthorizationFailedError once the grants are applied on the dev broker -- falsifier: the declared grants test fails when either topic binding or the reader group prefix is removed from developer-principal-bindings.yaml, and the issuer row count test moves with it"
+evidence_requirements:
+  - kind: tests
+    description: The derivation and issuer tests over the floor snapshot bindings.
+    command: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23402-ac1-declared-grants
+    description: >-
+      The bindings declare the two floor snapshot topics (READ, WRITE, DESCRIBE) and the reader group prefix (READ, DESCRIBE); the committed derived grants JSON is byte-equal to the derivation node's output; no other onex.snapshot.projection topic is covered. On the parent commit the committed derivation holds no floor snapshot topic and the issuer row count is 181.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra

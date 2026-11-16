@@ -1,0 +1,63 @@
+schema_version: 1.0.0
+ticket_id: OMN-23332
+title: The dev stack retires the skill-lifecycle-consumer container now that the runtime runs its handler
+summary: >-
+  The skill lifecycle projection runs as node_projection_skill_lifecycle in the dev main runtime (omnimarket#4849, which declares the consumer group handover from skill-lifecycle-postgres). This change retires the separate skill-lifecycle-consumer container on primary dev: the runtime policy lists it under the dev main process retired services, the rendered env file carries it, and the dev-lane compose stanza starts only under the folded-skill-lifecycle profile. Other dev instances, the stability lane and prod keep their consumer. The test selected by skill_lifecycle_retired fails with the service restored in the dev-lane compose file. The read of the dev lane on h201 after the next deploy-agent run is pending the merge.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23332-consumer-retired-on-dev
+    statement: Primary dev declares no skill-lifecycle-consumer service and the main runtime's handler owns the consumer group, so skill_executions has one writer.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the dev compose no longer declares skill-lifecycle-consumer and the runtime''s handler owns its consumer group -- falsifier: uv run pytest tests -q -k skill_lifecycle_retired in omnibase_infra, failing with the service restored'
+  - id: req-omn23332-container-gone-after-deploy
+    statement: After the deploy agent rolls dev from this change, the h201 dev lane runs no skill-lifecycle-consumer container.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: after the next deploy-agent run, h201''s dev lane runs no skill-lifecycle-consumer container -- falsifier: docker ps on h201''s dev lane'
+evidence_requirements:
+  - kind: tests
+    description: The skill lifecycle retirement test with its failing control, the fold tests for the retired services and the stack-shape check over the real compose files.
+    command: uv run pytest tests/unit/docker/test_dev_skill_lifecycle_fold_omn21933.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23332-ac1-retired-test
+    description: The runtime policy retires skill-lifecycle-consumer by name and the rendered primary dev stack declares no such service. With the folded-skill-lifecycle profile line removed from the dev-lane stanza (the service restored) the test fails with the consumer present in the rendered stack; with the stanza as committed it passes.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_skill_lifecycle_fold_omn21933.py -k skill_lifecycle_retired -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn23332-ac1-fold-and-stack-shape
+    description: The rendered env file, the dev-lane stanza gate, the other dev instances keeping their consumer, the deploy retirement of the folded services and the stack-shape baseline count unchanged.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_skill_lifecycle_fold_omn21933.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/validation/test_checker_stack_shape.py -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn23332-ac2-rendered-dev-stack
+    description: The rendered dev stack (base, dev-lane and fold overlays merged), the one the deploy agent rolls, carries no skill-lifecycle-consumer service, so a deploy starts none. No lab rollout is claimed by this item.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_skill_lifecycle_fold_omn21933.py -k "renders_no_skill_lifecycle_consumer or skill_lifecycle_retired" -q --no-cov --tb=line
+        cwd: .
+  - id: dod-omn23332-dev-lane-runs-no-consumer
+    description: After the deploy agent rolls dev from this change, docker ps on h201's dev lane lists no skill-lifecycle-consumer container and omninode-runtime answers on its 8085 health port. Red before the roll, when the container still runs. Needs the lab host, so only the local Done gate runs it.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh "$DEPLOY_PROBE_HOST" "! docker ps --format '{{.Names}}' | grep -F skill-lifecycle-consumer && curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8085/health | grep -x 200"
+        cwd: .

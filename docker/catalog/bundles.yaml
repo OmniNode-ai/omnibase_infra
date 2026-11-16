@@ -151,7 +151,7 @@ local:
     # only need to be well-formed. Override in the env file if you use them.
     LLM_CODER_URL: "${LLM_CODER_URL:-http://host.docker.internal:8000}"
     LLM_CODER_FAST_URL: "${LLM_CODER_FAST_URL:-http://host.docker.internal:8000}"
-    LLM_EMBEDDING_URL: "${LLM_EMBEDDING_URL:-http://host.docker.internal:8002}"
+    LLM_EMBEDDING_URL: "${LLM_EMBEDDING_URL:-http://host.docker.internal:8100}"
     LLM_DEEPSEEK_R1_URL: "${LLM_DEEPSEEK_R1_URL:-http://host.docker.internal:8000}"
     # Local model egress: private ranges by default, so a model on your own
     # machine or your own network is reachable.

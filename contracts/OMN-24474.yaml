@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-24474
+title: Hold development system updates until the onex API import is fixed
+summary: >-
+  Every merge-driven roll of the dev lane failed at onex-api on 2026-11-14 (omnimarket moved omnimarket.routing.byok_provider_backends to omnimarket.handlers.routing in commit 63fc12c0bb) and the dev boot guard's recovery then recreated the runtime, at 17:26Z, 17:47Z and 18:03Z, each followed by about 15 minutes of readiness. config/deploy_lane_routing.yaml now declares the existing freeze flag on dev-201 until 2026-11-15T06:00Z: the agent refuses every command whose requester is not a promotion and starts no idle converge, and the freeze ends by itself. The one test that forbade any committed dev freeze names this hold, with its ticket and latest expiry, as its only exception.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24474-dev-hold
+    statement: Merge-driven rolls of the dev-201 lane are refused until the declared expiry, and a deliberate promotion still goes through.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the committed lane routing table declares a freeze on the development deploy lane with a reason and an expiry, and the table parses -- falsifier: pytest scripts/deploy-agent/tests/unit/test_dev_lane_freeze_omn24474.py -q fails without the freeze"
+      - id: AC2
+        statement: "AC2: integrated: after the agent picks up the table, a merge-driven roll command is refused with reason frozen and the runtime container id is unchanged -- falsifier: the deploy agent journal shows a roll accepted, or the runtime container id changes"
+evidence_requirements:
+  - kind: tests
+    description: The committed table's dev-201 freeze and the existing lane flag tests.
+    command: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_freeze_omn24474.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24474-ac1-table-freezes-dev-201
+    description: >-
+      The committed table's dev-201 flags carry a freeze citing OMN-24474 that expires 2026-11-15T06:00Z and keep max_dev_lag_minutes and disabled_phases. On origin/dev the same read returns no freeze, so the new test fails there.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_freeze_omn24474.py scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24474-ac2-integrated
+    description: >-
+      Deploy check the hosted runner can run: the committed table names the hold. The runtime read (the agent journal refusing a roll as frozen after it picked up this table, and the runtime container id unchanged) is posted as a pull request comment naming the head and the revision running; it is not claimed by this check.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: grep -q 'OMN-24474' config/deploy_lane_routing.yaml
+        cwd: ${OMNI_HOME}/omnibase_infra

@@ -68,6 +68,8 @@ from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested, Scope
 from deploy_agent.executor import DevLaneMigrationPreflightError
 from deploy_agent.job_state import JobStore
 
+from .test_lab_overlay_omn18200 import build_passes, captured
+
 pytestmark = pytest.mark.unit
 
 SHA = "a" * 40
@@ -192,6 +194,7 @@ class _FakeApplier:
 
     instances: list[_FakeApplier] = []
     calls: list[dict[str, Any]] = []
+    captured_sha: str = ""
     #: Set by a test to make the call blow up the way a real one can.
     raise_with: str | None = None
     #: Read at call time so a test can prove the verdict was recorded FIRST.
@@ -220,20 +223,20 @@ class _FakeApplier:
             raise RuntimeError(_FakeApplier.raise_with)
         return Path(f"/state/lab-overlay/{sha}.json")
 
-    def capture_compose_inputs(self, *, sha: str, stamp: str) -> dict[str, str]:
+    def capture_compose_inputs(self, *, sha: str, stamp: str) -> Any:
+        # A fresh applier per call: the class carries the sha to the build.
+        _FakeApplier.captured_sha = sha
         # OMN-19501: the compose-lane half, taken under the lane lock. Opaque
-        # to the agent, which only hands it back to ``apply``.
-        return {"sha": sha, "stamp": stamp}
+        # to the agent, which only hands it back to the onex-api build.
+        return captured(sha, stamp)
 
-    def apply(
-        self,
-        *,
-        sha: str,
-        stamp: str,
-        correlation_id: str,
-        capture: object = None,
-    ) -> Path:
-        return self._record("apply", sha, correlation_id)
+    state_dir = Path("/state")
+
+    def archive_overlay(self, destination: Path) -> str:
+        self._record("build", _FakeApplier.captured_sha, "")
+        return "c" * 40
+
+    _run = staticmethod(build_passes)
 
     def build_repair_migrate_image(
         self, *, sha: str, stamp: str, correlation_id: str
@@ -383,9 +386,9 @@ async def test_an_overlay_failure_does_not_break_a_lane_running_the_merged_sha(
     assert not [error for error in job.errors if OVERLAY_ERROR in error], (
         "the overlay's failure leaked into the compose job's errors"
     )
-    assert [entry["entry"] for entry in _FakeApplier.calls] == ["apply"], (
-        "the success path must still take the FULL apply; the repair build is "
-        "the failing path's narrower substitute, not a replacement for it"
+    assert [entry["entry"] for entry in _FakeApplier.calls] == ["build"], (
+        "the success path must still build the onex-api image for the pin; the "
+        "repair build is the failing path's own, not a replacement for it"
     )
 
 
@@ -584,7 +587,7 @@ async def test_a_successful_dev_deploy_still_applies_the_overlay_exactly_once(
         "verify",
     ]
     assert [(entry["entry"], entry["sha"]) for entry in _FakeApplier.calls] == [
-        ("apply", SHA)
+        ("build", SHA)
     ]
     assert _FakeApplier.observed_status == ["success"]
 

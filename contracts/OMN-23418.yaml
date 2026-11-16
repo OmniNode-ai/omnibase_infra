@@ -1,0 +1,31 @@
+schema_version: 1.0.0
+ticket_id: OMN-23418
+title: The hourly message-bus health check tells a slow reply apart from no reply, and names where the delay is
+summary: The developer principal wire bindings (deploy/lab/developer-principal-bindings.yaml) declare READ on the work-ledger query command topic for the query client's group prefix, so the seam deadline probe's login can read when a request reached the broker. DESCRIBE and WRITE were already granted on that topic. The derived grants file is regenerated from the derivation node, never typed, and gains exactly one row. The grants take effect on the dev broker when the issuer's apply-grants runs the derived file; that step needs the operator's broker admin credential and is recorded in the pull request, not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23418-probe-reads-query-command
+    statement: The probe's login can read the work-ledger query command topic, declared in the principal bindings, with the derived file the derivation node's output and the row-count test moved by one.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the stall is located: the responder''s receive time for one late reply is measured and the slow hop (broker or responder) is named with its numbers -- falsifier: a comment on this ticket with the send, broker and responder timestamps of one late reply'
+evidence_requirements:
+  - kind: tests
+    description: The derivation, issuer and query-grant tests over the bindings with the added command-topic read.
+    command: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/unit/cli/test_work_ledger_query_grants_omn20740.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -p no:cacheprovider --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23418-command-topic-read-declared
+    description: The bindings declare a consume binding on the work-ledger query command topic under the query client's group prefix; the committed derived grants file is byte-equal to the derivation node's output and holds exactly one added row (TOPIC READ on that topic); the discovery test counts 176 rows (175 before). On the parent commit the derivation holds no READ on that topic and the same tests fail.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/unit/cli/test_work_ledger_query_grants_omn20740.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -p no:cacheprovider --no-cov
+        cwd: .

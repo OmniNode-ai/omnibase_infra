@@ -12,11 +12,12 @@
 # WHY: before this list existed, auto-repair recreated containers from
 # docker-compose.runners.yml alone and silently stripped canary wiring mid-soak,
 # with no log line and no alert. See knowledge-base:runbooks/pypi-cache-egress-rollout.md
-# ("Durability trap") and the header of docker/docker-compose.pypi-canary.yml.
+# ("Durability trap").
 #
-# REMOVE the canary entry below when the C1 canary ends — either because the
-# rollout graduated to the fleet (the wiring then belongs in
-# docker-compose.runners.yml itself) or because it was rolled back.
+# The C1 PyPI canary entry was removed when that canary ended (its three
+# runners were retired with the rest of the primary host's general pool,
+# OMN-22898). A new canary override is listed here again while it lasts and
+# removed when it ends, either because the rollout graduated to the fleet (the
+# wiring then belongs in docker-compose.runners.yml itself) or was rolled back.
 
-docker-compose.pypi-canary.yml
 docker-compose.model-review-canary.yml

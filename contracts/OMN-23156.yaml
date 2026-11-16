@@ -1,0 +1,40 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23156
+title: The h053 merge-queue runners' declared unit registers them into the host-named private-only group, never the shared group
+summary: >-
+  This contract covers the installer unit of OMN-23156. The compose file of the h053 merge-queue pool no longer spells the shared runner group; it reads the private-only group's name from MQ_RUNNER_GROUP in the runner host's docker/.env and refuses to render without it. The group is placed by the operator; moving the four already-registered runners, the organization readback of the group and the real merge-group job are not part of this change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-mq-pool-private-group
+    statement: The four h053 merge-queue runners are declared into a group the host names, and the shared group cannot be the default.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the installer's declared unit places hp053-ci-mq-runner-1 to -4 in the group named by the overlay and the readback prints visibility private with four online members -- falsifier: uv run pytest src/omnimarket/nodes/node_runner_group_reading_compute -q -k private_queue_group_readback"
+evidence_requirements:
+  - kind: tests
+    description: The merge-queue pool declaration test passes.
+    command: uv run pytest tests/ci/test_ci_mq_pool_omn22123.py -q --no-cov -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-mq-pool-private-group
+    description: Every h053 merge-queue runner reads its group from the host-owned MQ_RUNNER_GROUP, required, and none spells the shared group; the h051 pool is unchanged.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_ci_mq_pool_omn22123.py -q --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-mq-pool-group-source-readback
+    description: Hermetic readback of the h053 merge-queue compose file at the evaluated commit through the GitHub contents API. It requires the required MQ_RUNNER_GROUP form on RUNNER_GROUP and fails when the file spells the shared group there, as the merge base does. It needs no Docker daemon or lab access and checks the published deployment definition only.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'f=$(gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-hp053-ci-mq-runner.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d); printf "%s\n" "$f" | grep -F "RUNNER_GROUP: \${MQ_RUNNER_GROUP:?" > /dev/null && ! printf "%s\n" "$f" | grep -E "^[[:space:]]+RUNNER_GROUP: omnibase-ci$" > /dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra

@@ -1,0 +1,33 @@
+schema_version: 1.0.0
+ticket_id: OMN-23410
+title: A lab lane mints the child ticket its change needs through the ticket node on the bus (broker grants)
+summary: >-
+  The developer principal wire bindings (deploy/lab/developer-principal-bindings.yaml) declare the ticket node's command topic as a produce binding and its completed and failed terminals as consume bindings under the scm command client group prefix the file already grants. The derived grants file is regenerated from the derivation node, never typed. The principal gets no write on either terminal, and the read-only role withholds the command topic. The grants take effect on the dev broker when the issuer's apply-grants runs the derived file; that step needs the operator's broker admin credential and is recorded in the pull request, not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23410-ticket-node-grants
+    statement: The dev lane principal's declared grants let it write the ticket node's command topic and read its two terminals, and the derived grants file is the derivation node's output over the bindings.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a lab lane's principal is authorized on the ticket node's request topic through the declared developer-principal bindings, and a lane mints a child ticket under its own ticket through the node, with the create gate's rules enforced by the node -- falsifier: the declared grants test fails when the ticket command or a terminal binding is removed from developer-principal-bindings.yaml, and the read-only role test fails when the command topic is not withheld"
+evidence_requirements:
+  - kind: tests
+    description: The derivation, issuer and read-only role tests over the ticket node bindings.
+    command: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23410-ac1-declared-grants
+    description: >-
+      The bindings declare the ticket node's command topic (WRITE, DESCRIBE) and its completed and failed terminals (READ, DESCRIBE, no WRITE); the committed derived grants JSON is byte-equal to the derivation node's output; the read-only role withholds the command topic. On the parent commit the committed derivation holds no ticket node topic.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra

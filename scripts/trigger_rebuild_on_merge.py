@@ -68,7 +68,6 @@
 from __future__ import annotations
 
 import ast
-import fnmatch
 import importlib.util
 import json
 import os
@@ -347,6 +346,15 @@ class ModelCiBusLane(BaseModel):
     # runtime bindings. Modelled so the strict overlay keeps validating.
     binding_fallback: tuple[str, ...] = ()
     secret_resolver: ModelCiBusLaneSecretResolver | None = None
+    # OMN-23613 (step A1 of the HTTP API removal). Optional and unread by this
+    # publisher: the tenant the chain canary stamps on the delegation it
+    # publishes to the lane's bus. Modelled so the strict overlay keeps
+    # validating once omnimarket declares it (omnimarket's parity gate reads this
+    # model from the omnibase_infra release that repository pins, so this change
+    # is released and pinned BEFORE the key is added there). The shape is checked
+    # (UUID) by the one component that acts on it, node_chain_canary_effect.
+    # lane_transport, not duplicated here: two copies of a policy drift.
+    tenant_id: str | None = None
 
     @field_validator("broker")
     @classmethod

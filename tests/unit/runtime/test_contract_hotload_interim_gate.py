@@ -468,7 +468,7 @@ class TestGateResolution:
         assert TOPIC_SUFFIX_CONTRACT_REGISTERED in bus.subscribed_topics
         await bus.close()
 
-    def test_the_declared_mode_is_logged_as_not_consumed(
+    def test_the_declared_mode_is_logged(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
         monkeypatch.setenv("ONEX_ENVIRONMENT", _LAB_ENVIRONMENT)
@@ -482,7 +482,7 @@ class TestGateResolution:
         )
         with caplog.at_level("INFO"):
             host._resolve_contract_hotload_gate()
-        assert "mode=full_load (recorded, not yet consumed" in caplog.text
+        assert "mode=full_load" in caplog.text
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("environment", ["prod-eu", "onex-production", None])

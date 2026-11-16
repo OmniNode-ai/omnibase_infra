@@ -46,10 +46,11 @@ STUDIO_POOL = "omninode-studio-ci-runner"
 STUDIO_COMPOSE = DOCKER / f"docker-compose.runners-{STUDIO_POOL}.yml"
 MULTIARCH = "omnibase-ci-multiarch"
 MULTIARCH_CLASS = "action-multiarch"
-# The two amd64 action pools: the primary anchor and the second host's pool file.
+# The two amd64 action pools: the second host's pool file and h053's. OMN-22898
+# retired the primary host's general pool, which was the third.
 AMD64_ACTION_COMPOSE = (
-    DOCKER / "docker-compose.runners.yml",
     DOCKER / "docker-compose.runners-omnipc2-ci-runner.yml",
+    DOCKER / "docker-compose.runners-hp053-ci-runner.yml",
 )
 
 
@@ -95,10 +96,11 @@ def test_no_arm64_row_or_pool_carries_the_action_class() -> None:
 
 def test_declared_totals_keep_action_and_count_multiarch_on_both_arches() -> None:
     config = load_runner_fleet_config(FLEET_CONFIG)
-    assert config.declared_total("action") == 31
-    # 10 on the primary host + 16 on the second amd64 host + 4 on the Mac Studio
-    # + 4 on the HP DL560 (OMN-17232) + 5 on the HP ProLiant Gen9 (OMN-22111, OMN-19998).
-    assert config.declared_total(MULTIARCH_CLASS) == 39
+    assert config.declared_total("action") == 21
+    # 0 on the primary host (OMN-22898; it was 10) + 16 on the second amd64 host
+    # + 4 on the Mac Studio + 4 on the HP DL560 (OMN-17232)
+    # + 5 on the HP ProLiant Gen9 (OMN-22111, OMN-19998).
+    assert config.declared_total(MULTIARCH_CLASS) == 29
 
 
 def test_studio_pool_compose_matches_the_declared_count() -> None:

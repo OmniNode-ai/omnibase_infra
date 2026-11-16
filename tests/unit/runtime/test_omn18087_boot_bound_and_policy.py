@@ -61,6 +61,17 @@ def _compose(path: Path) -> dict[str, Any]:
     return loaded
 
 
+LAB_COMMAND_NODES = (
+    "node_start_path_census_compute",
+    "node_host_role_baseline_compute",
+    "node_host_drift_plugin_revision_compute",
+    "node_host_drift_plugin_revision_orchestrator",
+    "node_delegated_code_edit_orchestrator",
+    "node_delegation_routing_order_compute",
+)
+ROLL_WINDOW_GATE_NODE = "node_dev_roll_window_gate_effect"
+
+
 def test_dev_main_declares_the_boot_policy_and_memory_limit() -> None:
     boot = _contract().profiles["dev"].processes["main"].boot
 
@@ -69,6 +80,29 @@ def test_dev_main_declares_the_boot_policy_and_memory_limit() -> None:
     assert boot.max_concurrent_contract_attach >= 1
     assert "node_delegation_orchestrator" in boot.priority_contracts
     assert "projection_claude_hook_events" in boot.priority_contracts
+    # The board's readings and the seam probe ask this node by bus request with a
+    # 30 s deadline; undeclared, it joined 197 s to 318 s after start.
+    assert "work_ledger_query_effect" in boot.priority_contracts
+    rendered = renderer.render_env(_contract())
+    assert "work_ledger_query_effect" in rendered[
+        "DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS"
+    ].split(",")
+    for name in LAB_COMMAND_NODES:
+        assert name in boot.priority_contracts
+        assert name in rendered["DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS"].split(",")
+
+
+def test_dev_main_boot_priority_names_the_roll_window_gate() -> None:
+    # The roll window gate holds every dev deploy command on one hold topic
+    # (OMN-24447); the boot policy and the rendered env must both name it.
+    boot = _contract().profiles["dev"].processes["main"].boot
+
+    assert boot is not None
+    assert ROLL_WINDOW_GATE_NODE in boot.priority_contracts
+    rendered = renderer.render_env(_contract())
+    assert ROLL_WINDOW_GATE_NODE in rendered[
+        "DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS"
+    ].split(",")
 
 
 def test_dev_main_memory_limit_fits_the_four_kernel_figure() -> None:

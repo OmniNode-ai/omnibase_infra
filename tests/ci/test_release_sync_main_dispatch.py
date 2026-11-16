@@ -59,6 +59,7 @@ RELEASE_WORKFLOW = (
 _SYNC_JOB = "sync-main"
 _RELEASE_JOB = "release"
 _CASCADE_JOB = "dependency-cascade"
+_CASCADE_WORKFLOW_REF = "dependency-cascade.yml"
 _VALIDATE_STEP = "Validate sync tag"
 _MINT_STEP = "Mint onexbot-occ-writer app token"
 _SYNC_STEP = "Sync main to release tag"
@@ -230,9 +231,23 @@ def test_the_validate_script_carries_no_inline_expressions() -> None:
     assert "${{" not in _validate_script()
 
 
-def test_a_skipped_release_job_cannot_fire_the_dependency_cascade() -> None:
-    condition = str(_job(_CASCADE_JOB)["if"])
-    assert "needs.release.result == 'success'" in condition, condition
+def test_a_release_cannot_fire_the_dependency_cascade() -> None:
+    """RULING 2026-11-09T21:54:25Z lane=orchestrator-31d9 (OMN-18594).
+
+    Downstream pins move only when the downstream needs something new, so a
+    release no longer opens bump PRs in the downstream repositories. The
+    cascade stays reachable by hand through ``dependency-cascade-dispatch.yml``.
+    Neither the job nor any call to the reusable workflow may come back here.
+    """
+    jobs = _workflow()["jobs"]
+    assert isinstance(jobs, dict)
+    assert _CASCADE_JOB not in jobs, list(jobs)
+    callers = [
+        name
+        for name, job in jobs.items()
+        if _CASCADE_WORKFLOW_REF in str(job.get("uses", ""))
+    ]
+    assert callers == [], callers
 
 
 # --------------------------------------------------------------------------

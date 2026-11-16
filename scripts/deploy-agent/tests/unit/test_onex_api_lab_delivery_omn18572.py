@@ -58,6 +58,8 @@ from deploy_agent.executor import _compose_env, lane_config_for
 from deploy_agent.job_state import JobStore
 from deploy_agent.lane_lock_client import lane_lock_path
 
+from .test_lab_overlay_omn18200 import build_passes, captured
+
 pytestmark = pytest.mark.unit
 
 SHA = "a" * 40
@@ -186,25 +188,21 @@ class _FakeApplier:
         self.kwargs = kwargs
         self.manifest_sha: str | None = None
 
-    def capture_compose_inputs(self, *, sha: str, stamp: str) -> dict[str, str]:
+    def capture_compose_inputs(self, *, sha: str, stamp: str) -> Any:
         # OMN-19501: the compose-lane half, taken under the lane lock. Opaque
-        # to the agent, which only hands it back to ``apply``.
-        return {"sha": sha, "stamp": stamp}
+        # to the agent, which only hands it back to the onex-api build.
+        return captured(sha, stamp)
 
-    def apply(
-        self,
-        *,
-        sha: str,
-        stamp: str,
-        correlation_id: str,
-        capture: object = None,
-    ) -> Path:
-        _FakeApplier.calls.append({"entry": "apply", "sha": sha})
-        # OMN-18572: the overlay's OWN lineage, which is what the four image
-        # tags carry. Deliberately different from `sha` (the merged
-        # omnibase_infra commit) so a test cannot pass by conflating them.
-        self.manifest_sha = OVERLAY_SHA
-        return Path(f"/state/lab-overlay/{sha}.json")
+    state_dir = Path("/state")
+
+    def archive_overlay(self, destination: Path) -> str:
+        _FakeApplier.calls.append({"entry": "build", "sha": OVERLAY_SHA})
+        # OMN-18572: the overlay's OWN lineage, which is what the image tags
+        # carry. Deliberately different from the merged omnibase_infra commit
+        # so a test cannot pass by conflating them.
+        return OVERLAY_SHA
+
+    _run = staticmethod(build_passes)
 
     def build_repair_migrate_image(
         self, *, sha: str, stamp: str, correlation_id: str
@@ -425,7 +423,7 @@ async def test_successful_dev_deploy_delivers_the_onex_api_pin(
 
     agent._run_deploy(cmd)
 
-    assert [call["entry"] for call in _FakeApplier.calls] == ["apply"]
+    assert [call["entry"] for call in _FakeApplier.calls] == ["build"]
     assert executor.delivered, (
         "the lab-overlay apply built a fresh onex-api image and nothing "
         "advanced ONEX_API_IMAGE, so the lane keeps running the old pin"
@@ -439,7 +437,7 @@ async def test_successful_dev_deploy_delivers_the_onex_api_pin(
     assert executor.delivered[0]["sha"] == OVERLAY_SHA
 
 
-async def test_delivery_runs_after_the_apply_that_builds_the_image(
+async def test_delivery_runs_after_the_build_of_the_image(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Order is load-bearing: delivering before the build pins a stale tag."""
@@ -450,13 +448,13 @@ async def test_delivery_runs_after_the_apply_that_builds_the_image(
     executor = _LockProbingExecutor(lock_path)
 
     order: list[str] = []
-    applier_apply = _FakeApplier.apply
+    applier_archive = _FakeApplier.archive_overlay
 
-    def _apply(self: _FakeApplier, **kwargs: Any) -> Path:
-        order.append("apply")
-        return applier_apply(self, **kwargs)
+    def _archive(self: _FakeApplier, destination: Path) -> str:
+        order.append("build")
+        return applier_archive(self, destination)
 
-    monkeypatch.setattr(_FakeApplier, "apply", _apply)
+    monkeypatch.setattr(_FakeApplier, "archive_overlay", _archive)
     deliver = executor.deliver_onex_api_pin
 
     def _deliver(**kwargs: Any) -> dict[str, Any]:
@@ -468,7 +466,7 @@ async def test_delivery_runs_after_the_apply_that_builds_the_image(
 
     agent._run_deploy(cmd)
 
-    assert order == ["apply", "deliver"]
+    assert order == ["build", "deliver"]
 
 
 async def test_delivery_does_not_run_when_the_deploy_failed(

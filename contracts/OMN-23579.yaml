@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-23579
+title: Remove retired repository names from the infrastructure repository's live lists
+summary: The host reconcile unit refuses to run while a registry list, sync script or source constant names a retired repository. Nine files in omnibase_infra held such a name as a live entry (13 of the 16 findings from the retirement scan). Each entry for onex_change_control and omnibase_compat is removed from those lists; every other repository stays. config/lab_proof_profiles.yaml (2 findings) and scripts/deploy-gateway.sh (1 finding) are left for their owners because the lab-proof exemption rules and the runtime image build still depend on the names.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23579-no-retired-live-entries
+    statement: The nine changed files name no retired repository on a non-comment line, and each list keeps its other repositories.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the retirement scan over this repository''s change returns 3 findings, none in the files the change touches -- falsifier: run retired_repository_findings from node_host_reconcile_effect over the repository root at the base commit and see 16 findings, then at the change head and see 3 (config/lab_proof_profiles.yaml twice, scripts/deploy-gateway.sh once)'
+      - id: AC2
+        statement: 'AC2: the lists that name retired repositories keep every other repository -- falsifier: pytest tests/ci/test_no_occ_fleet_lists_omn17427.py tests/ci/test_no_compat_fleet_lists_omn14108.py tests/ci/test_runner_routing_audit.py tests/ci/test_fleet_repos_include_internal_omn20794.py -q'
+      - id: AC3
+        statement: 'AC3: integrated: after the change is installed on the lab computer that runs the hourly job through the host installer, the unit onex-host-reconcile reports no retired-repository-targets finding for the 13 removed names on its next run -- falsifier: the unit''s out log for that run still contains a retired-repository-targets line naming one of the 8 changed files under the omnibase_infra checkout'
+evidence_requirements:
+  - kind: tests
+    description: The focused guard test, which reads the nine files and fails on each at the merge base, plus the existing list-parity tests.
+    command: uv run --frozen pytest tests/ci/test_retired_repository_targets_omn23579.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23579-lists-clean
+    description: Each of the nine files names no retired repository on a non-comment line and still names an active repository. Against the merge-base files the nine per-file cases fail, so the selection fails there. The scan reading the base found 16 findings and the change head 3; that run, and the unit's next run on the lab computer, are recorded in the pull request's Lab line.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_retired_repository_targets_omn23579.py -q --no-cov -p no:randomly
+        cwd: .
+  - id: dod-omn23579-integration-proof-lab
+    description: Runs the guard test and the list-parity tests at the pushed head on a lab host through the lab work runner. Hosted CI cannot reach the lab runner, so only the local Done gate runs this unbound item.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: 'env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-23579 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_retired_repository_targets_omn23579.py tests/ci/test_no_occ_fleet_lists_omn17427.py tests/ci/test_runner_routing_audit.py -q --no-cov'
+        cwd: .

@@ -38,8 +38,8 @@
 #                   which wedges the saturated self-hosted fleet; required contexts
 #                   fire on `pull_request`, so disabling loses no enforcement.
 #   strict: bool  -- require-branches-up-to-date, the lighter combine-breakage
-#                   guard. DECIDED true on the two dashboards (omnidash,
-#                   omnibase_compat); recorded as-is for the rest.
+#                   guard. DECIDED true on the dashboard (omnidash);
+#                   recorded as-is for the rest.
 #
 # Live values verified 2026-07-10 via gh api + gh api graphql mergeQueue(branch:"dev").
 version: 1
@@ -159,12 +159,6 @@ repos:
   # These have no runtime contracts, so deploy-gate/reject-skip parity gates do
   # not apply. The merge_policy dimension still does.
   omnidash:
-    dev:
-      merge_policy:
-        queue: disabled # last two dev queues disabled 2026-07-10
-        strict: true # DECIDED: lighter combine-breakage guard replaces the queue
-        rule: "2026-07-10 dashboard policy: queue off, strict on (app_id-15368 preserved)"
-  omnibase_compat:
     dev:
       merge_policy:
         queue: disabled # last two dev queues disabled 2026-07-10

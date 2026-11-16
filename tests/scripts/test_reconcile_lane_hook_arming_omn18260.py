@@ -72,7 +72,7 @@ def _teach_dispatch_python_to_run_programs(ws: _Workspace) -> None:
     python = ws.dispatch_venv / "bin" / "python"
     python.write_text(
         "#!/usr/bin/env bash\n"
-        'if [[ "${1:-}" == "-" ]]; then\n'
+        'if [[ "${1:-}" == "-" || "${2:-}" == "installed-commit" ]]; then\n'
         "  cat >/dev/null 2>&1 || true\n"
         f"  printf '%s\\n' '{ws.market_head}'\n"
         "  exit 0\n"

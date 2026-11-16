@@ -1,0 +1,84 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeOnexApiImageBuildEffect
+#
+# Builds the onex-api image the dev lane's pin delivery advances to: one host
+# docker build from the archived overlay source tree, labelled with its source
+# revision, refusing a runtime image captured for another job.
+#
+# Related Tickets:
+#   - OMN-23521
+name: "node_onex_api_image_build_effect"
+contract_name: "node_onex_api_image_build_effect"
+node_name: "node_onex_api_image_build_effect"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_type: "EFFECT_GENERIC"
+# Only node_archetype: the check-no-io-outside-effects hook keys its I/O rule on it.
+descriptor:
+  node_archetype: effect
+description: >
+  Builds the onex-api image from the archived overlay source tree through an injected command runner, against the runtime image captured under the dev lane lock, and reports what it built or why it refused. The deploy agent's settle calls it before the onex-api pin delivery.
+
+input_model:
+  name: "ModelOnexApiImageBuildRequest"
+  module: "omnibase_infra.models.model_onex_api_image_build_request"
+  description: "The job's sha and stamp, its captured runtime image, the archived tree and the build recipe."
+output_model:
+  name: "ModelOnexApiImageBuildResult"
+  module: "omnibase_infra.models.model_onex_api_image_build_result"
+  description: "Whether the image was built, its tag, its source revision, and why."
+capabilities:
+  - name: "onex_api.image_build"
+    description: "Build the onex-api image the dev pin delivery advances to"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "onex_api.image_build"
+      handler:
+        name: "HandlerOnexApiImageBuild"
+        module: "omnibase_infra.handlers.handler_onex_api_image_build"
+      description: "Run one host docker build of the onex-api image; refuse another job's capture"
+      input_model:
+        name: "ModelOnexApiImageBuildRequest"
+        module: "omnibase_infra.models.model_onex_api_image_build_request"
+        description: "The job's capture, the archived tree and the build recipe."
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "BuildFailed"
+      description: "The build exited non-zero or could not start; reported with its lineage, never a fallback image"
+      recoverable: false
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  checks:
+    - name: "image_build_handler_loaded"
+      type: "handler"
+      critical: true
+metadata:
+  description: "Image build for the dev onex-api pin delivery"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-11-10"
+  tags:
+    - effect
+    - onex-api
+    - deploy-agent
+  related_tickets:
+    - "OMN-23521"

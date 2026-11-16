@@ -1,0 +1,75 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeSiblingClonePinEffect
+#
+# EFFECT node that answers the pin of a sibling clone the runtime build is about to
+# vendor: its version (the pyproject's static project.version, or, for a package whose
+# pyproject leaves its version to git, the version derived with the pyproject's own
+# git describe command) and its HEAD commit. Called by the sibling-pin preflight
+# (scripts/runtime_build/check_sibling_lock_pins.py).
+#
+# Related Tickets:
+#   - OMN-23947: omnibase_core's version became git-derived (omnibase_core#2310) and
+#     the preflight, which read project.version, refused every dev build.
+name: "node_sibling_clone_pin_effect"
+contract_name: "node_sibling_clone_pin_effect"
+node_name: "node_sibling_clone_pin_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "0.1.0"
+node_type: "EFFECT_GENERIC"
+descriptor:
+  node_archetype: "effect"
+description: >
+  Resolve the pin of a sibling clone: the version from its pyproject (static project.version, or derived from git when the pyproject lists version as dynamic) and the git HEAD commit. There is no fallback describe command: a dynamic package must name its own git_describe_command, otherwise the request is refused. Reads the clone's pyproject.toml and runs git in the clone; writes nothing.
+
+runtime_profiles: [local-dev]
+input_model:
+  name: "ModelSiblingClonePinRequest"
+  module: "omnibase_infra.models.sibling_pin.model_sibling_clone_pin_request"
+  description: "Package name (for messages) and the clone's repository root."
+output_model:
+  name: "ModelSiblingClonePinResult"
+  module: "omnibase_infra.models.sibling_pin.model_sibling_clone_pin_result"
+  description: "Package, resolved version, whether the version was derived from git, and the HEAD commit."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "sibling_clone_pin.resolve"
+      handler_type: "sibling_clone_pin"
+      handler:
+        name: "HandlerSiblingClonePin"
+        module: "omnibase_infra.handlers.handler_sibling_clone_pin"
+      supported_operations:
+        - "sibling_clone_pin.resolve"
+io_operations:
+  - operation: "sibling_clone_pin.resolve"
+    description: "Read a sibling clone's version (static or git-derived) and HEAD commit."
+    input_fields: [package, repo_root]
+    output_fields: [package, version, version_derived, git_sha]
+capabilities:
+  - name: "sibling_clone_pin.resolve"
+    description: "Answer a sibling clone's version, static or derived from git, and its HEAD commit."
+    version: "0.1.0"
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - FileNotFoundError
+    - ValueError
+    - subprocess.CalledProcessError
+metadata:
+  description: "Sibling clone pin resolution for the workspace-build preflight. No settings: every input is the request, the git describe command comes from the clone's own pyproject."
+  author: "OmniNode Team"
+  license: "MIT"
+  tags: [effect, workspace-build, sibling-pin]
+  ticket: "OMN-23947"

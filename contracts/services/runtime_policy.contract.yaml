@@ -208,6 +208,17 @@ profiles:
         source:
           source_type: env
           source_path: LINEAR_API_KEY
+      # OMN-23903: the read-only DSN of the analytics projection database for the
+      # tenant read nodes (omnimarket node_tenant_savings_read_effect and
+      # node_tenant_delegations_read_effect, config.analytics_dsn_secret). Unmapped,
+      # this lane's enable_convention_fallback: false left their postgres reader
+      # with no DSN, and every read answered not_configured. The container env
+      # already carries the value (docker-compose.dev-lane.yml, x-runtime-env,
+      # rendered as role_omnidash). The value never appears here.
+      - logical_name: omnidash.analytics.db_url
+        source:
+          source_type: env
+          source_path: OMNIDASH_ANALYTICS_DB_URL
     services:
       main:
         runtime_id: dev-main
@@ -276,6 +287,20 @@ profiles:
         # same way. The node's contract names the retired consumer's group under
         # consumer_group_handover (from_group_id context-audit-postgres), so main
         # resumes from that group's committed offsets and the table has one writer.
+        # OMN-21288 (T16): the contract resolver is mounted in main (the
+        # node_contract_resolver_bridge http_mount), so its container of the
+        # previous revision is retired by name the same way. The deploy handler
+        # no longer restarts it on the dev lane either.
+        # OMN-21933 (T12): the skill lifecycle projection node runs in main, so the
+        # skill-lifecycle-consumer container of the previous revision is retired the
+        # same way. The node's contract names the retired consumer's group under
+        # consumer_group_handover (from_group_id skill-lifecycle-postgres), and the
+        # consumer would otherwise hold that group live and fence the node's own.
+        # OMN-23043: the agent actions projection node runs in main, so the
+        # agent-actions-consumer container of the previous revision is retired the
+        # same way. The consumer holds its group (agent-observability-postgres) and
+        # fences the node's own group while it runs, which leaves the runtime
+        # reading DEGRADED projection_attachment and turns main unhealthy.
         retired_services:
           - projection-claude-hook-events-writer
           - context-audit-consumer
@@ -283,6 +308,24 @@ profiles:
           # contract mounts under /api/v1 on main's HTTP port, so the separate
           # intelligence-api container of the previous revision is retired by name.
           - intelligence-api
+          - omninode-contract-resolver
+          - skill-lifecycle-consumer
+          - agent-actions-consumer
+          # OMN-23525: omnibase_infra#5803 (OMN-23072) dropped the infra routing
+          # decisions consumer from the dev compose files, but its container of the
+          # previous revision kept running and holding its group
+          # (infra-routing-decisions-postgres), which fences the attach of
+          # projection_infra_routing_decisions in main. It is retired by name too.
+          - infra-routing-decisions-consumer
+          # OMN-24476: the separate onex-api container and the two omninode_cloud
+          # migration one-shots only it read are gone from the dev lane (the operator
+          # ruled the separate HTTP API a mistake for the local runtime, 2026-11-10,
+          # and consented to its deletion, 2026-11-14T19:01:14Z). The deploy agent
+          # never names, rolls, waits on or recreates them; the previous revision's
+          # containers are retired by name.
+          - onex-api
+          - cloud-migration-files
+          - cloud-migration
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof
@@ -311,13 +354,34 @@ profiles:
           ready_bound_seconds: 600
           max_concurrent_contract_attach: 4
           # Delegation and hook-event consumers subscribe before every other
-          # contract's, in this order.
+          # contract's, in this order. The work-ledger query node answers the
+          # board's readings and the seam probe by bus request, with a 30 s
+          # deadline; discovered 1225th of 1243 contracts it joined 197 s and
+          # 318 s after the container started on 2026-11-10, so a request sent
+          # during a roll waited unconsumed and was answered 151 s to 211 s late.
+          # The six lab command nodes (start-path census, host role baseline,
+          # both plugin revision nodes, delegated code edit, delegation
+          # routing order) are asked by `onex run-node` with a 30 s to 60 s
+          # wait; on 2026-11-14 their consumers joined 141 s to 284 s after
+          # the container start, so a send made during a roll waited unconsumed
+          # past the sender's wait (OMN-24426).
+          # The dev roll window gate holds every dev deploy command on one hold
+          # topic; a consumer group that joins after a command was sent skips
+          # it, so the gate joins in the first wave too (OMN-24447).
           priority_contracts:
             - node_delegate_skill_orchestrator
             - node_delegation_orchestrator
             - node_delegation_chain_ledger_effect
             - projection_claude_hook_events
             - projection_hook_ledger
+            - work_ledger_query_effect
+            - node_start_path_census_compute
+            - node_host_role_baseline_compute
+            - node_host_drift_plugin_revision_compute
+            - node_host_drift_plugin_revision_orchestrator
+            - node_delegated_code_edit_orchestrator
+            - node_delegation_routing_order_compute
+            - node_dev_roll_window_gate_effect
           memory_limit: 3072M
         # OMN-22930 (T8): the BYOK credential READ that only the separate
         # effects service resolved (OMN-20533) now happens in main, because the

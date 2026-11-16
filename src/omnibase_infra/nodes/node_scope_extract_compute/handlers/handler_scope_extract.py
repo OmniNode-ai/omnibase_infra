@@ -32,8 +32,6 @@ KNOWN_REPOS: frozenset[str] = frozenset(
         "omnidash",
         "omninode_infra",
         "omniweb",
-        "onex_change_control",
-        "omnibase_compat",
     }
 )
 

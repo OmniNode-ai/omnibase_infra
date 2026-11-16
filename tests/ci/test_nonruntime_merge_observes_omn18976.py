@@ -146,7 +146,9 @@ def test_the_delivery_reread_runs_when_an_observation_answered() -> None:
     assert "reemit_candidates != '[]'" in condition
 
 
-def test_the_lab_overlay_job_still_needs_a_published_rebuild() -> None:
-    # An observation rebuilt nothing, so there is no overlay apply to verify.
-    condition = _flat(_jobs()["verify-lab-overlay-converged"]["if"])
-    assert "published == 'true'" in condition
+def test_the_retired_lab_overlay_job_is_not_a_delivery_dependency() -> None:
+    # OMN-23422: the k3s overlay job is retired; the re-read waits only on jobs
+    # this workflow still defines.
+    jobs = _jobs()
+    assert "verify-lab-overlay-converged" not in jobs
+    assert set(jobs["rerun-refused-deliveries"]["needs"]) <= set(jobs)

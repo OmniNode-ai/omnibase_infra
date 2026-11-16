@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: OMN-23996
+title: "The lane census refresh job gets its lab host list"
+summary: >
+  The lane census refresh workflow checks out the lane census node's overlay (the host registry, OMN-22152) beside the lane manifest and exports the host registry path before the collector runs, so the collector no longer exits 3 with the not-configured error. The refresh job's place step now fetches the node overlay and, when the overlay repository carries it, exports ONEX_SKILL_OVERLAY_ROOTS and LANE_CENSUS_REGISTRY; a repository that does not carry it exports neither and the collector stops loudly. The first scheduled run of the refresh on dev after the merge does not fail at the step that collects the census from the lab docker daemon.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23996-refresh-registry
+    statement: The lane census refresh workflow fetches the lane census node's overlay and exports the host registry path before the collector runs.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the lane census refresh workflow checks out the lane census node overlay beside the lane manifest and exports the host registry path before the collector runs -- falsifier: pytest tests/ci/test_lane_census_refresh_registry.py -q (the control run against the base workflow fails)"
+      - id: AC2
+        statement: "AC2: with the registry exported the collector gets past the not-configured exit 3 against the real overlay file -- falsifier: pytest tests/ci/test_lane_census_refresh_registry.py -k registry_resolves -q"
+      - id: AC3
+        statement: "AC3: integrated: the first scheduled run of Lane census refresh on dev after the merge does not fail at the step Collect the census from the lab docker daemon -- falsifier: onex scm run-view on that run names a failure at that step"
+evidence_requirements:
+  - kind: tests
+    description: "The lane census refresh registry tests pass"
+    command: "uv run pytest tests/ci/test_lane_census_refresh_registry.py -q --no-cov -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23996-ac1
+    binds_ac: [AC1]
+    description: The refresh workflow's place step exports the host registry path when the overlay carries the node overlay, and the overlay checkout fetches it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/ci/test_lane_census_refresh_registry.py -q --no-cov -p no:randomly"
+  - id: dod-omn23996-ac2
+    binds_ac: [AC2]
+    description: With the registry exported the collector resolves the registry path against the real overlay file.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/ci/test_lane_census_refresh_registry.py -q --no-cov -p no:randomly -k registry_resolves"
+  - id: dod-omn23996-ac3
+    binds_ac: [AC3]
+    description: The refresh's place step exports the registry the collector reads (the pre-merge falsifier); the post-merge reading of the first scheduled run is the lane's integrated readback, recorded on the ticket.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/ci/test_lane_census_refresh_registry.py -q --no-cov -p no:randomly -k refresh_place_step_exports_the_registry"

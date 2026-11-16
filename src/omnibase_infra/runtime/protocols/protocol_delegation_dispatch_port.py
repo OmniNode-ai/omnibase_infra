@@ -6,8 +6,6 @@ Defines the structural interface that RuntimeDelegationDispatchPort conforms to,
 enabling handler_wiring to inject the dispatch port without a concrete dependency.
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Protocol
 from uuid import UUID
@@ -100,6 +98,9 @@ class ProtocolDelegationDispatchPort(Protocol):
         # keeps working.
         trace_id: UUID | None = None,
         queue_wait_ms: int | None = None,
+        # OMN-23162: the consumer passes a synthetic probe's ladder only when
+        # the request carries one. Defaulted, per the note above.
+        probe_ladder: object | None = None,
     ) -> dict[str, object]: ...
 
 

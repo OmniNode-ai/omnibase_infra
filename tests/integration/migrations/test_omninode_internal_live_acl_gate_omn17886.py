@@ -403,11 +403,14 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
     # citation table, with no DELETE.
     # OMN-23152: 0008 grants the runtime SELECT/INSERT/UPDATE on the sequence
     # conflicts table, with no DELETE.
+    # OMN-23705: 0012 grants the runtime SELECT/INSERT/UPDATE on the latest-state
+    # table, with no DELETE.
     for work_ledger_table in (
         "work_ledger_rows",
         "work_ledger_state",
         "ledger_line_citation",
         "work_ledger_seq_conflicts",
+        "work_ledger_latest",
     ):
         work_ledger_declared = {
             privilege

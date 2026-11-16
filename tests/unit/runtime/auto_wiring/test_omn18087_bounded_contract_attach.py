@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.event_bus.model_topic_readiness_config import (
@@ -34,6 +36,9 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 )
 from omnibase_infra.runtime.auto_wiring.models import ModelAutoWiringManifest
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.models.model_runtime_policy_contract import (
+    ModelRuntimePolicyContract,
+)
 from tests.unit.runtime.auto_wiring.test_omn18087_boot_subscribes_only_topics_in_use import (
     RecordingKafkaBus,
 )
@@ -41,6 +46,10 @@ from tests.unit.runtime.auto_wiring.test_per_contract_boot_interleave import (
     RecordingProvisioner,
     _contract,
     _fake_handler_cls,
+)
+from tests.unit.runtime.test_omn18087_boot_bound_and_policy import (
+    LAB_COMMAND_NODES,
+    ROLL_WINDOW_GATE_NODE,
 )
 
 pytestmark = pytest.mark.unit
@@ -171,3 +180,185 @@ async def test_the_first_wave_of_joins_is_the_priority_contracts() -> None:
     bus.release.set()
     await asyncio.wait_for(task, timeout=30)
     assert len(bus.joins) == len(_TOPICS)
+
+
+@pytest.mark.asyncio
+async def test_dev_main_policy_puts_the_work_ledger_query_responder_in_the_first_wave() -> (
+    None
+):
+    """The dev main boot policy answers work-ledger queries before the backlog.
+
+    The work ledger query node answers the board's readings and the seam probe
+    by bus request, with a 30 s deadline. Discovered 1225th of 1243 contracts,
+    it joined 197 s and 318 s after the container started on 2026-11-10, so a
+    request sent during a roll waited unconsumed and was answered late. The
+    boot policy names it a priority contract: even discovered last, behind a
+    dozen fillers, its consumer subscribes in the first wave, ahead of every
+    nonpriority contract.
+    """
+    policy_path = (
+        Path(__file__).resolve().parents[4]
+        / "contracts"
+        / "services"
+        / "runtime_policy.contract.yaml"
+    )
+    raw_policy = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    boot = (
+        ModelRuntimePolicyContract.model_validate(raw_policy)
+        .profiles["dev"]
+        .processes["main"]
+        .boot
+    )
+
+    query_name = "work_ledger_query_effect"
+    query_topic = "onex.cmd.omnimarket.work-ledger-query-requested.v1"
+    filler_topics = {f"onex.cmd.test.filler-{i}.v1" for i in range(12)}
+    pairs: list[tuple[str, str]] = [
+        (name, f"onex.cmd.test.priority-{i}.v1")
+        for i, name in enumerate(boot.priority_contracts)
+        if name != query_name
+    ]
+    pairs.extend(
+        (f"node_filler_{i:02d}", f"onex.cmd.test.filler-{i}.v1") for i in range(12)
+    )
+    pairs.append((query_name, query_topic))
+
+    bus, task = await _boot_gated(
+        tuple(pairs),
+        ModelTopicReadinessConfig(
+            max_concurrent_contract_attach=boot.max_concurrent_contract_attach,
+            priority_contracts=boot.priority_contracts,
+        ),
+    )
+
+    await _yield_to_loop()
+    bus.release.set()
+    await asyncio.wait_for(task, timeout=30)
+
+    # The join limit is below the priority list's length, so the list fills the
+    # first waves of joins; the query responder must be inside them, ahead of
+    # every nonpriority contract.
+    priority_waves = bus.entered[: len(boot.priority_contracts)]
+    assert query_topic in priority_waves
+    assert not filler_topics.intersection(priority_waves)
+
+
+@pytest.mark.asyncio
+async def test_dev_main_policy_puts_the_lab_command_nodes_in_the_first_wave() -> None:
+    """The six lab command nodes answer run-node sends before the backlog.
+
+    The start-path census, host role baseline, both plugin revision nodes,
+    delegated code edit and delegation routing order are asked by ``onex
+    run-node`` with a 30 s to 60 s wait. On 2026-11-14 their consumers joined
+    141 s to 284 s after the container start, so a send made during a roll
+    waited unconsumed past the sender's wait (OMN-24426). The
+    boot policy names all six as priority contracts: even discovered last,
+    behind a dozen fillers, their consumers subscribe in the first wave,
+    ahead of every nonpriority contract.
+    """
+    policy_path = (
+        Path(__file__).resolve().parents[4]
+        / "contracts"
+        / "services"
+        / "runtime_policy.contract.yaml"
+    )
+    raw_policy = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    boot = (
+        ModelRuntimePolicyContract.model_validate(raw_policy)
+        .profiles["dev"]
+        .processes["main"]
+        .boot
+    )
+
+    lab_topics = {
+        f"onex.cmd.test.lab-command-{i}.v1" for i in range(len(LAB_COMMAND_NODES))
+    }
+    filler_topics = {f"onex.cmd.test.filler-{i}.v1" for i in range(12)}
+    pairs: list[tuple[str, str]] = [
+        (name, f"onex.cmd.test.priority-{i}.v1")
+        for i, name in enumerate(boot.priority_contracts)
+        if name not in LAB_COMMAND_NODES
+    ]
+    pairs.extend(
+        (f"node_filler_{i:02d}", f"onex.cmd.test.filler-{i}.v1") for i in range(12)
+    )
+    pairs.extend(
+        (name, f"onex.cmd.test.lab-command-{i}.v1")
+        for i, name in enumerate(LAB_COMMAND_NODES)
+    )
+
+    bus, task = await _boot_gated(
+        tuple(pairs),
+        ModelTopicReadinessConfig(
+            max_concurrent_contract_attach=boot.max_concurrent_contract_attach,
+            priority_contracts=boot.priority_contracts,
+        ),
+    )
+
+    await _yield_to_loop()
+    bus.release.set()
+    await asyncio.wait_for(task, timeout=30)
+
+    # The join limit is below the priority list's length, so the list fills the
+    # first waves of joins; the six lab command nodes must be inside them,
+    # ahead of every nonpriority contract.
+    first_wave = bus.entered[: len(boot.priority_contracts)]
+    assert lab_topics.issubset(first_wave)
+    assert not filler_topics.intersection(first_wave)
+
+
+@pytest.mark.asyncio
+async def test_dev_main_policy_puts_the_roll_window_gate_in_the_first_wave() -> None:
+    """The roll window gate holds every dev deploy command on one hold topic.
+
+    A consumer group that joins late skips what was sent before it joined, so
+    a dev deploy command sent during a roll waits unconsumed on the hold topic
+    until the gate's consumer attaches (OMN-24447). The boot policy names the
+    gate a priority contract: even discovered last, behind a dozen fillers,
+    its consumer subscribes in the first wave, ahead of every nonpriority
+    contract.
+    """
+    policy_path = (
+        Path(__file__).resolve().parents[4]
+        / "contracts"
+        / "services"
+        / "runtime_policy.contract.yaml"
+    )
+    raw_policy = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    boot = (
+        ModelRuntimePolicyContract.model_validate(raw_policy)
+        .profiles["dev"]
+        .processes["main"]
+        .boot
+    )
+
+    gate_topic = "onex.cmd.test.roll-window-gate.v1"
+    filler_topics = {f"onex.cmd.test.filler-{i}.v1" for i in range(12)}
+    pairs: list[tuple[str, str]] = [
+        (name, f"onex.cmd.test.priority-{i}.v1")
+        for i, name in enumerate(boot.priority_contracts)
+        if name != ROLL_WINDOW_GATE_NODE
+    ]
+    pairs.extend(
+        (f"node_filler_{i:02d}", f"onex.cmd.test.filler-{i}.v1") for i in range(12)
+    )
+    pairs.append((ROLL_WINDOW_GATE_NODE, gate_topic))
+
+    bus, task = await _boot_gated(
+        tuple(pairs),
+        ModelTopicReadinessConfig(
+            max_concurrent_contract_attach=boot.max_concurrent_contract_attach,
+            priority_contracts=boot.priority_contracts,
+        ),
+    )
+
+    await _yield_to_loop()
+    bus.release.set()
+    await asyncio.wait_for(task, timeout=30)
+
+    # The join limit is below the priority list's length, so the list fills the
+    # first waves of joins; the gate must be inside them, ahead of every
+    # nonpriority contract.
+    first_wave = bus.entered[: len(boot.priority_contracts)]
+    assert gate_topic in first_wave
+    assert not filler_topics.intersection(first_wave)

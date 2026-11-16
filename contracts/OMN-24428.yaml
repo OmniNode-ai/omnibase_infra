@@ -1,0 +1,60 @@
+schema_version: 1.0.0
+ticket_id: OMN-24428
+title: Deploy agent tests check runs in parallel so it stays inside its time limit
+summary: >-
+  Child of OMN-19998. CI Summary failed on omnibase_infra pull requests 5961 and 5969 because the nested deploy-agent-tests job was cancelled at its 10 minute limit (job log of 5969 ends "The operation was canceled" at 92 percent of 2317 selected tests); dev's own runs of that job took about 8.5 minutes, so the margin was gone. This change runs the suite on parallel pytest workers grouped by file and leaves the job limit unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24428-parallel
+    statement: The deploy-agent test job runs its suite on parallel workers and its limit is not widened.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the deploy agent test workflow runs its pytest invocation in parallel workers grouped by file, and the deploy agent's dev extras declare the parallel runner -- falsifier: uv run pytest tests/ci/test_deploy_agent_tests_parallel.py -q --no-cov -p no:cacheprovider -n 0"
+      - id: AC2
+        statement: "AC2: the deploy agent tests all pass under the parallel invocation, with the same count collected as the serial run -- falsifier: run the workflow's exact pytest command in scripts/deploy-agent on a lab host and compare the passed count with the serial run"
+  - id: req-omn24428-integrated
+    statement: The deploy-agent test job finishes well inside its limit on a pull request head.
+    acceptance:
+      - id: AC3
+        statement: "AC3: integrated: the deploy agent test job on a pull request head after this change finishes under 5 minutes and CI Summary no longer fails on a cancelled deploy-agent-tests job -- falsifier: read the job's started and completed times and the CI Summary conclusion for that head from the watcher state"
+evidence_requirements:
+  - kind: tests
+    description: The workflow pin tests pass at the pushed head and two of three fail when the workflow and pyproject are taken from the base commit.
+    command: uv run pytest tests/ci/test_deploy_agent_tests_parallel.py -q --no-cov -p no:cacheprovider -n 0
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24428-ac1
+    description: >-
+      The suite step of deploy-agent-tests.yml carries -n auto --dist loadfile, timeout-minutes is still 10, and the deploy-agent dev extra declares pytest-xdist. The pin tests pass at the head (3 passed).
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_deploy_agent_tests_parallel.py -q --no-cov -p no:cacheprovider -n 0
+        cwd: .
+  - id: dod-omn24428-ac2
+    description: >-
+      The suite run with the workflow's exact pytest invocation on a lab host passes with the same selected count as the serial run; the reading is in the pull request's Lab line, hosted CI runs it again.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_deploy_agent_tests_parallel.py -q --no-cov -p no:cacheprovider -n 0
+        cwd: .
+  - id: dod-omn24428-ac3
+    description: >-
+      The reading of the job's duration on a pull request head and of CI Summary needs the hosted run after the change merges or on the pull request head; it is read from the watcher state, hosted CI cannot read it before then. The pin tests pass at the head.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_deploy_agent_tests_parallel.py -q --no-cov -p no:cacheprovider -n 0
+        cwd: .

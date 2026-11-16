@@ -1,0 +1,33 @@
+schema_version: 1.0.0
+ticket_id: OMN-23539
+title: The landing tick orchestrator can publish its compared events on the dev bus (broker grants)
+summary: >-
+  The developer principal wire bindings (deploy/lab/developer-principal-bindings.yaml) declare produce on the tick orchestrator's two publish topics (onex.evt.omnimarket.pr-landing-tick-compared.v1 and onex.evt.omnimarket.pr-landing-tick-compare-failed.v1, from the node's contract on omnimarket#5732). The derived grants file is regenerated from the derivation node, never typed, and gains four rows (WRITE and DESCRIBE on each topic); no READ is granted on either. The discovery test's row count moves from 208 to 212 as measured by running it. The grants take effect on the dev broker when the issuer's apply-grants runs the derived file; that step needs the operator's broker admin credential and is recorded in the pull request, not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23539-tick-compared-grants
+    statement: The dev lane principal's declared grants include produce on the tick orchestrator's compared and compare-failed topics, and the derived grants file is the derivation node's output over the bindings.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the developer principal bindings in omnibase_infra declare produce on the tick orchestrator's compared and compare-failed topics, the committed derived grants file is the derivation node's output, and the discovery test counts the rows the derivation gives (212, 208 before) -- falsifier: the grant derive tests with the bindings of the merge base"
+evidence_requirements:
+  - kind: tests
+    description: The derivation and issuer tests over the tick compared bindings.
+    command: PYTHONPATH=src pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23539-ac1-declared-grants
+    description: >-
+      The bindings declare the compared and compare-failed topics for produce (WRITE, DESCRIBE each); the committed derived grants JSON is byte-equal to the derivation node's output; no READ on either topic. With the merge base's bindings and derived file, the same tests fail (the derivation holds none of the four rows and the discovery count is 208).
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_read_only_role_omn22478.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra

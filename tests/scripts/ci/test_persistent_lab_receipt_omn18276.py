@@ -129,10 +129,11 @@ def test_delivery_requires_persistent_apply_for_exact_sha(
     )
 
 
-def test_delivery_workflow_selects_persistent_receipt_without_inheriting_it() -> None:
+def test_delivery_workflow_reads_default_lanes_not_the_retired_k3s_one() -> None:
     job = _workflow("deliver-dev-candidate-to-staging.yml")["jobs"]["lab-pass-gate"]
     step = next(s for s in job["steps"] if s.get("id") == "own-sha-gate")
-    assert "--lane onex-lab-k3s" in step["run"]
+    assert " --lane " not in step["run"]
+    assert "k3s" not in step["run"]
     assert '--sha "${GITHUB_SHA}"' in step["run"]
     assert "--require-lane compose-dev" in step["run"]
     assert "--resolve-runtime-ancestor" in step["run"]
@@ -249,9 +250,10 @@ def test_reread_waits_for_persistent_pass(monkeypatch, state) -> None:
     assert bool(posted) is (state == "pass")
 
 
-def test_reread_is_ordered_after_overlay_receipt_upload() -> None:
+def test_reread_is_ordered_after_the_compose_dev_receipt_upload() -> None:
     job = _workflow("runtime-rebuild-trigger.yml")["jobs"]["rerun-refused-deliveries"]
-    assert "verify-lab-overlay-converged" in job["needs"]
+    assert "verify-lane-converged" in job["needs"]
+    assert "verify-lab-overlay-converged" not in job["needs"]
 
 
 @pytest.mark.parametrize("state", ["fail", "unreadable"])

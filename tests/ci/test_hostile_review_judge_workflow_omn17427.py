@@ -32,7 +32,6 @@ SHARED_STEPS = (
     "Place the CI overlay outside the workspace",
     "Clone omniintelligence",
     "Clone omnibase_core (omniintelligence dependency)",
-    "Clone omnibase_compat",
     "Set up Python 3.12",
     "Install omniintelligence dependencies",
 )

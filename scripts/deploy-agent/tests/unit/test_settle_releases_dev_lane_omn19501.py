@@ -43,6 +43,8 @@ from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested, Scope
 from deploy_agent.executor import EnumSelfUpdateBoundary, lane_config_for
 from deploy_agent.job_state import EnumJobSettlingStage, JobStore
 
+from .test_lab_overlay_omn18200 import build_passes, captured
+
 pytestmark = [pytest.mark.unit, pytest.mark.real_settle_pool]
 
 INFRA_SHA = "a" * 40
@@ -117,24 +119,25 @@ class _Applier:
         self.gate = gate
         self.running = threading.Event()
         self.manifest_sha: str | None = None
-        self.captures: list[dict[str, str]] = []
+        self.captures: list[Any] = []
 
-    def capture_compose_inputs(self, *, sha: str, stamp: str) -> dict[str, str]:
-        capture = {"sha": sha, "stamp": stamp}
+    def capture_compose_inputs(self, *, sha: str, stamp: str) -> Any:
+        capture = captured(sha, stamp)
         self.captures.append(capture)
         self.events.append("capture")
         return capture
 
-    def apply(
-        self, *, sha: str, stamp: str, correlation_id: str, capture: Any = None
-    ) -> Path:
-        self.events.append("apply:start")
-        self.manifest_sha = OVERLAY_SHA
+    state_dir = Path("/state")
+
+    def archive_overlay(self, destination: Path) -> str:
+        self.events.append("build:start")
         self.running.set()
         self.gate.wait(timeout=WAIT_SECONDS)
         self.running.clear()
-        self.events.append("apply:end")
-        return Path(f"/state/lab-overlay/{sha}.json")
+        self.events.append("build:end")
+        return OVERLAY_SHA
+
+    _run = staticmethod(build_passes)
 
 
 def _cmd(ref: str = "dev") -> ModelRebuildRequested:
@@ -277,16 +280,15 @@ def test_onex_api_pin_under_lane_lock(
             events.append(f"release:{project}")
 
     monkeypatch.setattr(agent_mod, "lane_lock", _recording_lock)
-    original_apply = applier.apply
+    original_archive = applier.archive_overlay
 
-    def _apply_checking_locks(**kwargs: Any) -> Path:
+    def _build_checking_locks(destination: Path) -> str:
         assert DEV_PROJECT not in held, (
-            f"the k3s overlay ran while the dev lane lock was held: {held}"
+            f"the onex-api build ran while the dev lane lock was held: {held}"
         )
-        assert agent_mod.LAB_OVERLAY_SURFACE_LOCK in held, held
-        return original_apply(**kwargs)
+        return original_archive(destination)
 
-    applier.apply = _apply_checking_locks  # type: ignore[method-assign]
+    applier.archive_overlay = _build_checking_locks  # type: ignore[method-assign]
     original_pin = executor.deliver_onex_api_pin
 
     def _pin_checking_locks(**kwargs: Any) -> dict[str, Any]:
@@ -306,14 +308,14 @@ def test_onex_api_pin_under_lane_lock(
     order = [
         e
         for e in events
-        if e.split(":")[0] in {"acquire", "release", "apply", "pin", "capture"}
+        if e.split(":")[0] in {"acquire", "release", "build", "pin", "capture"}
     ]
     dev_acquires = [i for i, e in enumerate(order) if e == f"acquire:{DEV_PROJECT}"]
     dev_releases = [i for i, e in enumerate(order) if e == f"release:{DEV_PROJECT}"]
     assert len(dev_acquires) == 2 and len(dev_releases) == 2, order
     capture, apply_start, pin = (
         order.index("capture"),
-        order.index("apply:start"),
+        order.index("build:start"),
         order.index("pin"),
     )
     # The capture reads compose-lane state, so it is inside the job's hold.
@@ -327,22 +329,21 @@ def test_onex_api_pin_under_lane_lock(
 def test_the_overlay_reads_the_capture_taken_under_the_lane_lock(
     harness: tuple[DeployAgent, _Executor, _Applier, threading.Event, list[str]],
 ) -> None:
-    """Model condition OverlayPromotesOwnBuild: the overlay gets the capture.
+    """Model condition OverlayPromotesOwnBuild: the build reads the capture.
 
     The applier's ``capture_compose_inputs`` is called for THIS job's sha, and
-    the same object is handed to ``apply``. An overlay that read
-    ``runtime:latest`` when it ran would promote the NEXT job's build as this
-    one's once the lane is released at the verdict.
+    the onex-api build's runtime image argument is that capture's tag. A build
+    that read ``runtime:latest`` when it ran would build on the NEXT job's
+    runtime image once the lane is released at the verdict.
     """
     agent, _executor, applier, gate, _events = harness
-    seen: list[Any] = []
-    original_apply = applier.apply
+    seen: list[list[str]] = []
 
-    def _apply(**kwargs: Any) -> Path:
-        seen.append(kwargs.get("capture"))
-        return original_apply(**kwargs)
+    def _run(argv: Any, **kwargs: Any) -> Any:
+        seen.append(list(argv))
+        return build_passes(argv, **kwargs)
 
-    applier.apply = _apply  # type: ignore[method-assign]
+    applier._run = _run  # type: ignore[method-assign]
     gate.set()
     job = _cmd()
     agent.job_store.accept(job.correlation_id, job.model_dump(mode="json"))
@@ -350,8 +351,9 @@ def test_the_overlay_reads_the_capture_taken_under_the_lane_lock(
     agent.drain_settle(timeout=WAIT_SECONDS)
 
     assert len(applier.captures) == 1
-    assert applier.captures[0]["sha"] == INFRA_SHA
-    assert seen == [applier.captures[0]]
+    assert applier.captures[0].sha == INFRA_SHA
+    assert len(seen) == 1
+    assert f"RUNTIME_IMAGE={applier.captures[0].runtime_image}" in seen[0]
 
 
 def test_the_terminal_event_waits_for_the_pin_and_carries_it(
@@ -419,4 +421,4 @@ def test_a_reexec_waits_for_the_settle_in_flight(
     gate.set()
     reexec.join(WAIT_SECONDS)
     assert waited.is_set()
-    assert "apply:end" in events
+    assert "build:end" in events

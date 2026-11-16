@@ -1,0 +1,55 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-24290"
+title: "Dispatch environment records which lock list it was built from"
+summary: "The dispatch venv's promote-floor step (dispatch_venv_promotion.py, run by reconcile-workspace-venvs.sh after every converged pass) now also writes <venv>/.built-from (lock_path, lock_sha256, lock_copy) and a copy of the lock beside it, so the core venv build-lock validator (omnibase_core OMN-22649) has a lock to judge the venv against. A failed pass writes nothing. Not in this change: the caller that reads the marker and runs the validator (named place: omnimarket node_host_reconcile_effect, handler_host_reconcile_effect.py after venvs()); the plugin daemon venv's own marker, which ensure-plugin-venv.sh writes in another format."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24290-dispatch-venv-build-marker
+    statement: "A rebuilt dispatch venv carries a marker naming the lock it was built from, its sha256 and a copy of that lock, and the core validator can judge the venv against the copy."
+    acceptance:
+      - id: AC1
+        statement: "AC1: promote-floor stamps the dispatch venv with a .built-from marker naming the lock path and sha256 and a copy of the lock, and writes nothing when the pass failed -- falsifier: pytest tests/scripts/test_dispatch_venv_build_marker_omn19998.py -q (six tests fail on the pre-change engine)"
+      - id: AC2
+        statement: "AC2: the marker's lock copy is a lock the core venv build-lock validator can judge a venv against, and a lock that moved after the build does not turn the venv red -- falsifier: pytest tests/scripts/test_dispatch_venv_build_marker_seam_omn19998.py -q (a renamed marker key fails all five tests)"
+      - id: AC3
+        statement: "AC3: integrated: a dispatch venv on h051 rebuilt from the branch carries .built-from whose lock_sha256 equals the sha256 of the lock it was built from -- falsifier: read <dispatch venv>/.built-from on h051 and compare lock_sha256 with sha256sum of the lock; an absent marker or a different hash fails"
+evidence_requirements:
+  - kind: tests
+    description: "The marker test and the marker-to-validator seam test pass at the pushed head."
+    command: "uv run --frozen pytest tests/scripts/test_dispatch_venv_build_marker_omn19998.py tests/scripts/test_dispatch_venv_build_marker_seam_omn19998.py tests/integration/test_dispatch_venv_build_marker_chain_omn19998.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-omn24290-ac1-marker-stamp
+    description: "AC1: promote-floor writes the marker and the lock copy, and a failed pass writes nothing; the six tests fail against the merge base engine, where stamp_build_lock does not exist."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/scripts/test_dispatch_venv_build_marker_omn19998.py -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24290-ac2-validator-seam
+    description: "AC2: the core validator judges a venv against the marker's own lock copy; renaming a marker key fails all five seam tests."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/scripts/test_dispatch_venv_build_marker_seam_omn19998.py -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24290-ac3-hosted-proxy
+    description: "hosted proxy for AC3: the marker tests pass; the rebuilt dispatch venv on h051 is read in the running lab and named in the pull request."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/scripts/test_dispatch_venv_build_marker_omn19998.py -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24290-integration-proof
+    description: "the marker and seam tests run on a lab host at the pushed head; hosted CI cannot reach the lab, so only the local Done gate runs this unbound check"
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha \"$(git rev-parse HEAD)\" --lane dod-integration-proof-24290 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_dispatch_venv_build_marker_omn19998.py tests/scripts/test_dispatch_venv_build_marker_seam_omn19998.py -q --no-cov"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []

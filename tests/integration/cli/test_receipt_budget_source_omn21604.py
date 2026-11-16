@@ -38,6 +38,8 @@ _BUDGET = {
     "task_class_timeout_ceiling_seconds": 600,
     "execution_timeout_seconds": 300,
     "terminal_delivery_margin_seconds": 60,
+    "ceiling_overlay_ref": None,
+    "ceiling_source": "packaged",
 }
 
 

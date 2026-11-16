@@ -658,7 +658,6 @@ def test_policy_tracks_repos_that_drifted_to_hosted_minutes() -> None:
         "omnibase_infra",
         "omniclaude",
         "omnimarket",
-        "onex_change_control",
     }.issubset(set(policy["repositories"]))
 
 

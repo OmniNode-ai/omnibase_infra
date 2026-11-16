@@ -232,6 +232,24 @@ def _read_contract(
     )
 
 
+def _entry_point_is_active(
+    ep: object, dist_name: str, active_packages: frozenset[str] | None
+) -> bool:
+    """Whether the lane lists the distribution or the import package the entry point loads.
+
+    ``ONEX_ACTIVE_RUNTIME_PACKAGES`` names import packages (``omniintelligence``), and a
+    distribution may carry another name (``omninode-intelligence``), so either one
+    listed admits the entry point (OMN-22958).
+    """
+    if is_runtime_package_active(dist_name, active_packages):
+        return True
+    value = getattr(ep, "value", "")
+    import_package = str(value).split(":", 1)[0].split(".", 1)[0]
+    return bool(import_package) and is_runtime_package_active(
+        import_package, active_packages
+    )
+
+
 def read_package_inventory(
     active_packages: frozenset[str] | None = None,
 ) -> ModelPackageInventory:
@@ -248,7 +266,7 @@ def read_package_inventory(
         dist_name = dist.name if dist is not None else "unknown"
         dist_version = str(dist.version) if dist is not None else "0.0.0"
         fingerprint.append((ep.name, dist_name, dist_version))
-        if not is_runtime_package_active(dist_name, active_packages):
+        if not _entry_point_is_active(ep, dist_name, active_packages):
             logger.debug(
                 "Skipping contract discovery for inactive runtime package '%s'",
                 dist_name,
