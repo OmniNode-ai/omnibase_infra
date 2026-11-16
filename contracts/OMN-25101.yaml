@@ -1,0 +1,94 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25101
+title: "Review findings 1 to 9 on the lane_sync unpublished-drift fix are fixed or argued: the fixture carries the candidates' census exit, the guard tests run unskipped, and the red half is proven at the merge base"
+summary: >-
+  The review of the check_lane_sync fix found evidence and test gaps, not a code defect. The fixture now carries the original lane_sync checks of both skipped candidates (census exit 8), the replay tests consume them through the recorded_response helper, the broker variable is blanked in the runner environment and asserted on what the runner receives, the every-other-exit test lists 1, 2, 124, 127 and a negative code, and a FAIL-then-PASS pair covers the train reader.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25101-review-findings-answered
+    statement: >-
+      Each review finding on the unpublished-drift fix is fixed in the tests and fixture, or answered with evidence in a pull request comment.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the fixture carries the census exit 8 lines of the skipped candidates' receipts and the two regression tests load through the recorded-data helper and run unskipped."
+      - id: AC2
+        statement: "AC2: the red half is proven at the merge base: only the two regression families fail there, on the lane_sync INDETERMINATE assertion."
+      - id: AC3
+        statement: "AC3: no other test pins exit 8 as indeterminate, and a FAIL-then-PASS control covers the train reader's receipt supersession."
+      - id: AC4
+        statement: "AC4: the broker variable is blanked and asserted on the runner's environment with an ambient value set, and the every-other-exit test lists 1, 2, 124, 127 and a negative code."
+      - id: AC5
+        statement: "AC5: the train still reports lab_receipt_fail while the lane drift persists, so this change alone does not cut the two releases; the ticket of the fix is not closed by the merge."
+      - id: AC6
+        statement: "AC6: a pull request comment starting Lab: head= names the pushed sha, the command and exit 0 for the suites run on the lab."
+evidence_requirements:
+  - kind: tests
+    description: The recorded-receipt replay through check_lane_sync and the train's receipt reader, with the ambient broker variable set.
+    command: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25101-ac1-fixture-exit-and-unskipped
+    description: >-
+      The fixture holds the census exit 8 evidence line of both candidates' original receipts, and the focused file runs with no skipped or deselected test.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: grep -c 'census exit=8:' tests/ci/fixtures/omn24976_lane_sync_unpublished_drift.json
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25101-ac2-red-half-assertion
+    description: >-
+      The two regression families assert FAIL where the unfixed code reads INDETERMINATE; the focused file passes on the fixed code.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider -k "recorded_unpublished_drift_is_a_failed_lane_sync or train_names_lane_sync_as_a_failed_check"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25101-ac3-supersession-control
+    description: >-
+      The FAIL-then-PASS and PASS-then-FAIL controls hold for the train reader in both artifact list orders, and the existing newest-receipt control still passes.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider -k "superseded_by_a_newer_pass"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25101-ac4-ambient-broker-and-exits
+    description: >-
+      With an ambient broker value set the focused file passes only because the check blanks the variable, and the every-other-exit test lists the exit 124 case.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: env LANE_MEMORY_BROKER_CONTAINER=ambient uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -c '124' tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25101-ac5-train-still-reports-fail
+    description: >-
+      The train reader names lab_receipt_fail with lane_sync among the failing checks for the recorded drift, which is the reading AC5 describes; the pull request comment states the consequence for the two releases.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider -k "train_names_lane_sync_as_a_failed_check"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25101-ac6-lab-suites
+    description: >-
+      The suites the pull request requires run green on the lab; the head-bound result is recorded in the pull request's Lab comment.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py tests/ci/test_lab_pass_census_overlay_omn20934.py tests/ci/test_direct_lab_census_omn20008.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
