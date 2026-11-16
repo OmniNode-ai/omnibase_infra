@@ -1,7 +1,7 @@
 schema_version: 1.0.0
 ticket_id: OMN-24695
 title: Fix the blocking findings of the omnibase_infra#6029 review at head 9c2cff86c628 so the deploy job reading chain tests can fail
-summary: Review of omnibase_infra#6029 at head 9c2cff86c628 found the live chain tests could turn red with no defect and green with one. The live tests now read the ledger's archive rolls, check every row in the window with the handler's own failing-step rule, wait while the agent reports the job settling, take the host from CHAIN_CANARY_AGENT_LEDGER_HOST and bound the row's lateness by ONE_TICK_SECONDS. The real append command cannot run in a test process, so AC1 and AC2 of OMN-24674 are amended and recorded as not met for the append half. Tests and the OMN-24674 contract only; nothing under src/ changes and the deploy agent is untouched, so no deploy-scope surface is changed.
+summary: Review of omnibase_infra#6029 at head 9c2cff86c628 found the live chain tests could turn red with no defect and green with one. The live tests now read the ledger's archive rolls, check every row in the window with the handler's own failing-step rule, wait while the agent reports the job settling, take the host from CHAIN_CANARY_AGENT_LEDGER_HOST and bound the row's lateness by ONE_TICK_SECONDS. The real append command cannot run in a test process, so AC1 and AC2 of OMN-24674 are amended and recorded as not met for the append half. NOT MET at this head, recorded and tracked in follow-up-append-half (open, not yet filed; the ticket id is pending and is named in the TERMINAL of lane fix6029-0610, OMN-24716) are the real append command, the failed job the test induces, and the lab wiring of the kafka tests. Tests and the OMN-24674 contract only; nothing under src/ changes and the deploy agent is untouched, so no deploy-scope surface is changed.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -31,19 +31,16 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn24695-ac1-append-halves-recorded-not-met
-    description: 'The real append command (omnimarket.work_ledger_bus.cli append) cannot land a row in a scratch ledger from a test process: an in-memory append from a separate process exits 75 pending because no ledger host shares its bus, omnimarket is not installed in this repository''s test environment, and a Kafka append lands on the ledger of record, which the OMN-19513 guard refuses a test. This check passes only while the OMN-24674 contract records AC1 and AC2 as not met for the append half, and the hermetic golden and error tests still pass.'
+    description: 'NOT MET at this head: no test runs the real append command (omnimarket.work_ledger_bus.cli append) against a scratch ledger and reads the row back; an in-memory append from a separate process exits 75 pending because no ledger host shares its bus, omnimarket is not installed in this repository''s test environment, and a Kafka append lands on the ledger of record, which the OMN-19513 guard refuses a test. AC1''s fallback is met: the OMN-24674 contract amends its AC1 and AC2 and records the append half as not met, tracked in follow-up-append-half (open, not yet filed). The hermetic golden and error tests pass.'
     source: manual
     binds_ac:
       - AC1
     checks:
-      - check_type: command
-        check_value: grep -c 'NOT MET at this head' contracts/OMN-24674.yaml | grep -qx 2
-        cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/chain_canary -q -m "not kafka" -k "deploy_job_reading and (golden or error)" -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24695-ac2-archive-roll
-    description: A NOT_WORKING row that sits only in an archive roll file is read by the shared ledger reader the live golden and error tests use.
+    description: 'The archive-roll half is met: a NOT_WORKING row that sits only in a roll file is read by the shared ledger reader the live golden and error tests use. NOT MET at this head: the live error test does not take the failed job from the one the test induces, so it cannot see a failed job whose row was never appended (it passes on any historic NOT_WORKING row); tracked in follow-up-append-half (open, not yet filed).'
     source: manual
     binds_ac:
       - AC2
@@ -52,7 +49,7 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/integration/chain_canary -q -m "not kafka" -k "deploy_job_reading and archive_roll" -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24695-ac3-every-row-skipped-settling
-    description: Every row in the window is checked, the handler's own failing-step rule names the first non-success phase for a skipped job, and the wait holds while last_result.settling is true and gives up at its ceiling.
+    description: The two late rows, a7b921db (published 2876 s after completion, failing_step unknown) and 7179dcca (347 s), are real late alarms whose cause is not read; they are tracked in follow-up-late-rows (open, not yet filed; the ticket id is pending in the TERMINAL of lane fix6029-0610) and the window default of 6 h drops them. Every row in the window is checked, the handler's own failing-step rule names the first non-success phase for a skipped job, and the wait holds while last_result.settling is true and gives up at its ceiling.
     source: manual
     binds_ac:
       - AC3
@@ -73,7 +70,7 @@ dod_evidence:
         check_value: grep -q 'wait_while_settling' tests/integration/chain_canary/test_deploy_job_reading_golden_chain_omn24674.py && ! grep -n 'superseded' tests/integration/chain_canary/test_deploy_job_reading_golden_chain_omn24674.py | grep -v 'never lists'
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24695-ac5-host-variable-one-tick
-    description: The host comes from CHAIN_CANARY_AGENT_LEDGER_HOST, the live tests bound lateness by ONE_TICK_SECONDS and not the literal 120, and the shared reader fails closed without a host. The lab run of the two kafka live tests with the CHAIN_CANARY_* settings is recorded in the pull request's Lab comment.
+    description: The host comes from CHAIN_CANARY_AGENT_LEDGER_HOST, the live tests bound lateness by ONE_TICK_SECONDS and not the literal 120, and the shared reader fails closed without a host. NOT MET at this head, the lab wiring of the kafka live tests is not done, and the two golden live tests have no run against a live agent at any head, and the receipt of the one-off run of the three kafka tests is a pull request comment (OMN-24716 AC3) and is not wiring, tracked in follow-up-append-half (open, not yet filed).
     source: manual
     binds_ac:
       - AC5

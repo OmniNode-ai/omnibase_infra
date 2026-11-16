@@ -53,7 +53,9 @@ from tests.integration.migrations.test_application_migration_ledger_omn15413 imp
 
 __all__ = [
     "ONE_TICK_SECONDS",
+    "SETTLE_CEILING_SECONDS",
     "LiveDeployAgentChain",
+    "chain_from_environment",
     "handler_failing_step",
     "live_deploy_agent_chain",
     "pg16",
@@ -73,9 +75,7 @@ _LEDGER_IS_CURRENT = os.environ.get("CHAIN_CANARY_LEDGER_IS_CURRENT", "") == "1"
 #: the bus from that host. A variable, because more than one host runs this agent.
 _AGENT_LEDGER_HOST = os.environ.get("CHAIN_CANARY_AGENT_LEDGER_HOST", "")
 _DEFAULT_WINDOW_SECONDS = 6 * 3600.0
-_WINDOW_SECONDS = float(
-    os.environ.get("CHAIN_CANARY_WINDOW_SECONDS", "") or _DEFAULT_WINDOW_SECONDS
-)
+_WINDOW_VARIABLE = "CHAIN_CANARY_WINDOW_SECONDS"
 
 _CONTRACT = (
     Path(__file__).resolve().parents[3]
@@ -89,6 +89,11 @@ READING_ACTOR = "deploy-agent:job-reading"
 #: One tick of the chain: the agent appends the row inside the job's own terminal
 #: publish, so the row is due well inside this bound after the job completes.
 ONE_TICK_SECONDS = 120.0
+#: The longest a dev job may stay settling: the lab overlay settle and the repair build run after
+#: ``completed_at`` is stamped and before the reading row is published (OMN-24716), so a correct
+#: dev row is published up to this long after its job completed. The wait on ``/health`` gives up
+#: at the same ceiling.
+SETTLE_CEILING_SECONDS = 1800.0
 _POLL_SECONDS = 5.0
 _HTTP_TIMEOUT_SECONDS = 10.0
 
@@ -101,7 +106,7 @@ class LiveDeployAgentChain:
     agent_url: str
     ledger_is_current: bool
     agent_host: str = _AGENT_LEDGER_HOST
-    window_seconds: float = _WINDOW_SECONDS
+    window_seconds: float = _DEFAULT_WINDOW_SECONDS
 
     def health(self) -> dict[str, object]:
         """The agent's ``/health`` body; fails the test when the agent cannot be read."""
@@ -178,7 +183,7 @@ class LiveDeployAgentChain:
         *,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
-        ceiling: timedelta = timedelta(minutes=30),
+        ceiling: timedelta = timedelta(seconds=SETTLE_CEILING_SECONDS),
     ) -> datetime:
         """Wait while the agent reports ``job_id`` settling; the moment it stopped.
 
@@ -237,13 +242,18 @@ def handler_failing_step(
 
 
 def reading_problems(
-    rows: list[dict[str, str]], *, bound: float = ONE_TICK_SECONDS
+    rows: list[dict[str, str]],
+    *,
+    bound: float = ONE_TICK_SECONDS,
+    dev_bound: float = SETTLE_CEILING_SECONDS + ONE_TICK_SECONDS,
 ) -> list[str]:
     """What is wrong with each row, one line per defect; empty when every row is correct.
 
     Checks every row it is given, the shape the handler writes (its step vocabulary included:
     ``unknown`` and ``not-started-*`` are rows the handler emits) and that the row was
-    published inside ``bound`` seconds of the job's completion.
+    published inside a bound of the job's completion: ``dev_bound`` for a dev-lane row, whose
+    job may settle (overlay apply, repair build) between ``completed_at`` and the publish, and
+    ``bound`` for every other lane, which never settles.
     """
     order = _READING_SETTINGS["phase_order"]
     problems: list[str] = []
@@ -280,18 +290,39 @@ def reading_problems(
         lag = (
             _moment(row["published_at"]) - _moment(row["completed_at"])
         ).total_seconds()
-        if not 0 <= lag <= bound:
+        limit = (
+            dev_bound if row.get("deploy_lane") == EnumRuntimeLane.DEV.value else bound
+        )
+        if not 0 <= lag <= limit:
             problems.append(
-                f"job {job}: published {lag:.0f}s after completion, past the {bound:.0f}s bound"
+                f"job {job}: published {lag:.0f}s after completion, past the {limit:.0f}s bound"
             )
     return problems
+
+
+def chain_from_environment(environ: Mapping[str, str]) -> LiveDeployAgentChain:
+    """The live chain's read side from ``environ``; the window is parsed here, at test time.
+
+    A window that is not a positive number fails the test that asked for the chain, never the
+    collection of every chain-canary test.
+    """
+    raw = environ.get(_WINDOW_VARIABLE, "")
+    try:
+        window = float(raw) if raw else _DEFAULT_WINDOW_SECONDS
+    except ValueError:
+        window = 0.0
+    assert window > 0, (
+        f"{_WINDOW_VARIABLE} must be a positive number of seconds, got {raw!r}"
+    )
+    return LiveDeployAgentChain(
+        ledger_path=Path(_LEDGER_FILE) if _LEDGER_FILE else None,
+        agent_url=_AGENT_URL.rstrip("/"),
+        ledger_is_current=_LEDGER_IS_CURRENT,
+        window_seconds=window,
+    )
 
 
 @pytest.fixture
 def live_deploy_agent_chain() -> LiveDeployAgentChain:
     """The live chain's read side, from the variables as the shell exported them."""
-    return LiveDeployAgentChain(
-        ledger_path=Path(_LEDGER_FILE) if _LEDGER_FILE else None,
-        agent_url=_AGENT_URL.rstrip("/"),
-        ledger_is_current=_LEDGER_IS_CURRENT,
-    )
+    return chain_from_environment(os.environ)
