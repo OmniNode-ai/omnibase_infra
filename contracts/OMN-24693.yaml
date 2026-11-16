@@ -9,6 +9,12 @@ summary: >
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+requirements:
+  - id: req-omn24693-no-undeliverable
+    statement: A node of the fixed shape (no publish_topics, handler returns no model) never takes the undeliverable-output route when dispatched through the real auto-wiring boundary.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the fixed shape never awaits the undeliverable-output route and the unfixed shape awaits it once with UndeliverableDispatchOutputError -- falsifier: uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov fails at the base branch, where the test does not exist"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -17,9 +23,12 @@ dod_evidence:
   - id: "dod-omn24693-ac2"
     description: "The real-path test passes: the fixed shape never routes undeliverable output and the unfixed shape routes it once as UndeliverableDispatchOutputError."
     source: "manual"
+    binds_ac:
+      - AC2
     checks:
-      - check_type: "command"
+      - check_type: "test_passes"
         check_value: "env -u PYTHONPATH uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov"
+        cwd: .
   - id: "dod-deploy"
     description: "No runtime deploy, restart, broker topic, container image, or live service change is required for this test-only change."
     source: "manual"
