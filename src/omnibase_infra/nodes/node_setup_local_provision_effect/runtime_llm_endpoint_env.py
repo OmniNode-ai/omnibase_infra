@@ -46,6 +46,32 @@ from omnibase_infra.models.contracts.model_llm_endpoint_overlay import (
 LANE_DECLARATION_DIR_ENV = "ONEX_LANE_DECLARATION_DIR"
 
 
+def lane_declaration_dir(
+    execution: ModuleType, environ: Mapping[str, str]
+) -> str | None:
+    """The absolute config/lab folder that holds the lane declaration, or ``None``.
+
+    The one derivation both the deploy agent's compose env (``render_dev_lane``) and the
+    warm refresh (``refresh_exports``) take. An already-set ``ONEX_LANE_DECLARATION_DIR``
+    wins: it was set before anything repointed ``ONEX_LANE_OVERLAY_DIR`` at the rendered
+    copy, so a second pass in a shell that applied the first still reads the real folder
+    and never the rendered state directory. Otherwise the folder is the parent of the
+    directory the agent resolves for ``ONEX_LANE_OVERLAY_DIR`` (``resolve_lane_overlay_dir``:
+    absolute, symlinks and relative segments resolved, ``None`` when it names no
+    directory). A set value that names no directory is refused, not ignored.
+    """
+    pinned = environ.get(LANE_DECLARATION_DIR_ENV, "").strip()
+    if pinned:
+        folder = Path(pinned).resolve()
+        if not folder.is_dir():
+            raise LlmEndpointEnvError(
+                f"{LANE_DECLARATION_DIR_ENV} names no directory: {pinned}"
+            )
+        return str(folder)
+    overlay_dir = execution.resolve_lane_overlay_dir(environ)
+    return None if overlay_dir is None else str(Path(overlay_dir).parent)
+
+
 class LlmEndpointEnvError(RuntimeError):
     """The llm_endpoints overlay cannot be rendered as written."""
 
@@ -286,19 +312,19 @@ def render_dev_lane(
         rendered = render(
             execution,
             environ,
-            lane_overlay_dir=environ.get(execution.LANE_OVERLAY_DIR_ENV),
+            lane_overlay_dir=execution.resolve_lane_overlay_dir(environ),
         )
+        # OMN-24854: the declaration folder, taken before the caller repoints the overlay
+        # directory at the rendered copy, so the compose mount keeps the real config/lab.
+        declaration_dir = lane_declaration_dir(execution, environ)
     except LlmEndpointEnvError as exc:
         raise RuntimeError(
             "the dev lane's LLM endpoint env cannot be rendered from the "
             f"llm_endpoints overlay: {exc}"
         ) from exc
     env = dict(rendered.env)
-    overlay_dir = environ.get(execution.LANE_OVERLAY_DIR_ENV)
-    if overlay_dir:
-        # OMN-24854: the declaration folder, taken before the caller repoints the overlay
-        # directory at the rendered copy, so the compose mount keeps the real config/lab.
-        env[LANE_DECLARATION_DIR_ENV] = str(Path(overlay_dir).parent)
+    if declaration_dir is not None:
+        env[LANE_DECLARATION_DIR_ENV] = declaration_dir
     return env, rendered.lane_overlay_dir
 
 
@@ -335,15 +361,15 @@ def refresh_exports(
             env,
             lane_overlay_dir=execution.resolve_lane_overlay_dir(env),
         )
+        declaration_dir = lane_declaration_dir(execution, env)
     except LlmEndpointEnvError as exc:
         raise RuntimeError(
             "the dev lane's LLM endpoint env cannot be rendered from the "
             f"llm_endpoints overlay: {exc}"
         ) from exc
     exports = dict(rendered.env)
-    resolved_overlay_dir = execution.resolve_lane_overlay_dir(env)
-    if resolved_overlay_dir is not None:
-        exports[LANE_DECLARATION_DIR_ENV] = str(Path(resolved_overlay_dir).parent)
+    if declaration_dir is not None:
+        exports[LANE_DECLARATION_DIR_ENV] = declaration_dir
     if rendered.lane_overlay_dir is not None:
         exports[execution.LANE_OVERLAY_DIR_ENV] = rendered.lane_overlay_dir
     return lane_env_shell_exports(exports)
@@ -429,9 +455,11 @@ def main(argv: Sequence[str]) -> int:
 
 
 __all__ = [
+    "LANE_DECLARATION_DIR_ENV",
     "LlmEndpointEnvError",
     "RenderedLlmEndpointEnv",
     "declaration",
+    "lane_declaration_dir",
     "main",
     "render",
     "refresh_exports",

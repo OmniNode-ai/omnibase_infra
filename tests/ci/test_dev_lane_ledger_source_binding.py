@@ -16,7 +16,9 @@ from them. The running container is read on the lab after the deploy agent conve
 
 from __future__ import annotations
 
+import os
 import posixpath
+import re
 import shlex
 from typing import Any
 
@@ -27,6 +29,7 @@ from omnibase_infra.cli.cli_ledger import ledger_query
 from tests.ci._compose_render_omn21099 import (
     DEV_LANE_OVERLAY,
     DEV_LANE_STACK,
+    DOCKER_DIR,
     docker_compose_available,
     load_compose,
     render_stack,
@@ -47,10 +50,32 @@ LEDGER_ENV = {
 }
 LEDGER_MOUNT_TARGET = "/etc/onex/workspace-config/config/lab"
 
-needs_compose = pytest.mark.skipif(
-    not docker_compose_available(),
-    reason="docker compose CLI absent; the committed-entry checks still hold",
-)
+NESTED_DEFAULT_SOURCE = "${ONEX_LANE_DECLARATION_DIR:-${ONEX_LANE_OVERLAY_DIR}/..}"
+
+
+def require_compose(available: bool, in_ci: bool) -> None:
+    """The render tests below need the compose CLI: skipped off CI, a failure on CI.
+
+    The only tests that show compose accepts the nested default
+    ``${A:-${B}/..}`` render the stack, so a CI runner without the CLI must not
+    quietly leave the committed-entry string pins as the only evidence.
+    """
+    if available:
+        return
+    if in_ci:
+        pytest.fail(
+            "docker compose CLI absent on CI: the nested-default render tests "
+            "may not be skipped there (OMN-24854)"
+        )
+    pytest.skip("docker compose CLI absent; the committed-entry checks still hold")
+
+
+@pytest.fixture
+def compose_cli() -> None:
+    require_compose(docker_compose_available(), bool(os.environ.get("CI")))
+
+
+needs_compose = pytest.mark.usefixtures("compose_cli")
 
 
 def _services(filename: str) -> dict[str, dict[str, object]]:
@@ -123,10 +148,34 @@ def test_the_committed_mount_source_names_the_declaration_dir_with_a_fallback() 
     ):
         mounts = _mounts_of(_services(filename)[name])
         assert len(mounts) == 1, filename
-        assert mounts[0].startswith(
-            "${ONEX_LANE_DECLARATION_DIR:-${ONEX_LANE_OVERLAY_DIR}/..}:"
-        ), filename
+        assert mounts[0].startswith(f"{NESTED_DEFAULT_SOURCE}:"), filename
         assert mounts[0].endswith(f":{LEDGER_MOUNT_TARGET}:ro"), filename
+
+
+def test_compose_absence_is_a_failure_on_ci_and_a_skip_elsewhere() -> None:
+    require_compose(available=True, in_ci=True)
+    require_compose(available=True, in_ci=False)
+    with pytest.raises(pytest.fail.Exception, match="may not be skipped"):
+        require_compose(available=False, in_ci=True)
+    with pytest.raises(pytest.skip.Exception):
+        require_compose(available=False, in_ci=False)
+
+
+def test_no_compose_file_mounts_the_overlay_dir_parent_outside_the_declaration_default() -> (
+    None
+):
+    # OMN-24854: the overlay directory is the deploy agent's rendered copy, so its
+    # parent is no lane declaration; only the fallback of the declaration variable
+    # may still name it.
+    offenders = sorted(
+        f"{path.name}:{number}"
+        for path in DOCKER_DIR.glob("*.yml")
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if re.search(r"\$\{ONEX_LANE_OVERLAY_DIR\}/\.\.", line)
+        and not line.strip().startswith("#")
+        and "ONEX_LANE_DECLARATION_DIR:-" not in line
+    )
+    assert offenders == []
 
 
 @needs_compose

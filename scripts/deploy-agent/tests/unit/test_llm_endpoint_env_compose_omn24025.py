@@ -141,20 +141,146 @@ def test_golden_compose_env_keeps_the_lane_declaration_dir_on_the_real_folder(
     rendered_dir = env["ONEX_LANE_OVERLAY_DIR"]
     assert rendered_dir == str(dev_agent["state"] / "rendered-lane-overlays")
     assert rendered_dir != env["ONEX_LANE_DECLARATION_DIR"]
-    assert Path(rendered_dir).name != "lane-overlays"
 
 
-def test_control_a_deploy_with_no_lane_overlay_dir_leaves_the_declaration_dir_unset(
+def _render_dev_lane(
+    environ: dict[str, str],
+) -> tuple[dict[str, str], str | None]:
+    guard = executor_mod.load_dev_boot_guard(executor_mod._LLM_ENV_MODULE)
+    rendered: tuple[dict[str, str], str | None] = guard.render_dev_lane(
+        executor_mod, environ
+    )
+    return rendered
+
+
+def _refresh_exports(environ: dict[str, str], state: Path) -> str:
+    guard = executor_mod.load_dev_boot_guard(executor_mod._LLM_ENV_MODULE)
+    exports: str = guard.refresh_exports(
+        executor_mod, environ, state / "no-clones", state
+    )
+    return exports
+
+
+def _shell_after(exports: str, *names: str) -> dict[str, str]:
+    """What a shell that sourced ``exports`` holds for ``names``."""
+    script = exports + "".join(f"printf '%s\\n' \"${name}\"\n" for name in names)
+    result = subprocess.run(
+        ["bash", "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    return dict(zip(names, result.stdout.splitlines(), strict=True))
+
+
+@pytest.mark.parametrize("unset_form", ["absent", "empty", "blank"])
+def test_control_render_dev_lane_with_no_lane_overlay_dir_sets_no_declaration_dir(
+    dev_agent: dict[str, Any], unset_form: str
+) -> None:
+    environ = dict(os.environ)
+    environ.pop("ONEX_LANE_OVERLAY_DIR")
+    if unset_form != "absent":
+        environ["ONEX_LANE_OVERLAY_DIR"] = "" if unset_form == "empty" else "  "
+
+    env, rendered_dir = _render_dev_lane(environ)
+
+    assert env["LLM_EMBEDDING_URL"] == OVERLAY_ADDRESS
+    assert "ONEX_LANE_DECLARATION_DIR" not in env
+    assert rendered_dir is None
+
+
+def test_golden_render_dev_lane_sets_the_declaration_dir_from_the_real_overlay_dir(
+    dev_agent: dict[str, Any],
+) -> None:
+    env, rendered_dir = _render_dev_lane(dict(os.environ))
+
+    assert env["ONEX_LANE_DECLARATION_DIR"] == str(dev_agent["tmp"].resolve())
+    assert rendered_dir == str(dev_agent["state"] / "rendered-lane-overlays")
+
+
+def test_golden_render_dev_lane_and_refresh_exports_agree_on_a_symlinked_overlay_dir(
     dev_agent: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # With no resolved lane overlay directory the render skips the lane overlay
-    # binding and _compose_env completes; neither variable may survive.
-    monkeypatch.setattr(executor_mod, "resolve_lane_overlay_dir", lambda _env: None)
+    """OMN-24854: one derivation, so a symlinked overlay directory reads the same twice."""
+    elsewhere = dev_agent["tmp"] / "elsewhere"
+    elsewhere.mkdir()
+    link = elsewhere / "link-to-lane-overlays"
+    link.symlink_to(dev_agent["lane_dir"], target_is_directory=True)
+    monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(link))
 
-    env = executor_mod._compose_env()
+    env, _ = _render_dev_lane(dict(os.environ))
+    exported = _shell_after(
+        _refresh_exports(dict(os.environ), dev_agent["state"]),
+        "ONEX_LANE_DECLARATION_DIR",
+    )
 
-    assert "ONEX_LANE_DECLARATION_DIR" not in env
-    assert "ONEX_LANE_OVERLAY_DIR" not in env
+    expected = str(dev_agent["lane_dir"].resolve().parent)
+    assert env["ONEX_LANE_DECLARATION_DIR"] == expected
+    assert exported["ONEX_LANE_DECLARATION_DIR"] == expected
+    assert expected != str(elsewhere)
+
+
+def test_golden_render_dev_lane_and_refresh_exports_return_an_absolute_path_for_a_relative_overlay_dir(
+    dev_agent: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(dev_agent["tmp"])
+    monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", "lane-overlays")
+
+    env, _ = _render_dev_lane(dict(os.environ))
+    exported = _shell_after(
+        _refresh_exports(dict(os.environ), dev_agent["state"]),
+        "ONEX_LANE_DECLARATION_DIR",
+    )
+
+    expected = str(dev_agent["tmp"].resolve())
+    assert env["ONEX_LANE_DECLARATION_DIR"] == expected
+    assert exported["ONEX_LANE_DECLARATION_DIR"] == expected
+    assert Path(expected).is_absolute()
+
+
+def test_golden_two_refresh_passes_in_one_shell_keep_the_real_declaration_dir(
+    dev_agent: dict[str, Any],
+) -> None:
+    """OMN-24854: pass two reads the rendered overlay dir pass one exported, not the real one."""
+    names = ("ONEX_LANE_OVERLAY_DIR", "ONEX_LANE_DECLARATION_DIR")
+    real = str(dev_agent["tmp"].resolve())
+    rendered = str(dev_agent["state"] / "rendered-lane-overlays")
+    environ = dict(os.environ)
+
+    first = _shell_after(_refresh_exports(environ, dev_agent["state"]), *names)
+    assert first["ONEX_LANE_DECLARATION_DIR"] == real
+    assert first["ONEX_LANE_OVERLAY_DIR"] == rendered
+
+    # The shell that applied pass one now holds the rendered directory.
+    environ.update(first)
+    second = _shell_after(_refresh_exports(environ, dev_agent["state"]), *names)
+
+    assert second["ONEX_LANE_DECLARATION_DIR"] == real
+    assert second["ONEX_LANE_DECLARATION_DIR"] != str(dev_agent["state"])
+
+
+def test_golden_an_already_set_declaration_dir_is_kept(
+    dev_agent: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pinned = dev_agent["tmp"] / "pinned-config-lab"
+    pinned.mkdir()
+    monkeypatch.setenv("ONEX_LANE_DECLARATION_DIR", str(pinned))
+
+    env, _ = _render_dev_lane(dict(os.environ))
+
+    assert env["ONEX_LANE_DECLARATION_DIR"] == str(pinned.resolve())
+
+
+def test_error_a_declaration_dir_that_names_no_directory_is_refused(
+    dev_agent: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(
+        "ONEX_LANE_DECLARATION_DIR", str(dev_agent["tmp"] / "does-not-exist")
+    )
+
+    with pytest.raises(RuntimeError, match="ONEX_LANE_DECLARATION_DIR names no"):
+        _render_dev_lane(dict(os.environ))
 
 
 def test_control_an_agent_not_fenced_to_dev_keeps_the_stores_address(
@@ -170,6 +296,22 @@ def test_control_an_agent_not_fenced_to_dev_keeps_the_stores_address(
     assert env["ONEX_LANE_OVERLAY_DIR"] == str(dev_agent["lane_dir"].resolve())
     assert "ONEX_LANE_DECLARATION_DIR" not in env
     assert "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL" not in env
+
+
+def test_control_an_agent_not_fenced_to_dev_renders_nothing_over_a_stale_declaration_dir(
+    dev_agent: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(
+        "DEPLOY_AGENT_ALLOWED_LANES", executor_mod.EnumRuntimeLane.STABILITY_TEST.value
+    )
+    monkeypatch.setenv("ONEX_LANE_DECLARATION_DIR", "/stale/ambient/config/lab")
+
+    env, rendered_dir = _render_dev_lane(dict(os.environ))
+
+    assert (env, rendered_dir) == ({}, None)
+    assert executor_mod._compose_env()["ONEX_LANE_DECLARATION_DIR"] == (
+        "/stale/ambient/config/lab"
+    )
 
 
 def test_golden_a_stability_job_of_a_dev_agent_takes_the_address_from_the_overlay(
