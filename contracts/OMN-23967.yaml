@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-23967
 title: Repo-root tests hand their children an env with no LD_LIBRARY_PATH, so the venv interpreter dies on any runner whose CPython resolves libpython through it
 summary: >-
-  Tests that build a child process environment from scratch (env={"PATH": ...}) drop LD_LIBRARY_PATH. On runners whose venv interpreter is the Actions tool-cache CPython (a shared-libpython build found only through that variable) every such child dies with exit 127, while runners with a uv-managed interpreter pass. One autouse fixture in tests/conftest.py wraps subprocess.Popen so a child spawned with an explicit env mapping that does not name LD_LIBRARY_PATH receives the session value; the rule is generic, no test file is named, and an explicit value (even empty) or env=None is left alone.
+  Tests that build a child process environment from scratch (env={"PATH": ...}) drop LD_LIBRARY_PATH. On runners whose venv interpreter is the Actions tool-cache CPython (a shared-libpython build found only through that variable) every such child dies with exit 127, while runners with a uv-managed interpreter pass. tests/conftest.py wraps subprocess.Popen.__init__ for the whole pytest process (installed in pytest_configure, so collection-time spawns and session-, module- and class-scoped fixtures are covered): a child spawned with an explicit env mapping that does not name LD_LIBRARY_PATH receives the value the session started with; the rule is generic, no test file is named, and an explicit value (even empty) or env=None is left alone. Named exclusions: os.posix_spawn, os.exec*e and os.spawn*e (no test uses them; a guard test fails if one appears) and a loop that bypasses Popen (uvloop; none configured). The wrapper also rewrites an env that product code under test builds for its own child; src/ holds 32 explicit-env spawn sites among 161 subprocess calls, and the suite runs with the variable set on hosted CI.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -26,7 +26,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn23967-inherit-tests
-    description: The nine inheritance tests pass on the branch; with the autouse fixture removed (tests/conftest.py at the merge base) the session-value, positional-env and asyncio tests fail.
+    description: The sixteen tests of the file pass on the branch; against tests/conftest.py at the merge base the session-value, positional-env and asyncio tests fail.
     source: manual
     binds_ac:
       - AC1
@@ -36,13 +36,16 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_child_env_ld_library_path_omn23967.py -q --no-cov --tb=line
         cwd: .
   - id: dod-omn23967-fixture-is-generic
-    description: The fixture is autouse and is written in tests/conftest.py.
+    description: The wrapper is installed for the whole session from pytest_configure in tests/conftest.py, not by a function-scoped fixture; both the installer and its call site are checked.
     source: manual
     binds_ac:
       - AC2
     checks:
       - check_type: command
-        check_value: grep -qF 'def _children_inherit_ld_library_path' tests/conftest.py
+        check_value: grep -qF 'def _install_children_inherit_ld_library_path' tests/conftest.py
+        cwd: .
+      - check_type: command
+        check_value: grep -qF '    _install_children_inherit_ld_library_path()' tests/conftest.py
         cwd: .
   - id: dod-omn23967-run-receipt
     description: A focused run of the new test file on a runner host at the pushed head exits 0; the hosted verifier runs it on its own runner and the receipt is read from that run.
