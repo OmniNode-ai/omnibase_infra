@@ -1,0 +1,67 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24691
+title: "The h201 dev deploy agent loads dev's tip plus the failed-job alarm from a registered pin, and one dev deploy job reads end to end"
+summary: "This branch is dev's tip plus the three commits of omnibase_infra#6025 (the failed-job and pin-near-expiry alarm), cherry-picked because the pull request head is stacked on pre-squash commits of omnibase_infra#6012. The h201 dev deploy agent follows it through a pin registered with runtime_code_ref_pin. contracts/OMN-24562.yaml carries the union of both requirement sets."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24691-pin-dev-tip-plus-alarm
+    statement: The h201 dev deploy agent runs dev's tip plus the failed-job alarm from a pin on this branch, and one dev deploy job reads end to end on that code.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the h201 dev pin record read with the runtime_code_ref_pin show command names the lane's branch, a 40 character head, ticket OMN-24562 and an expiry later than 2026-11-18T21:31:11Z -- falsifier: ssh h201 runtime_code_ref_pin show --state-dir /data/omninode/deploy-agent/state/jobs-dev, expiry compared with 2026-11-18T21:31:11Z"
+      - id: AC2
+        statement: "AC2: the agent /health field loaded_code_sha equals the pin branch head after the self-update re-exec -- falsifier: curl the h201 dev agent /health, jq .loaded_code_sha, compared with git rev-parse origin/<branch>"
+      - id: AC3
+        statement: "AC3: each of 15d0b2fd4, 773d8f2e1, 483d86d09, 963edd89b and b9cffe877 is an ancestor of the loaded sha -- falsifier: git merge-base --is-ancestor <sha> <loaded_code_sha>, exit 0 for all five"
+      - id: AC4
+        statement: "AC4: one dev deploy job has run end to end on the loaded code and its deploy-probe reading row (src=reading) is in the ledger, or the lane ends BLOCKED naming who acts on the refused dev trigger -- falsifier: grep the rolling ledger for the job id with src=reading, one row"
+evidence_requirements:
+  - kind: tests
+    description: The pin, pin guard, loaded-code, alarm row and reading row tests.
+    command: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py scripts/deploy-agent/tests/unit/test_job_reading_row.py scripts/deploy-agent/tests/unit/test_code_ref_pin_omn23039.py scripts/deploy-agent/tests/unit/test_pin_guard_omn23368.py scripts/deploy-agent/tests/unit/test_self_update_loaded_code_omn18200.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24691-ac1-pin-record
+    description: The pin model and its register and show commands refuse a head that is not 40 characters, a branch named main, master or dev, and an expiry past seven days, and the registration writes the record the show command reads.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_code_ref_pin_omn23039.py scripts/deploy-agent/tests/unit/test_pin_guard_omn23368.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24691-ac2-loaded-code
+    description: The agent reports the sha of the code it loaded after a self-update re-exec, and the branch on origin carries the alarm check the idle loop calls.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_self_update_loaded_code_omn18200.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/agent.py?ref=omn-24562-pin-dev-0340' --jq .content | base64 -d | grep -F 'self._job_reading, "check_pin"' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24691-ac3-ancestry
+    description: Each of the five merged changes that the h201 checkout lacked (6011, 6012, 6018, 5960, 6010) is contained in the pushed branch, read from the hosting service's comparison of each full sha against the branch.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: for s in 15d0b2fd4da9db576e9655fd79da5fb34a02f134 773d8f2e199bade3f544d8ccdb5521d3c2d18170 483d86d09809c14ef6265d05118651dd8750b979 963edd89b1342bd039f86d4547e5d717bb8fdd5c b9cffe877c13638e167db0ec41a174405ba5ed9e; do gh api "repos/OmniNode-ai/omnibase_infra/compare/${s}...omn-24562-pin-dev-0340" --jq .status | grep -E '^(ahead|identical)$' > /dev/null || exit 1; done
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24691-ac4-job-reading
+    description: A terminal dev deploy job yields one STATUS reading row (src=reading) and a failed job also yields an alarm row, on the code this branch carries.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_reading_row.py scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
