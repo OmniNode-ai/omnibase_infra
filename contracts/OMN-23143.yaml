@@ -27,7 +27,7 @@ dod_evidence:
       - AC3
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/validation -q -n 0 --no-cov -p no:cacheprovider -k skill_result_model_references
+        check_value: uv run pytest tests/unit/validation/test_skill_result_model_references_omn23143.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
   - id: dod-omn23143-deploy-publisher-reads-receipt-model
     description: 'Post-deploy probe: the dev branch carries the terminal publisher that takes the receipt''s own result model when the mapping names none, so the rebuilt runtime publishes the dod_verify verdict with no market model named in the mapping. It reads dev, which holds the line only after this change merges, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion (AC3 is bound by the mapping tests).'
