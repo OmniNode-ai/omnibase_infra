@@ -50,21 +50,20 @@ LEDGER_ENV = {
 }
 LEDGER_MOUNT_TARGET = "/etc/onex/workspace-config/config/lab"
 
-NESTED_DEFAULT_SOURCE = "${ONEX_LANE_DECLARATION_DIR:-${ONEX_LANE_OVERLAY_DIR}/..}"
+REQUIRED_SOURCE_PREFIX = "${ONEX_LANE_DECLARATION_DIR:?"
 
 
 def require_compose(available: bool, in_ci: bool) -> None:
     """The render tests below need the compose CLI: skipped off CI, a failure on CI.
 
-    The only tests that show compose accepts the nested default
-    ``${A:-${B}/..}`` render the stack, so a CI runner without the CLI must not
+    The tests below render the stack, so a CI runner without the CLI must not
     quietly leave the committed-entry string pins as the only evidence.
     """
     if available:
         return
     if in_ci:
         pytest.fail(
-            "docker compose CLI absent on CI: the nested-default render tests "
+            "docker compose CLI absent on CI: the render tests "
             "may not be skipped there (OMN-24854)"
         )
     pytest.skip("docker compose CLI absent; the committed-entry checks still hold")
@@ -138,17 +137,17 @@ def test_folded_main_binds_the_same_ledger_source() -> None:
     assert mounts[0].endswith(f":{LEDGER_MOUNT_TARGET}:ro")
 
 
-def test_the_committed_mount_source_names_the_declaration_dir_with_a_fallback() -> None:
+def test_the_committed_mount_source_requires_the_declaration_dir() -> None:
     # OMN-24854: the deploy agent points ONEX_LANE_OVERLAY_DIR at a rendered copy
     # under its state directory, so the declaration folder travels under its own
-    # name; the fallback keeps callers that do not set it working.
+    # name, required, never a nested default (the repository bans those).
     for filename, name in (
         (DEV_LANE_OVERLAY, "runtime-effects"),
         ("docker-compose.dev-tenant-fold.yml", "omninode-runtime"),
     ):
         mounts = _mounts_of(_services(filename)[name])
         assert len(mounts) == 1, filename
-        assert mounts[0].startswith(f"{NESTED_DEFAULT_SOURCE}:"), filename
+        assert mounts[0].startswith(REQUIRED_SOURCE_PREFIX), filename
         assert mounts[0].endswith(f":{LEDGER_MOUNT_TARGET}:ro"), filename
 
 
@@ -161,19 +160,15 @@ def test_compose_absence_is_a_failure_on_ci_and_a_skip_elsewhere() -> None:
         require_compose(available=False, in_ci=False)
 
 
-def test_no_compose_file_mounts_the_overlay_dir_parent_outside_the_declaration_default() -> (
-    None
-):
+def test_no_compose_file_mounts_the_overlay_dir_parent() -> None:
     # OMN-24854: the overlay directory is the deploy agent's rendered copy, so its
-    # parent is no lane declaration; only the fallback of the declaration variable
-    # may still name it.
+    # parent is no lane declaration, so no compose file may mount it.
     offenders = sorted(
         f"{path.name}:{number}"
         for path in DOCKER_DIR.glob("*.yml")
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
         if re.search(r"\$\{ONEX_LANE_OVERLAY_DIR\}/\.\.", line)
         and not line.strip().startswith("#")
-        and "ONEX_LANE_DECLARATION_DIR:-" not in line
     )
     assert offenders == []
 

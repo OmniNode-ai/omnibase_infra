@@ -1135,11 +1135,11 @@ services:
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}/../../..:/etc/onex/ticket-guard:ro
       # The lane declaration folder (OMN-24218): the deploy agent sets
       # ONEX_LANE_DECLARATION_DIR to the real config/lab folder, because it points
-      # ONEX_LANE_OVERLAY_DIR at a rendered copy under its state directory; the
-      # fallback keeps callers that do not set it working (its parent is config/lab
-      # under the workspace config root, which the infra compose already requires).
-      # Read-only.
-      - ${ONEX_LANE_DECLARATION_DIR:-${ONEX_LANE_OVERLAY_DIR}/..}:/etc/onex/workspace-config/config/lab:ro
+      # ONEX_LANE_OVERLAY_DIR at a rendered copy under its state directory, so the
+      # overlay directory's parent is not it. Required, never a nested default
+      # (tests/ci/test_compose_no_nested_expansion.py); every caller of this file sets
+      # it. Read-only.
+      - ${ONEX_LANE_DECLARATION_DIR:?ONEX_LANE_DECLARATION_DIR must name the config/lab folder that holds ci_bus_lanes.yaml; the deploy agent, the warm refresh and the compose file helpers set it from ONEX_LANE_OVERLAY_DIR}:/etc/onex/workspace-config/config/lab:ro
     healthcheck:
       test:
         - CMD

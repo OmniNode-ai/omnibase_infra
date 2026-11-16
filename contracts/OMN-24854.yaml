@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-24854
 title: The dev runtime container mounts the folder that holds the lane declaration, so the commitment ledger source resolves on the dev lane
 summary: >-
-  The dev runtime on the lab host runs omnimarket PR 5347 but every commitment check run ends failed with DelegateLaneSelectionError and the work-state projection reads item_count 0, because config/lab/ci_bus_lanes.yaml is absent in the container. The dev lane compose files mount ${ONEX_LANE_OVERLAY_DIR}/.. at the container's config/lab folder, and the deploy agent rewrites ONEX_LANE_OVERLAY_DIR to its rendered overlay copy under its own state directory, so the parent that is mounted is the agent's job state directory, which holds no lane declaration. This change makes the dev render the agent already applies (render_dev_lane) and the warm refresh export ONEX_LANE_DECLARATION_DIR, computed from the real lane overlay directory before the rewrite, and makes both dev compose files mount ${ONEX_LANE_DECLARATION_DIR:-${ONEX_LANE_OVERLAY_DIR}/..}. The change does not run on the lab by itself: the dev runtime reads the lane declaration only after the deploy agent redeploys the dev lane from a revision that carries it, and that redeploy is the step that is not yet done at this head.
+  The dev runtime on the lab host runs omnimarket PR 5347 but every commitment check run ends failed with DelegateLaneSelectionError and the work-state projection reads item_count 0, because config/lab/ci_bus_lanes.yaml is absent in the container. The dev lane compose files mount ${ONEX_LANE_OVERLAY_DIR}/.. at the container's config/lab folder, and the deploy agent rewrites ONEX_LANE_OVERLAY_DIR to its rendered overlay copy under its own state directory, so the parent that is mounted is the agent's job state directory, which holds no lane declaration. This change makes the dev render the agent already applies (render_dev_lane) and the warm refresh export ONEX_LANE_DECLARATION_DIR, computed from the real lane overlay directory before the rewrite, and makes both dev compose files mount ${ONEX_LANE_DECLARATION_DIR:?...}. The change does not run on the lab by itself: the dev runtime reads the lane declaration only after the deploy agent redeploys the dev lane from a revision that carries it, and that redeploy is the step that is not yet done at this head.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -32,8 +32,8 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: grep -q 'ONEX_LANE_DECLARATION_DIR:-' docker/docker-compose.dev-lane.yml
+        check_value: grep -q 'ONEX_LANE_DECLARATION_DIR:?' docker/docker-compose.dev-lane.yml
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: grep -q 'ONEX_LANE_DECLARATION_DIR:-' docker/docker-compose.dev-tenant-fold.yml
+        check_value: grep -q 'ONEX_LANE_DECLARATION_DIR:?' docker/docker-compose.dev-tenant-fold.yml
         cwd: ${OMNI_HOME}/omnibase_infra
