@@ -47,7 +47,7 @@ import yaml
 from deploy_agent import agent as agent_mod
 from deploy_agent import executor as executor_mod
 from deploy_agent import publisher as publisher_mod
-from deploy_agent.agent import JOB_READING_RUNTIME, DeployAgent
+from deploy_agent.agent import JOB_READING, DeployAgent
 from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested, Scope
 from deploy_agent.executor import DeployExecutor, load_dev_boot_guard
 from deploy_agent.job_state import JobStore
@@ -115,7 +115,7 @@ def test_error_a_failing_preflight_settles_a_failed_job_and_reads_not_working(
     agent.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
     agent.executor = DeployExecutor()
 
-    reading = load_dev_boot_guard(JOB_READING_RUNTIME)
+    reading = load_dev_boot_guard(JOB_READING)
     results: list[Any] = []
     real_publish = reading.publish
 

@@ -43,7 +43,7 @@ import yaml
 from deploy_agent.events import EnumRuntimeLane
 from pydantic import JsonValue
 
-from omnibase_infra.handlers.handler_deploy_job_reading import HandlerDeployJobReading
+from omnibase_infra.handlers.handler_deploy_job_reading import _failing_step
 from omnibase_infra.models.model_deploy_job_reading_request import (
     ModelDeployJobReadingRequest,
 )
@@ -229,7 +229,6 @@ def handler_failing_step(
     did not succeed (a lane-lock or host-slot job settles every phase skipped and reads
     ``preflight``), else ``unknown``.
     """
-    handler = HandlerDeployJobReading(settings=settings, environ={})
     request = ModelDeployJobReadingRequest(
         correlation_id=uuid.uuid4(),
         runtime_lane="dev",
@@ -238,7 +237,7 @@ def handler_failing_step(
         phase_results=dict(phase_results),
         published_at=datetime.now(UTC),
     )
-    return handler.failing_step(request)
+    return _failing_step(settings, request)
 
 
 def reading_problems(
