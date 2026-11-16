@@ -26,6 +26,15 @@ requirements:
         statement: "AC13: the contract is read and parsed once per process and a failing read logs once per interval -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
       - id: AC14
         statement: "AC14: the alarm owner is the item lane OMN-24562 and no owner line names one host -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
+  - id: req-omn24562-stability-job-renders-overlay-address
+    statement: A stability job of a dev-fenced deploy agent takes LLM_EMBEDDING_URL, BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL and the rewritten lane overlay directory from the llm_endpoints overlay, in its compose environment and in its env contract guard, and a prod job takes nothing from the render.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the compose environment of a stability job of a dev-fenced agent carries the overlay address over the settings store''s -- falsifier: python -m pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -k "stability_job" -q fails at the merge base'
+      - id: AC2
+        statement: 'AC2: the env contract guard of a stability job checks the rendered environment and skips the store''s value for the rendered names -- falsifier: the guard test for a stability job passes with the render fence unchanged'
+      - id: AC3
+        statement: 'AC3: a prod job of a dev-fenced agent keeps the store''s address -- falsifier: the prod control test fails at the head'
   - id: req-omn24562-stability-retire-folded
     statement: The stability lane retires the container of every role its main runtime folds, keeps volumes, and leaves prod and the other stability containers alone. The old runtime-effects container an older compose file left behind is removed before main publishes port 18086, and compose is no longer asked to start that service.
     acceptance:
@@ -37,6 +46,9 @@ evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
     command: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py scripts/deploy-agent/tests/unit/test_job_reading_row.py -q -p no:cacheprovider
+  - kind: tests
+    description: The stability compose-environment and guard tests pass at the pushed head and fail at the merge base, where the render is fenced to the dev lane.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:randomly --no-cov
   - kind: tests
     description: Stability lane retirement of the folded effects container and its runtime-phase call site, with a positive control that the services the lane still runs stay requested.
     command: cd scripts/deploy-agent && uv run --frozen --extra dev python -m pytest tests/unit/test_stability_retires_folded_effects_omn24562.py -q -p no:cacheprovider
@@ -145,3 +157,22 @@ dod_evidence:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/handlers/test_handler_dev_boot_guard_stability_fold_omn24562.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac1
+    description: 'AC1 and AC2 and AC3: the stability job compose environment, the stability guard and the prod control pass'
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+      - AC3
+    checks:
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:randomly --no-cov
+        cwd: .
+  - id: dod-omn24562-integration-proof
+    description: 'The real renderer reads the real contracts and a real git overlay: a stability job takes the overlay address and a prod job takes nothing. It binds no criterion; the hosted proof is dod-omn24562-ac1, this one is the local Done gate'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/ci/test_stability_job_overlay_render_integration_omn24562.py -q -p no:randomly --no-cov
+        cwd: .
