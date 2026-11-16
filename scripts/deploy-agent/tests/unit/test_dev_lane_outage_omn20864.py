@@ -665,6 +665,7 @@ def _agent(
 ) -> DeployAgent:
     monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
     monkeypatch.setattr(agent_mod, "STATE_DIR", tmp_path / "agent-state")
+    monkeypatch.setattr("deploy_agent.lock._LOCK_PATH", tmp_path / "deploy.lock")
     monkeypatch.setattr(agent_mod, "publish_result", lambda payload, config: False)
     monkeypatch.setattr(agent_mod, "LAB_OVERLAY_ENABLED", False)
     agent = DeployAgent(skip_self_update=True)
