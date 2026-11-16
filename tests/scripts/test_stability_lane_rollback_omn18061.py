@@ -585,8 +585,14 @@ def test_the_rollback_set_is_the_deployed_set() -> None:
     assert len(build_set) >= 10, sorted(build_set)
     assert "runtime-effects" not in core_set | build_set | rollback_set
     assert core_set < build_set, "CORE_SERVICES must be a strict subset of the build"
-    assert rollback_set == build_set, (
-        f"rollback set {sorted(rollback_set)} != deployed set {sorted(build_set)}"
+    # OMN-23363: the two SASL one-shots run a pinned upstream image, so there is
+    # no <project>-<service>:latest image to anchor or retag; they are the ONLY
+    # deployed services a rollback does not touch (the flip lives in the broker).
+    sasl_one_shots = {"lane-redpanda-scram-user", "lane-redpanda-sasl-enable"}
+    assert sasl_one_shots <= build_set
+    assert rollback_set == build_set - sasl_one_shots, (
+        f"rollback set {sorted(rollback_set)} != deployed set minus the SASL "
+        f"one-shots {sorted(build_set - sasl_one_shots)}"
     )
     assert rollback_set > core_set, (
         "a rollback set equal to CORE_SERVICES is the mixed-revision defect"
