@@ -1,0 +1,82 @@
+schema_version: 1.0.0
+ticket_id: OMN-25106
+title: The dlq-replay consumer left ghost members in the onex-dlq-replay group when its start or stop was cancelled, which kept the group in a rebalance storm on the h201 dev runtime
+summary: >-
+  On the h201 dev runtime (read 2026-11-16, 23:14Z to 23:40Z) the onex-dlq-replay group joined 409 times and logged 308 'Heartbeat failed ... because it is rebalancing' lines, with 8 and 9 members in one generation although the handler runs one consumer at a time. DLQConsumer.start() and stop() are bounded by asyncio.wait_for in the handler; a timeout cancelled them half way and left an AIOKafkaConsumer that had joined the group with no path to stop it (11 start timeouts, 11 'Unclosed AIOKafkaConsumer' errors). DLQConsumer now ends the member it began on every failure or cancellation of start() and finishes a close that a caller stopped waiting for.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25106-dlq-ghost-member
+    statement: The dev runtime's dlq-replay consumer never leaves a group member behind when its start or stop is cancelled or fails, and the dev runtime reads ready after a redeploy through the dev deploy agent.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the time and cause of the runtime's loss of the dev broker are stated with log, ACL and broker health evidence read on h201 -- falsifier: the cited broker log line, ACL listing and runtime log line are re-read on h201 and the stated time and cause match them"
+      - id: AC2
+        statement: "AC2: the dev runtime reads /ready 200 after a redeploy through the h201 dev deploy agent, with no hand restart of a container, and one node run line is read -- falsifier: curl the h201 dev runtime /ready returns 200, and the runtime log holds one node run line after the redeploy time"
+      - id: AC3
+        statement: "AC3: a code defect cause, if found, is fixed at its source by a test that fails on the broken code and passes on the fix, in a draft pull request with a Lab: line -- falsifier: uv run pytest on the named test fails at the base commit and passes at the pull request head"
+      - id: AC4
+        statement: "AC4: a scheduled alarm fires when dev /ready stays non-200 for 10 minutes, or the existing one is named with its schedule row -- falsifier: the schedule verdict on the dev runtime lists the alarm, and its rule reads a 10 minute non-200 window"
+evidence_requirements:
+  - kind: tests
+    description: The DLQConsumer ghost member tests, plus the neighbouring DLQ replay unit tests.
+    command: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25106-ac1-broker-loss-cause
+    description: >-
+      The broker log line, the runtime log line and the broker's own state for the loss of the dev broker are re-read on h201 and match the stated time and cause. Not claimed by this pull request's code change.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: "docker logs --since 6h omninode-runtime 2>&1 | grep -c 'lost Kafka'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25106-ac2-ready-after-redeploy
+    description: >-
+      The h201 dev runtime answers /ready 200 after a redeploy through the dev deploy agent. Read on h201 after the redeploy; the reading and its time are posted on the pull request.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: "curl -sf -o /dev/null -w '%{http_code}' http://localhost:8085/ready"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25106-ac3-ghost-member-test
+    description: >-
+      The DLQConsumer ghost member tests fail on origin/dev (four of six fail: a cancelled start, a failing start, a start after a cancelled start, a cancelled stop) and pass at the pull request head; the two other tests are positive controls that pass on both.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_dlq_consumer_no_ghost_member_omn25106.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25106-ac3-neighbours-hold
+    description: >-
+      The existing DLQ replay unit tests, including the OMN-17137 lifecycle bound tests, still pass with the consumer's start and stop changed.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25106-ac4-ready-alarm
+    description: >-
+      The scheduled alarm for a dev /ready that stays non-200 for 10 minutes is named with its schedule row. This pull request names none: the check reads the parity manifest for one and exits non-zero while none is found, so the criterion stays open until a follow-up lands it.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: "grep -E 'ready.*10 ?min|10 ?min.*ready' ${OMNI_HOME}/omnibase_infra/scripts/enforcement_parity_manifest.yaml"
+        cwd: ${OMNI_HOME}/omnibase_infra
