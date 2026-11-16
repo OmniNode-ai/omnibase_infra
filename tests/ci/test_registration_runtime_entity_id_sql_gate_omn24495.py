@@ -40,7 +40,9 @@ def recorded_response() -> dict[str, object]:
     return recording
 
 
-@pytest.mark.live_contact(_RECORDED)
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/registration_runtime_entity_id_sql_gate_recorded_omn24495.json"
+)
 def test_recorded_gate_run_fails_qualified_names_and_passes_the_fix(
     recorded_response: dict[str, object],
 ) -> None:
