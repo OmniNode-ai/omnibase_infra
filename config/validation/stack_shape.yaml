@@ -250,14 +250,14 @@ allowed_commands:
     services:
       - lane-redpanda-scram-user
     reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
-    argv_sha256: 9e31c71a6c7a71af6f65a7477b9e55778d5d8848b7de5f3613cbae84725565b8
+    argv_sha256: d64451e4bc325cac80aa24fa2d3c907c2508ae86a3864faf1d92386de8247a94
     command_hint: set -eu
   - match: exact
     field: command
     services:
       - lane-redpanda-sasl-enable
     reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
-    argv_sha256: aee75448ae34bf5c4b801b782914a74ff92f254eb8e847de1a98c9f7edd9961c
+    argv_sha256: c0b4eb4436865aad2ab3b823ce764354f50ac2ecc08f04b66f18fb3380961539
     command_hint: set -eu
   - match: exact
     field: command

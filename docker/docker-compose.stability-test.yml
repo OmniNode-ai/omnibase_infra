@@ -126,10 +126,19 @@ x-stability-test-internal-projection-env: &stability_test_internal_projection_en
 #   RPK_USER=<same principal>
 #   RPK_PASS=<same password>
 # RPK_USER/RPK_PASS are read by redpanda-partition-cap, which already requires them
-# once enable_sasl is true (docker-compose.broker-profile.yml).
+# once enable_sasl is true and exports RPK_SASL_MECHANISM=SCRAM-SHA-256 itself
+# (docker-compose.broker-profile.yml), so the file carries no RPK_SASL_MECHANISM.
+# Short form on purpose (no `required: false`): /dev/null always exists, so the unset
+# default needs no optional-file escape, and a LANE_BROKER_AUTH_ENV_FILE that is set
+# to a path that does not exist makes compose refuse instead of starting every
+# client on PLAINTEXT with both one-shots exiting 0.
 x-lane-broker-auth-env-file: &lane_broker_auth_env_file
-  - path: ${LANE_BROKER_AUTH_ENV_FILE:-/dev/null}
-    required: false
+  - ${LANE_BROKER_AUTH_ENV_FILE:-/dev/null}
+# Every broker client waits for the flip, so none starts with SCRAM settings before
+# the principal exists or before enable_sasl is set. On a host with no auth file
+# the one-shot exits 0 at once.
+x-lane-sasl-enable-dependency: &lane_sasl_enable_dependency
+  condition: service_completed_successfully
 # OMN-20932: a lane's Bifrost overlay is private deployment config; this
 # repository ships none (only lane-overlays/local.bifrost.example.yaml, the
 # neutral template). Every runtime service mounts the overlay named for its
@@ -231,7 +240,7 @@ services:
       - |
         set -eu
         if [ -z "$${KAFKA_SASL_USERNAME:-}" ]; then
-          echo "OMN-23363: no LANE_BROKER_AUTH_ENV_FILE on this host; broker stays PLAINTEXT"
+          echo "OMN-23363: no LANE_BROKER_AUTH_ENV_FILE on this host; this one-shot changes nothing"
           exit 0
         fi
         : "$${KAFKA_SASL_PASSWORD:?OMN-23363: the lane broker auth file sets a username and no password}"
@@ -267,25 +276,29 @@ services:
       - |
         set -eu
         if [ -z "$${KAFKA_SASL_USERNAME:-}" ]; then
-          echo "OMN-23363: no LANE_BROKER_AUTH_ENV_FILE on this host; broker stays PLAINTEXT"
+          echo "OMN-23363: no LANE_BROKER_AUTH_ENV_FILE on this host; this one-shot changes nothing"
           exit 0
         fi
         : "$${KAFKA_SASL_PASSWORD:?OMN-23363: the lane broker auth file sets a username and no password}"
         ADMIN="-X admin.hosts=redpanda:9644"
-        BROKER="-X brokers=redpanda:9092"
+        # Every Kafka listener the broker publishes: in-network (9092), the host-local
+        # one (19092) and the LAN-published one (19093) that other machines use.
+        LISTENERS="redpanda:9092 redpanda:19092 redpanda:19093"
         /usr/bin/rpk cluster config set superusers "['$$KAFKA_SASL_USERNAME']" $$ADMIN
         /usr/bin/rpk cluster config set enable_sasl true $$ADMIN
         /usr/bin/rpk cluster config get superusers $$ADMIN | grep -q "$$KAFKA_SASL_USERNAME"
         echo "OMN-23363: superuser grant confirmed"
         /usr/bin/rpk cluster config get enable_sasl $$ADMIN | grep -qx true
         echo "OMN-23363: enable_sasl confirmed true"
-        if env -u RPK_USER -u RPK_PASS /usr/bin/rpk topic list $$BROKER >/dev/null 2>&1; then
-          echo "OMN-23363 FAIL: an UNAUTHENTICATED client reached the Kafka listener" >&2
-          exit 1
-        fi
-        echo "OMN-23363: unauthenticated client refused"
-        RPK_USER="$$KAFKA_SASL_USERNAME" RPK_PASS="$$KAFKA_SASL_PASSWORD" RPK_SASL_MECHANISM=SCRAM-SHA-256 /usr/bin/rpk topic list $$BROKER >/dev/null
-        echo "OMN-23363: authenticated client accepted - positive control"
+        for LISTENER in $$LISTENERS; do
+          if env -u RPK_USER -u RPK_PASS /usr/bin/rpk topic list -X "brokers=$$LISTENER" >/dev/null 2>&1; then
+            echo "OMN-23363 FAIL: an UNAUTHENTICATED client reached the Kafka listener $$LISTENER" >&2
+            exit 1
+          fi
+          echo "OMN-23363: unauthenticated client refused on $$LISTENER"
+          RPK_USER="$$KAFKA_SASL_USERNAME" RPK_PASS="$$KAFKA_SASL_PASSWORD" RPK_SASL_MECHANISM=SCRAM-SHA-256 /usr/bin/rpk topic list -X "brokers=$$LISTENER" >/dev/null
+          echo "OMN-23363: authenticated client accepted on $$LISTENER - positive control"
+        done
     depends_on:
       lane-redpanda-scram-user:
         condition: service_completed_successfully
@@ -552,6 +565,8 @@ services:
       - "com.omninode.runtime.id=stability-test-effects"
   projection-api:
     env_file: *lane_broker_auth_env_file
+    depends_on:
+      lane-redpanda-sasl-enable: *lane_sasl_enable_dependency
     container_name: omnimarket-stability-test-projection-api
     restart: unless-stopped
     environment:
@@ -753,6 +768,7 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
+      lane-redpanda-sasl-enable: *lane_sasl_enable_dependency
       migration-gate:
         condition: service_healthy
       redpanda:
@@ -818,6 +834,7 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
+      lane-redpanda-sasl-enable: *lane_sasl_enable_dependency
       migration-gate:
         condition: service_healthy
       redpanda:
@@ -873,6 +890,7 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
+      lane-redpanda-sasl-enable: *lane_sasl_enable_dependency
       migration-gate:
         condition: service_healthy
       redpanda:
@@ -927,6 +945,7 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
+      lane-redpanda-sasl-enable: *lane_sasl_enable_dependency
       migration-gate:
         condition: service_healthy
       redpanda:
@@ -982,6 +1001,7 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
+      lane-redpanda-sasl-enable: *lane_sasl_enable_dependency
       migration-gate:
         condition: service_healthy
       redpanda:
@@ -1037,6 +1057,7 @@ services:
       - omnibase-infra-network
     restart: unless-stopped
     depends_on:
+      lane-redpanda-sasl-enable: *lane_sasl_enable_dependency
       migration-gate:
         condition: service_healthy
       redpanda:
@@ -1099,6 +1120,8 @@ services:
   # policy, the same split the three shared kernels above already use.
   tenant-projection-writer:
     env_file: *lane_broker_auth_env_file
+    depends_on:
+      lane-redpanda-sasl-enable: *lane_sasl_enable_dependency
     container_name: omnimarket-stability-test-tenant-projection-writer
     profiles: !override ["runtime", "full"]
     restart: unless-stopped

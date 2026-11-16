@@ -276,12 +276,16 @@ readonly CORE_SERVICES=(omninode-runtime runtime-worker projection-api)
 # The OMN-14262 defect does not reach these: they build from
 # docker/Dockerfile.runtime, the same image the four core services build from,
 # not the release-only selector path that is still broken in workspace mode.
+# OMN-23363 -- the opt-in SASL flip, in this order: the principal, then the flip.
+# One-shots on a pinned upstream image, so they cannot go stale; they are in the
+# build scope so that every governed refresh re-asserts the flip and its readback,
+# as refresh_dev_lane.sh does for OMN-18012. onex-runtime-deploy recreates the whole
+# scope in ONE `up -d --no-deps --force-recreate`, where the clients' depends_on on
+# lane-redpanda-sasl-enable and the flip's own on the principal order them, and its
+# RT-6 readback fails the deploy (and so this refresh, at DEPLOY_EXIT below) when
+# either one-shot has not exited 0 during this deploy. Without
+# LANE_BROKER_AUTH_ENV_FILE on the host both exit 0 and the broker stays PLAINTEXT.
 readonly REFRESH_BUILD_SERVICES=(
-    # OMN-23363 -- the opt-in SASL flip, beside the core services. One-shots on a
-    # pinned upstream image, so they cannot go stale; they are here so that every
-    # governed refresh re-asserts the flip and its readback, as refresh_dev_lane.sh
-    # does for OMN-18012. Without LANE_BROKER_AUTH_ENV_FILE on the host both exit 0
-    # and the broker stays PLAINTEXT.
     "${CORE_SERVICES[@]}" lane-redpanda-scram-user lane-redpanda-sasl-enable
     projection-tenant-registry-writer
     projection-delegation-writer
@@ -327,9 +331,11 @@ readonly REFRESH_BUILD_SERVICES=(
 # separate change with its own live proof. What must not stay narrow is the
 # set a DESTRUCTIVE operation touches: a rollback narrower than its deploy is
 # not a rollback.
-readonly ROLLBACK_SERVICES=(
-    "${REFRESH_BUILD_SERVICES[@]}"
-)
+# OMN-23363: the two SASL one-shots (the +2 after CORE_SERVICES) are not in it. They run a
+# pinned upstream image, so no <project>-<service>:latest image exists to anchor, and one
+# missing anchor makes every rollback refuse (MISSING_ROLLBACK_ANCHORS); the flip they
+# assert lives in the broker.
+readonly ROLLBACK_SERVICES=("${CORE_SERVICES[@]}" "${REFRESH_BUILD_SERVICES[@]:${#CORE_SERVICES[@]}+2}")
 # Prefix of the kernel's folded-roles log line in src/omnibase_infra/runtime/service_kernel.py, pinned by tests/unit/runtime/auto_wiring/test_folded_roles_log_marker_omn21288.py.
 readonly FOLDED_ROLES_LOG_MARKER="Auto-wiring folded roles"
 # service -> lane-scoped container_name (docker-compose.stability-test.yml).
