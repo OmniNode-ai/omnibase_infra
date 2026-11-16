@@ -87,15 +87,26 @@ JUDGE_FILE = DOCKER_DIR / "docker-compose.judge.yml"
 # dev lane's bare name. The map is derived from the agent's own ``_LANE_CONFIGS``, so a
 # lane added there is covered or has to be named below.
 #
-# The prod overlay is the one named exclusion: it still carries both runtime-list-only
-# services on their bare names, and prod is outside this lane's reach. Taking it out of
-# the exclusion list is the follow-up that adds the two names to prod's
-# ``disabled_services``.
+# The prod overlay is the one named exclusion: docker-compose.prod.yml sets only the
+# ``prod-disabled`` profile on both services and no container_name, so both would still
+# be created under the dev lane's bare names if the agent named them, and the prod lane
+# config does not disable them yet. Taking prod out of this map means adding both to
+# prod's ``disabled_services``; no ticket id is cited for that follow-up here.
 AGENT_RUNTIME_EXCLUSIONS = {
     EnumRuntimeLane.PROD: "prod's disabled_services is a prod config change, not made here",
 }
+
+
+def _overlay_file_of(lane: EnumRuntimeLane, config: ModelLaneConfig) -> Path:
+    assert len(config.compose_files) >= 2, (
+        f"{lane} lane config lists {len(config.compose_files)} compose file(s); an "
+        "overlay lane needs the base file and its overlay"
+    )
+    return DOCKER_DIR / Path(config.compose_files[1]).name
+
+
 AGENT_RUNTIME_LANES = {
-    DOCKER_DIR / Path(config.compose_files[1]).name: lane
+    _overlay_file_of(lane, config): lane
     for lane, config in _LANE_CONFIGS.items()
     if lane is not EnumRuntimeLane.DEV and lane not in AGENT_RUNTIME_EXCLUSIONS
 }
@@ -383,13 +394,31 @@ def test_agent_runtime_list_feeds_the_instantiated_set(
 
 
 @pytest.mark.unit
+def test_overlay_lane_with_one_compose_file_is_refused_with_a_clear_message() -> None:
+    """A non-dev lane config with no overlay fails an assertion, not an IndexError."""
+    one_file = _LANE_CONFIGS[EnumRuntimeLane.PROD].model_copy(
+        update={"compose_files": _LANE_CONFIGS[EnumRuntimeLane.PROD].compose_files[:1]}
+    )
+    with pytest.raises(AssertionError, match="needs the base file and its overlay"):
+        _overlay_file_of(EnumRuntimeLane.PROD, one_file)
+    # Positive control: the real prod config has its overlay.
+    assert _overlay_file_of(
+        EnumRuntimeLane.PROD, _LANE_CONFIGS[EnumRuntimeLane.PROD]
+    ).name.endswith("prod.yml")
+
+
+@pytest.mark.unit
 def test_agent_runtime_lanes_cover_every_overlay_lane_of_the_agent() -> None:
     """Every overlay lane of the agent is in the ratchet's map or a named exclusion."""
-    overlay_lanes = set(_LANE_CONFIGS) - {EnumRuntimeLane.DEV}
-    covered = set(AGENT_RUNTIME_LANES.values())
-    excluded = set(AGENT_RUNTIME_EXCLUSIONS)
-    assert covered | excluded == overlay_lanes
-    assert not covered & excluded
+    # Hand-written, so a lane added to the agent's table fails here until it is
+    # either covered or named as an exclusion.
+    assert set(_LANE_CONFIGS) == {
+        EnumRuntimeLane.DEV,
+        EnumRuntimeLane.STABILITY_TEST,
+        EnumRuntimeLane.PROD,
+    }
+    assert set(AGENT_RUNTIME_LANES.values()) == {EnumRuntimeLane.STABILITY_TEST}
+    assert set(AGENT_RUNTIME_EXCLUSIONS) == {EnumRuntimeLane.PROD}
     assert all(AGENT_RUNTIME_EXCLUSIONS.values()), "name a reason per exclusion"
     layered = set(LAYERED_OVERLAYS.values())
     for overlay_file, lane in AGENT_RUNTIME_LANES.items():
