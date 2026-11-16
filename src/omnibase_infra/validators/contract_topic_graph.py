@@ -119,7 +119,6 @@ INSTALLED_PACKAGES: tuple[str, ...] = (
     "omnibase_infra",
     "omnibase_core",
     "omnibase_spi",
-    "omnibase_compat",
 )
 
 # Resolved via a filesystem checkout, NOT an import (see
