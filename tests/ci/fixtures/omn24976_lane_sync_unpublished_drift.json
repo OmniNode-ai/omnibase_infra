@@ -1,0 +1,40 @@
+{
+  "_provenance": {
+    "source": "lab host replay of check_lane_sync's census call (scripts/lane-census-check.sh --json, KAFKA_BOOTSTRAP_SERVERS empty, LANE_MEMORY_BROKER_CONTAINER unset, LANE_CENSUS_HOST from the daemon) against the private CI overlay at f2a3eab59e017696868f707a226b9d2d9acc8fd4, the overlay revision the candidate's verify job (run 43816701323, job 133130456417, 2026-11-16T06:54:27Z) logged as 'lane census read from'",
+    "captured_utc": "2026-11-16T19:48:57Z",
+    "base_sha": "75969ce9e2ca8e8dd96ab38d5ae04aff11698f63",
+    "drift_dated": "the three profile_gated_present containers of the drifting lane report docker State.StartedAt 2026-11-16T02:09:59Z, 02:11:02Z and 02:12:08Z, before the candidate's verify job, so the same findings were present when its receipt was written",
+    "train_run": "Release Train (nightly) run 43823852608, Decide job 133152894900, 2026-11-16T07:26:53Z",
+    "train_decisions": {
+      "omnibase_infra": {
+        "candidate": "0e5f656d03b70515dfdf418347c98ca0e833d188",
+        "verdict": "SKIP",
+        "reason": "lab_receipt_indeterminate",
+        "checks_not_established": [
+          "lane_sync"
+        ]
+      },
+      "omnimarket": {
+        "candidate": "0238884e3849",
+        "verdict": "SKIP",
+        "reason": "lab_receipt_indeterminate",
+        "checks_not_established": [
+          "lane_sync"
+        ]
+      }
+    },
+    "redaction": "the lab daemon's host name and the plan's host label are replaced by lab-host-a, and each lab lane name by lane-<letter> (container names follow their lane), for the public-repo hygiene gate; exit codes, finding kinds, severities and counts are unchanged"
+  },
+  "responses": [
+    {
+      "returncode": 0,
+      "stdout": "lab-host-a\n",
+      "stderr": ""
+    },
+    {
+      "returncode": 8,
+      "stdout": "{\"schema_version\": \"1.1.0\", \"host\": \"lab-host-a\", \"lanes_checked\": [\"lane-a\", \"lane-b\", \"lane-c\", \"lane-d\", \"lane-e\", \"lane-f\", \"lane-g\"], \"lanes_not_applicable\": [\"lane-h\", \"lane-i\", \"lane-j\", \"lane-k\"], \"lanes_skipped_optional_down\": [\"lane-e\", \"lane-f\"], \"lab_sync_evaluated\": false, \"findings\": [{\"lane\": \"lane-a\", \"kind\": \"container_absent\", \"container\": \"lane-a-runtime-effects\", \"detail\": \"required service container 'lane-a-runtime-effects' is not running (desired replicas=1); lane 'lane-a' is degraded\", \"severity\": \"critical\"}, {\"lane\": \"lane-a\", \"kind\": \"profile_gated_present\", \"container\": \"lane-a-agent-actions-consumer\", \"detail\": \"container 'lane-a-agent-actions-consumer' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) \\u2014 something started it outside the lane's active profile\", \"severity\": \"warning\"}, {\"lane\": \"lane-a\", \"kind\": \"profile_gated_present\", \"container\": \"lane-a-skill-lifecycle-consumer\", \"detail\": \"container 'lane-a-skill-lifecycle-consumer' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) \\u2014 something started it outside the lane's active profile\", \"severity\": \"warning\"}, {\"lane\": \"lane-a\", \"kind\": \"profile_gated_present\", \"container\": \"lane-a-contract-resolver\", \"detail\": \"container 'lane-a-contract-resolver' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) \\u2014 something started it outside the lane's active profile\", \"severity\": \"warning\"}], \"has_drift\": true}\n",
+      "stderr": "[2026-11-16T19:48:56Z] [lane-census] Starting (lane=ALL, host=lab-host-a, LIVE)\n[2026-11-16T19:48:57Z] [lane-census] DRIFT detected:\n  [critical] container_absent lane-a-runtime-effects (lane-a): required service container 'lane-a-runtime-effects' is not running (desired replicas=1); lane 'lane-a' is degraded\n  [warning] profile_gated_present lane-a-agent-actions-consumer (lane-a): container 'lane-a-agent-actions-consumer' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) — something started it outside the lane's active profile\n  [warning] profile_gated_present lane-a-skill-lifecycle-consumer (lane-a): container 'lane-a-skill-lifecycle-consumer' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) — something started it outside the lane's active profile\n  [warning] profile_gated_present lane-a-contract-resolver (lane-a): container 'lane-a-contract-resolver' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) — something started it outside the lane's active profile\n[2026-11-16T19:48:57Z] [lane-census] DRIFT event NOT published: LANE_MEMORY_BROKER_CONTAINER is unset (exit 8). Drift event logged above for manual replay.\n"
+    }
+  ]
+}
