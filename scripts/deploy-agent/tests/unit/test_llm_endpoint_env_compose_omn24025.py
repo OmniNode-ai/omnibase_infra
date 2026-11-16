@@ -143,10 +143,24 @@ def test_control_an_agent_not_fenced_to_dev_keeps_the_stores_address(
     assert "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL" not in env
 
 
-def test_control_a_stability_job_of_a_dev_agent_keeps_the_stores_address(
+def test_golden_a_stability_job_of_a_dev_agent_takes_the_address_from_the_overlay(
     dev_agent: dict[str, Any],
 ) -> None:
+    """OMN-24562: the stability follow job failed the guard on the store's removed :8002."""
     with executor_mod.active_deploy_lane(executor_mod.EnumRuntimeLane.STABILITY_TEST):
+        env = executor_mod._compose_env()
+
+    assert env["LLM_EMBEDDING_URL"] == OVERLAY_ADDRESS
+    assert (
+        env["BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL"]
+        == f"{OVERLAY_ADDRESS}{EMBEDDING_PATH}"
+    )
+
+
+def test_control_a_prod_job_of_a_dev_agent_keeps_the_stores_address(
+    dev_agent: dict[str, Any],
+) -> None:
+    with executor_mod.active_deploy_lane(executor_mod.EnumRuntimeLane.PROD):
         env = executor_mod._compose_env()
 
     assert env["LLM_EMBEDDING_URL"] == STALE_ADDRESS
@@ -210,6 +224,27 @@ def test_golden_guard_checks_the_rendered_environment_and_skips_the_stores_value
     assert file_commands
     for cmd in file_commands:
         assert cmd[cmd.index("--skip-env-var") + 1] == "LLM_EMBEDDING_URL"
+
+
+def test_golden_guard_of_a_stability_job_checks_the_rendered_environment(
+    dev_agent: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-24562: the guard of a stability follow job reads the render, not the store."""
+    store = dev_agent["tmp"] / "store.env"
+    store.write_text(f"LLM_EMBEDDING_URL={STALE_ADDRESS}\n", encoding="utf-8")
+    monkeypatch.setenv("OMNIBASE_ENV_FILE", str(store))
+    seen = _captured_guard_commands(monkeypatch)
+
+    with executor_mod.active_deploy_lane(executor_mod.EnumRuntimeLane.STABILITY_TEST):
+        DeployExecutor().validate_llm_endpoint_env_contract()
+
+    process_cmd, process_env = seen[0]
+    assert "--env-file" not in process_cmd
+    assert process_env is not None
+    assert process_env["LLM_EMBEDDING_URL"] == OVERLAY_ADDRESS
+    for cmd, _ in seen:
+        if "--env-file" in cmd:
+            assert cmd[cmd.index("--skip-env-var") + 1] == "LLM_EMBEDDING_URL"
 
 
 def test_control_guard_outside_the_dev_fence_skips_nothing(
