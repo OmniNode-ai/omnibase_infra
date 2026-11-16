@@ -434,7 +434,9 @@ def test_a_scheduled_bot_advances_the_pin_and_regenerates_in_one_commit() -> Non
 
     # `on:` parses as the boolean True under YAML 1.1.
     triggers = document.get("on", document.get(True))
-    assert "schedule" in triggers, "the pin must advance on a schedule"
+    assert "schedule" not in triggers, (
+        "the pin advances only on demand (RULING 2026-11-09T21:54:25Z)"
+    )
     assert "workflow_dispatch" in triggers, "and be advanceable on demand"
 
     body = _REFRESH_WORKFLOW.read_text(encoding="utf-8")

@@ -869,6 +869,10 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
         compose_files=(COMPOSE_FILE, _STABILITY_OVERLAY),
         compose_project="omnibase-infra-stability-test",
         postgres_container="omnibase-infra-stability-test-postgres",
+        # The overlay disables these by profile and gives them no container_name of
+        # their own, so an explicit start by name would create them under the dev
+        # lane's names (the runtime phase then fails on a name conflict).
+        disabled_services=frozenset({"autoheal", "context-audit-consumer"}),
         # OMN-15181: must match the container_name: override in
         # docker-compose.stability-test.yml, never the dev-lane bare name —
         # docker inspect on the bare name returns "no such object" for this lane.
@@ -1219,13 +1223,10 @@ def _requested_services_for_up(
     ``compose_files``; passing one to ``docker compose -p omnibase-infra up`` aborts
     on `no such service`. A no-op on every non-DEV lane.
     """
-    if services:
-        return _without_disabled_services(without_gateway_services(services), lane)
-    if scope == Scope.RUNTIME:
-        return _without_disabled_services(
-            without_gateway_services(services_for_scope(scope, lane=lane)), lane
-        )
-    return []
+    if not services and scope != Scope.RUNTIME:
+        return []
+    named = services or services_for_scope(scope, lane=lane)
+    return _without_disabled_services(without_gateway_services(named), lane)
 
 
 def _coerce_build_source(value: BuildSource | str, *, layer: str) -> BuildSource:
