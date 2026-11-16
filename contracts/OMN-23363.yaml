@@ -14,9 +14,6 @@ requirements:
       - id: AC1
         statement: >-
           AC1: the lab proof lane's compose declares a one-shot SASL enable service for its Redpanda and passes SASL client settings to every runtime and projection-writer service that connects to the broker, and a test fails on a compose without them -- falsifier: uv run pytest tests/unit/docker/ -k stability_sasl -q in omnibase_infra
-      - id: AC2
-        statement: >-
-          AC2: on the lab host, after a refresh from a release that carries this change, the stability broker requires SASL -- falsifier: rpk cluster config get enable_sasl in the lab host's stability broker prints true
 evidence_requirements:
   - kind: tests
     description: >-
@@ -45,16 +42,15 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn23363.py -q -n 0 -p no:cacheprovider -k "flips_the_broker or admits_an_unauthenticated or reads_back_true"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
-  - id: dod-omn23363-ac2-lab-readback
+  - id: dod-omn23363-lab-readback
     description: >-
-      The lab readback for AC2: on the lab host that serves the stability lane, after a refresh from a release that carries this change with LANE_BROKER_AUTH_ENV_FILE in place, the lane's broker reports enable_sasl true. It runs at the local done gate on that host, not on the hosted runner, the same scope OMN-24819 gives its AC4 and AC5 items. A unit test is not this readback (OMN-24819 finding 8), so AC2 stays unmet, and OMN-23363 stays open, until the lab host reads true. The refresh has not run on the lane yet.
+      The lab readback of the ticket's second criterion (on the lab host, after a refresh from a release that carries this change, the stability broker requires SASL): on the lab host that serves the stability lane, with LANE_BROKER_AUTH_ENV_FILE in place, the lane's broker reports enable_sasl true. It runs at the local done gate on that host, not on the hosted runner, so it binds no contract criterion: the hosted must-fail control cannot run a local_done_gate item. A unit test is not this readback (OMN-24819 finding 8), so the ticket's AC2 stays unmet, and OMN-23363 stays open, until the lab host reads true. The refresh has not run on the lane yet.
     source: manual
     execution_scope: local_done_gate
     checks:
       - check_type: command
         check_value: docker exec "${LANE_REDPANDA_CONTAINER:?set it to the lane broker container}" rpk cluster config get enable_sasl | grep -qx true
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC2]
   - id: dod-omn23363-ac1-deploy-probe
     description: >-
       Deploy probe. The proof lane's refresh script GitHub serves at the checked-out commit carries the SASL one-shots in its build scope, which is what makes a governed refresh run the flip. The probe reads the file from GitHub at that commit and exits nonzero on a tree without them, so it fails at the merge base.
