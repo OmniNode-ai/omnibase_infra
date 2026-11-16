@@ -30,6 +30,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.docker.test_stability_sasl_omn23363 import (
+    _merged_services,
+    _readers,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "runtime_build" / "refresh_stability_lane.sh"
 SCRAM_USER = "lane-redpanda-scram-user"
@@ -175,18 +180,32 @@ def test_refresh_stability_deploy_exit_fails_the_refresh() -> None:
     )
 
 
+OVERRIDE_ASSIGNMENT = re.compile(
+    r"^\s*(?:export\s+|\[\[[^\]]*\]\]\s*\|\|\s*)?RUNTIME_BUILD_SERVICES_OVERRIDE="
+)
+
+
 @pytest.mark.unit
 def test_refresh_stability_scope_is_handed_to_the_deploy_as_one_override() -> None:
+    """The full scope is exported once; the one other assignment narrows it to the
+    rollback set for a ref with no SASL flip. Every assignment is counted, not only
+    the ``export`` one, so a third cannot slip in beside them."""
     lines = _script_lines()
-    matches = [i for i, line in enumerate(lines) if OVERRIDE_EXPORT_PREFIX in line]
-    if len(matches) != 1:
+    matches = [i for i, line in enumerate(lines) if OVERRIDE_ASSIGNMENT.match(line)]
+    if len(matches) != 2:
         pytest.fail(
-            f"expected exactly one {OVERRIDE_EXPORT_PREFIX!r} line in "
+            f"expected exactly two assignments to RUNTIME_BUILD_SERVICES_OVERRIDE in "
             f"{SCRIPT_PATH.name}, found {len(matches)} "
             f"(1-based lines: {[i + 1 for i in matches]})"
         )
-    if lines[matches[0]].strip() != OVERRIDE_EXPORT:
-        pytest.fail(f"unexpected override line: {lines[matches[0]]!r}")
+    first, second = (lines[i].strip() for i in matches)
+    if first != OVERRIDE_EXPORT:
+        pytest.fail(f"unexpected override line: {first!r}")
+    if (
+        second
+        != '[[ "${PRE_SASL_REF}" != true ]] || RUNTIME_BUILD_SERVICES_OVERRIDE="${ROLLBACK_SERVICES[*]}"'
+    ):
+        pytest.fail(f"unexpected second override assignment: {second!r}")
 
 
 DEPLOY_BLOCK_START = 'log "=== Build + restart (scoped to:'
@@ -232,12 +251,15 @@ def _run_deploy_block(
         encoding="utf-8",
     )
     stub.chmod(0o755)
-    auth = f'LANE_BROKER_AUTH_ENV_FILE="{auth_file}"' if auth_file else ":"
+    auth = f'LANE_BROKER_AUTH_ENV_FILE="{auth_file}"' if auth_file is not None else ":"
     program = "\n".join(
         [
             "set -euo pipefail",
             'log() { echo "$*"; }',
             'err() { echo "$*" >&2; }',
+            # the broker's own state handling is run in tests/scripts/test_stability_lane_rollback_omn18061.py
+            'broker_sasl() { [[ "$1" != get ]] || echo true; }',
+            "restore_broker_sasl() { :; }",
             _scope_block(lines),
             f'DEPLOY_RUNTIME="{stub}"',
             "OMNI_HOME=/omni REPO_ROOT=/repo COMPOSE_PROJECT=omnibase-infra-lane",
@@ -285,15 +307,26 @@ def test_refresh_stability_lane_broker_auth_env_file_reaches_the_deploy(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "set").mkdir()
-    (tmp_path / "unset").mkdir()
     run = _run_deploy_block(tmp_path / "set", deploy_exit=0)
     assert run.returncode == 0, run.stderr
     assert _deploy_seen(tmp_path / "set")["auth"] == AUTH_FILE
-    # A host with no auth file hands the deploy an empty value, which compose's
-    # `${LANE_BROKER_AUTH_ENV_FILE:-/dev/null}` reads as unset.
-    none = _run_deploy_block(tmp_path / "unset", deploy_exit=0, auth_file=None)
-    assert none.returncode == 0, none.stderr
-    assert _deploy_seen(tmp_path / "unset")["auth"] == ""
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("auth_file", [None, ""], ids=["unset", "empty"])
+def test_refresh_stability_lane_broker_auth_env_file_is_not_exported_when_empty(
+    tmp_path: Path, auth_file: str | None
+) -> None:
+    """A host with no auth file hands the deploy NO variable at all.
+
+    An empty export is not inert: it beats a ``LANE_BROKER_AUTH_ENV_FILE`` set in a
+    compose ``.env`` (shell environment outranks ``.env``), and every client would
+    then start on PLAINTEXT with both one-shots exiting 0. Red at 2604e98f6da8, where
+    the script exported ``""``.
+    """
+    run = _run_deploy_block(tmp_path, deploy_exit=0, auth_file=auth_file)
+    assert run.returncode == 0, run.stderr
+    assert _deploy_seen(tmp_path)["auth"] == "unset"
 
 
 @pytest.mark.unit
@@ -312,3 +345,46 @@ def test_refresh_stability_a_ref_without_the_flip_is_deployed_without_the_one_sh
     pre = _deploy_seen(tmp_path / "pre")["scope"].split()
     assert not set(ONE_SHOTS) & set(pre), pre
     assert set(pre) == set(scope) - set(ONE_SHOTS)
+
+
+#: Derived broker clients the refresh need not recreate, each with the reason.
+READER_EXEMPTIONS = {
+    # OMN-21288: effects run inside main; the deploy retires this service and the
+    # refresh must never rebuild it.
+    "runtime-effects": "folded into omninode-runtime",
+    # A one-shot with restart "no": it has exited before the refresh ends and no
+    # long-running client of it exists to lock out.
+    "redpanda-partition-cap": "one-shot that has already exited",
+}
+
+
+@pytest.mark.unit
+def test_refresh_stability_readers_are_inside_the_build_scope() -> None:
+    """Every SASL client the overlay derives is recreated by the refresh.
+
+    ``up --no-deps`` recreates only the services it names, so a client outside
+    REFRESH_BUILD_SERVICES keeps the settings it started with while the flip changes
+    what the broker requires: a client left on PLAINTEXT is locked out, and nothing
+    fails until its next restart.
+    """
+    scope = set(_print_array(_scope_block(_script_lines()), "REFRESH_BUILD_SERVICES"))
+    readers = _readers(_merged_services())
+    assert "tenant-projection-writer" in readers, sorted(readers)
+    assert set(READER_EXEMPTIONS) <= readers, sorted(set(READER_EXEMPTIONS) - readers)
+    outside = sorted(readers - scope - set(READER_EXEMPTIONS))
+    assert outside == [], f"derived SASL clients the refresh never recreates: {outside}"
+    exempt_in_scope = sorted(set(READER_EXEMPTIONS) & scope)
+    assert exempt_in_scope == [], (
+        f"an exemption that is in scope needs no exemption: {exempt_in_scope}"
+    )
+
+
+@pytest.mark.unit
+def test_refresh_stability_readers_scope_check_fails_when_a_client_is_dropped() -> None:
+    """Positive control: the same check over a scope missing one client reports it."""
+    scope = set(_print_array(_scope_block(_script_lines()), "REFRESH_BUILD_SERVICES"))
+    scope.discard("tenant-projection-writer")
+    readers = _readers(_merged_services())
+    assert sorted(readers - scope - set(READER_EXEMPTIONS)) == [
+        "tenant-projection-writer"
+    ]

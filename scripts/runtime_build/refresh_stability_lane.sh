@@ -256,26 +256,16 @@ readonly CORE_SERVICES=(omninode-runtime runtime-worker projection-api)
 # OMN-17562: the six standalone projection writers this lane introduces.
 #
 # BUILD SCOPE, NOT VERIFICATION SCOPE. This array is handed to
-# RUNTIME_BUILD_SERVICES_OVERRIDE and nothing else. CORE_SERVICES stays the
-# narrow four because it also drives the health gate, the pre-image-id capture,
-# the rollback anchors and CORE_CONTAINERS, and verify_stability_refresh.py
-# carries its own CORE_SERVICE_NAMES that must stay matched to it. Widening the
-# VERIFICATION surface is a separate change with its own live proof; widening
-# the BUILD surface is what stops the drift, and it is the half provable here.
-# Same split, same reason, as refresh_dev_lane.sh.
-#
-# Without this the writers would be declared in the overlay, censused by
-# lane-manifest.yaml, and NEVER BUILT: this script has always exported a scoped
-# override (to route around the open OMN-14262 BUILD_SOURCE selector mismatch on
-# the four release-only services), and onex-runtime-deploy treats an explicit
-# override as an instruction to touch ONLY the named services. A writer left out
-# keeps running on last-release code behind `restart: unless-stopped`, which
-# reads as healthy -- a slower version of the silent-loss defect these services
-# exist to end, on the lane `stability-proven` is resolved from.
-#
-# The OMN-14262 defect does not reach these: they build from
-# docker/Dockerfile.runtime, the same image the four core services build from,
-# not the release-only selector path that is still broken in workspace mode.
+# RUNTIME_BUILD_SERVICES_OVERRIDE and nothing else. CORE_SERVICES stays the narrow
+# set because it also drives the health gate, the pre-image-id capture, the rollback
+# anchors and CORE_CONTAINERS (verify_stability_refresh.py keeps a matching
+# CORE_SERVICE_NAMES); widening the VERIFICATION surface is a separate change with its
+# own live proof, as in refresh_dev_lane.sh. onex-runtime-deploy treats an explicit
+# override as an instruction to touch ONLY the named services, so a writer left out
+# keeps running last-release code behind `restart: unless-stopped` and reads as healthy
+# -- the silent-loss defect these services exist to end, on the lane `stability-proven`
+# is resolved from. They build from docker/Dockerfile.runtime like the core services, so
+# the open OMN-14262 BUILD_SOURCE selector mismatch (release-only services) does not reach them.
 # OMN-23363 -- the opt-in SASL flip (principal, then flip): pinned-image one-shots in the build scope, so every
 # refresh re-asserts it; the clients' own depends_on on the flip orders them inside the one `up --no-deps`.
 readonly REFRESH_BUILD_SERVICES=(
@@ -286,46 +276,24 @@ readonly REFRESH_BUILD_SERVICES=(
     projection-savings-writer
     projection-tenant-credentials-writer
     projection-live-events-writer
-    # OMN-18114 -- the tenant-projection profile CARRIER. Here for a DIFFERENT
-    # reason than the six writers above, stated separately so the two do not
-    # merge. Those exist only in this lane's overlay; this one is declared in
-    # docker/docker-compose.infra.yml behind the inert `profile-carrier-optin`
-    # compose profile, and what makes it a real service HERE is this lane's
-    # `profiles: !override` promoting it into `runtime`.
-    #
-    # Membership is mandatory, not tidiness. onex-runtime-deploy keeps the same
-    # name in STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES, but
-    # resolve_lane_runtime_services returns early whenever
-    # RUNTIME_BUILD_SERVICES_OVERRIDE is set -- and this script ALWAYS sets it.
-    # So that array is unreachable on the governed path and THIS array is the
-    # whole restart set. OMN-18114 landed the carrier everywhere except here,
-    # which left it declared, censused as critical drift, and never running:
-    # the lane census read `container_absent` on the surface the
-    # `stability-proven` premise of every live prod grant resolves from.
-    #
-    # It builds from docker/Dockerfile.runtime -- the same image as the four
-    # core services -- so the open OMN-14262 BUILD_SOURCE selector mismatch
-    # that scopes this array does not reach it.
+    # OMN-18114 -- the tenant-projection profile CARRIER: declared in
+    # docker/docker-compose.infra.yml behind the inert `profile-carrier-optin` profile,
+    # promoted into `runtime` by this lane's `profiles: !override`. Membership is
+    # mandatory: onex-runtime-deploy's STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES is
+    # unreachable here (resolve_lane_runtime_services returns early whenever
+    # RUNTIME_BUILD_SERVICES_OVERRIDE is set, and this script always sets it), so THIS
+    # array is the whole restart set. Left out, it is declared, censused as critical
+    # drift and never running. Builds from docker/Dockerfile.runtime (not OMN-14262).
     tenant-projection-writer
 )
-# OMN-18061: the ROLLBACK set is the DEPLOYED set, not the core four.
-#
-# The refresh builds and recreates all ten REFRESH_BUILD_SERVICES, but the
-# preflight anchor, the retag and the recreate all used CORE_SERVICES. A
-# rollback therefore restored four services and left six on the new image --
-# a lane on MIXED revisions that was never built, tested or proven in that
-# combination. Measured twice: attempt 2 (2026-09-08T17:41Z) and attempt 3
-# (2026-09-09T00:06Z), which ended with four core services on 2ea74bc4 and six
-# projection writers on 915a1044.
-#
-# CORE_SERVICES stays the narrow four: it drives the health gate, the pre-image
-# census and CORE_CONTAINERS, and verify_stability_refresh.py carries its own
-# CORE_SERVICE_NAMES matched to it. Widening the VERIFICATION surface is a
-# separate change with its own live proof. What must not stay narrow is the
-# set a DESTRUCTIVE operation touches: a rollback narrower than its deploy is
-# not a rollback.
-# OMN-23363: the two SASL one-shots (the +2 after CORE_SERVICES) run a pinned upstream
-# image with no :latest to anchor (a missing anchor refuses every rollback); the flip is in the broker.
+# OMN-18061: the ROLLBACK set is the DEPLOYED set, not the core four. The refresh builds
+# and recreates every REFRESH_BUILD_SERVICES member, but the preflight anchor, the retag and
+# the recreate once used CORE_SERVICES only, so a rollback restored four services and left
+# the projection writers on the new image (attempts 2 and 3, 2026-09-08/09: core on
+# 2ea74bc4, writers on 915a1044) -- a mixed lane nothing had built, tested or proven.
+# CORE_SERVICES stays narrow for the health gate, census and CORE_CONTAINERS; a rollback
+# narrower than its deploy is not a rollback.
+# OMN-23363: the two SASL one-shots (the +2 after CORE_SERVICES) run a pinned upstream image with no :latest to anchor.
 readonly ROLLBACK_SERVICES=("${CORE_SERVICES[@]}" "${REFRESH_BUILD_SERVICES[@]:${#CORE_SERVICES[@]}+2}")
 # Prefix of the kernel's folded-roles log line in src/omnibase_infra/runtime/service_kernel.py, pinned by tests/unit/runtime/auto_wiring/test_folded_roles_log_marker_omn21288.py.
 readonly FOLDED_ROLES_LOG_MARKER="Auto-wiring folded roles"
@@ -410,10 +378,7 @@ done
 
 # --- preconditions -----------------------------------------------------------
 OMNI_HOME="${OMNI_HOME:-}"
-if [[ -z "${OMNI_HOME}" ]]; then
-    err "OMNI_HOME must be set (the ambient clones under it are the deploy source)."
-    exit 64
-fi
+[[ -n "${OMNI_HOME}" ]] || { err "OMNI_HOME must be set (the ambient clones under it are the deploy source)."; exit 64; }
 
 # Safety: refuse to run if the operator env has repointed the compose project
 # at a non-stability-test target (e.g. a sourced prod/judge env file). This
@@ -434,14 +399,8 @@ for cmd in docker git curl jq; do
 done
 
 resolve_runtime_deploy
-if ! command -v "${DEPLOY_RUNTIME}" >/dev/null 2>&1; then
-    err "onex-runtime-deploy not found; looked in: ${DEPLOY_RUNTIME_TRIED}"
-    exit 64
-fi
-if [[ ! -f "${VERIFY_SCRIPT}" ]]; then
-    err "verify_stability_refresh.py not found at ${VERIFY_SCRIPT}"
-    exit 64
-fi
+command -v "${DEPLOY_RUNTIME}" >/dev/null 2>&1 || { err "onex-runtime-deploy not found; looked in: ${DEPLOY_RUNTIME_TRIED}"; exit 64; }
+[[ -f "${VERIFY_SCRIPT}" ]] || { err "verify_stability_refresh.py not found at ${VERIFY_SCRIPT}"; exit 64; }
 if [[ ! -f "${DECISION_SCRIPT}" ]]; then
     # Fail here rather than fall back to "roll back on any FAIL": the fallback
     # IS the defect this script's decision module removes (OMN-18061).
@@ -570,20 +529,9 @@ log "mode            : ${MODE}"
 # =============================================================================
 ATTRIBUTION_PREFLIGHT="${REPO_ROOT}/scripts/preflight_lane_deploy_attribution.py"
 ATTRIBUTION_RECORD_JSON="null"
-if [[ ! -f "${ATTRIBUTION_PREFLIGHT}" ]]; then
-    err "lane-deploy attribution preflight not found: ${ATTRIBUTION_PREFLIGHT}"
-    err "  Refusing to refresh ${LANE} with no attribution mechanism (OMN-15218)."
-    exit 64
-fi
-ATTRIBUTION_ARGS=(
-    --lane "${LANE}"
-    --compose-project "${COMPOSE_PROJECT}"
-    --source "refresh_stability_lane.sh"
-    --invoking-command "refresh_stability_lane.sh --ref ${REF} (mode=${MODE})"
-)
-if [[ "${MODE}" != "execute" ]]; then
-    ATTRIBUTION_ARGS+=(--check-only)
-fi
+[[ -f "${ATTRIBUTION_PREFLIGHT}" ]] || { err "lane-deploy attribution preflight not found: ${ATTRIBUTION_PREFLIGHT}"; err "  Refusing to refresh ${LANE} with no attribution mechanism (OMN-15218)."; exit 64; }
+ATTRIBUTION_ARGS=(--lane "${LANE}" --compose-project "${COMPOSE_PROJECT}" --source "refresh_stability_lane.sh" --invoking-command "refresh_stability_lane.sh --ref ${REF} (mode=${MODE})")
+[[ "${MODE}" == "execute" ]] || ATTRIBUTION_ARGS+=(--check-only)
 ATTRIBUTION_EXIT=0
 ATTRIBUTION_RECORD_JSON="$(run_python "${ATTRIBUTION_PREFLIGHT}" "${ATTRIBUTION_ARGS[@]}")" || ATTRIBUTION_EXIT=$?
 if [[ "${ATTRIBUTION_EXIT}" -ne 0 ]]; then
@@ -591,9 +539,7 @@ if [[ "${ATTRIBUTION_EXIT}" -ne 0 ]]; then
     err "  Nothing was tagged, checked out, built, or restarted."
     exit 64
 fi
-if ! jq -e . >/dev/null 2>&1 <<<"${ATTRIBUTION_RECORD_JSON}"; then
-    ATTRIBUTION_RECORD_JSON="null"
-fi
+jq -e . >/dev/null 2>&1 <<<"${ATTRIBUTION_RECORD_JSON}" || ATTRIBUTION_RECORD_JSON="null"
 
 if [[ "${MODE}" != "execute" ]]; then
     log "dry-run: no fetch/checkout/build/restart performed. Re-run with --execute."
@@ -626,10 +572,7 @@ declare -A PRE_CONTAINER_STATUS
 for svc in "${CORE_SERVICES[@]}"; do
     container="${CORE_CONTAINERS[${svc}]}"
     image_id="$(docker inspect "${container}" --format '{{.Image}}' 2>/dev/null || true)"
-    if [[ -z "${image_id}" ]]; then
-        err "Could not resolve running image ID for ${container} (${svc}). Is the lane up?"
-        exit 64
-    fi
+    [[ -n "${image_id}" ]] || { err "Could not resolve running image ID for ${container} (${svc}). Is the lane up?"; exit 64; }
     PRE_IMAGE_IDS["${svc}"]="${image_id}"
     PRE_CONTAINER_STATUS["${svc}"]="$(container_status "${container}")"
     log "  ${svc} (${container}): pre_image_id=${image_id} pre_status=${PRE_CONTAINER_STATUS[${svc}]}"
@@ -642,10 +585,7 @@ log "  current org.opencontainers.image.revision=${OLD_INFRA_REVISION:-<none>}"
 declare -A PRIOR_REFS
 for repo in "${ALL_TRACKED_REPOS[@]}"; do
     clone="${OMNI_HOME}/${repo}"
-    if [[ ! -d "${clone}/.git" ]]; then
-        err "Expected clone not found: ${clone}"
-        exit 64
-    fi
+    [[ -d "${clone}/.git" ]] || { err "Expected clone not found: ${clone}"; exit 64; }
     PRIOR_REFS["${repo}"]="$(git_clone "${clone}" rev-parse HEAD)"
     log "  ${repo} prior HEAD: ${PRIOR_REFS[${repo}]:0:12}"
 done
@@ -707,8 +647,18 @@ declare -a LANE_COMPOSE_FILE_ARGS
 resolve_compose_file_args LANE_COMPOSE_FILE_ARGS "${INFRA_CLONE}" "${COMPOSE_PROJECT}"
 git_clone "${INFRA_CLONE}" fetch origin --prune
 RESOLVED_REF_SHA="$(git_clone "${INFRA_CLONE}" rev-parse "${REF}^{commit}")"
-# OMN-24908: a ref whose overlay has no SASL flip starts PLAINTEXT clients: un-flip the broker first, deploy it without the flip one-shots.
-PRE_SASL_REF=false; git_clone "${INFRA_CLONE}" grep -q 'lane-redpanda-sasl-enable' "${RESOLVED_REF_SHA}" -- "${LANE_COMPOSE_FILE#"${INFRA_CLONE}"/}" || PRE_SASL_REF=true; [[ "${PRE_SASL_REF}" == true && -n "${LANE_BROKER_AUTH_ENV_FILE:-}" ]] && { docker run --rm --network "${COMPOSE_PROJECT}-network" --env-file "${LANE_BROKER_AUTH_ENV_FILE}" --entrypoint /bin/sh redpandadata/redpanda:v24.2.7 -c 'rpk cluster config set enable_sasl false -X admin.hosts=redpanda:9644 && rpk cluster config get enable_sasl -X admin.hosts=redpanda:9644 | grep -qx false' || { err "SASL_UNFLIP_FAILED: ${REF} predates the SASL flip and the broker could not be un-flipped; nothing was built."; exit 65; }; }
+# OMN-24964: no SASL flip in the ref's overlay (a CLEAN git grep no-match, exit 1) means PLAINTEXT clients; a git failure stops here.
+PRE_SASL_REF=false GREP_RC=0
+git_clone "${INFRA_CLONE}" grep -q 'lane-redpanda-sasl-enable' "${RESOLVED_REF_SHA}" -- "${LANE_COMPOSE_FILE#"${INFRA_CLONE}"/}" || GREP_RC=$?
+case "${GREP_RC}" in 0) ;; 1) PRE_SASL_REF=true ;; *) err "SASL_REF_UNREADABLE: git grep exit ${GREP_RC} reading the overlay of ${REF}; nothing was changed."; exit 65 ;; esac
+# enable_sasl on the lane broker, as the lane's own principal: `broker_sasl get` prints it, `broker_sasl true|false` sets it and reads it back.
+broker_sasl() {
+    local rpk='rpk cluster config' adm='-X admin.hosts=redpanda:9644' cmd
+    [[ "$1" == get ]] && cmd="${rpk} get enable_sasl ${adm}" || cmd="${rpk} set enable_sasl $1 ${adm} && ${rpk} get enable_sasl ${adm} | grep -qx $1"
+    docker run --rm --network "${COMPOSE_PROJECT}-network" --env-file "${LANE_BROKER_AUTH_ENV_FILE}" --entrypoint /bin/sh redpandadata/redpanda:v24.2.7 -c "${cmd}"
+}
+# Put the broker back as this refresh found it (a no-op with no auth file or an unreadable prior state).
+restore_broker_sasl() { case "${BROKER_SASL_BEFORE:-}" in true | false) broker_sasl "${BROKER_SASL_BEFORE}" || err "SASL_RESTORE_FAILED: enable_sasl is not back to ${BROKER_SASL_BEFORE}" ;; esac; }
 git_clone "${INFRA_CLONE}" checkout --force --detach "${RESOLVED_REF_SHA}"
 NEW_INFRA_SHA="$(git_clone "${INFRA_CLONE}" rev-parse HEAD)"
 NEW_INFRA_SHA_SHORT="$(git_clone "${INFRA_CLONE}" rev-parse --short=12 HEAD)"
@@ -718,6 +668,14 @@ log "  omnibase_infra now at ${NEW_INFRA_SHA_SHORT} (full: ${NEW_INFRA_SHA})"
 # 4. Build + restart (scoped to the 4 core services) via onex-runtime-deploy
 # =============================================================================
 log "=== Build + restart (scoped to: ${REFRESH_BUILD_SERVICES[*]}) ==="
+BROKER_SASL_BEFORE=""
+if [[ -n "${LANE_BROKER_AUTH_ENV_FILE:-}" ]]; then
+    BROKER_SASL_BEFORE="$(broker_sasl get)" || BROKER_SASL_BEFORE=unknown
+    if [[ "${PRE_SASL_REF}" == true ]] && ! broker_sasl false; then
+        err "SASL_UNFLIP_FAILED: ${REF} predates the SASL flip and the broker could not be un-flipped; nothing was built."
+        exit 65
+    fi
+fi
 DEPLOY_EXIT=0
 (
     export OMNI_HOME
@@ -729,11 +687,13 @@ DEPLOY_EXIT=0
     # tag (OMN-19998) on this lane.
     export DEPLOY_SIBLING_REFS
     export RUNTIME_BUILD_SERVICES_OVERRIDE="${REFRESH_BUILD_SERVICES[*]}"
-    export LANE_BROKER_AUTH_ENV_FILE="${LANE_BROKER_AUTH_ENV_FILE:-}"; [[ "${PRE_SASL_REF}" == true ]] && RUNTIME_BUILD_SERVICES_OVERRIDE="${ROLLBACK_SERVICES[*]}"
+    [[ -z "${LANE_BROKER_AUTH_ENV_FILE:-}" ]] || export LANE_BROKER_AUTH_ENV_FILE
+    [[ "${PRE_SASL_REF}" != true ]] || RUNTIME_BUILD_SERVICES_OVERRIDE="${ROLLBACK_SERVICES[*]}"
     "${DEPLOY_RUNTIME}" --repository-root "${REPO_ROOT}" --execute --force --restart
 ) || DEPLOY_EXIT=$?
 
 if [[ "${DEPLOY_EXIT}" -ne 0 ]]; then
+    restore_broker_sasl
     # OMN-17289: this used to log "proceeding to health-gate anyway" and carry
     # on, on the theory that the health-gate below is the source of truth. It
     # is not, for this failure: a failed deploy means the lane is running some
@@ -953,6 +913,11 @@ elif [[ "${#MISSING_ROLLBACK_ANCHORS[@]}" -gt 0 ]]; then
 else
     log "=== FAILURE: lane is not healthy (${DECISION_UNHEALTHY:-unknown}) -- triggering rollback ==="
     ROLLBACK_TRIGGERED=true
+    # OMN-24964: the rolled-back clients are recreated from THIS overlay. A refresh that flipped a PLAINTEXT broker is rolled
+    # back to PLAINTEXT (broker un-flipped, auth file withheld from the recreate below), not onto the flip it was rolled back from.
+    if [[ "${BROKER_SASL_BEFORE}" == false && "${PRE_SASL_REF}" == false ]]; then
+        if broker_sasl false; then export LANE_BROKER_AUTH_ENV_FILE=/dev/null; else err "SASL_UNFLIP_FAILED: the rollback left the broker on SASL, so its clients keep SASL settings."; fi
+    fi
 
     # OMN-18061: retag the FULL deployed set. Rolling back four of ten is what
     # left attempt 3 on four core services at 2ea74bc4 and six projection

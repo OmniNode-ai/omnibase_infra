@@ -25,7 +25,7 @@ requirements:
           AC4: the AUTHED fixture in tests/unit/docker/test_stability_sasl_omn23363.py carries RPK_USER and RPK_PASS, so deleting `env -u RPK_USER -u RPK_PASS` in the flip one-shot fails a test -- falsifier: `uv run pytest tests/unit/docker/test_stability_sasl_omn23363.py -q` still passes with that deletion
       - id: AC5
         statement: >-
-          AC5: the client derivation reads the lane's real -f list, covers clients that use ${KAFKA_BOOTSTRAP_SERVERS}, reads environment on extends targets and includes redpanda, and asserts that broker-profile.yml sets RPK_USER and RPK_PASS in environment and that the redpanda healthcheck uses the Kafka API -- falsifier: `uv run pytest tests/unit/docker/test_stability_sasl_omn23363.py -q` still passes with a client added in an extends target that has no SASL settings
+          AC5: the client derivation reads the lane's real -f list, covers clients that use ${KAFKA_BOOTSTRAP_SERVERS}, reads environment on extends targets and includes redpanda, and asserts that broker-profile.yml sets no auth key (RPK_USER and RPK_PASS included) in environment, because the host auth file supplies them, and that the redpanda healthcheck stays on the admin API and does not use the Kafka API -- falsifier: `uv run pytest tests/unit/docker/test_stability_sasl_omn23363.py -q` still passes with a client added in an extends target that has no SASL settings
       - id: AC6
         statement: >-
           AC6: contracts/OMN-23363.yaml restores AC2 bound to the lab readback of enable_sasl on h051, and OMN-23363 stays open until h051 reads true -- falsifier: `grep -c 'AC2' contracts/OMN-23363.yaml` prints 0
@@ -116,7 +116,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24908-ac8-unflip-step
     description: >-
-      The refresh script reads the target ref's overlay before checking it out; a ref without the flip un-flips the broker (read back as false), stops the refresh when it cannot, and is deployed without the flip one-shots; the rollback-set test keeps its original equality assertion.
+      The refresh script reads the target ref's overlay before checking it out and treats only a clean git grep no-match as a ref without the flip (a git failure stops the refresh, OMN-24964); it un-flips the broker (read back as false) just before the deploy, stops the refresh when it cannot, re-flips on a failed deploy and deploys that ref without the flip one-shots. The rollback-set test no longer edits the build set: it asserts that the deployed set minus the rollback set is exactly the two named SASL one-shots (the earlier `build_set -= sasl_one_shots` loosened the equality, so it is replaced by this exact difference), and the second probe fails on ANY line removed from the test file, not only a removed assert.
     source: manual
     binds_ac: [AC8]
     checks:
@@ -124,7 +124,7 @@ dod_evidence:
         check_value: "uv run --frozen pytest tests/scripts/test_stability_lane_rollback_omn18061.py -k \"flip or un_flip\" -q -n 0 --no-cov -p no:cacheprovider"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: "! git diff 418b2cf0cd5a22d171021f78c56895e054aaa207 HEAD -- tests/scripts/test_stability_lane_rollback_omn18061.py | grep -E '^-[[:space:]]*assert '"
+        check_value: "! git diff 418b2cf0cd5a22d171021f78c56895e054aaa207 HEAD -- tests/scripts/test_stability_lane_rollback_omn18061.py | grep -vE '^--- ' | grep -E '^-[[:space:]]*[^[:space:]#]'"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24908-ac9-lab-suites
     description: >-
@@ -143,5 +143,5 @@ dod_evidence:
     binds_ac: [AC8]
     checks:
       - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/refresh_stability_lane.sh?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cE 'SASL_UNFLIP_FAILED|export LANE_BROKER_AUTH_ENV_FILE=' | grep -qx 2"
+        check_value: "f=$(gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/refresh_stability_lane.sh?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d) && grep -q 'SASL_UNFLIP_FAILED' <<<\"$f\" && grep -q 'SASL_REF_UNREADABLE' <<<\"$f\" && grep -q 'restore_broker_sasl' <<<\"$f\" && grep -qx '    \\[\\[ -z \"${LANE_BROKER_AUTH_ENV_FILE:-}\" \\]\\] || export LANE_BROKER_AUTH_ENV_FILE' <<<\"$f\""
         cwd: ${OMNI_HOME}/omnibase_infra

@@ -33,12 +33,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_BUILD = REPO_ROOT / "scripts" / "runtime_build"
@@ -59,6 +64,8 @@ from lane_rollback_decision import (
     RESULT_ROLLBACK_REQUIRED,
     decide_lane_rollback,
 )
+
+from tests.unit.docker.test_stability_sasl_omn23363 import _proof_lane_overlay
 
 #: The dimensions the gates that wrote the 2026-09-08 receipts did not yet
 #: emit. Supplied here EXPLICITLY rather than defaulted inside the loader: the
@@ -589,14 +596,15 @@ def test_the_rollback_set_is_the_deployed_set() -> None:
     # OMN-23363: the two SASL one-shots run a pinned upstream image, so there is no
     # <project>-<service>:latest image to anchor or retag, and the flip they assert
     # lives in the broker. They are the ONLY deployed services a rollback does not
-    # touch: the exemption is pinned by name below, and every other deployed service
-    # must still equal the rollback set exactly, as the assertion below has always said.
+    # touch. The build set is not edited to make room for them: the difference
+    # between the deployed set and the rollback set must BE exactly those two names,
+    # so a third service dropped from the rollback fails here, and so does one of the
+    # two coming back without an image to anchor.
     sasl_one_shots = {"lane-redpanda-scram-user", "lane-redpanda-sasl-enable"}
-    assert sasl_one_shots <= build_set
-    build_set -= sasl_one_shots
-    assert rollback_set == build_set, (
-        f"rollback set {sorted(rollback_set)} != deployed set {sorted(build_set)}"
+    assert build_set - rollback_set == sasl_one_shots, (
+        f"deployed services a rollback skips: {sorted(build_set - rollback_set)}"
     )
+    assert rollback_set <= build_set, sorted(rollback_set - build_set)
     assert rollback_set > core_set, (
         "a rollback set equal to CORE_SERVICES is the mixed-revision defect"
     )
@@ -793,108 +801,404 @@ def test_dlq_saturation_annotation_says_so_when_no_group_can_be_attributed() -> 
 
 
 # ---------------------------------------------------------------------------
-# 5. A ref that predates the SASL flip cannot strand PLAINTEXT clients (OMN-24908)
+# 5. The broker's SASL state follows the ref the refresh deploys (OMN-24964)
 # ---------------------------------------------------------------------------
+#
+# The script's own text is run, not mirrored: the read of the target ref's overlay and
+# the deploy step are cut out of ``refresh_stability_lane.sh`` and run in bash against a
+# REAL git repository holding one ref with the flip and one without, with the script's
+# own ``git_clone``, the project name read from ``docker/runtime-policy.env`` the way the
+# script reads it, and a stub ``docker`` that keeps the broker's ``enable_sasl`` in a
+# file, so the state the broker is left in is what the tests assert.
 
-#: The un-flip step is the one script line that starts with the PRE_SASL_REF read.
-_UNFLIP_START = "PRE_SASL_REF=false;"
-_OVERLAY_WITH_FLIP = "services:\n  lane-redpanda-sasl-enable:\n    restart: no\n"
-_OVERLAY_WITHOUT_FLIP = "services:\n  redpanda:\n    restart: no\n"
+LANE_OVERLAY = _proof_lane_overlay()
+OVERLAY_PATH = LANE_OVERLAY.relative_to(REPO_ROOT).as_posix()
+_FLIP_ONE_SHOT = "lane-redpanda-sasl-enable"
 _AUTH_FILE = "/lane/broker-auth.env"
 
 
-def _unflip_block() -> str:
-    lines = REFRESH_STABILITY.read_text().splitlines()
-    starts = [line for line in lines if line.startswith(_UNFLIP_START)]
-    assert len(starts) == 1, starts
-    return starts[0]
+def _script_text() -> str:
+    return REFRESH_STABILITY.read_text()
 
 
-def _run_unflip(
-    tmp_path: Path, overlay: str, *, auth_file: str | None, docker_exit: int = 0
+def _script_slice(start_prefix: str, end_prefix: str, *, include_end: bool) -> str:
+    """The script's lines from the one starting ``start_prefix`` to ``end_prefix``."""
+    lines = _script_text().splitlines()
+    (first,) = [i for i, ln in enumerate(lines) if ln.startswith(start_prefix)]
+    last = next(
+        i for i in range(first + 1, len(lines)) if lines[i].startswith(end_prefix)
+    )
+    return "\n".join(lines[first : last + (1 if include_end else 0)])
+
+
+def _git_clone_function() -> str:
+    return _script_slice("git_clone() {", "}", include_end=True)
+
+
+def _read_block() -> str:
+    """The script's read of the target ref's overlay, ahead of the checkout."""
+    return _script_slice(
+        "PRE_SASL_REF=false", 'git_clone "${INFRA_CLONE}" checkout', include_end=False
+    )
+
+
+def _deploy_step() -> str:
+    """From the build-and-restart log line through the deploy-failure guard's ``fi``."""
+    lines = _script_text().splitlines()
+    first = next(
+        i for i, ln in enumerate(lines) if ln.startswith('log "=== Build + restart')
+    )
+    guard = next(
+        i
+        for i in range(first, len(lines))
+        if lines[i].startswith('if [[ "${DEPLOY_EXIT}" -ne 0 ]]')
+    )
+    end = next(i for i in range(guard, len(lines)) if lines[i] == "fi")
+    return "\n".join(lines[first : end + 1])
+
+
+def _make_two_ref_repo(root: Path) -> Path:
+    """A real clone with ``old`` (overlay without the flip) and ``new`` (with it)."""
+    repo = root / "clone"
+    (repo / "docker").mkdir(parents=True)
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            env=scrub_git_location_env(os.environ),
+        )
+
+    git("init", "-q", "-b", "old")
+    overlay = repo / OVERLAY_PATH
+    overlay.write_text("services:\n  redpanda:\n    restart: no\n")
+    git("add", OVERLAY_PATH)
+    git("commit", "-q", "-m", "old")
+    git("checkout", "-q", "-b", "new")
+    overlay.write_text(
+        f"services:\n  redpanda:\n    restart: no\n  {_FLIP_ONE_SHOT}:\n    restart: no\n"
+    )
+    git("commit", "-q", "-am", "new")
+    return repo
+
+
+_DOCKER_STUB = r"""
+docker() {
+    echo "$*" >> "$CALLS"
+    [[ "$1" == run ]] || return 0
+    local cmd="${@: -1}"
+    if [[ "$cmd" == *"set enable_sasl"* ]]; then
+        local want; want="$(sed -E 's/.*set enable_sasl ([a-z]+) .*/\1/' <<<"$cmd")"
+        [[ "$want" != "${FAIL_SET:-none}" ]] || return 1
+        echo "$want" > "$STATE"
+    else
+        cat "$STATE"
+    fi
+}
+"""
+
+
+def _run_refresh_steps(
+    tmp_path: Path,
+    *,
+    ref: str,
+    broker_before: str = "true",
+    deploy_exit: int = 0,
+    deploy_sets: str | None = None,
+    fail_set: str | None = None,
+    auth_file: str | None = _AUTH_FILE,
+    sha: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
-    """Run the script's own un-flip step with a stub ``docker`` and a stub ``git grep``.
-
-    ``git_clone <clone> grep -q <pattern> <sha> -- <path>`` is answered from the overlay
-    text the target ref is said to hold.
-    """
-    overlay_file = tmp_path / "overlay.yml"
-    overlay_file.write_text(overlay)
-    calls = tmp_path / "docker.calls"
+    """Run the script's ref read and deploy step; return (proc, docker calls, final enable_sasl)."""
+    repo = _make_two_ref_repo(tmp_path)
+    resolved = (
+        sha
+        or subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", ref],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=scrub_git_location_env(os.environ),
+        ).stdout.strip()
+    )
+    state, calls = tmp_path / "enable_sasl", tmp_path / "docker.calls"
+    state.write_text(broker_before + "\n")
+    deploy = tmp_path / "deploy-stub"
+    deploy.write_text(
+        "#!/bin/sh\n"
+        f'echo "state=$(cat {state}) scope=$RUNTIME_BUILD_SERVICES_OVERRIDE" > {tmp_path}/deploy.seen\n'
+        + (f"echo {deploy_sets} > {state}\n" if deploy_sets else "")
+        + f"exit {deploy_exit}\n"
+    )
+    deploy.chmod(0o755)
     program = "\n".join(
         [
             "set -euo pipefail",
+            f'source "{REPO_ROOT}/docker/runtime-policy.env"',
+            'readonly COMPOSE_PROJECT="${STABILITY_TEST_COMPOSE_PROJECT}"',
+            'log() { echo "$*"; }',
             'err() { echo "$*" >&2; }',
-            f'git_clone() {{ grep -q "$4" "{overlay_file}"; }}',
-            f'docker() {{ echo "$*" >> "{calls}"; return {docker_exit}; }}',
-            "INFRA_CLONE=/clone RESOLVED_REF_SHA=abc REF=old",
-            "LANE_COMPOSE_FILE=/clone/docker/overlay.yml",
-            "COMPOSE_PROJECT=omnibase-infra-lane",
+            _git_clone_function(),
+            _DOCKER_STUB,
+            f'CALLS="{calls}" STATE="{state}" FAIL_SET="{fail_set or "none"}"',
+            f'INFRA_CLONE="{repo}" REF={ref} RESOLVED_REF_SHA={resolved}',
+            f'LANE_COMPOSE_FILE="${{INFRA_CLONE}}/{OVERLAY_PATH}"',
             f'LANE_BROKER_AUTH_ENV_FILE="{auth_file}"' if auth_file else ":",
-            _unflip_block(),
+            "readonly CORE_SERVICES=(omninode-runtime)",
+            'readonly REFRESH_BUILD_SERVICES=("${CORE_SERVICES[@]}" lane-redpanda-scram-user lane-redpanda-sasl-enable writer)',
+            'readonly ROLLBACK_SERVICES=("${CORE_SERVICES[@]}" writer)',
+            f'DEPLOY_RUNTIME="{deploy}" REPO_ROOT=/repo OMNI_HOME=/omni',
+            "DEPLOY_SIBLING_REFS= RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS=5 NEW_INFRA_SHA_SHORT=abc",
+            "OMNIBASE_INFRA_COMPOSE_PROJECT=x",
+            _read_block(),
+            _deploy_step(),
             'echo "PRE_SASL_REF=${PRE_SASL_REF}"',
         ]
     )
-    env = {k: v for k, v in os.environ.items() if k != "LANE_BROKER_AUTH_ENV_FILE"}
+    env = scrub_git_location_env(
+        {k: v for k, v in os.environ.items() if k != "LANE_BROKER_AUTH_ENV_FILE"}
+    )
     proc = subprocess.run(
         ["bash", "-c", program],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=60,
         check=False,
         env=env,
     )
     recorded = calls.read_text().splitlines() if calls.exists() else []
-    return proc, recorded, proc.stdout
+    return proc, recorded, state.read_text().strip()
+
+
+def _sets(calls: list[str]) -> list[str]:
+    return [c for c in calls if "set enable_sasl" in c]
 
 
 @pytest.mark.unit
 def test_a_ref_with_the_flip_leaves_the_broker_alone(tmp_path: Path) -> None:
-    proc, calls, out = _run_unflip(tmp_path, _OVERLAY_WITH_FLIP, auth_file=_AUTH_FILE)
+    proc, calls, final = _run_refresh_steps(tmp_path, ref="new", broker_before="true")
     assert proc.returncode == 0, proc.stderr
-    assert calls == []
-    assert "PRE_SASL_REF=false" in out
+    assert "PRE_SASL_REF=false" in proc.stdout
+    assert _sets(calls) == []
+    assert final == "true"
+    assert "lane-redpanda-sasl-enable" in (tmp_path / "deploy.seen").read_text()
 
 
 @pytest.mark.unit
-def test_a_ref_before_the_flip_un_flips_the_broker_its_clients_would_meet(
+def test_unflip_a_ref_before_the_flip_un_flips_the_broker_just_before_the_deploy(
     tmp_path: Path,
 ) -> None:
-    """The clients of a pre-SASL ref start PLAINTEXT; the broker must stop requiring SASL.
+    """The deploy sees ``enable_sasl`` false, and the one-shots are not in its scope.
 
-    Red control: with the step removed the broker keeps ``enable_sasl`` true while the
-    clients of that ref carry no SASL settings, and nothing in this file noticed.
+    Red at 2604e98f6da8: the un-flip ran, but before the checkout and the build, so a
+    failure there left the lane's SASL clients facing a PLAINTEXT broker.
     """
-    proc, calls, out = _run_unflip(
-        tmp_path, _OVERLAY_WITHOUT_FLIP, auth_file=_AUTH_FILE
-    )
+    proc, calls, final = _run_refresh_steps(tmp_path, ref="old", broker_before="true")
     assert proc.returncode == 0, proc.stderr
-    assert "PRE_SASL_REF=true" in out
-    assert len(calls) == 1, calls
-    call = calls[0]
-    assert "enable_sasl false" in call
+    assert "PRE_SASL_REF=true" in proc.stdout
+    seen = (tmp_path / "deploy.seen").read_text()
+    assert seen.startswith("state=false "), seen
+    assert _FLIP_ONE_SHOT not in seen
+    assert final == "false"
+    (call,) = _sets(calls)
     assert f"--env-file {_AUTH_FILE}" in call
-    assert "--network omnibase-infra-lane-network" in call
     assert "grep -qx false" in call, "the un-flip must read enable_sasl back as false"
 
 
 @pytest.mark.unit
-def test_a_ref_before_the_flip_on_a_host_that_never_flipped_touches_no_broker(
-    tmp_path: Path,
-) -> None:
-    proc, calls, out = _run_unflip(tmp_path, _OVERLAY_WITHOUT_FLIP, auth_file=None)
+def test_unflip_the_network_is_the_one_the_overlay_names(tmp_path: Path) -> None:
+    """``<project>-network`` is derived in the script; the overlay's network carries that name."""
+    proc, calls, _ = _run_refresh_steps(tmp_path, ref="old", broker_before="true")
     assert proc.returncode == 0, proc.stderr
-    assert calls == []
-    assert "PRE_SASL_REF=true" in out
+    named = re.search(
+        r"^networks:\n  omnibase-infra-network:\n    name: (\S+)$",
+        LANE_OVERLAY.read_text(),
+        re.MULTILINE,
+    )
+    assert named is not None, "the overlay names no omnibase-infra-network"
+    network = named.group(1)
+    assert all(f"--network {network} " in call for call in _sets(calls)), (
+        network,
+        calls,
+    )
 
 
 @pytest.mark.unit
-def test_a_failed_un_flip_stops_the_refresh_before_anything_is_built(
+def test_unflip_a_git_grep_failure_is_not_a_pre_sasl_ref(tmp_path: Path) -> None:
+    """A ref git cannot read is an error that stops the refresh, never a licence to un-flip.
+
+    Red at 2604e98f6da8: any ``git grep`` failure read as "no flip in this ref" and turned
+    auth off on a broker published on the LAN.
+    """
+    proc, calls, final = _run_refresh_steps(
+        tmp_path, ref="old", broker_before="true", sha="0" * 40
+    )
+    assert proc.returncode == 65, (proc.stdout, proc.stderr)
+    assert "SASL_REF_UNREADABLE" in proc.stderr
+    assert calls == []
+    assert final == "true"
+    assert not (tmp_path / "deploy.seen").exists()
+
+
+@pytest.mark.unit
+def test_unflip_a_ref_before_the_flip_on_a_host_with_no_auth_file_touches_no_broker(
     tmp_path: Path,
 ) -> None:
-    proc, _, out = _run_unflip(
-        tmp_path, _OVERLAY_WITHOUT_FLIP, auth_file=_AUTH_FILE, docker_exit=1
+    proc, calls, _ = _run_refresh_steps(tmp_path, ref="old", auth_file=None)
+    assert proc.returncode == 0, proc.stderr
+    assert calls == []
+
+
+@pytest.mark.unit
+def test_unflip_a_failed_un_flip_stops_the_refresh_before_anything_is_built(
+    tmp_path: Path,
+) -> None:
+    proc, _, final = _run_refresh_steps(
+        tmp_path, ref="old", broker_before="true", fail_set="false"
     )
     assert proc.returncode == 65, (proc.stdout, proc.stderr)
     assert "SASL_UNFLIP_FAILED" in proc.stderr
-    assert "PRE_SASL_REF=" not in out
+    assert not (tmp_path / "deploy.seen").exists()
+    assert final == "true"
+
+
+@pytest.mark.unit
+def test_reflip_a_deploy_that_fails_after_the_un_flip_puts_the_flip_back(
+    tmp_path: Path,
+) -> None:
+    """Red at 2604e98f6da8: nothing re-flipped, so the SASL clients still running met a
+    PLAINTEXT broker for as long as it took someone to notice."""
+    proc, calls, final = _run_refresh_steps(
+        tmp_path, ref="old", broker_before="true", deploy_exit=3
+    )
+    assert proc.returncode == 3, (proc.stdout, proc.stderr)
+    assert [c.split("set enable_sasl ")[1].split()[0] for c in _sets(calls)] == [
+        "false",
+        "true",
+    ]
+    assert final == "true"
+
+
+@pytest.mark.unit
+def test_reflip_a_broker_that_was_never_flipped_is_not_flipped_by_a_failed_deploy(
+    tmp_path: Path,
+) -> None:
+    proc, calls, final = _run_refresh_steps(
+        tmp_path, ref="old", broker_before="false", deploy_exit=3
+    )
+    assert proc.returncode == 3, (proc.stdout, proc.stderr)
+    assert final == "false"
+    assert all("set enable_sasl true" not in c for c in calls)
+
+
+@pytest.mark.unit
+def test_reflip_a_flip_that_fails_after_enabling_sasl_leaves_the_broker_as_found(
+    tmp_path: Path,
+) -> None:
+    """The flip one-shot sets ``enable_sasl`` true and then fails a later check (an
+    unauthenticated client still reaches a listener): the PLAINTEXT clients that never
+    got recreated must find the broker un-flipped again."""
+    proc, _, final = _run_refresh_steps(
+        tmp_path, ref="new", broker_before="false", deploy_exit=1, deploy_sets="true"
+    )
+    assert proc.returncode == 1, (proc.stdout, proc.stderr)
+    assert final == "false"
+
+
+def _rollback_branch() -> str:
+    """The script's rollback branch, from the trigger to the targeted recreate."""
+    return _script_slice(
+        "    ROLLBACK_TRIGGERED=true",
+        '        "${ROLLBACK_SERVICES[@]}" || ROLLBACK_RECREATE_EXIT=$?',
+        include_end=True,
+    )
+
+
+def _run_rollback(
+    tmp_path: Path,
+    *,
+    broker_before: str,
+    pre_sasl_ref: bool,
+    broker_now: str,
+    fail_set: str | None = None,
+) -> tuple[subprocess.CompletedProcess[str], str, str]:
+    state, calls = tmp_path / "enable_sasl", tmp_path / "docker.calls"
+    state.write_text(broker_now + "\n")
+    recreate = tmp_path / "recreate.argv"
+    program = "\n".join(
+        [
+            "set -euo pipefail",
+            'log() { echo "$*"; }',
+            'err() { echo "$*" >&2; }',
+            _DOCKER_STUB,
+            f'CALLS="{calls}" STATE="{state}" FAIL_SET="{fail_set or "none"}"',
+            "COMPOSE_PROJECT=lane UTC_NOW=t RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS=5 ROLLBACK_TRIGGERED=false",
+            f'LANE_BROKER_AUTH_ENV_FILE="{_AUTH_FILE}"',
+            f"BROKER_SASL_BEFORE={broker_before} PRE_SASL_REF={'true' if pre_sasl_ref else 'false'}",
+            "ROLLBACK_SERVICES=(omninode-runtime writer) LANE_COMPOSE_FILE_ARGS=(-f overlay.yml)",
+            "# the script's rollback recreate goes through compose_up_bounded; record its argv",
+            f'compose_up_bounded() {{ shift; echo "auth=${{LANE_BROKER_AUTH_ENV_FILE-unset}} $*" > "{recreate}"; }}',
+            _script_slice(
+                "broker_sasl() {", "restore_broker_sasl() {", include_end=False
+            ),
+            _rollback_branch(),
+        ]
+    )
+    proc = subprocess.run(
+        ["bash", "-c", program], capture_output=True, text=True, timeout=60, check=False
+    )
+    return (
+        proc,
+        state.read_text().strip(),
+        recreate.read_text() if recreate.exists() else "",
+    )
+
+
+@pytest.mark.unit
+def test_rollback_after_a_failed_first_sasl_refresh_returns_the_lane_to_plaintext(
+    tmp_path: Path,
+) -> None:
+    """The lane was PLAINTEXT, the refresh flipped it, the health gate failed.
+
+    The rolled-back clients are recreated from the SASL overlay the clone now holds, so
+    without this they would come back on SASL settings the lane never had before the
+    refresh. The broker is un-flipped and the recreate runs with no auth file.
+    """
+    proc, final, argv = _run_rollback(
+        tmp_path, broker_before="false", pre_sasl_ref=False, broker_now="true"
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert final == "false"
+    assert argv.startswith("auth=/dev/null docker compose"), argv
+    assert "omninode-runtime writer" in argv
+
+
+@pytest.mark.unit
+def test_rollback_of_a_lane_that_was_already_on_sasl_keeps_the_flip_and_the_auth_file(
+    tmp_path: Path,
+) -> None:
+    proc, final, argv = _run_rollback(
+        tmp_path, broker_before="true", pre_sasl_ref=False, broker_now="true"
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert final == "true"
+    assert argv.startswith(f"auth={_AUTH_FILE} docker compose"), argv
+
+
+@pytest.mark.unit
+def test_rollback_that_cannot_un_flip_keeps_the_auth_file_so_clients_match_the_broker(
+    tmp_path: Path,
+) -> None:
+    proc, final, argv = _run_rollback(
+        tmp_path,
+        broker_before="false",
+        pre_sasl_ref=False,
+        broker_now="true",
+        fail_set="false",
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "SASL_UNFLIP_FAILED" in proc.stderr
+    assert final == "true"
+    assert argv.startswith(f"auth={_AUTH_FILE} docker compose"), argv
