@@ -1,0 +1,93 @@
+schema_version: 1.0.0
+ticket_id: OMN-24695
+title: Fix the blocking findings of the omnibase_infra#6029 review at head 9c2cff86c628 so the deploy job reading chain tests can fail
+summary: Review of omnibase_infra#6029 at head 9c2cff86c628 found the live chain tests could turn red with no defect and green with one. The live tests now read the ledger's archive rolls, check every row in the window with the handler's own failing-step rule, wait while the agent reports the job settling, take the host from CHAIN_CANARY_AGENT_LEDGER_HOST and bound the row's lateness by ONE_TICK_SECONDS. The real append command cannot run in a test process, so AC1 and AC2 of OMN-24674 are amended and recorded as not met for the append half. Tests and the OMN-24674 contract only; nothing under src/ changes and the deploy agent is untouched, so no deploy-scope surface is changed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24695-live-chain-tests-can-fail
+    statement: The deploy job reading chain tests can fail when the path they name is broken and do not fail when it is not.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the induced-failure test runs the real append command (omnimarket.work_ledger_bus.cli append) against a scratch ledger and asserts `appended` plus the row read back, so [OMN-24674](https://linear.app/omninode/issue/OMN-24674) AC1 and AC2 are falsifiable; where that cannot be done, the ticket''s AC1 and AC2 are amended and recorded as not met -- falsifier: uv run pytest tests/integration/chain_canary -q -k "deploy_job_reading and (golden or error)" passes with the append command and fails when the append command is removed'
+      - id: AC2
+        statement: 'AC2: the live error test and the live golden test read the archive rolls as well as the live ledger file and take the failed job from the one the test induces, so a ledger roll cannot turn them red with no defect -- falsifier: uv run pytest tests/integration/chain_canary -q -k "deploy_job_reading and archive_roll" fails when the NOT_WORKING row sits only in a roll file and passes after the fix'
+      - id: AC3
+        statement: 'AC3: the live assertions run over every row in the window and not only the newest, apply the handler''s rule for the failing phase (the first non-success phase, so a lane-lock or host-slot skipped job is a correct row), and wait while last_result.settling is true before the one-tick bound, and the two real rows (7179dcca published 347 s after completion, a7b921db published 2876 s after with failing_step unknown) are reported as live readings or the bound is corrected -- falsifier: uv run pytest tests/integration/chain_canary -q -k "deploy_job_reading and (every_row or skipped_phases or settling)" fails on head 9c2cff86c628 and passes after the fix'
+      - id: AC4
+        statement: 'AC4: the unreachable branch for a job that /health never lists is deleted -- falsifier: uv run pytest tests/integration/chain_canary -q -k deploy_job_reading passes and grep -n "settling" over the golden test file shows the wait and no branch for a job state /health does not list'
+      - id: AC5
+        statement: 'AC5: the host is taken from a variable and not hard-coded to h201, the bound uses ONE_TICK_SECONDS and not the literal 120, and a lab run of the -m kafka live tests is wired with the CHAIN_CANARY\_\* settings -- falsifier: uv run pytest tests/integration/chain_canary -q -k "deploy_job_reading and host_variable" fails on head 9c2cff86c628 and passes after the fix'
+      - id: AC6
+        statement: 'AC6: the new head is commented on omnibase_infra#6029 and the lab runs of the PR''s required suites are recorded, in parts where a whole-suite run times out -- falsifier: onex scm pr-view [OmniNode-ai/omnibase_infra#6029](https://linear.app/omninode/review/omn-24674-add-deploy-agent-job-reading-golden-and-error-chain-tests-13d62a6ab40f) --source bus lists a comment naming the new head sha'
+evidence_requirements:
+  - kind: tests
+    description: The hermetic deploy_job_reading tests, including the live-assertion logic tests, pass at the pushed head; the live-assertion logic tests fail at 9c2cff86c628.
+    command: uv run --frozen pytest tests/integration/chain_canary -q -m "not kafka" -k "deploy_job_reading" -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24695-ac1-append-halves-recorded-not-met
+    description: 'The real append command (omnimarket.work_ledger_bus.cli append) cannot land a row in a scratch ledger from a test process: an in-memory append from a separate process exits 75 pending because no ledger host shares its bus, omnimarket is not installed in this repository''s test environment, and a Kafka append lands on the ledger of record, which the OMN-19513 guard refuses a test. This check passes only while the OMN-24674 contract records AC1 and AC2 as not met for the append half, and the hermetic golden and error tests still pass.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: grep -c 'NOT MET at this head' contracts/OMN-24674.yaml | grep -qx 2
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/chain_canary -q -m "not kafka" -k "deploy_job_reading and (golden or error)" -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24695-ac2-archive-roll
+    description: A NOT_WORKING row that sits only in an archive roll file is read by the shared ledger reader the live golden and error tests use.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/chain_canary -q -m "not kafka" -k "deploy_job_reading and archive_roll" -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24695-ac3-every-row-skipped-settling
+    description: Every row in the window is checked, the handler's own failing-step rule names the first non-success phase for a skipped job, and the wait holds while last_result.settling is true and gives up at its ceiling.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/chain_canary -q -m "not kafka" -k "deploy_job_reading and (every_row or skipped_phases or settling)" -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24695-ac4-no-unreachable-branch
+    description: The golden test file keeps the settling wait and no branch for a superseded job, a state /health never lists.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/chain_canary -q -m "not kafka" -k "deploy_job_reading" -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -q 'wait_while_settling' tests/integration/chain_canary/test_deploy_job_reading_golden_chain_omn24674.py && ! grep -n 'superseded' tests/integration/chain_canary/test_deploy_job_reading_golden_chain_omn24674.py | grep -v 'never lists'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24695-ac5-host-variable-one-tick
+    description: The host comes from CHAIN_CANARY_AGENT_LEDGER_HOST, the live tests bound lateness by ONE_TICK_SECONDS and not the literal 120, and the shared reader fails closed without a host. The lab run of the two kafka live tests with the CHAIN_CANARY_* settings is recorded in the pull request's Lab comment.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/chain_canary -q -m "not kafka" -k "deploy_job_reading and host_variable" -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24695-ac6-lab-comment-on-new-head
+    description: 'Unbound local Done gate: the watcher''s bus read of the pull request lists a comment starting Lab: head= . The hosted runner cannot read the watcher state, so the item is local_done_gate.'
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: command
+        check_value: 'onex scm pr-view OmniNode-ai/omnibase_infra#6029 --source bus | grep -q ''Lab: head='''
+        cwd: ${OMNI_HOME}/omnibase_infra
+    execution_scope: local_done_gate

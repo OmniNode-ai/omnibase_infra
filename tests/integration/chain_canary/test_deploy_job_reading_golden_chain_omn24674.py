@@ -14,12 +14,16 @@ live agent's alarm ever wrote a row. This module runs the chain on the real part
    and the ledger. The agent's last terminal job, however it ended, has the reading row
    the real append command wrote (``node_deploy_job_reading_effect``), bound to that job by
    id, completion time and the id the handler derives for the append request. The test
-   fails when the row is missing one tick after the job completed, which is what removing
-   the append command does. Selected with the ``kafka`` marker: it needs the lab's dev
-   broker path, so the PR test splits deselect it and a lab host runs it.
+   waits while the agent reports the job settling, then fails when the row is missing one
+   tick later, which is what removing the append command does. Selected with the ``kafka``
+   marker: it needs the lab's dev broker path, so the PR test splits deselect it and a lab
+   host runs it.
 
-It writes no ledger row: the OMN-19513 guard refuses a test's write to the ledger of
-record, and the live agent has already written the row this test reads.
+The live tests read the ledger's archive rolls as well as the live file, check every row in
+the window and take the host from ``CHAIN_CANARY_AGENT_LEDGER_HOST`` (OMN-24695). They write no
+ledger row: the OMN-19513 guard refuses a test's write to the ledger of record, and the live
+agent has already written the row they read. They do not run the append command themselves:
+it needs a ledger host on a shared bus (see ``contracts/OMN-24695.yaml``).
 """
 
 from __future__ import annotations
@@ -40,6 +44,8 @@ from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_locat
 from tests.integration.chain_canary.conftest import (
     ONE_TICK_SECONDS,
     LiveDeployAgentChain,
+    handler_failing_step,
+    reading_problems,
 )
 
 pytestmark = pytest.mark.integration
@@ -105,13 +111,19 @@ def test_golden_a_new_commit_changes_the_loaded_code_sha(tmp_path: Path) -> None
 def test_golden_the_newest_reading_row_matches_the_agents_job_record(
     live_deploy_agent_chain: LiveDeployAgentChain,
 ) -> None:
-    """The ledger's newest reading row from the agent's host is the agent's own job, as it settled."""
+    """The ledger's newest reading row from the agent's host is the agent's own job, as it settled.
+
+    Every row in the window is also checked for its shape and for being published inside one tick
+    of its job's completion.
+    """
     chain = live_deploy_agent_chain
     rows = chain.rows()
     assert rows, (
-        "the ledger holds no deploy-agent-job reading row from the agent's host: "
-        "the append command never wrote one"
+        "the ledger and its archive rolls hold no deploy-agent-job reading row from the agent's "
+        "host: the append command never wrote one"
     )
+    problems = reading_problems(chain.window_rows())
+    assert not problems, "readings in the window are wrong:\n" + "\n".join(problems)
     row = rows[-1]
     job = chain.job(row["job"])
     status = str(job["status"])
@@ -124,10 +136,9 @@ def test_golden_the_newest_reading_row_matches_the_agents_job_record(
     if status == "failed":
         phases = job["phase_results"]
         assert isinstance(phases, dict)
-        order = _SETTINGS["phase_order"]
-        failed = [phase for phase in order if phases.get(phase) == "failed"]
-        assert failed, f"a failed job records no failed phase: {phases}"
-        assert row["failing_step"] == failed[0]
+        # The handler's own rule: a lane-lock or host-slot job settles every phase skipped, and
+        # its row names the first phase that did not succeed.
+        assert row["failing_step"] == handler_failing_step(_SETTINGS, phases)
     assert row["deploy_lane"] in _COVERED_LANES
     assert row["piece"] == _SETTINGS["piece"]
     assert row["name"] == _SETTINGS["piece_name"]
@@ -157,14 +168,14 @@ def test_golden_the_agents_last_terminal_job_has_its_reading_row(
     job_id = str(last["correlation_id"])
     status = str(last["status"])
     completed = datetime.fromisoformat(str(last["completed_at"]))
-    deadline = completed + timedelta(seconds=ONE_TICK_SECONDS)
+    # Where the overlay settle runs, completed_at is stamped before it and the row is written
+    # after it: the one tick starts when the agent stops reporting the job settling.
+    settled_at = chain.wait_while_settling(job_id)
+    deadline = max(completed, settled_at) + timedelta(seconds=ONE_TICK_SECONDS)
 
     row = chain.wait_for_row(job_id, deadline=deadline)
 
-    if status == "superseded":
-        # A superseded command never ran, so the contract writes it no row.
-        assert row is None, f"a superseded job has a reading row: {row}"
-        return
+    # /health lists only success and failed jobs, so no other status reaches here.
     assert status in ("success", "failed"), f"unexpected terminal status {status!r}"
     assert row is not None, (
         f"job {job_id} ({status}) completed {completed.isoformat()} and the ledger holds "

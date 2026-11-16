@@ -15,13 +15,18 @@ real parts:
    reading composition root; the test records what it returned. Hermetic; runs on every
    runner. The environment holds no append route here, so the row is built and reported
    ``unappended``; the live test below holds the append.
-2. ``test_error_the_agents_latest_failed_job_has_its_not_working_row`` -- reads the ledger
-   rows the live agent's host appended through the real append command. The newest
-   NOT_WORKING row names a job and the phase that failed, was written in the same tick the
-   job completed, and carries the append id the handler derives. Selected with the
-   ``kafka`` marker: it needs the lab's dev broker path, so the PR test splits deselect it
-   and a lab host runs it.
+2. ``test_error_the_agents_failed_jobs_have_their_not_working_rows`` -- reads the ledger
+   rows the live agent's host appended through the real append command, from the live file
+   and the archive rolls. Some NOT_WORKING row exists, and every row in the window names a
+   job and a failing step the handler can emit, was written within one tick of the job's
+   completion and carries the append id the handler derives. Selected with the ``kafka``
+   marker: it needs the lab's dev broker path, so the PR test splits deselect it and a lab
+   host runs it.
 
+The hermetic test builds the row and reports the append ``unappended`` because this process
+holds no append route: the real append command needs a ledger host on a shared bus, which a
+test process does not have (``contracts/OMN-24695.yaml`` records the probe). It therefore
+proves the row, not the append. The live test proves the append, on rows the agent wrote.
 It writes no ledger row: the OMN-19513 guard refuses a test's write to the ledger of
 record, and no job is induced on the live agent (a deploy command needs the lane's signing
 credential, which a test does not hold).
@@ -33,7 +38,6 @@ import os
 import subprocess
 import uuid
 from contextlib import nullcontext
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -49,7 +53,10 @@ from deploy_agent.executor import DeployExecutor, load_dev_boot_guard
 from deploy_agent.job_state import JobStore
 
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
-from tests.integration.chain_canary.conftest import LiveDeployAgentChain
+from tests.integration.chain_canary.conftest import (
+    LiveDeployAgentChain,
+    reading_problems,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -141,30 +148,18 @@ def test_error_a_failing_preflight_settles_a_failed_job_and_reads_not_working(
 
 
 @pytest.mark.kafka
-def test_error_the_agents_latest_failed_job_has_its_not_working_row(
+def test_error_the_agents_failed_jobs_have_their_not_working_rows(
     live_deploy_agent_chain: LiveDeployAgentChain,
 ) -> None:
-    failed = [
-        row
-        for row in live_deploy_agent_chain.rows()
-        if row.get("verdict") == "NOT_WORKING"
-    ]
+    chain = live_deploy_agent_chain
+    failed = [row for row in chain.rows() if row.get("verdict") == "NOT_WORKING"]
     assert failed, (
-        "the live ledger holds no NOT_WORKING reading row from the agent's host: "
-        "no failed job has ever been read, or the append command never wrote one"
+        "the live ledger and its archive rolls hold no NOT_WORKING reading row from the "
+        "agent's host: no failed job has ever been read, or the append command never wrote one"
     )
-    row = failed[-1]
-    job_id = row["job"]
-    uuid.UUID(job_id)
-    assert row["key"] == job_id
-    assert row["failing_step"] in _SETTINGS["phase_order"]
-    assert row["reason"] == f"job-failed:{row['failing_step']}"
-    assert row["deploy_lane"] in _COVERED_LANES
-    # One tick: the row is built from the job's own terminal record and appended inside
-    # the job's terminal publish.
-    completed = datetime.fromisoformat(row["completed_at"].replace("Z", "+00:00"))
-    published = datetime.fromisoformat(row["published_at"].replace("Z", "+00:00"))
-    assert 0 <= (published - completed).total_seconds() <= 120
-    assert row["req"] == str(
-        uuid.uuid5(uuid.NAMESPACE_URL, f"onex:deploy-job-reading:{job_id}")
-    )
+    for row in failed:
+        uuid.UUID(row["job"])
+    # Every row in the window, not the newest alone: the shape the handler writes and one tick
+    # between the job's completion and its row.
+    problems = reading_problems(chain.window_rows())
+    assert not problems, "readings in the window are wrong:\n" + "\n".join(problems)
