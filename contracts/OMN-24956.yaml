@@ -1,0 +1,33 @@
+schema_version: 1.0.0
+ticket_id: OMN-24956
+title: The lab k3s server refuses to start on an unset or dead node-ip
+summary: >-
+  The pinned keys of the single-node lab k3s server configuration and the preflight that guards them. deploy/lab/k3s/k3s-server-config.yaml pins node-ip, advertise-address and flannel-iface through placeholders the host fills at start, so no address is written here. node_k3s_lab_preflight_effect (handler src/omnibase_infra/handlers/handler_k3s_lab_preflight.py, models model_k3s_lab_preflight_request and model_k3s_lab_preflight_result) refuses a config whose node-ip or flannel-iface is unset or unrendered, whose node-ip no live (UP) interface holds, or whose node-ip another interface holds. The host unit, the monitoring stack's values, the copied alert rules, the Alertmanager configuration and the Grafana manifest are host configuration and live in the private config overlays, with their own tests. The readings of AC2, AC3, AC4, AC5 and AC6 are taken on the lab host and posted in the pull request's Lab line; no check here can bind a reading of a host, so this contract carries no entry for them.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24956-k3s-lab
+    statement: The lab k3s server never starts on an unset or dead node-ip.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a test in omnibase_infra fails when node-ip is unset in the lab k3s server config, and the preflight check refuses to start when the pinned address is not on a live interface -- falsifier: `uv run pytest tests/ -q -k \"k3s and node_ip\"` in omnibase_infra exits non-zero on a config with node-ip removed and zero on the committed config"
+evidence_requirements:
+  - kind: tests
+    description: The preflight handler tests.
+    command: uv run --frozen pytest tests/unit/handlers/test_handler_k3s_lab_preflight.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24956-ac1-node-ip
+    description: >-
+      The preflight tests pass on the committed config and refuse a config with node-ip removed, blank, unrendered, held by a DOWN interface, absent from the interface table, or held by an interface other than flannel-iface. With node-ip deleted from deploy/lab/k3s/k3s-server-config.yaml three of the ten tests fail.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_k3s_lab_preflight.py -q -k "k3s and node_ip" --no-cov -n 0 -p no:cacheprovider
+        cwd: .
