@@ -128,14 +128,6 @@ RENDER_FIXTURES: tuple[RenderFixture, ...] = (
         env_dicts=("RENDER_ONLY_SECRETS",),
         compose_file="docker/docker-compose.dogfood.yml",
     ),
-    # Renders with `_compose_render_env`, imported from another registered
-    # render module rather than redefined, so it owns no env dict. Its `:?`
-    # coverage is gated by that module's COMPOSE_RENDER_ENV registration above; it never names the
-    # base compose file itself, so the per-var check skips it by design.
-    RenderFixture(
-        path="tests/integration/infra/test_agent_named_services_compose_render.py",
-        env_dicts=(),
-    ),
 )
 
 
