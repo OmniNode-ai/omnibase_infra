@@ -257,15 +257,23 @@ def render_dev_lane(
     The address of every contract slot flagged ``endpoint_from_overlay`` is the overlay's,
     never the operator store's: the store keeps whatever a person last typed, and compose
     reads this render over it. The lane bifrost overlay directory comes back rewritten when
-    the slot is bound to one of its backends. Fenced like the lane env fragment: a deploy of
-    any other lane takes nothing from here, and a dev deploy whose overlay cannot be read is
+    the slot is bound to one of its backends. Fenced to the lab dev agent: the dev
+    lane and the stability lane it follows (OMN-24260) take the render, because the stability
+    lane's containers read the same embedding server and the store still names the removed one
+    (OMN-24119 rendered it for the refresh script, this is the agent's own job); a deploy of
+    the prod lane takes nothing from here, and a deploy whose overlay cannot be read is
     refused, never run on a stale address.
     """
     raw = environ.get(execution.ENV_ALLOWED_LANES, "").strip()
     if not (
         raw
         and execution.is_lab_dev_fence(execution.parse_allowed_lanes(raw))
-        and execution._ActiveDeployLane.lane in (None, execution.EnumRuntimeLane.DEV)
+        and execution._ActiveDeployLane.lane
+        in (
+            None,
+            execution.EnumRuntimeLane.DEV,
+            execution.EnumRuntimeLane.STABILITY_TEST,
+        )
     ):
         return {}, None
     try:
