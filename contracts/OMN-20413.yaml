@@ -153,7 +153,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC8
-  - id: dod-omn20413-ac9-work-ledger-seq-provisional-vendor
+  - id: dod-omn20413-ac9-ledger-seq-provisional-vendor
     description: AC9 tests read the vendored 0013 file, its ledger row and class; they fail at the merge base, where the file is absent.
     source: manual
     checks:
