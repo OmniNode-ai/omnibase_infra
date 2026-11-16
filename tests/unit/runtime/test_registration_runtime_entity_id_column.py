@@ -101,9 +101,7 @@ class MockProjectionRecord(BaseModel):
 
 def _create_table_block(schema_sql: str) -> str:
     """Extract the CREATE TABLE block for registration_projections."""
-    start = schema_sql.index(
-        "CREATE TABLE IF NOT EXISTS public.registration_projections"
-    )
+    start = schema_sql.index("CREATE TABLE IF NOT EXISTS registration_projections")
     end = schema_sql.index("\n);", start)
     return schema_sql[start:end]
 
