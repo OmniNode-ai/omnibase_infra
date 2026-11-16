@@ -45,11 +45,10 @@ dod_evidence:
         check_value: grep -qF 'def _children_inherit_ld_library_path' tests/conftest.py
         cwd: .
   - id: dod-omn23967-run-receipt
-    description: A focused run of the new test file on a runner host at the pushed head exits 0; the receipt is read from that run.
+    description: A focused run of the new test file on a runner host at the pushed head exits 0; the hosted verifier runs it on its own runner and the receipt is read from that run.
     source: manual
     binds_ac:
       - AC3
-    execution_scope: local_done_gate
     checks:
       - check_type: command
         check_value: uv run pytest tests/ci/test_child_env_ld_library_path_omn23967.py -q --no-cov

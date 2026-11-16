@@ -16,13 +16,16 @@ import asyncio
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
 _SH = "/bin/sh"
 _PROBE = 'printf %s "$LD_LIBRARY_PATH"'
+_CONTRACT = Path(__file__).resolve().parents[2] / "contracts" / "OMN-23967.yaml"
 
 
 def test_scrubbed_env_child_inherits_session_value(
@@ -157,3 +160,21 @@ def test_scrubbed_env_child_interpreter_starts() -> None:
     )
     assert result.returncode == 0
     assert result.stdout.strip() == "1"
+
+
+def test_repo_evidence_dod_verify_contract_binds_only_hosted_items() -> None:
+    """No item of this test-only change is scoped to the local done gate.
+
+    The fix lives in tests/conftest.py, so the hosted repo-evidence / dod-verify
+    control overlays it onto the merge base and the bound tests pass there. A
+    test-only diff is accepted only when every bound item is judged at the
+    head; an item scoped to ``local_done_gate`` is never evaluated by the hosted
+    job, so it makes the control refuse the whole ticket (always-pass).
+    """
+    contract = yaml.safe_load(_CONTRACT.read_text())
+    scopes = {
+        item["id"]: item.get("execution_scope", "default")
+        for item in contract["dod_evidence"]
+    }
+    assert scopes
+    assert "local_done_gate" not in scopes.values(), scopes
