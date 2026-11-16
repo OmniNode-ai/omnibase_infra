@@ -22,6 +22,11 @@ receipt on stdout. It declares no topic; the bus append command owns the ledger'
 * ``success`` reads WORKING and names no failing step.
 * ``failed`` reads NOT_WORKING and names the failing step in ``reason``
   (``job-failed:<step>``) and in ``failing_step``.
+* A failed job also writes one ALARM row (``src=alarm``, ``alarm=deploy-job-failed``) that
+  names its owner and the action the owner takes, so a failure is a row someone is told
+  about and not only a reading that must be looked for (OMN-24562).
+* A code-ref pin inside the contract's ``pin_alarm_window_hours`` of its expiry writes one
+  ALARM row (``alarm=pin-near-expiry``) with the same owner line, through :meth:`handle_pin`.
 * ``superseded``, ``accepted`` and ``in_progress`` write nothing: a superseded command
   never ran and a job still running has no terminal outcome.
 * A lane in the contract's ``excluded_lanes`` (prod) writes nothing.
@@ -40,7 +45,8 @@ import subprocess
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import JsonValue
 
@@ -83,6 +89,75 @@ def _token(text: str) -> str:
     return _TOKEN_UNSAFE.sub("-", text).strip("-") or _UNKNOWN
 
 
+def _request_id(request: ModelDeployJobReadingRequest) -> str:
+    """One id per job, so a retry of the append is a duplicate and writes nothing twice."""
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"onex:deploy-job-reading:{request.correlation_id}",
+        )
+    )
+
+
+def _pin_request_id(branch: str, expires_at: datetime, now: datetime) -> str:
+    """One id per pin and clock hour, for the one row ``build_pin_alarm_row`` builds in that hour.
+
+    The row is identical for every tick of the hour, so a retry within the hour is a
+    duplicate to the append; the next clock hour is a new id and a new row.
+    """
+    bucket = now.astimezone(UTC).strftime("%Y%m%dT%H")
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"onex:deploy-pin-alarm:{branch}:{_stamp(expires_at)}:{bucket}",
+        )
+    )
+
+
+def _failing_step(
+    settings: Mapping[str, JsonValue], request: ModelDeployJobReadingRequest
+) -> str:
+    """The first phase that failed, else the first that did not succeed, else ``unknown``."""
+    order = _names(settings, "phase_order")
+    for phase in order:
+        if request.phase_results.get(phase) == "failed":
+            return phase
+    # A job refused between phases marks none failed; it stopped where the first phase
+    # that did not succeed was due.
+    for phase in order:
+        if request.phase_results.get(phase) != "success":
+            return phase
+    if request.not_started:
+        return _token(f"not-started-{request.not_started}")
+    return _UNKNOWN
+
+
+def _alarm_head(
+    settings: Mapping[str, JsonValue], alarm: str, moment: datetime
+) -> list[str]:
+    """The cells every alarm row opens with, then the owner line cells."""
+    return [
+        f"{_stamp(moment)} | STATUS",
+        f"lane={_text(settings, 'row_lane')}",
+        "src=alarm",
+        f"actor={_text(settings, 'row_actor')}",
+        "model=none",
+        f"alarm={alarm}",
+    ]
+
+
+def _append_env(
+    settings: Mapping[str, JsonValue], environ: Mapping[str, str]
+) -> dict[str, str]:
+    """The append command's environment: the agent's, with its prefixed broker login unprefixed."""
+    env = dict(environ)
+    prefix = env.get(_text(settings, "sasl_prefix_env"), "")
+    for name in _names(settings, "sasl_login_names"):
+        if prefix and name not in env and f"{prefix}{name}" in env:
+            env[name] = env[f"{prefix}{name}"]
+    return env
+
+
 class HandlerDeployJobReading:
     """Build a terminal deploy job's reading row and append it to the ledger."""
 
@@ -100,30 +175,6 @@ class HandlerDeployJobReading:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.EFFECT
 
-    def failing_step(self, request: ModelDeployJobReadingRequest) -> str:
-        """The first phase that failed, else the first that did not succeed, else ``unknown``."""
-        order = _names(self._settings, "phase_order")
-        for phase in order:
-            if request.phase_results.get(phase) == "failed":
-                return phase
-        # A job refused between phases marks none failed; it stopped where the first phase
-        # that did not succeed was due.
-        for phase in order:
-            if request.phase_results.get(phase) != "success":
-                return phase
-        if request.not_started:
-            return _token(f"not-started-{request.not_started}")
-        return _UNKNOWN
-
-    def request_id(self, request: ModelDeployJobReadingRequest) -> str:
-        """One id per job, so a retry of the append is a duplicate and writes nothing twice."""
-        return str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"onex:deploy-job-reading:{request.correlation_id}",
-            )
-        )
-
     def build_row(self, request: ModelDeployJobReadingRequest) -> str | None:
         """The reading row of a terminal job on a covered lane, or ``None`` when it has none."""
         if request.runtime_lane in _names(self._settings, "excluded_lanes"):
@@ -131,7 +182,7 @@ class HandlerDeployJobReading:
         if request.job_outcome not in ("success", "failed"):
             return None
         failed = request.job_outcome == "failed"
-        step = self.failing_step(request) if failed else ""
+        step = _failing_step(self._settings, request) if failed else ""
         completed = request.completed_at or request.published_at
         cells = [
             f"lane={_text(self._settings, 'row_lane')}",
@@ -162,34 +213,153 @@ class HandlerDeployJobReading:
         ]
         return f"{_stamp(request.published_at)} | STATUS | " + " | ".join(cells)
 
+    def build_alarm_row(self, request: ModelDeployJobReadingRequest) -> str | None:
+        """The alarm row of a failed job on a covered lane, ``None`` for any other job."""
+        if request.runtime_lane in _names(self._settings, "excluded_lanes"):
+            return None
+        if request.job_outcome != "failed":
+            return None
+        cells = _alarm_head(self._settings, "deploy-job-failed", request.published_at)
+        cells += [
+            f"deploy_lane={_token(request.runtime_lane)}",
+            f"job={request.correlation_id}",
+            f"kind={_token(request.scope)}",
+            f"failing_step={_failing_step(self._settings, request)}",
+            f"owner={_text(self._settings, 'alarm_owner')}",
+            f"owner_line={_text(self._settings, 'alarm_job_owner_line')}",
+        ]
+        return " | ".join(cells)
+
+    def build_pin_alarm_row(
+        self,
+        *,
+        branch: str,
+        pr: int,
+        ticket: str,
+        registered_by: str,
+        expires_at: datetime,
+        now: datetime,
+    ) -> str | None:
+        """The alarm row of a live code-ref pin inside the window before its expiry, else ``None``.
+
+        The row is a function of the pin and the clock hour of ``now`` (its stamp and
+        ``hours_left`` are those of the hour's start), so every tick of one hour builds
+        the identical row: the work-ledger append answers duplicate for it, where a row
+        that changed under one request id would be refused.
+        """
+        window = self._settings["pin_alarm_window_hours"]
+        hours = float(window) if isinstance(window, int | float) else 0.0
+        if (expires_at - now).total_seconds() / 3600 > hours:
+            return None
+        bucket = now.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+        left = (expires_at - bucket).total_seconds() / 3600
+        cells = _alarm_head(self._settings, "pin-near-expiry", bucket)
+        cells += [
+            f"pin_branch={_token(branch)}",
+            f"pin_pr={pr}",
+            f"pin_ticket={_token(ticket)}",
+            f"pin_owner={_token(registered_by)}",
+            f"expires_at={_stamp(expires_at)}",
+            f"hours_left={max(left, 0.0):.1f}",
+            f"owner={_text(self._settings, 'alarm_owner')}",
+            f"owner_line={_text(self._settings, 'alarm_pin_owner_line')}",
+        ]
+        return " | ".join(cells)
+
+    def pin_state_dir(self) -> Path | None:
+        """The agent's state directory, from the variable the contract names; ``None`` when unset."""
+        value = self._environ.get(
+            _text(self._settings, "pin_state_dir_env"), ""
+        ).strip()
+        return Path(value) if value else None
+
+    def handle_pin(
+        self,
+        *,
+        branch: str,
+        pr: int,
+        ticket: str,
+        registered_by: str,
+        expires_at: datetime,
+        now: datetime,
+    ) -> ModelDeployJobReadingResult:
+        """Append the pin's alarm row when it is inside the window; ``skipped`` when it is not."""
+        row = self.build_pin_alarm_row(
+            branch=branch,
+            pr=pr,
+            ticket=ticket,
+            registered_by=registered_by,
+            expires_at=expires_at,
+            now=now,
+        )
+        if row is None:
+            return ModelDeployJobReadingResult(outcome="skipped")
+        request_id = _pin_request_id(branch, expires_at, now)
+        error = self._append(row, request_id)
+        if error:
+            logger.warning("pin alarm for %s not appended: %s", branch, error)
+            return ModelDeployJobReadingResult(
+                outcome="unappended",
+                row=row,
+                append_key=request_id,
+                detail=error,
+                alarm_row=row,
+                alarm_outcome="unappended",
+            )
+        return ModelDeployJobReadingResult(
+            outcome="appended",
+            row=row,
+            append_key=request_id,
+            alarm_row=row,
+            alarm_outcome="appended",
+        )
+
     def handle(
         self, request: ModelDeployJobReadingRequest
     ) -> ModelDeployJobReadingResult:
-        """Build the job's reading row and append it through the reading writer's append route."""
+        """Build the job's reading row (and a failed job's alarm row) and append them."""
         row = self.build_row(request)
         if row is None:
             return ModelDeployJobReadingResult(outcome="skipped")
-        request_id = self.request_id(request)
+        request_id = _request_id(request)
         error = self._append(row, request_id)
+        alarm_row = self.build_alarm_row(request) or ""
+        alarm_outcome: Literal["none", "appended", "unappended"] = "none"
+        if alarm_row:
+            alarm_id = str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"onex:deploy-job-alarm:{request.correlation_id}",
+                )
+            )
+            alarm_error = self._append(alarm_row, alarm_id)
+            alarm_outcome = "unappended" if alarm_error else "appended"
+            if alarm_error:
+                logger.warning(
+                    "job alarm for %s not appended: %s",
+                    request.correlation_id,
+                    alarm_error,
+                )
+                error = error or alarm_error
         if error:
             logger.warning(
                 "job reading for %s not appended: %s", request.correlation_id, error
             )
             return ModelDeployJobReadingResult(
-                outcome="unappended", row=row, append_key=request_id, detail=error
+                outcome="unappended",
+                row=row,
+                append_key=request_id,
+                detail=error,
+                alarm_row=alarm_row,
+                alarm_outcome=alarm_outcome,
             )
         return ModelDeployJobReadingResult(
-            outcome="appended", row=row, append_key=request_id
+            outcome="appended",
+            row=row,
+            append_key=request_id,
+            alarm_row=alarm_row,
+            alarm_outcome=alarm_outcome,
         )
-
-    def _append_env(self) -> dict[str, str]:
-        """The append command's environment: the agent's, with its prefixed broker login unprefixed."""
-        env = dict(self._environ)
-        prefix = env.get(_text(self._settings, "sasl_prefix_env"), "")
-        for name in _names(self._settings, "sasl_login_names"):
-            if prefix and name not in env and f"{prefix}{name}" in env:
-                env[name] = env[f"{prefix}{name}"]
-        return env
 
     def _append(self, row: str, request_id: str) -> str:
         """Append ``row``; an empty string when the append command took it, else why not."""
@@ -211,7 +381,7 @@ class HandlerDeployJobReading:
             "-",
         ]
         timeout = self._settings["append_timeout_seconds"]
-        env = self._append_env()
+        env = _append_env(self._settings, self._environ)
         try:
             done = subprocess.run(
                 argv,

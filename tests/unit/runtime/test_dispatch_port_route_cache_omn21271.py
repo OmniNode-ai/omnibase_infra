@@ -266,7 +266,10 @@ async def test_second_dispatch_reads_no_contract(
         assert result["status"] == "completed"
         reads_after.append(read_counter.count)
 
-    assert reads_after == [1, 1]
+    # The first dispatch reads the contract twice: route discovery parses it, and
+    # the dispatch terminal node reads its runtime_dispatch.run_step_event once,
+    # cached per file version (OMN-19972). The second dispatch reads none.
+    assert reads_after == [2, 2]
     assert [command.command_name for command in commands] == [
         "delegation.orchestrate"
     ] * 2
