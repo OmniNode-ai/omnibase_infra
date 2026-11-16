@@ -31,3 +31,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_handler_k3s_lab_preflight.py -q -k "k3s and node_ip" --no-cov -n 0 -p no:cacheprovider
         cwd: .
+  - id: dod-omn24956-deploy-import
+    description: >-
+      Deploy evidence: the deployed runtime image carries the preflight handler, and the handler refuses a config with no node-ip. The probe runs against the runtime container, so it is red until a runtime built from this change is deployed.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: 'docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "from omnibase_infra.handlers.handler_k3s_lab_preflight import check_k3s_server_config as c; from omnibase_infra.models.model_k3s_lab_preflight_request import ModelK3sLabPreflightRequest as R; assert c(R(config_text=\"flannel-iface: eth0\", require_rendered=False)).reason == \"node-ip-unset\""'
