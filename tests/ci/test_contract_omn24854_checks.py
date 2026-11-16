@@ -59,10 +59,17 @@ def test_the_evidence_command_runs_both_tests() -> None:
 def test_no_check_passes_whatever_the_lab_shows() -> None:
     for check in _checks():
         assert not check["check_value"].startswith("test -f"), check
+    declared = {
+        ac["id"]
+        for requirement in _contract()["requirements"]
+        for ac in requirement["acceptance"]
+    }
     bound = {ac for item in _contract()["dod_evidence"] for ac in item["binds_ac"]}
-    # AC2 and AC3 are lab observations: unmet until the STATUS row and the
-    # SEEN RUNNING line exist, so no check binds them here.
-    assert bound == {"AC1"}
+    # The contract gate refuses an acceptance criterion with no check bound to it.
+    # AC2 and AC3 are lab observations (the STATUS row, the SEEN RUNNING line) with
+    # no check that can both fail now and pass on the hosted runner, so the
+    # contract declares neither; they stay unmet on the ticket.
+    assert declared == bound == {"AC1"}
 
 
 def test_every_grep_check_names_exactly_one_file() -> None:

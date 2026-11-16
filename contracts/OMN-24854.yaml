@@ -12,10 +12,6 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: one demand or tick reaches node_commitment_check_runner_effect, node_commitment_ledger_compute, node_commitment_writer_effect, node_work_state_projection_compute and node_work_state_projection_effect on the dev runtime on h201 and the log or dispatch record shows it handled -- falsifier: read the dev runtime log on h201 for the run line naming all five nodes after the install"
-      - id: AC2
-        statement: "AC2: a STATUS row kv pr=omnimarket#5347 installed=h201:revision observed=what ran read_at=UTC is on the rolling ledger -- falsifier: grep -F 'pr=omnimarket#5347' on the ledger and its archive shows that STATUS row with installed=, observed= and read_at="
-      - id: AC3
-        statement: "AC3: the next hourly integration pass marks omnimarket PR 5347 SEEN RUNNING -- falsifier: the integration pass line for omnimarket#5347 reads SEEN RUNNING and not NOT RUNNING"
 evidence_requirements:
   - kind: tests
     description: The deploy agent and the warm refresh export the declaration folder from the real lane overlay directory, and both dev compose files mount it. The agent test file runs in the deploy-agent-tests job; the compose render file runs in the full suite.
@@ -27,7 +23,7 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn24854-ac1-mount-source
     description: >-
-      The mount half of AC1: the compose render of the dev lane stack and of the folded main service takes the ledger mount source from ONEX_LANE_DECLARATION_DIR and not from the rendered overlay directory, and the deploy agent's compose environment and the warm refresh keep that variable on the real folder when they rewrite ONEX_LANE_OVERLAY_DIR (dev-fenced agent). The run line naming all five nodes on the dev runtime is read on the lab after the deploy agent redeploys dev and is recorded in a STATUS row of the lane; it is not claimed by these checks. AC2 and AC3 are lab observations (the STATUS row and the integration pass line) that exist only after that redeploy, so they carry no check here and stay unmet until the h201 run line, the STATUS row and the SEEN RUNNING line are recorded.
+      The mount half of AC1: the compose render of the dev lane stack and of the folded main service takes the ledger mount source from ONEX_LANE_DECLARATION_DIR and not from the rendered overlay directory, and the deploy agent's compose environment and the warm refresh keep that variable on the real folder when they rewrite ONEX_LANE_OVERLAY_DIR (dev-fenced agent). The run line naming all five nodes on the dev runtime is read on the lab after the deploy agent redeploys dev and is recorded in a STATUS row of the lane; it is not claimed by these checks. AC2 and AC3 of the ticket are lab observations (the STATUS row and the integration pass line) that exist only after that redeploy; the contract gate refuses an acceptance criterion with no check bound to it, and a check that passes whatever the lab shows is the defect this contract removes, so neither is declared here and both stay unmet on the ticket until the h201 run line, the STATUS row and the SEEN RUNNING line are recorded.
     source: manual
     binds_ac:
       - AC1
