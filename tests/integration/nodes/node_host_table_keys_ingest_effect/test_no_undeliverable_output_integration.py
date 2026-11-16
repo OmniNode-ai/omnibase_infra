@@ -278,11 +278,21 @@ async def test_unfixed_handler_shape_does_route_undeliverable_output(
     (a handler returning a BaseModel, no publish_topics).
     """
     caplog.set_level(logging.WARNING)
-    with patch(
-        "omnibase_infra.runtime.auto_wiring.handler_wiring._route_apply_publish_failure",
-        new_callable=AsyncMock,
-    ) as route_failure:
+    with (
+        patch(
+            "omnibase_infra.runtime.auto_wiring.handler_wiring._route_apply_publish_failure",
+            new_callable=AsyncMock,
+        ) as route_failure,
+        patch(_NORMALIZE, wraps=handler_wiring._normalize_handler_result) as normalize,
+    ):
         await _dispatch_one(HandlerUnfixedShape, contract_path)
+
+    # Same branch assertion as the fixed-shape case: the dispatch took the typed
+    # `payload_type_match` branch. Moving the stand-in to the untyped `topic_match`
+    # shape (no `event_model`) skips the normalizer, so this case turns red
+    # instead of passing on the untyped branch.
+    normalize.assert_called_once()
+    assert normalize.call_args.args[2] == ModelFixtureOverlayStoreRecord.__name__
 
     assert len(HandlerUnfixedShape.received) == 1
     route_failure.assert_awaited_once()

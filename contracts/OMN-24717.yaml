@@ -14,7 +14,7 @@ requirements:
     statement: The stand-in contract takes the typed payload_type_match dispatch branch the deployed node takes.
     acceptance:
       - id: AC1
-        statement: "AC1: the stand-in contract's routing entry sets routing_strategy payload_type_match with event_model ModelHandlerRef(name=ModelFixtureOverlayStoreRecord, module=**name**) and no message_category, and the test asserts the handler received an instance of that typed model -- falsifier: uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov in omnibase_infra, red at head 1c5e34baf06e (the received-type assertion fails under topic_match) and green after the fix"
+        statement: "AC1: the stand-in contract's routing entry sets routing_strategy payload_type_match with event_model ModelHandlerRef(name=ModelFixtureOverlayStoreRecord, module=**name**) and no message_category, and the test asserts through a spy on handler_wiring._normalize_handler_result that the dispatch took the typed event_model branch (the spy is the branch assertion) -- falsifier: uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov in omnibase_infra passes, and with the stand-in routing entry changed to topic_match with event_model removed, both tests fail on the normalizer spy assertion"
   - id: req-omn24717-fails-on-failed-dispatch
     statement: A failed dispatch turns the fixed-shape test red.
     acceptance:
@@ -28,7 +28,7 @@ requirements:
     statement: The pull request's required suites run on a lab host at the new head.
     acceptance:
       - id: AC5
-        statement: "AC5: the pull request's required suites run on a lab host at the new head, in parts if a whole run times out, and the new head and results are commented on omnibase_infra#6032 -- falsifier: onex scm pr-view omnibase_infra#6032 --source bus lists a comment naming the new head sha with the lab suite results"
+        statement: "AC5: the pull request's required suites run on a lab host at the new head, in parts if a whole run times out, and the new head and results are commented on omnibase_infra#6032 -- falsifier: a read of the comments of OmniNode-ai/omnibase_infra#6032 that returns comments (onex scm pr-view OmniNode-ai/omnibase_infra#6032 --source bus returns the pull request record only, with no comments) lists a comment beginning Lab: head=<full new head sha> with the lab suite results and the parts run"
 emergency_bypass:
   enabled: false
   justification: ""

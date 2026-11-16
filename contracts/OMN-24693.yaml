@@ -14,7 +14,7 @@ requirements:
     statement: A node of the fixed shape (no publish_topics, handler returns no model) never takes the undeliverable-output route when dispatched through the real auto-wiring boundary.
     acceptance:
       - id: AC2
-        statement: "AC2: the fixed shape never awaits the undeliverable-output route and the unfixed shape awaits it once with UndeliverableDispatchOutputError -- falsifier: uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov fails at the base branch, where the test does not exist"
+        statement: "AC2: the fixed shape never awaits the undeliverable-output route and the unfixed shape awaits it once with UndeliverableDispatchOutputError -- falsifier: uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov -k test_unfixed_handler_shape_does_route_undeliverable_output passes, and its assertion that the route is awaited once with UndeliverableDispatchOutputError is the control that separates the unfixed shape from the fixed one"
 emergency_bypass:
   enabled: false
   justification: ""
