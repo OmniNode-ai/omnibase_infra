@@ -1,0 +1,69 @@
+schema_version: 1.0.0
+ticket_id: OMN-24779
+title: The orphaned-dispatch line on /health names the consumer group, so an abandoned runtime-tick dispatch identifies its node
+summary: >-
+  The review of omnibase_infra#6036 found a deploy check that cannot fail, a description that claims a hosted-runner check that needs a runtime container, and a single-subscription test that cannot catch a group taken from the wrong subscription. This ticket carries the fixes on the PR's own branch.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24779-orphan-group-checks
+    statement: The orphan line names the hung subscription's consumer group, and the checks that say so fail without it and are described at the scope they run.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the orphan line of an abandoned dispatch names the consumer group of the hung subscription, and with a second subscription on another group the line names the hung one's full group token -- falsifier: uv run pytest tests/unit/event_bus/test_omn20464_orphan_degraded_grace.py -q -k names_the_consumer fails on origin/dev and passes on the PR head"
+      - id: AC2
+        statement: "AC2: the contract's installed-and-read check exits non-zero when the group is missing from the orphan description, so a runtime without the change fails it -- falsifier: the contracts/OMN-20464.yaml command run against origin/dev code exits non-zero, via uv run pytest tests/unit/event_bus -q -k omn20464"
+      - id: AC3
+        statement: "AC3: the contract describes each check at the scope it runs (local done gate, not hosted runner) and carries a check or a named receipt that reads group= from the dev runtime dispatch_deadline line -- falsifier: dod-verify over contracts/OMN-20464.yaml reports every dod_evidence entry with a runnable command and a scope matching its description"
+      - id: AC4
+        statement: "AC4: no reader of the orphan line parses it positionally or by exact match, and the consumer_group field is a required str, so the line never reads group=None -- falsifier: uv run pytest tests/unit/event_bus tests/unit/services tests/unit/models -q passes on the PR head with the suites run in parts if the whole run times out"
+evidence_requirements:
+  - kind: tests
+    description: The orphan readout and contract-check tests.
+    command: uv run --frozen pytest tests/unit/event_bus -q -p no:cacheprovider -k omn20464
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24779-ac1-two-subscriptions
+    description: >-
+      The real consume loop with a second subscription on another consumer group, listed first, reports one orphan whose line carries the hung subscription's full group token and nothing of the other group.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_omn20464_orphan_degraded_grace.py -q -p no:cacheprovider -k names_the_consumer
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24779-ac2-installed-check-fails-without-group
+    description: >-
+      The installed-and-read command of the OMN-20464 contract exits non-zero on the pre-change model and zero on the model with the group.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus -q -p no:cacheprovider -k omn20464
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24779-ac3-scope-and-runtime-read
+    description: >-
+      Every dod_evidence entry of the OMN-20464 contract has a runnable command and a scope matching its description, and one local-done-gate entry reads the orphan line from the dev runtime's /health.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_omn20464_orphan_contract_checks.py -q -p no:cacheprovider -k scope_matching
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24779-ac4-required-group-and-readers
+    description: >-
+      The group is a required string on the model, and the one reader of the orphan lines (the runtime health dimension) joins them as text.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_omn20464_orphan_contract_checks.py tests/unit/services/test_runtime_health_dispatch_deadline_dimension_omn19355.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
