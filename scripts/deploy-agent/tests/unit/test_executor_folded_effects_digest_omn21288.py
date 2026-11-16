@@ -23,6 +23,9 @@ pytestmark = pytest.mark.unit
 DIGEST = "sha256:" + "a" * 64
 OTHER_DIGEST = "sha256:" + "b" * 64
 FOLDED_KEY = "STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES"
+# The fold mapping the policy contract carries; OMN-24562 retires the mapped service.
+FOLDABLE_KEY = "DEV_RUNTIME_MAIN_FOLDABLE_SERVICES"
+FOLDABLE = '{"effects":"runtime-effects"}'
 # The lane's own unfolded health targets name its containers and ports, so no
 # lane container name is restated here.
 (MAIN, MAIN_PORT), (EFFECTS, EFFECTS_PORT) = _lane_configs()[
@@ -45,7 +48,7 @@ def inspected(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr("deploy_agent.executor._run", fake_run)
     monkeypatch.setattr(
         "deploy_agent.executor._load_runtime_policy_env",
-        lambda: {FOLDED_KEY: "effects"},
+        lambda: {FOLDED_KEY: "effects", FOLDABLE_KEY: FOLDABLE},
     )
     return containers
 
@@ -61,7 +64,8 @@ def test_stability_effects_digest_uses_fold_policy(
     monkeypatch: pytest.MonkeyPatch, inspected: list[str], profiles: str, container: str
 ) -> None:
     monkeypatch.setattr(
-        "deploy_agent.executor._load_runtime_policy_env", lambda: {FOLDED_KEY: profiles}
+        "deploy_agent.executor._load_runtime_policy_env",
+        lambda: {FOLDED_KEY: profiles, FOLDABLE_KEY: FOLDABLE},
     )
     assert DeployExecutor().resolve_stability_ready_digest("runtime-effects") == DIGEST
     assert inspected == [container]
@@ -82,7 +86,10 @@ def test_digest_resolution_reads_policy_once(
     def load_policy() -> dict[str, str]:
         reads.append(None)
         # A second read would observe a different policy during a rewrite.
-        return {FOLDED_KEY: "effects" if len(reads) == 1 else ""}
+        return {
+            FOLDED_KEY: "effects" if len(reads) == 1 else "",
+            FOLDABLE_KEY: FOLDABLE,
+        }
 
     monkeypatch.setattr("deploy_agent.executor._load_runtime_policy_env", load_policy)
     assert DeployExecutor().resolve_stability_ready_digest("runtime-effects") == DIGEST

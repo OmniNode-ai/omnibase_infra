@@ -187,6 +187,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "handlers/handler_restart_on_merge.py",
         "models/model_dev_lane_code_ref_pin.py",
         "handlers/handler_dev_lane_code_ref_pin.py",
+        "nodes/node_deploy_job_reading_effect/runtime_deploy_job_reading.py",
         "models/model_onex_api_image_import_request.py",
         "models/model_onex_api_image_import_verdict.py",
         "handlers/handler_onex_api_image_import_check.py",
@@ -1037,8 +1038,9 @@ def active_dev_instance() -> str:
 
 
 def _folded_dev_services(lane: EnumRuntimeLane) -> set[str]:
+    policy = _load_runtime_policy_env()  # one snapshot for the profiles and the map
     services: set[str] = load_dev_boot_guard().folded_dev_services(
-        _load_runtime_policy_env(), lane_folded_profiles(lane)
+        policy, lane_folded_profiles(lane, policy), LANE_POLICY_PREFIX.get(lane, "")
     )
     return services
 
@@ -1047,13 +1049,14 @@ def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
     if lane is EnumRuntimeLane.DEV:
         config = dev_instance_lane_configs()[_DevInstanceSelection.name]
-        if retired := _folded_dev_services(lane):
-            config = load_dev_boot_guard().retire_lane_services(
-                config, retired, {ONEX_API_SERVICE: EnumInstancePhase.ONEX_API_PIN}
-            )
     else:
         config = _lane_configs()[lane]
-    if "effects" in lane_folded_profiles(lane):
+    if retired := _folded_dev_services(lane):
+        config = load_dev_boot_guard().retire_lane_services(
+            config, retired, {ONEX_API_SERVICE: EnumInstancePhase.ONEX_API_PIN}
+        )
+    # One policy snapshot decides both: a folded effects role is one the lane retires.
+    if "runtime-effects" in retired:
         # The effects port is published by main once the role is folded, so the
         # effects health target reads main's container (OMN-22930 on primary dev).
         targets = list(config.runtime_health_targets)
@@ -3554,15 +3557,6 @@ class DeployExecutor:
             self.container_residue.append(
                 ModelContainerResidue(service=service, state=state, exit_code=exit_code)
             )
-
-    def _mark_residue_recovered(self, recovered: set[str]) -> None:
-        """Flip residue entries whose service came up under recovery."""
-        self.container_residue = [
-            item.model_copy(update={"recovered": True})
-            if item.service in recovered
-            else item
-            for item in self.container_residue
-        ]
 
     def validate_llm_endpoint_env_contract(self) -> None:
         """Fail runtime deploys when configured LLM endpoints drift from contract."""
@@ -6207,9 +6201,7 @@ class DeployExecutor:
     def _retire_folded_dev_services(
         self, lane: EnumRuntimeLane, config: ModelLaneConfig | None = None
     ) -> None:
-        """Retire each primary dev container whose role main now carries; keep volumes."""
-        if lane is not EnumRuntimeLane.DEV:
-            return  # Other dev instances fold nothing (lane_folded_profiles).
+        """Retire each lane container whose role main now carries; keep volumes."""
         config = lane_config_for(lane) if config is None else config
         project = f"label=com.docker.compose.project={config.compose_project}"
         containers: list[str] = []
@@ -6251,7 +6243,7 @@ class DeployExecutor:
         config = lane_config_for(lane)
         profile = "core" if scope == Scope.CORE else "runtime"
         requested_services = _requested_services_for_up(scope, services, lane=lane)
-        if lane is EnumRuntimeLane.DEV and services and not requested_services:
+        if services and not requested_services:
             # A retired-role-only request must never start the whole profile.
             on_phase_update(phase, PhaseStatus.SUCCESS)
             return
@@ -6449,7 +6441,14 @@ class DeployExecutor:
                 timeout_s=CONTAINER_RECOVERY_VERIFY_TIMEOUT_SECONDS,
                 lane=lane,
             )
-            self._mark_residue_recovered(set(stuck) - set(still_stuck))
+            # Flip residue entries whose service came up under recovery.
+            recovered = set(stuck) - set(still_stuck)
+            self.container_residue = [
+                item.model_copy(update={"recovered": True})
+                if item.service in recovered
+                else item
+                for item in self.container_residue
+            ]
             if not ok:
                 detail = f"Containers still not running after docker start recovery: {still_stuck}"
                 if compose_up_error:
@@ -7635,13 +7634,6 @@ class DeployRolledBackError(VerificationFailedError):
         )
 
 
-def _retention_ref(image_ref: str, lane: EnumRuntimeLane) -> str:
-    repo = image_ref.split("@", 1)[0]
-    if repo.rfind(":") > repo.rfind("/"):
-        repo = repo.rsplit(":", 1)[0]
-    return f"{repo}:rollback-{lane.value}"
-
-
 def _tag_image(image_id: str, image_ref: str) -> None:
     result = _run(
         ["docker", "tag", image_id, image_ref],
@@ -7714,7 +7706,10 @@ def capture_rollback_point(
                     container,
                 )
                 return None
-            retain_ref = _retention_ref(image_ref, lane)
+            retain_repo = image_ref.split("@", 1)[0]
+            if retain_repo.rfind(":") > retain_repo.rfind("/"):
+                retain_repo = retain_repo.rsplit(":", 1)[0]
+            retain_ref = f"{retain_repo}:rollback-{lane.value}"
             if retain_ref in retention and retention[retain_ref] != image_id:
                 logger.warning(
                     "Cannot capture rollback for %s: conflicting image ids for %s",

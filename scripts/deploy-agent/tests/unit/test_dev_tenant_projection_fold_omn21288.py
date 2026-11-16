@@ -231,13 +231,11 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
         assert calls[len(censused) + 1] == ["docker", "rm", *ids]
 
 
-def test_retirement_is_inert_on_other_lanes() -> None:
+def test_retirement_is_inert_on_prod() -> None:
     with patch("deploy_agent.executor._run") as run:
-        DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.STABILITY_TEST)
+        DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.PROD)
     run.assert_not_called()
-    assert HOOK_EVENTS_WRITER not in (
-        lane_config_for(EnumRuntimeLane.STABILITY_TEST).disabled_services
-    )
+    assert not lane_config_for(EnumRuntimeLane.PROD).disabled_services
 
 
 def test_other_dev_instance_does_not_retire_the_hook_events_writer(

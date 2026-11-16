@@ -89,6 +89,17 @@ def _stub_deploy_source_clone_creation(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_ledger_append_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A unit test never appends a job reading row to the host's real ledger (OMN-24617).
+
+    The agent's terminal publish writes a reading row through the bus append command named
+    by the host's environment; on a lab host that variable is set, so a test that settles a
+    job would otherwise write to the live ledger. The reading's own tests set a stand-in.
+    """
+    monkeypatch.delenv("ONEX_LEDGER_BUS_APPEND_COMMAND", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _stub_cost_estimator_build_settings(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
