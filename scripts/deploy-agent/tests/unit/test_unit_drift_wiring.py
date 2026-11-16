@@ -169,9 +169,9 @@ def test_self_update_syncs_before_code_check_and_preserves_command_on_failure(
     if reload_exit == 0:
         assert actions == [*expected, "rewind"]
         restarts = [cmd for cmd in commands if cmd[0] == "systemd-run"]
-        assert restarts == [
-            [*SELF_RESTART_COMMAND.split(), "agent.service"],
-        ]
+        prefix = SELF_RESTART_COMMAND.split()[:4]
+        assert [cmd[:6] for cmd in restarts] == [[*prefix, "bash", "-c"]]
+        assert "systemctl --user restart agent.service" in restarts[0][-1]
     else:
         assert actions == expected
         assert all(cmd[0] != "systemd-run" for cmd in commands)

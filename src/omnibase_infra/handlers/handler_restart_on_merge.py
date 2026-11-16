@@ -386,15 +386,9 @@ def sync_own_unit_after_pull(
     return unit_name if changed else None
 
 
-def installed_unit_path(execution: ModuleType, target: ModelRestartOnMerge) -> Path:
-    """Where the agent's unit-drift check says ``target``'s unit is installed."""
-    repo_root = Path(target.repo_root)
-    entries = execution.unit_drift.load_manifest(repo_root / MANIFEST_RELPATH)
-    entry = next(e for e in entries if e.name == target.unit)
-    result = execution.unit_drift.check_units(
-        [entry], repo_root=repo_root, hostname="", home=Path(target.home)
-    )[0]
-    return Path(result.installed_path)
+def installed_unit_path(target: ModelRestartOnMerge) -> Path:
+    """Where an agent unit is installed: the user unit directory under ``home``."""
+    return Path(target.home) / ".config" / "systemd" / "user" / target.unit
 
 
 def transient_restart_script(
@@ -435,7 +429,8 @@ def restart_synced_unit(
     """Run the restart script in a transient unit; raise when it left the agent stopped.
 
     A ``-SIGTERM`` is this process being stopped by its own restart: the transient
-    unit goes on verifying and rolling back without it.
+    unit goes on verifying and rolling back without it. Any exit other than the
+    script's own means the transient unit never ran and nothing was stopped.
     """
     code = run_unit_command([*transient_command, "bash", "-c", script])
     if code in _RESTART_OK:
@@ -446,10 +441,14 @@ def restart_synced_unit(
             target.unit,
         )
         return
-    raise AgentLeftStoppedError(
-        f"restart of {target.unit} failed and so did its restart on the previous "
-        f"revision (transient unit exit {code}): operator action needed; no other "
-        "agent was touched"
+    if code == LEFT_STOPPED:
+        raise AgentLeftStoppedError(
+            f"restart of {target.unit} failed and so did its restart on the previous "
+            "revision: operator action needed; no other agent was touched"
+        )
+    raise RuntimeError(
+        f"the transient restart unit for {target.unit} did not run (exit {code}): "
+        "the agent was not stopped and keeps its revision"
     )
 
 
@@ -474,7 +473,7 @@ def restart_own_unit(
         transient_command=argv[: argv.index("systemctl")],
         script=transient_restart_script(
             unit_name,
-            installed=installed_unit_path(execution, target),
+            installed=installed_unit_path(target),
             agent_dir=agent_dir,
             loaded_sha=loaded_sha,
             settle=SETTLE_SECONDS,
