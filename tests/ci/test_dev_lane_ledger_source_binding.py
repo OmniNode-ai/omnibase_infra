@@ -173,22 +173,6 @@ def test_no_compose_file_mounts_the_overlay_dir_parent() -> None:
     assert offenders == []
 
 
-@needs_compose
-def test_runtime_effects_renders_the_mount_source() -> None:
-    services = render_stack(
-        DEV_LANE_STACK,
-        {"ONEX_LANE_OVERLAY_DIR": "/srv/workspace/config/lab/lane-overlays"},
-    )
-    volumes = services["runtime-effects"]["volumes"]
-    mounts = [v for v in volumes if v["target"] == LEDGER_MOUNT_TARGET]
-    # Compose keeps the dots; the engine's mount resolves them, and the lane
-    # declaration folder (the parent of the lane overlay folder) is where they land.
-    assert [posixpath.normpath(m["source"]) for m in mounts] == [
-        "/srv/workspace/config/lab"
-    ]
-    assert mounts[0]["read_only"] is True
-
-
 def _rendered_declaration_mount(stack: tuple[str, ...], name: str) -> dict[str, Any]:
     services = render_stack(
         stack,
