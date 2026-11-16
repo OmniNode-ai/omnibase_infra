@@ -29,8 +29,6 @@ node_type: "EFFECT_GENERIC"
 description: >
   Turn a dispatched delegation run's terminal into the delegate-skill result and, for a waited run, into its numbered run steps for the contract-declared run-step topic.
 
-runtime_profiles:
-  - local-dev
 input_model:
   name: "ModelDelegationDispatchTerminalRequest"
   module: "omnibase_infra.models.delegation.model_delegation_dispatch_terminal_request"
@@ -93,7 +91,7 @@ error_handling:
   error_types: []
 metadata:
   description: >
-    Called in process by RuntimeDelegationDispatchPort after each dispatch. Declares the local-dev runtime profile, which no deployed runtime carries, so main and effects never attach it as a subscriber.
+    Called in process by RuntimeDelegationDispatchPort after each dispatch. Declares no runtime profile and no topics, so no deployed runtime attaches it as a subscriber.
 
   author: "OmniNode Team"
   license: "MIT"
