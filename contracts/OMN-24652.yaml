@@ -1,12 +1,12 @@
 schema_version: 1.0.0
-ticket_id: OMN-23143
+ticket_id: OMN-24652
 title: The skill mapping names no market result model
 summary: The onex skill mapping no longer names a result model from the market package. The 54 references are removed, the field is optional, a mapping that names a market package is refused, and the terminal publisher reads the receipt's own result model when the mapping names none. The dynamic imports in the delegation command line and in the two observation scripts are not in this pull request.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-omn23143-skill-result-model
+  - id: req-omn24652-skill-result-model
     statement: The skill mapping carries no market package name as a result model.
     acceptance:
       - id: AC3
@@ -20,7 +20,7 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn23143-ac3
+  - id: dod-omn24652-ac3
     description: 'AC3: the skill_mapping.yaml names no market result model (54 references removed, 8 core, infra and builtin ones kept and resolved) and the mapping model refuses a market package; before the change 54 lines named omnimarket.'
     source: manual
     binds_ac:
@@ -29,7 +29,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/validation -q -n 0 --no-cov -p no:cacheprovider -k skill_result_model_references
         cwd: .
-  - id: dod-omn23143-deploy-publisher-reads-receipt-model
+  - id: dod-omn24652-deploy-publisher-reads-receipt-model
     description: 'Post-deploy probe: the dev branch carries the terminal publisher that takes the receipt''s own result model when the mapping names none, so the rebuilt runtime publishes the dod_verify verdict with no market model named in the mapping. It reads dev, which holds the line only after this change merges, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion (AC3 is bound by the mapping tests).'
     source: manual
     execution_scope: local_done_gate
@@ -37,7 +37,7 @@ dod_evidence:
       - check_type: command
         check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/skill_terminal_publish.py?ref=dev --jq .content | base64 -d | grep -qF 'result_model = result_model or str(getattr(receipt'
         cwd: .
-  - id: dod-omn23143-integration-proof-skill-registry
+  - id: dod-omn24652-integration-proof-skill-registry
     description: The shipped skill registry loads through the onex skill command surface and its integration test passes with no market result model named.
     source: manual
     execution_scope: local_done_gate
