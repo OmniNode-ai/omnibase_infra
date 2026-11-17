@@ -320,23 +320,31 @@ def _compose_prefix(execution: ModuleType, lane: str) -> list[str]:
 
 def writer_roll(
     execution: ModuleType, lane: str, scope: object, git_sha: str
-) -> Callable[..., tuple[str, ...]]:
-    """The roll as a step ``_compose_up`` runs once the migrations are ready.
+) -> dict[str, Callable[..., tuple[str, ...]]]:
+    """The roll as the ``after_migrations`` step ``_compose_up`` runs, or ``{}``.
 
     The runtime ``_compose_up`` runs ``_ensure_runtime_migrations_ready`` and
     ``rerun_changed_oneshots`` first; the writers must start on the migrated
     schema, so the executor hands this to ``_compose_up`` instead of rolling
     them before it. ``_compose_up`` runs outside the build-context lock, and
-    the step receives the environment the runtime up runs under.
+    the step receives the environment the runtime up runs under. ``{}`` when
+    the lane has no writers or the scope builds none: ``_compose_up`` is then
+    called exactly as before.
 
     Called at the top of ``rebuild_scope``: the roll compares every image's
     revision label with ``git_sha``, so an empty one is refused here, before
     any build, boot preflight or deps up, instead of after them.
     """
-    rolls = scope in (execution.Scope.RUNTIME, execution.Scope.FULL)
-    if rolls and stability_lane_writer_services(execution, lane) and not git_sha:
+    scopes = (execution.Scope.RUNTIME, execution.Scope.FULL)
+    if scope not in scopes or not stability_lane_writer_services(execution, lane):
+        return {}
+    if not git_sha:
         raise RuntimeError(_NO_SHA)
-    return lambda extra_env=None: roll_writers(execution, lane, git_sha, extra_env)
+    return {
+        "after_migrations": lambda extra_env=None: roll_writers(
+            execution, lane, git_sha, extra_env
+        )
+    }
 
 
 _NO_SHA = "stability lane writer check needs the deploy's git sha"

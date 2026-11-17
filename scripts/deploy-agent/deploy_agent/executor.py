@@ -4789,7 +4789,7 @@ class DeployExecutor:
                 lane=lane,
                 compose_may_build=False,
                 extra_env=estimator_env,
-                after_migrations=roll,
+                **roll,
             )
             self._deploy_gateway_lane(
                 on_phase_update,
@@ -4838,7 +4838,7 @@ class DeployExecutor:
             lane=lane,
             compose_may_build=False,
             extra_env=estimator_env,
-            after_migrations=roll,
+            **roll,
         )
         # After the infra family, never before it: the forwarder mirrors off
         # this lane's broker, so deploying it against a lane that is still
