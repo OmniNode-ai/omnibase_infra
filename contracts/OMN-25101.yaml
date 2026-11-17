@@ -43,7 +43,7 @@ dod_evidence:
           bash -o pipefail -c 'test "$(grep -c "census exit=8: " tests/ci/fixtures/omn24976_lane_sync_unpublished_drift.json)" = 2'
         cwd: .
       - check_type: command
-        check_value: bash -o pipefail -c 'out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider 2>&1); printf "%s\n" "$out" | tail -5; printf "%s\n" "$out" | grep -Eq "^23 passed in "'
+        check_value: bash -o pipefail -c 'out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider 2>&1) && printf "%s\n" "$out" | tail -5 && printf "%s\n" "$out" | grep -Eq "^23 passed in "'
         cwd: .
   - id: dod-omn25101-ac2-red-at-merge-base
     description: >-

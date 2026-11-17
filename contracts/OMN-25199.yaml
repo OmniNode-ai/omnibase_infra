@@ -32,7 +32,7 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn25199-ac1-closure-claim
     description: >-
-      No commit message of the branch carries a closing keyword before OMN-24976, and the test runs that check on a synthetic repository with closing and plain references. The pull request body is not readable from the repository; its closing line is removed by the orchestrator and read back with the watcher.
+      No commit message of the branch carries a closing keyword before OMN-24976, and the test runs that check on a synthetic repository with closing and plain references. The check reads commit messages only. The pull request body is not readable from the repository: the OMN-25205 pull request comment gives its readback, and the orchestrator edits its closing line.
     source: manual
     binds_ac: [AC1]
     checks:
@@ -41,7 +41,7 @@ dod_evidence:
           bash -o pipefail -c '
           msgs=$(git log --format="%H %s%n%b" 75969ce9e..HEAD) &&
           test -n "$msgs" &&
-          test "$(printf "%s\n" "$msgs" | grep -ciE "(clos(e|es|ed|ing)|fix(es|ed|ing)?|resolv(e|es|ed|ing)|complet(e|es|ed|ing))[: ]+(https://[^ ]*/)?OMN-24976")" = 0'
+          test "$(printf "%s\n" "$msgs" | grep -ciE "(clos(e|es|ed|ing)|fix(es|ed|ing)?|resolv(e|es|ed|ing)|complet(e|es|ed|ing))[: ]+((\[?(https://[^ ]*/)?OMN-[0-9]+\]?(\([^)]*\))?)[ ,]+(and +)?)*\[?(https://[^ ]*/)?OMN-24976")" = 0'
         cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_contract_check_guards_omn25199.py -q --no-cov -n 0 -p no:cacheprovider -k "closing_keyword or only_reference or unreadable_range"
@@ -83,7 +83,7 @@ dod_evidence:
     binds_ac: [AC4]
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c 'out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider 2>&1); printf "%s\n" "$out" | tail -5; printf "%s\n" "$out" | grep -Eq "^23 passed in "'
+        check_value: bash -o pipefail -c 'out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider 2>&1) && printf "%s\n" "$out" | tail -5 && printf "%s\n" "$out" | grep -Eq "^23 passed in "'
         cwd: .
   - id: dod-omn25199-ac5-non-blocking
     description: >-
