@@ -271,7 +271,7 @@ def build_stability_lane_writers(
     already staged at the deploy's sha (``stage_workspace=False`` reuses it) and
     BEFORE ``_preflight_runtime_boot``. A build touches no running container, so
     a refused preflight leaves the lane as it was; the recreate is
-    :func:`recreate_stability_lane_writers`, which the executor calls only once
+    :func:`roll_writers`, which the executor calls only once
     the preflight has passed and, on a FULL rebuild, the deps leg has converged.
     """
     services = stability_lane_writer_services(execution, lane)
@@ -306,11 +306,12 @@ _INSPECT_FORMAT = (
 )
 
 
-def recreate_stability_lane_writers(
+def roll_writers(
     execution: ModuleType,
-    *,
     lane: str,
     git_sha: str,
+    extra_env: dict[str, str] | None = None,
+    *,
     wait_seconds: float = WRITER_HEALTH_WAIT_SECONDS,
     poll_seconds: float = WRITER_HEALTH_POLL_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
@@ -321,13 +322,17 @@ def recreate_stability_lane_writers(
     carry the runtime image's revision, and that revision must be the deploy's
     sha, so a mismatch leaves the running writers untouched. ``up -d`` exiting 0
     says only that compose started a container, so the roll then fails the
-    deploy unless every writer is running, healthy and has not restarted. The
-    compose environment is the one ``_compose_up`` runs under.
+    deploy unless every writer is running, healthy and has not restarted.
+
+    ``extra_env`` is the environment the executor's builder returned, which the
+    executor passes to ``_compose_up`` for the runtime up that follows; the
+    writers' commands run under ``_compose_env(extra_env)``, the same environment
+    ``run_compose_up_steps`` builds for that up.
     """
     services = stability_lane_writer_services(execution, lane)
     if not services:
         return ()
-    environment = execution._compose_env()
+    environment = execution._compose_env(extra_env)
     _assert_images_at_deploy_sha(execution, lane, services, environment, git_sha)
     argv = [
         *execution._compose_argv(lane),
@@ -427,24 +432,43 @@ def _wait_writers_healthy(
         sleep(poll_seconds)
 
 
+def _service_image(
+    execution: ModuleType, lane: str, service: str, environment: dict[str, str]
+) -> str:
+    """The image compose will start ``service`` from, read from its own entry.
+
+    ``config --images <service>`` also prints the images of the service's
+    dependencies (a writer lists the broker's after its own), so a line of that
+    output cannot be told apart from the service's. ``config --format json``
+    keys each service by name; a service with ``build:`` and no ``image:`` has
+    no image field there, and compose names its image ``<project>-<service>``.
+    """
+    rendered = json.loads(
+        _read_docker(
+            execution,
+            [
+                *execution._compose_argv(lane),
+                "--profile",
+                "runtime",
+                "config",
+                "--format",
+                "json",
+                service,
+            ],
+            environment,
+        )
+    )
+    body = rendered.get("services", {}).get(service)
+    if not isinstance(body, dict):
+        raise RuntimeError(f"stability lane writer check: {service} is not rendered")
+    return str(body.get("image") or f"{rendered['name']}-{service}")
+
+
 def _service_revision(
     execution: ModuleType, lane: str, service: str, environment: dict[str, str]
 ) -> str:
     """The revision label of the image compose will start ``service`` from."""
-    image = _read_docker(
-        execution,
-        [
-            *execution._compose_argv(lane),
-            "--profile",
-            "runtime",
-            "config",
-            "--images",
-            service,
-        ],
-        environment,
-    ).splitlines()[-1:]
-    if not image:
-        raise RuntimeError(f"stability lane writer check: {service} names no image")
+    image = _service_image(execution, lane, service, environment)
     return _read_docker(
         execution,
         [
@@ -453,7 +477,7 @@ def _service_revision(
             "inspect",
             "--format",
             f'{{{{index .Config.Labels "{IMAGE_REVISION_LABEL}"}}}}',
-            image[0].strip(),
+            image,
         ],
         environment,
     )

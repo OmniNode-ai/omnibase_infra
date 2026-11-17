@@ -40,6 +40,8 @@ OLD_SHA = "a" * 40
 WRITER = "projection-delegation-writer"
 SENTINEL = ("COMPOSE_ENV_SENTINEL", "set in the agent's process environment")
 RUNTIME = "omninode-runtime"
+PROJECT = execution.lane_config_for(LANE).compose_project
+BROKER_IMAGE = "redpandadata/redpanda:v24.2.7"
 NO_WAIT = {"wait_seconds": 0, "poll_seconds": 0, "sleep": lambda seconds: None}
 
 
@@ -70,6 +72,17 @@ def recorded() -> dict[str, object]:
     return data
 
 
+def _rendered(service: str, image: str | None) -> dict[str, object]:
+    """``config --format json <service>``: the service and the broker it depends on."""
+    body: dict[str, object] = {"build": {"context": ".."}, "depends_on": ["redpanda"]}
+    if image:
+        body["image"] = image
+    return {
+        "name": PROJECT,
+        "services": {service: body, "redpanda": {"image": BROKER_IMAGE}},
+    }
+
+
 @pytest.fixture
 def deploy(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """A stability deploy with a scripted docker: compose ps/inspect answer from ``state``.
@@ -83,6 +96,8 @@ def deploy(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         returncode=0,
         containers={},
         revisions={},
+        images={},
+        inspected=[],
     )
 
     def container(service: str) -> dict[str, object]:
@@ -96,15 +111,22 @@ def deploy(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         state.calls.append(argv)
         state.envs.append(kwargs.get("env"))
         out = ""
-        if argv[:2] == ["docker", "compose"] and "config" in argv:
-            out = f"image-of-{argv[-1]}"
+        if argv[:2] == ["docker", "compose"] and "--images" in argv:
+            # What compose prints: the service's image, then its dependencies'.
+            out = f"{PROJECT}-{argv[-1]}\n{BROKER_IMAGE}"
+        elif argv[:2] == ["docker", "compose"] and "config" in argv:
+            out = json.dumps(_rendered(argv[-1], state.images.get(argv[-1])))
         elif argv[:2] == ["docker", "compose"] and "ps" in argv:
             out = f"id-{argv[-1]}"
         elif argv[:2] == ["docker", "inspect"]:
             c = container(argv[-1].removeprefix("id-"))
             out = f"{c['status']}|{c['health']}|{c['restarts']}"
         elif argv[:3] == ["docker", "image", "inspect"]:
-            out = state.revisions.get(argv[-1].removeprefix("image-of-"), SHA)
+            state.inspected.append(argv[-1])
+            # Only this lane's built images carry a revision label.
+            built = argv[-1].removeprefix(f"{PROJECT}-")
+            out = state.revisions.get(built, SHA) if built != argv[-1] else ""
+            out = state.revisions.get(argv[-1], out)
         code = state.returncode if "up" in argv else 0
         return subprocess.CompletedProcess(argv, code, out, "")
 
@@ -145,7 +167,7 @@ def _build(
 
 
 def _recreate(state: SimpleNamespace, lane: EnumRuntimeLane) -> tuple[str, ...]:
-    rolled: tuple[str, ...] = _effect().recreate_stability_lane_writers(
+    rolled: tuple[str, ...] = _effect().roll_writers(
         execution, lane=lane, git_sha=SHA, **NO_WAIT
     )
     return rolled
@@ -183,12 +205,11 @@ def test_the_writer_that_refused_the_terminal_is_rolled_by_a_stability_deploy(
     # (the nightly's "terminal unknown"), and its DLQ record is the writer's refusal.
     assert row["terminal_ok"] is None and row["terminal_failure_cause"] is None
     # Both cases the nightly failed read the terminal as 'unknown': I9 wanted
-    # 'completed', I10 wanted 'failed'. Only I9's row was readable to record.
-    cases = {c["case"]: c for c in recorded["nightly_cases"]}
-    assert set(cases) == {"I9", "I10"}
-    assert (cases["I9"]["expected"], cases["I9"]["got"]) == ("completed", "unknown")
-    assert (cases["I10"]["expected"], cases["I10"]["got"]) == ("failed", "unknown")
-    assert {c["check"] for c in cases.values()} == {"terminal"}
+    # 'completed', I10 wanted 'failed'. Read from the job's own FAILED lines.
+    assert _terminal_cases(recorded["nightly_failed_lines"]) == {
+        "I9": ("completed", "unknown"),
+        "I10": ("failed", "unknown"),
+    }
     assert row["correlation_id"] == dlq["correlation_id"]
     assert dlq["handler"] == "node_projection_delegation"
     assert "ModelDelegateSkillTerminalProjection" in dlq["failure_reason_lines"][0]
@@ -209,6 +230,32 @@ def test_the_writer_that_refused_the_terminal_is_rolled_by_a_stability_deploy(
     assert up[up.index("-p") + 1] == execution.lane_config_for(LANE).compose_project
     assert {"--no-deps", "--no-build", "--force-recreate"} <= set(up)
     assert writer in up
+
+
+_FAILED_CASE = re.compile(
+    r"test_case_behaves_as_expected\[(?P<case>I\d+)\] .*?"
+    r"terminal: expected '(?P<expected>\w+)', got '(?P<got>\w+)'"
+)
+
+
+def _terminal_cases(lines: object) -> dict[str, tuple[str, str]]:
+    """The terminal expectation of each case in the nightly's FAILED lines."""
+    assert isinstance(lines, list)
+    found = {}
+    for line in lines:
+        match = _FAILED_CASE.search(str(line))
+        if match:
+            found[match["case"]] = (match["expected"], match["got"])
+    return found
+
+
+def test_a_fixture_without_the_i10_line_loses_the_i10_case(
+    recorded: dict[str, object],
+) -> None:
+    lines = recorded["nightly_failed_lines"]
+    assert isinstance(lines, list) and len(lines) == 2
+    kept = [line for line in lines if "[I10]" not in line]
+    assert set(_terminal_cases(kept)) == {"I9"}
 
 
 def test_every_writer_the_stability_overlay_declares_is_rolled() -> None:
@@ -265,9 +312,14 @@ def test_a_writer_recreate_exiting_1_fails_the_roll_before_the_runtime_up(
     with pytest.raises(RuntimeError, match="writer recreate exited 1"):
         _rebuild(deploy, scope)
     assert len(_ups(deploy)) == 1, "positive control: the writers' up ran and failed"
-    phases = [c.args[0] for c in deploy.executor._compose_up.call_args_list]
-    assert Phase.RUNTIME not in phases
+    _assert_only_the_deps_leg_ran(deploy, scope)
     deploy.executor._deploy_gateway_lane.assert_not_called()
+
+
+def _assert_only_the_deps_leg_ran(deploy: SimpleNamespace, scope: Scope) -> None:
+    """No runtime up: none at all on a RUNTIME roll, the deps leg alone on FULL."""
+    ups = [c.args[:2] for c in deploy.executor._compose_up.call_args_list]
+    assert ups == ([(Phase.CORE, Scope.CORE)] if scope == Scope.FULL else [])
 
 
 OTHER_LANES = [lane for lane in EnumRuntimeLane if lane != LANE]
@@ -380,44 +432,71 @@ def test_a_failed_runtime_build_builds_no_writer_and_recreates_none(
     assert _ups(deploy) == []
 
 
-def test_the_recreate_and_every_read_use_the_environment_compose_up_uses(
-    deploy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Neither side is stubbed: ``_compose_up`` runs its steps under ``_compose_env``."""
-    monkeypatch.delenv("OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN", False)
-    # What _compose_up hands compose for a stack up, through the real step runner.
-    execution.load_dev_boot_guard().run_compose_up_steps(
-        [["docker", "compose", "up", "-d"]],
-        10,
-        rolling=False,
-        lane=LANE,
-        execution=execution,
-    )
-    (stack_env,) = deploy.envs
-    deploy.envs.clear()
-    deploy.calls.clear()
-    _recreate(deploy, LANE)
-    assert len(deploy.calls) > 3, "positive control: ps, inspect and the up ran"
-    assert stack_env == execution._compose_env()
-    assert all(env == stack_env for env in deploy.envs)
-    # A bare environment would lack both: the sentinel is the process's, the DSN is
-    # the builder's own default and is in no process environment here.
-    assert stack_env[SENTINEL[0]] == SENTINEL[1]
-    assert "OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN" in stack_env
-    assert "OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN" not in os.environ
+BUILDER_ENV = {"WRITER_ROLL_BUILDER_SENTINEL": "returned by the dev-only builder"}
 
 
-def test_a_writer_up_given_a_bare_environment_is_caught(
-    deploy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
+def test_the_writer_up_runs_under_the_environment_the_real_runtime_up_gets(
+    deploy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, scope: Scope
 ) -> None:
-    """Negative control: a bare ``os.environ`` is not the builder's environment."""
-    monkeypatch.delenv("OMNIBASE_INFRA_INJECTION_EFFECTIVENESS_POSTGRES_DSN", False)
-    builders = execution._compose_env()
+    """The real ``_compose_up``: only docker itself and its container reads are stubbed.
+
+    The builder's environment reaches the runtime up as ``extra_env``; a writer up
+    run under ``_compose_env()`` alone would lack it.
+    """
+    executor = deploy.executor
+    executor._compose_up = DeployExecutor._compose_up.__get__(executor)
     monkeypatch.setattr(
-        execution, "_compose_env", lambda extra_env=None: dict(os.environ)
+        executor, "_build_dev_lane_only_services", lambda *a, **k: dict(BUILDER_ENV)
     )
+    monkeypatch.setattr(execution, "verify_containers_up", lambda *a, **k: (True, []))
+    monkeypatch.setattr(execution, "finish_recreate_renames", lambda lane: None)
+    monkeypatch.setattr(execution, "remove_recreate_leftovers", lambda *a: None)
+    for name in ("_ensure_runtime_migrations_ready", "rerun_changed_oneshots"):
+        monkeypatch.setattr(executor, name, lambda **kwargs: None)
+    if scope == Scope.FULL:
+        monkeypatch.setattr(executor, "_supervised_deps_recreate", lambda *a, **k: "")
+        monkeypatch.setattr(executor, "observe_deps_convergence", lambda lane: None)
+    _rebuild(deploy, scope)
+    ups = [
+        (argv, env)
+        for argv, env in zip(deploy.calls, deploy.envs, strict=True)
+        if "up" in argv
+    ]
+    writer_ups = [env for argv, env in ups if WRITER in argv]
+    runtime_ups = [env for argv, env in ups if RUNTIME in argv]
+    assert len(writer_ups) == 1 and runtime_ups, "positive control: both ups ran"
+    assert isinstance(writer_ups[0], dict)
+    assert writer_ups[0][next(iter(BUILDER_ENV))] == next(iter(BUILDER_ENV.values()))
+    assert all(env == writer_ups[0] for env in runtime_ups)
+    reads = [
+        env
+        for argv, env in zip(deploy.calls, deploy.envs, strict=True)
+        if argv[:2] == ["docker", "compose"] and "up" not in argv
+    ]
+    assert reads and all(env == writer_ups[0] for env in reads)
+
+
+def test_the_image_is_read_from_the_services_own_config_entry(
+    deploy: SimpleNamespace,
+) -> None:
+    """``config --images`` lists the broker after the writer; the JSON keys it by name."""
     _recreate(deploy, LANE)
-    assert deploy.envs and all(env != builders for env in deploy.envs)
+    assert BROKER_IMAGE not in deploy.inspected
+    assert set(deploy.inspected) == {
+        f"{PROJECT}-{service}" for service in (RUNTIME, *_writers())
+    }
+    assert not [c for c in deploy.calls if "--images" in c]
+
+
+def test_an_image_the_compose_file_names_is_the_one_inspected(
+    deploy: SimpleNamespace,
+) -> None:
+    deploy.images[WRITER] = "registry.local/delegation-writer:pinned"
+    deploy.revisions["registry.local/delegation-writer:pinned"] = OLD_SHA
+    with pytest.raises(RuntimeError, match="not on the runtime's image revision"):
+        _recreate(deploy, LANE)
+    assert "registry.local/delegation-writer:pinned" in deploy.inspected
 
 
 def test_healthy_writers_on_the_runtime_image_pass(deploy: SimpleNamespace) -> None:
@@ -456,7 +535,7 @@ def test_a_writer_waits_for_its_healthcheck_before_it_passes(
         slept.append(seconds)
         deploy.container(WRITER)["health"] = "healthy"
 
-    _effect().recreate_stability_lane_writers(
+    _effect().roll_writers(
         execution, lane=LANE, git_sha=SHA, wait_seconds=60, poll_seconds=5, sleep=sleep
     )
     assert slept == [5]
@@ -486,7 +565,7 @@ def test_the_writers_are_compared_with_the_runtime_image_that_was_read(
         _recreate(deploy, LANE)
     _assert_nothing_replaced(deploy)
     read = [c[-1] for c in deploy.calls if c[:3] == ["docker", "image", "inspect"]]
-    assert f"image-of-{RUNTIME}" in read
+    assert f"{PROJECT}-{RUNTIME}" in read
 
 
 @pytest.mark.parametrize("revision", ["", "unknown", "<no value>"])
@@ -503,9 +582,7 @@ def test_a_recreate_with_no_deploy_sha_proves_nothing_and_touches_nothing(
     deploy: SimpleNamespace,
 ) -> None:
     with pytest.raises(RuntimeError, match="needs the deploy's git sha"):
-        _effect().recreate_stability_lane_writers(
-            execution, lane=LANE, git_sha="", **NO_WAIT
-        )
+        _effect().roll_writers(execution, lane=LANE, git_sha="", **NO_WAIT)
     assert not _ups(deploy)
 
 
@@ -517,8 +594,7 @@ def test_a_revision_mismatch_in_the_roll_runs_no_writer_up_and_no_runtime_up(
     with pytest.raises(RuntimeError, match="not on the runtime's image revision"):
         _rebuild(deploy, scope)
     _assert_nothing_replaced(deploy)
-    phases = [c.args[0] for c in deploy.executor._compose_up.call_args_list]
-    assert Phase.RUNTIME not in phases
+    _assert_only_the_deps_leg_ran(deploy, scope)
 
 
 def _writers() -> tuple[str, ...]:
@@ -600,7 +676,6 @@ def test_the_build_passes_the_full_deploy_sha_as_the_label_and_cache_args(
     (build,) = [c for c in argv if "build" in c]
     pairs = [build[i + 1] for i, token in enumerate(build) if token == "--build-arg"]
     assert f"GIT_SHA={SHA}" in pairs and f"VCS_REF={SHA}" in pairs
-    assert len(SHA) == 40
 
 
 DEV_FOLD_OVERLAY = REPO / "docker" / "docker-compose.dev-tenant-fold.yml"
@@ -726,29 +801,41 @@ def test_stability_runtime_main_refuses_to_deploy_without_the_roots_directory() 
     )
 
 
-def test_the_deploy_environment_comes_from_the_operator_env_file(
-    tmp_path: Path,
-) -> None:
-    """The agent's environment is its unit's env file; the deploy refuses without the var.
+ENV_TEMPLATE = REPO / "docs" / "env-example-full.txt"
+_TEMPLATE_ENTRY = re.compile(
+    r"^#?\s*(?:export\s+)?(?P<name>[A-Z_][A-Z0-9_]*)=(?P<value>\S*)", re.M
+)
 
-    The file is the host's (``DEPLOY_AGENT_ENV_FILE`` of the unit tracked here), so a
-    hosted test reads a file written to match it: the roots directory and OMNI_HOME
-    set, the store directory not set.
+
+def _template_names(text: str) -> set[str]:
+    """The names a tracked env template documents, set or commented out."""
+    return {match["name"] for match in _TEMPLATE_ENTRY.finditer(text)}
+
+
+def test_the_tracked_env_template_names_the_roots_directory() -> None:
+    """The stability compose file refuses to deploy without it (``:?``, line 316).
+
+    ``docs/env-example-full.txt`` is the tracked reference for the operator env
+    file the deploy agent's unit names (``DEPLOY_AGENT_ENV_FILE``).
     """
     unit = OPERATOR_UNIT.read_text()
     assert re.search(r"^Environment=DEPLOY_AGENT_ENV_FILE=\S+$", unit, re.M)
-    operator_env = tmp_path / ".env"
-    operator_env.write_text(
-        f"export {ROOTS_DIR_VAR}='/srv/private/overlays'\nOMNI_HOME=/srv/registry\n"
+    names = _template_names(ENV_TEMPLATE.read_text())
+    assert "DEPLOY_AGENT_HMAC_SECRET" in names, "positive control: entries are read"
+    assert ROOTS_DIR_VAR in names
+    assert f"${{{ROOTS_DIR_VAR}:?" in STABILITY_OVERLAY.read_text()
+
+
+def test_a_template_without_the_roots_directory_is_caught() -> None:
+    text = ENV_TEMPLATE.read_text()
+    dropped = "\n".join(
+        line for line in text.splitlines() if f"{ROOTS_DIR_VAR}=" not in line
     )
-    env = _env_file_assignments(operator_env.read_text())
-    assert env == DEPLOY_ENV and STORE_DIR_VAR not in env
+    assert ROOTS_DIR_VAR not in _template_names(dropped)
     stab_main = _main(_overlay_services())
-    assert _overlay_mounts(stab_main, env, _project_directory(LANE))
-    operator_env.write_text("OMNI_HOME=/srv/registry\n")
-    absent = _env_file_assignments(operator_env.read_text())
+    env = {k: v for k, v in DEPLOY_ENV.items() if k != ROOTS_DIR_VAR}
     with pytest.raises(KeyError, match=ROOTS_DIR_VAR):
-        _overlay_mounts(stab_main, absent, _project_directory(LANE))
+        _overlay_mounts(stab_main, env, _project_directory(LANE))
 
 
 def test_no_tracked_env_file_sets_the_overlay_store_directory() -> None:

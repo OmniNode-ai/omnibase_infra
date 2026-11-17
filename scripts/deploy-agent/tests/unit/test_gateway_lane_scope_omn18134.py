@@ -74,6 +74,7 @@ from deploy_agent.executor import (
     DeployExecutor,
     GatewayDeployScriptUnavailableError,
     GatewayLaneConfigError,
+    _rcb,
     _requested_services_for_up,
     materialize_gateway_https_resolver_artifacts,
 )
@@ -144,7 +145,7 @@ def _captured(
         patch("deploy_agent.executor._run", side_effect=_fake_run),
         patch.object(DeployExecutor, "_compose_up", return_value=None),
         # OMN-24903: the writers' recreate reads docker; its own test file owns it.
-        patch.object(DeployExecutor, "_recreate_stability_writers", return_value=None),
+        patch.object(_rcb(), "roll_writers", return_value=()),
     ):
         executor.rebuild_scope(
             scope,

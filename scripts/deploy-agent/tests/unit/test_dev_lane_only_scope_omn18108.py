@@ -53,6 +53,7 @@ from deploy_agent.events import (
 )
 from deploy_agent.executor import (
     DeployExecutor,
+    _rcb,
     _requested_services_for_up,
     load_dev_boot_guard,
 )
@@ -270,9 +271,7 @@ class TestTheBuildPhaseReachesThem:
             patch.object(DeployExecutor, "_compose_up", return_value=None),
             # OMN-24903: the writers' recreate and health read are not builds;
             # test_stability_writers_follow_runtime_omn24903 owns them.
-            patch.object(
-                DeployExecutor, "_recreate_stability_writers", return_value=None
-            ),
+            patch.object(_rcb(), "roll_writers", return_value=()),
         ):
             executor.rebuild_scope(
                 Scope.RUNTIME,

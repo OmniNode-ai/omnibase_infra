@@ -54,19 +54,9 @@
       "omnibase_infra": "0.38.77"
     }
   },
-  "nightly_cases": [
-    {
-      "case": "I9",
-      "check": "terminal",
-      "expected": "completed",
-      "got": "unknown"
-    },
-    {
-      "case": "I10",
-      "check": "terminal",
-      "expected": "failed",
-      "got": "unknown"
-    }
+  "nightly_failed_lines": [
+    "2026-11-16T07:59:15.3976234Z FAILED tests/delegation_golden/test_layer2_live_runner.py::TestDelegationGoldenTasksLive::test_case_behaves_as_expected[I9] - AssertionError: case I9 behavioral expectation failed: [\"terminal: expected 'completed', got 'unknown'\", 'tokens: expected positive, got input=0 output=0'] (model=cohere/north-mini-code:free cost=0.0 tokens=0/0 terminal=unknown)",
+    "2026-11-16T07:59:15.3977471Z FAILED tests/delegation_golden/test_layer2_live_runner.py::TestDelegationGoldenTasksLive::test_case_behaves_as_expected[I10] - AssertionError: case I10 behavioral expectation failed: [\"terminal: expected 'failed', got 'unknown'\"] (model=none cost=0.0 tokens=0/0 terminal=unknown)"
   ],
-  "nightly_cases_source": "the case results the nightly printed for run 43826372809, job 133161076598 (quoted in the pull request body). Case I10's own delegation_events row was not readable from the lane (the job log is not cached), so no row is recorded for it."
+  "nightly_failed_lines_source": "verbatim from the log tail of omnimarket job 133161076598 (run 43826372809), read on 2026-11-17 with onex scm job-log. The tail carries no correlation id for I10, and I10 ran with model=none, so no delegation_events row of I10 is recorded here."
 }

@@ -87,7 +87,10 @@ from deploy_agent.instance_lanes import (
     parse_lane_env_fragment,
     read_lane_env_fragment,
 )
-from deploy_agent.lane_lock_client import DEFAULT_LANE_LOCK_TIMEOUT_SECONDS, lane_lock
+from deploy_agent.lane_lock_client import (
+    DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
+    lane_lock,
+)
 from deploy_agent.lane_policy import (
     ENV_ALLOWED_LANES,
     is_lab_dev_fence,
@@ -103,7 +106,10 @@ from deploy_agent.recreate_supervisor import (
     derive_deps_recreate_budget,
     supervise_compose_up,
 )
-from deploy_agent.ref_fence import ModelRefLineageFacts, assert_ref_not_stale_branch
+from deploy_agent.ref_fence import (
+    ModelRefLineageFacts,
+    assert_ref_not_stale_branch,
+)
 from deploy_agent.routing import AGENT_CLONE_ROOT, lane_flags_for_instance
 from deploy_agent.tracking_ref import (
     load_tracking_ref_from_env,
@@ -215,6 +221,14 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         module = sys.modules[module_name] = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     return sys.modules[name]
+
+
+# The runtime cost estimator build module, which also rolls the stability writers.
+_RCB = "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+
+
+def _rcb() -> ModuleType:
+    return load_dev_boot_guard(_RCB)
 
 
 def dev_boot_report_config() -> ModelDevBootReportConfig:
@@ -4727,9 +4741,7 @@ class DeployExecutor:
             # staged provenance a reconcile checkout would reset to a placeholder.
             # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
             with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
-                settings = load_dev_boot_guard(
-                    "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-                ).dev_lane_build_settings(sys.modules[__name__], lane)
+                settings = _rcb().dev_lane_build_settings(sys.modules[__name__], lane)
                 for build_scope in (Scope.CORE, Scope.RUNTIME):
                     self._compose_build(
                         build_scope,
@@ -4766,7 +4778,7 @@ class DeployExecutor:
             )
             # OMN-24903: the build and the boot preflight above passed and the
             # deps have converged, so the writers find their broker and database.
-            self._recreate_stability_writers(lane, git_sha)
+            _rcb().roll_writers(sys.modules[__name__], lane, git_sha, estimator_env)
             # OMN-18143: every image was built above; compose must not build
             # them again inside the up ceiling.
             self._compose_up(
@@ -4796,9 +4808,7 @@ class DeployExecutor:
         # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
         with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
             settings = (
-                load_dev_boot_guard(
-                    "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-                ).dev_lane_build_settings(sys.modules[__name__], lane)
+                _rcb().dev_lane_build_settings(sys.modules[__name__], lane)
                 if scope == Scope.RUNTIME
                 else None
             )
@@ -4823,7 +4833,7 @@ class DeployExecutor:
                 self._preflight_runtime_boot(services, on_phase_update, lane=lane)
                 # OMN-24903: after the runtime build and the boot preflight,
                 # before the runtime is recreated, so its events find new writers.
-                self._recreate_stability_writers(lane, git_sha)
+                _rcb().roll_writers(sys.modules[__name__], lane, git_sha, estimator_env)
         self._compose_up(
             phase,
             scope,
@@ -5136,9 +5146,7 @@ class DeployExecutor:
         git_ref: str,
         read_settings: Callable[[], Any] | None = None,
     ) -> dict[str, str]:
-        environment: dict[str, str] = load_dev_boot_guard(
-            "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-        ).build_dev_lane_services(
+        environment: dict[str, str] = _rcb().build_dev_lane_services(
             sys.modules[__name__],
             self._compose_build,
             git_sha,
@@ -5149,11 +5157,6 @@ class DeployExecutor:
             read_settings=read_settings,
         )
         return environment
-
-    def _recreate_stability_writers(self, lane: EnumRuntimeLane, sha: str) -> None:
-        load_dev_boot_guard(
-            "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-        ).recreate_stability_lane_writers(sys.modules[__name__], lane=lane, git_sha=sha)
 
     def _pull_pinned_image(self, image_digest: str, lane: EnumRuntimeLane) -> None:
         """Resolve the exact stability-proven image digest for a prod deploy.
