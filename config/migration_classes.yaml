@@ -551,3 +551,6 @@ migrations:
   forward/nodes/node_projection_experiment_result/0000_create_experiment_arm_results.sql: forward-only # CREATE TABLE and CREATE INDEX for the experiment arm results table
   forward/nodes/node_projection_experiment_result/0001_grant_tenant_projection_writer_experiment_arm_results.sql: expand-only # GRANT SELECT, INSERT, UPDATE to tenant_projection_writer on the experiment arm results table
   forward/nodes/node_projection_experiment_result/0002_force_rls_experiment_arm_results.sql: forward-only # FORCE ROW LEVEL SECURITY and the tenant isolation policy on the experiment arm results table
+  forward/nodes/node_projection_eval_results/0000_create_eval_results_tables.sql: forward-only # CREATE TABLE and CREATE INDEX for the eval results tables
+  forward/nodes/node_projection_eval_results/0001_grant_tenant_projection_writer_eval_results.sql: expand-only # GRANT table privileges to tenant_projection_writer on the eval results tables
+  forward/nodes/node_projection_eval_results/0002_force_rls_eval_results_tables.sql: forward-only # FORCE ROW LEVEL SECURITY and tenant isolation policies on the eval results tables

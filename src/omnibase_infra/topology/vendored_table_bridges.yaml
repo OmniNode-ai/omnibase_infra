@@ -26,3 +26,11 @@
   prefix: ""
   opts: {schema: public}
   tables: [experiment_arm_results]
+# OMN-25505: infra vendors the eval results tables ahead of the node contract.
+# The tenant projection writer receives the table grants; FORCE RLS is fenced.
+- ticket: OMN-25505
+  node: node_projection_eval_results
+  create: 0000_create_eval_results_tables.sql
+  prefix: ""
+  opts: {schema: public}
+  tables: [eval_item_scores, eval_item_traces, eval_run_closes, eval_run_rates]
