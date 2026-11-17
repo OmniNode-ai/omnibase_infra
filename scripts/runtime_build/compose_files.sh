@@ -130,14 +130,25 @@ _lane_overlay_dir_candidate() {
     printf '%s' "${ONEX_LANE_OVERLAY_DIR:-${ONEX_WORKSPACE_CONFIG_ROOT:+${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/lane-overlays}}"
 }
 
+# OMN-24854: the dev lane compose files mount ${ONEX_LANE_DECLARATION_DIR:?...} (the folder
+# that holds ci_bus_lanes.yaml) at the runtime container's config/lab. The deploy agent points
+# ONEX_LANE_OVERLAY_DIR at a rendered copy under its own state directory, so the overlay
+# directory's parent is not that folder: the agent and the warm refresh pin the real one, and
+# this helper keeps a pinned folder, else takes config/lab under ONEX_WORKSPACE_CONFIG_ROOT.
+# A folder that holds no ci_bus_lanes.yaml is never exported: the variable is left unset, so
+# compose itself refuses at the mount with the message that names it. Run by both overlay
+# functions below, so every caller of resolve_compose_file_args and the pre-PR slot get it.
+_pin_lane_declaration_dir() {
+    local dir="${ONEX_LANE_DECLARATION_DIR:-${ONEX_WORKSPACE_CONFIG_ROOT:-/nonexistent}/config/lab}"
+    if [[ -f "${dir}/ci_bus_lanes.yaml" ]]; then ONEX_LANE_DECLARATION_DIR="$(cd "${dir}" && pwd -P)"; export ONEX_LANE_DECLARATION_DIR; else unset ONEX_LANE_DECLARATION_DIR; fi
+}
+
 # Strict form, for a caller that must stop before any compose call (the pre-PR
 # slot): a missing directory, or one without this compose project's overlay, is
 # refused naming both variables.
 #   resolve_lane_overlay_dir <compose_project>
 resolve_lane_overlay_dir() {
-    local compose_project="$1"
-    local dir
-    dir="$(_lane_overlay_dir_candidate)"
+    local compose_project="$1" dir; dir="$(_lane_overlay_dir_candidate)"
     if [[ -z "${dir}" || ! -f "${dir}/${compose_project}.bifrost.yaml" ]]; then
         _compose_files_log_error "No lane overlay for compose project '${compose_project}'${dir:+ in \"${dir}\"}."
         _compose_files_log_error "  The lane compose files mount \${ONEX_LANE_OVERLAY_DIR}/\${COMPOSE_PROJECT_NAME}.bifrost.yaml, and this repository ships no lab lane overlay. Set ONEX_LANE_OVERLAY_DIR to the"
@@ -145,8 +156,7 @@ resolve_lane_overlay_dir() {
         _compose_files_log_error "  config root whose config/lab/lane-overlays/ holds it (OMN-20932)."
         return 1
     fi
-    ONEX_LANE_OVERLAY_DIR="$(cd "${dir}" && pwd -P)"
-    export ONEX_LANE_OVERLAY_DIR
+    ONEX_LANE_OVERLAY_DIR="$(cd "${dir}" && pwd -P)"; export ONEX_LANE_OVERLAY_DIR; _pin_lane_declaration_dir
 }
 
 # Export form, run by resolve_compose_file_args before every lane compose call:
@@ -156,15 +166,12 @@ resolve_lane_overlay_dir() {
 # deploy agent's _compose_env.
 #   export_lane_overlay_dir <compose_project>
 export_lane_overlay_dir() {
-    local compose_project="$1"
-    local dir
-    dir="$(_lane_overlay_dir_candidate)"
+    local compose_project="$1" dir; dir="$(_lane_overlay_dir_candidate)"
     if [[ -n "${dir}" && -f "${dir}/${compose_project}.bifrost.yaml" ]]; then
-        ONEX_LANE_OVERLAY_DIR="$(cd "${dir}" && pwd -P)"
-        export ONEX_LANE_OVERLAY_DIR
+        ONEX_LANE_OVERLAY_DIR="$(cd "${dir}" && pwd -P)"; export ONEX_LANE_OVERLAY_DIR
     else
         unset ONEX_LANE_OVERLAY_DIR
-    fi
+    fi; _pin_lane_declaration_dir
 }
 
 resolve_compose_file_args() {

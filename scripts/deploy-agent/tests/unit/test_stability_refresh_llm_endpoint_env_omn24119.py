@@ -73,6 +73,8 @@ def _overlay_home(root: Path, endpoint_urls: dict[str, str]) -> Path:
 def _lane_overlays(root: Path) -> Path:
     lane_dir = root / "lane-overlays"
     lane_dir.mkdir()
+    # OMN-24854: the folder above the lane overlays holds the lane declaration.
+    (root / "ci_bus_lanes.yaml").write_text("lanes: {}\n", encoding="utf-8")
     (lane_dir / LANE_FILE).write_text(
         yaml.safe_dump(
             {

@@ -20,6 +20,8 @@ import os
 import posixpath
 import re
 import shlex
+import subprocess
+from pathlib import Path
 from typing import Any
 
 import click
@@ -30,6 +32,8 @@ from tests.ci._compose_render_omn21099 import (
     DEV_LANE_OVERLAY,
     DEV_LANE_STACK,
     DOCKER_DIR,
+    REPO_ROOT,
+    compose_config,
     docker_compose_available,
     load_compose,
     render_stack,
@@ -51,6 +55,9 @@ LEDGER_ENV = {
 LEDGER_MOUNT_TARGET = "/etc/onex/workspace-config/config/lab"
 
 REQUIRED_SOURCE_PREFIX = "${ONEX_LANE_DECLARATION_DIR:?"
+FOLD_OVERLAY = "docker-compose.dev-tenant-fold.yml"
+RUNTIME_BUILD_DIR = REPO_ROOT / "scripts" / "runtime_build"
+COMPOSE_FILES_LIB = RUNTIME_BUILD_DIR / "compose_files.sh"
 
 
 def require_compose(available: bool, in_ci: bool) -> None:
@@ -71,7 +78,9 @@ def require_compose(available: bool, in_ci: bool) -> None:
 
 @pytest.fixture
 def compose_cli() -> None:
-    require_compose(docker_compose_available(), bool(os.environ.get("CI")))
+    # GitHub Actions sets CI and GITHUB_ACTIONS for every step; no workflow here clears either.
+    in_ci = bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+    require_compose(docker_compose_available(), in_ci)
 
 
 needs_compose = pytest.mark.usefixtures("compose_cli")
@@ -164,8 +173,8 @@ def test_no_compose_file_mounts_the_overlay_dir_parent() -> None:
     # OMN-24854: the overlay directory is the deploy agent's rendered copy, so its
     # parent is no lane declaration, so no compose file may mount it.
     offenders = sorted(
-        f"{path.name}:{number}"
-        for path in DOCKER_DIR.glob("*.yml")
+        f"{path.relative_to(DOCKER_DIR)}:{number}"
+        for path in sorted((*DOCKER_DIR.rglob("*.yml"), *DOCKER_DIR.rglob("*.yaml")))
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
         if re.search(r"\$\{ONEX_LANE_OVERLAY_DIR\}/\.\.", line)
         and not line.strip().startswith("#")
@@ -211,6 +220,168 @@ def test_folded_main_mount_follows_the_declaration_dir_not_the_rendered_overlay_
 
     assert posixpath.normpath(mount["source"]) == "/srv/workspace/config/lab"
     assert mount["read_only"] is True
+
+
+@needs_compose
+@pytest.mark.parametrize("stack", [DEV_LANE_STACK, (*DEV_LANE_STACK, FOLD_OVERLAY)])
+def test_a_render_with_only_the_overlay_dir_set_is_refused_naming_the_declaration_dir(
+    stack: tuple[str, ...],
+) -> None:
+    # OMN-24854: the overlay directory's parent is no longer the mount source, so a caller
+    # that sets only ONEX_LANE_OVERLAY_DIR (every caller before this change) must be refused
+    # by compose, by name, never rendered with a guessed folder.
+    refused = compose_config(
+        stack,
+        {"ONEX_LANE_OVERLAY_DIR": "/srv/state/rendered-lane-overlays"},
+        omit=("ONEX_LANE_DECLARATION_DIR",),
+    )
+
+    assert refused.returncode != 0
+    assert "ONEX_LANE_DECLARATION_DIR must name the config/lab folder" in refused.stderr
+
+
+def _dev_lane_shell(
+    tmp_path: Path, body: str, **env: str
+) -> subprocess.CompletedProcess[str]:
+    """Run ``body`` in bash after sourcing the compose file helpers, with only ``env`` set."""
+    docker_dir = tmp_path / "deploy" / "docker"
+    docker_dir.mkdir(parents=True, exist_ok=True)
+    return subprocess.run(
+        ["bash", "-c", f'source "{COMPOSE_FILES_LIB}"\n{body}'],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ["PATH"], "HOME": os.environ["HOME"], **env},
+    )
+
+
+@pytest.fixture
+def lab_config(tmp_path: Path) -> dict[str, Path]:
+    """A config root whose config/lab holds the lane declaration, and a rendered overlay copy."""
+    config_lab = tmp_path / "config" / "lab"
+    lane_overlays = config_lab / "lane-overlays"
+    rendered = tmp_path / "state" / "rendered-lane-overlays"
+    for folder in (lane_overlays, rendered):
+        folder.mkdir(parents=True)
+        (folder / "omnibase-infra.bifrost.yaml").write_text("lane: dev\n")
+    (config_lab / "ci_bus_lanes.yaml").write_text("lanes: {}\n")
+    return {
+        "root": tmp_path,
+        "config_lab": config_lab,
+        "lane_overlays": lane_overlays,
+        "rendered": rendered,
+        "state": tmp_path / "state",
+    }
+
+
+def _resolved_declaration_dir(tmp_path: Path, entry: str, **env: str) -> str:
+    """What ``ONEX_LANE_DECLARATION_DIR`` holds after the helper's ``entry`` runs."""
+    result = _dev_lane_shell(
+        tmp_path,
+        "declare -a args\n"
+        f"{entry.format(deploy=tmp_path / 'deploy')}\n"
+        'printf "%s" "${ONEX_LANE_DECLARATION_DIR-UNSET}"',
+        **env,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
+ENTRIES = [
+    'resolve_compose_file_args args "{deploy}" omnibase-infra',
+    "resolve_lane_overlay_dir omnibase-infra",
+]
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_the_compose_file_helper_takes_the_declaration_dir_from_the_workspace_config_root(
+    tmp_path: Path, lab_config: dict[str, Path], entry: str
+) -> None:
+    # The deploy agent's rendered overlay directory is the only overlay variable here, as in a
+    # shell that applied a refresh from before ONEX_LANE_DECLARATION_DIR existed.
+    resolved = _resolved_declaration_dir(
+        tmp_path,
+        entry,
+        ONEX_LANE_OVERLAY_DIR=str(lab_config["rendered"]),
+        ONEX_WORKSPACE_CONFIG_ROOT=str(lab_config["root"]),
+    )
+
+    assert resolved == str(lab_config["config_lab"].resolve())
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_the_compose_file_helper_keeps_a_pinned_declaration_dir(
+    tmp_path: Path, lab_config: dict[str, Path], entry: str
+) -> None:
+    pinned = lab_config["config_lab"]
+    resolved = _resolved_declaration_dir(
+        tmp_path,
+        entry,
+        ONEX_LANE_OVERLAY_DIR=str(lab_config["rendered"]),
+        ONEX_LANE_DECLARATION_DIR=str(pinned),
+    )
+
+    assert resolved == str(pinned.resolve())
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_control_the_compose_file_helper_leaves_the_variable_unset_for_a_rendered_overlay_dir_alone(
+    tmp_path: Path, lab_config: dict[str, Path], entry: str
+) -> None:
+    # No pinned folder and no config root: the rendered directory's parent is the agent's
+    # state directory, which holds no declaration, so compose must refuse by name.
+    resolved = _resolved_declaration_dir(
+        tmp_path, entry, ONEX_LANE_OVERLAY_DIR=str(lab_config["rendered"])
+    )
+
+    assert resolved == "UNSET"
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_control_the_compose_file_helper_refuses_a_stale_pinned_declaration_dir(
+    tmp_path: Path, lab_config: dict[str, Path], entry: str
+) -> None:
+    # A pinned folder without ci_bus_lanes.yaml is not replaced by the config root's.
+    resolved = _resolved_declaration_dir(
+        tmp_path,
+        entry,
+        ONEX_LANE_OVERLAY_DIR=str(lab_config["lane_overlays"]),
+        ONEX_LANE_DECLARATION_DIR=str(lab_config["state"]),
+        ONEX_WORKSPACE_CONFIG_ROOT=str(lab_config["root"]),
+    )
+
+    assert resolved == "UNSET"
+
+
+def test_every_script_that_layers_the_dev_lane_file_resolves_the_declaration_dir() -> (
+    None
+):
+    # OMN-24854: the file requires ONEX_LANE_DECLARATION_DIR, so a script that spells
+    # `-f .../docker-compose.dev-lane.yml` itself must go through the overlay helpers, and
+    # both helpers pin the declaration folder.
+    layering = re.compile(r'-f\s+"?\$\{[^}]+\}/docker-compose\.dev-lane\.yml')
+    callers = sorted(
+        path
+        for root in (REPO_ROOT / "scripts", REPO_ROOT / "src")
+        for path in root.rglob("*.sh")
+        if layering.search(path.read_text(encoding="utf-8"))
+    )
+
+    assert {path.name for path in callers} >= {
+        "compose_files.sh",
+        "prepr_verify_lane.sh",
+    }
+    for path in callers:
+        text = path.read_text(encoding="utf-8")
+        assert re.search(
+            r"\b(resolve_lane_overlay_dir|export_lane_overlay_dir|resolve_compose_file_args)\b",
+            text,
+        ), path
+    library = COMPOSE_FILES_LIB.read_text(encoding="utf-8")
+    for helper in ("resolve_lane_overlay_dir", "export_lane_overlay_dir"):
+        body = re.search(rf"^{helper}\(\) \{{\n(.*?)^\}}", library, re.M | re.S)
+        assert body is not None, helper
+        assert "_pin_lane_declaration_dir" in body.group(1), helper
 
 
 def _command_after_env_prefix(value: str) -> list[str]:
