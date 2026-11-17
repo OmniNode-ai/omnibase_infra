@@ -29,6 +29,7 @@ shim:
 
 from __future__ import annotations
 
+import inspect
 import os
 import stat
 import subprocess
@@ -69,7 +70,7 @@ def _run(
     args: list[str],
     tmp_path: Path,
     *,
-    broker_container: str | None,
+    broker_container: str | None = None,
     produce_rc: int = 0,
     bootstrap: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], str, str]:
@@ -126,10 +127,21 @@ def _run(
     return proc, calllog.read_text(), sent
 
 
+def test_run_helper_sends_neither_broker_variable_by_default() -> None:
+    """OMN-25184: a caller that passes neither variable sends neither.
+
+    ``""`` as a default would make every existing caller send both variables
+    named-but-empty and drop the unset-variable path's coverage.
+    """
+    params = inspect.signature(_run).parameters
+    assert params["bootstrap"].default is None
+    assert params["broker_container"].default is None
+
+
 def test_lane_census_unpublishable_drift_fails_without_a_broker_container(
     tmp_path: Path,
 ) -> None:
-    proc, calls, sent = _run(["--lane", _LANE], tmp_path, broker_container=None)
+    proc, calls, sent = _run(["--lane", _LANE], tmp_path)
     assert proc.returncode == 8, proc.stderr
     assert "produce" not in calls and not sent, calls
     assert "NOT published" in proc.stderr

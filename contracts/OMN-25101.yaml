@@ -41,10 +41,10 @@ dod_evidence:
       - check_type: command
         check_value: |-
           bash -o pipefail -c 'test "$(grep -c "census exit=8: " tests/ci/fixtures/omn24976_lane_sync_unpublished_drift.json)" = 2'
-        cwd: ${OMNI_HOME}/omnibase_infra
+        cwd: .
       - check_type: command
         check_value: bash -o pipefail -c 'out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider 2>&1); printf "%s\n" "$out" | tail -5; printf "%s\n" "$out" | grep -Eq "^23 passed in "'
-        cwd: ${OMNI_HOME}/omnibase_infra
+        cwd: .
   - id: dod-omn25101-ac2-red-at-merge-base
     description: >-
       The focused test file, run in a scratch worktree of this head whose scripts/ci/lab_pass_receipt.py is the merge base 75969ce9 version, exits non-zero with nine failed tests (the broker-variable test, two recorded-drift tests, two train tests, four supersession cases); the same file passes at the head (AC1 check).
@@ -52,23 +52,23 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c 'd=$(mktemp -d); trap "git worktree remove --force $d" EXIT; git worktree add -q --detach "$d" HEAD; cd "$d"; git show 75969ce9e:scripts/ci/lab_pass_receipt.py > scripts/ci/lab_pass_receipt.py; rc=0; out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider 2>&1) || rc=$?; printf "%s\n" "$out" | grep -E "^(FAILED|[0-9]+ failed)"; test "$rc" -eq 1 && printf "%s\n" "$out" | grep -Eq "^[0-9]+ failed, 14 passed in "'
-        cwd: ${OMNI_HOME}/omnibase_infra
+        check_value: bash -o pipefail -c 'd=$(mktemp -d); trap "git worktree remove --force $d" EXIT; git worktree add -q --detach "$d" HEAD; cd "$d"; git show 75969ce9e:scripts/ci/lab_pass_receipt.py > scripts/ci/lab_pass_receipt.py; rc=0; out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider 2>&1) || rc=$?; printf "%s\n" "$out" | grep -E "^(FAILED|[0-9]+ failed)"; test "$rc" -eq 1 && printf "%s\n" "$out" | grep -Eq "^9 failed, 14 passed in "'
+        cwd: .
   - id: dod-omn25101-ac3-no-other-pin-and-full-suite
     description: >-
-      No test outside the focused file runs check_lane_sync with exit 8 or pins it as indeterminate; the supersession test covers the train reader's FAIL-then-PASS and PASS-then-FAIL orders; the whole tests/ci suite passes at the head.
+      No file under tests/ outside tests/ci names check_lane_sync (the grep covers all of tests/, so a positional CompletedProcess, a parametrised 8 or a returncode key cannot hide); the tests/ci files that do name it are run by the AC6 check; the supersession test covers the train reader's FAIL-then-PASS and PASS-then-FAIL orders; the whole tests/ci suite passes at the head.
     source: manual
     binds_ac: [AC3]
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c '! grep -rnE "returncode=8|_replay\(8|census exit=8" tests/ci --include=*.py | grep -v test_lab_pass_lane_sync_unpublished_drift_omn24976'
-        cwd: ${OMNI_HOME}/omnibase_infra
+        check_value: bash -o pipefail -c 'out=$(grep -rl "check_lane_sync" tests/ | sort); printf "%s\n" "$out"; test -z "$(printf "%s\n" "$out" | grep -v "^tests/ci/")"'
+        cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider -k "superseded_by_a_newer_pass"
-        cwd: ${OMNI_HOME}/omnibase_infra
+        cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci -q --no-cov -n auto -p no:cacheprovider
-        cwd: ${OMNI_HOME}/omnibase_infra
+        cwd: .
   - id: dod-omn25101-ac4-ambient-broker-empty-var-exits
     description: >-
       The broker-variable test sets an ambient value and asserts the runner's environment carries "" for it; the real census script with both variables empty exits 8; the every-other-exit test lists the exit 124 case.
@@ -77,13 +77,13 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider -k "check_names_no_broker"
-        cwd: ${OMNI_HOME}/omnibase_infra
+        cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/scripts/test_lane_census_unpublishable_drift_omn20798.py -q --no-cov -n 0 -p no:cacheprovider
-        cwd: ${OMNI_HOME}/omnibase_infra
+        cwd: .
       - check_type: command
         check_value: grep -qE '"census_rc", \[[^]]*\b124\b' tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py
-        cwd: ${OMNI_HOME}/omnibase_infra
+        cwd: .
   - id: dod-omn25101-ac5-train-still-reports-fail
     description: >-
       The train reader names lab_receipt_fail with lane_sync among the failing checks for the recorded drift, which is the reading AC5 describes; the pull request comment states the consequence for the two releases.
@@ -92,7 +92,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider -k "train_names_lane_sync_as_a_failed_check"
-        cwd: ${OMNI_HOME}/omnibase_infra
+        cwd: .
   - id: dod-omn25101-ac6-lab-suites
     description: >-
       The suites the pull request requires run green on the lab; the head-bound result is recorded in the pull request's Lab comment.
@@ -101,4 +101,4 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py tests/ci/test_lab_pass_census_overlay_omn20934.py tests/ci/test_direct_lab_census_omn20008.py tests/ci/test_lab_pass_receipt_integration_probes_omn18866.py tests/ci/test_declined_measurement_omn18144.py tests/unit/scripts/test_lane_census_unpublishable_drift_omn20798.py -q --no-cov -n 0 -p no:cacheprovider
-        cwd: ${OMNI_HOME}/omnibase_infra
+        cwd: .
