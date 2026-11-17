@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
@@ -103,6 +104,16 @@ def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:
 
 def _ok() -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+
+def _up_running_the_roll(
+    self: DeployExecutor,
+    *args: object,
+    after_migrations: Callable[..., object] = lambda *_: None,
+    **kwargs: object,
+) -> None:
+    """A faked ``_compose_up`` that runs the ``after_migrations`` step it is handed."""
+    after_migrations(kwargs.get("extra_env"))
 
 
 class TestTheArrayIsFoundAtAll:
@@ -268,10 +279,13 @@ class TestTheBuildPhaseReachesThem:
                 "deploy_agent.executor._hold_build_context",
                 side_effect=lambda purpose: nullcontext(),
             ),
-            patch.object(DeployExecutor, "_compose_up", return_value=None),
-            # OMN-24903: the writers' recreate and health read are not builds;
+            # OMN-25440: the faked up runs the roll it is handed, as the real one
+            # does, so roll_writers is reached; a handed roll left unrun refuses.
+            patch.object(DeployExecutor, "_compose_up", new=_up_running_the_roll),
+            # The writers' recreate, health read and image check are not builds;
             # test_stability_writers_follow_runtime_omn24903 owns them.
             patch.object(_rcb(), "roll_writers", return_value=()),
+            patch.object(_rcb(), "_assert_images_at_deploy_sha", return_value=None),
         ):
             executor.rebuild_scope(
                 Scope.RUNTIME,

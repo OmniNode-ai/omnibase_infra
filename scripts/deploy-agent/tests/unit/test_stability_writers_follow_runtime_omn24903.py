@@ -304,7 +304,8 @@ def test_building_the_writers_recreates_nothing(
         deploy.executor._compose_build.call_args.kwargs["build_source"] == build_source
     )
     assert deploy.executor._compose_build.call_count == 1
-    assert not deploy.calls
+    assert deploy.inspected, "positive control: the build reads the images it wrote"
+    assert not _ups(deploy)
 
 
 def test_a_failed_recreate_fails_the_deploy(deploy: SimpleNamespace) -> None:
@@ -372,7 +373,8 @@ def test_a_writer_the_lane_disables_is_neither_built_nor_recreated(
 def test_the_writers_are_staged_built_and_recreated_in_the_rolls_order(
     deploy: SimpleNamespace, scope: Scope, build_source: BuildSource
 ) -> None:
-    order: list[str] = []
+    # OMN-25440: every build, preflight and up lands in one list in call order.
+    order: list[str] = deploy.events
     deploy.executor._compose_build.side_effect = lambda *a, **k: order.append(
         "build:writers" if WRITER in k.get("services", ()) else "build:main"
     )
@@ -380,7 +382,6 @@ def test_the_writers_are_staged_built_and_recreated_in_the_rolls_order(
         "preflight"
     )
     _rebuild(deploy, scope, build_source)
-    order += deploy.events
     last_main = max(i for i, step in enumerate(order) if step == "build:main")
     # The main build stages the workspace at the deploy's sha; the writers' build
     # reuses it (stage_workspace=False), so it must come after a staging build.
@@ -396,9 +397,23 @@ def test_the_writers_are_staged_built_and_recreated_in_the_rolls_order(
     writers_call = deploy.executor._compose_build.call_args_list[-1]
     assert writers_call.kwargs["stage_workspace"] is False
     assert writers_call.kwargs["build_source"] == build_source
-    # Nothing running is replaced until the build and the boot preflight passed.
-    expected = ["build:writers", "preflight", "up:writers", "up:runtime"]
-    assert [step for step in order if step in expected] == expected
+    _assert_roll_order(order)
+
+
+#: Nothing running is replaced until the build and the boot preflight passed.
+ROLL_ORDER = ["build:writers", "preflight", "up:writers", "up:runtime"]
+
+
+def _assert_roll_order(order: list[str]) -> None:
+    assert [step for step in order if step in ROLL_ORDER] == ROLL_ORDER
+
+
+def test_a_preflight_recorded_after_the_writers_up_fails_the_order_check() -> None:
+    """Negative control for the order check: the order it reads can be wrong."""
+    _assert_roll_order(["build:main", *ROLL_ORDER])
+    broken = ["build:main", "build:writers", "up:writers", "preflight", "up:runtime"]
+    with pytest.raises(AssertionError):
+        _assert_roll_order(broken)
 
 
 @pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
@@ -481,6 +496,8 @@ def test_the_writer_up_runs_under_the_environment_the_real_runtime_up_gets(
         for argv, env in zip(deploy.calls, deploy.envs, strict=True)
         if argv[:2] == ["docker", "compose"] and "up" not in argv
     ]
+    # The builder is replaced here, so the build-time image check does not run:
+    # every compose read is the roll's own, under the runtime up's environment.
     assert reads and all(env == writer_ups[0] for env in reads)
 
 
@@ -594,14 +611,17 @@ def test_a_recreate_with_no_deploy_sha_proves_nothing_and_touches_nothing(
 
 
 @pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
-def test_a_revision_mismatch_in_the_roll_runs_no_writer_up_and_no_runtime_up(
+def test_a_revision_mismatch_is_refused_before_the_preflight_and_the_deps_leg(
     deploy: SimpleNamespace, scope: Scope
 ) -> None:
+    """OMN-25440: read where the writers are built, before anything converges."""
     deploy.revisions[WRITER] = OLD_SHA
     with pytest.raises(RuntimeError, match="not on the runtime's image revision"):
         _rebuild(deploy, scope)
     _assert_nothing_replaced(deploy)
-    _assert_only_the_deps_leg_ran(deploy, scope)
+    assert deploy.executor._compose_build.call_count >= 2, "the writers were built"
+    deploy.executor._preflight_runtime_boot.assert_not_called()
+    deploy.executor._compose_up.assert_not_called()
 
 
 def _writers() -> tuple[str, ...]:
@@ -1010,3 +1030,143 @@ def test_a_writer_healthy_on_the_first_read_and_unhealthy_on_the_last_fails_the_
     finally:
         execution._run = base
     assert seen.count(f"id-{first}") == 2, "read once in the loop, once at the end"
+
+
+def _before_verb(argv: list[str], verb: str) -> list[str]:
+    return argv[: argv.index(verb)]
+
+
+def _real_writers_build(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The argv the real ``_compose_build`` runs for the writers' own build call."""
+    argv: list[list[str]] = []
+
+    def run(cmd: list[str], timeout: int, **kwargs: object) -> object:
+        argv.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(execution, "_run", run)
+    # The image check after the build has its own tests; this one reads the build.
+    monkeypatch.setattr(_effect(), "_assert_images_at_deploy_sha", lambda *a: None)
+    _effect().build_stability_lane_writers(
+        execution,
+        DeployExecutor()._compose_build,
+        SHA,
+        lambda *a: None,
+        build_source=BuildSource.RELEASE,
+        lane=LANE,
+        git_ref="origin/dev",
+    )
+    (build,) = [c for c in argv if "build" in c]
+    return build
+
+
+def test_the_writers_build_runs_under_the_files_and_project_the_roll_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-25440: compose tags a built image ``<project>-<service>``, and the roll
+    reads ``<project>-<service>`` of the project ``_compose_prefix`` names, so the
+    build's ``-f`` and ``-p`` are the roll's or every stability deploy is refused.
+    """
+    build = _real_writers_build(monkeypatch)
+    assert set(_writers()) <= set(build), "the writers' own call, with its services"
+    assert _before_verb(build, "build") == _effect()._compose_prefix(execution, LANE)
+
+
+def test_a_writers_build_under_another_project_is_caught(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative control: the build project the stability lane had before OMN-25440."""
+    config = execution.lane_config_for(LANE)
+    other = config.model_copy(update={"build_project": "omnibase-infra"})
+    monkeypatch.setattr(
+        execution, "lane_config_for", lambda lane: other if lane == LANE else config
+    )
+    build = _real_writers_build(monkeypatch)
+    assert _before_verb(build, "build") != _effect()._compose_prefix(execution, LANE)
+
+
+def _up_prefixes(deploy: SimpleNamespace) -> tuple[list[str], list[list[str]]]:
+    ups = _ups(deploy)
+    (writer_up,) = [a for a in ups if WRITER in a]
+    runtime_ups = [a for a in ups if RUNTIME in a]
+    assert runtime_ups, "positive control: the real _compose_up issued the runtime up"
+    return _before_verb(writer_up, "up"), [_before_verb(a, "up") for a in runtime_ups]
+
+
+@pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
+def test_the_writer_up_has_the_prefix_of_the_runtime_up_the_real_compose_up_issues(
+    deploy: SimpleNamespace, scope: Scope
+) -> None:
+    """OMN-25440: the same ``-f`` files, ``-p`` project and profile as the runtime up."""
+    _rebuild(deploy, scope)
+    writer, runtime = _up_prefixes(deploy)
+    assert all(prefix == writer for prefix in runtime)
+    assert "-p" in writer and writer.count("-f") == 2
+
+
+def test_a_writer_up_that_drops_the_project_is_caught(
+    deploy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: a writer prefix without ``-p`` differs from the runtime's."""
+    real = _effect()._compose_prefix
+
+    def without_project(execution_: object, lane: EnumRuntimeLane) -> list[str]:
+        argv = real(execution_, lane)
+        at = argv.index("-p")
+        return argv[:at] + argv[at + 2 :]
+
+    monkeypatch.setattr(_effect(), "_compose_prefix", without_project)
+    _rebuild(deploy, Scope.RUNTIME)
+    writer, runtime = _up_prefixes(deploy)
+    assert all(prefix != writer for prefix in runtime)
+
+
+@pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
+def test_a_runtime_up_that_skips_the_handed_over_roll_fails_the_deploy(
+    deploy: SimpleNamespace, scope: Scope
+) -> None:
+    """OMN-25440: ``_compose_up`` runs ``after_migrations`` only in its RUNTIME
+    block and returns before it for a request of retired roles only. An up that
+    skips the block must not end in a passed deploy with the old writers running.
+    """
+
+    def skipping_up(*args: object, **kwargs: object) -> None:
+        return None
+
+    deploy.executor._compose_up.side_effect = skipping_up
+    with pytest.raises(RuntimeError, match="did not run; the writers were not rolled"):
+        _rebuild(deploy, scope)
+    assert "up:writers" not in deploy.events
+    deploy.executor._deploy_gateway_lane.assert_not_called()
+
+
+def test_the_roll_handed_to_the_real_runtime_up_runs_and_the_deploy_passes(
+    deploy: SimpleNamespace,
+) -> None:
+    """Positive control for the skip test: the real up runs the step it is handed."""
+    _rebuild(deploy, Scope.RUNTIME)
+    (call,) = [
+        c
+        for c in deploy.executor._compose_up.call_args_list
+        if c.args[1] == Scope.RUNTIME
+    ]
+    assert call.kwargs["after_migrations"].ran
+    assert "up:writers" in deploy.events
+
+
+def test_no_job_reaches_rebuild_scope_before_its_git_pull_sets_the_sha() -> None:
+    """OMN-25440: ``_current_git_sha`` starts empty and each job resets it to empty;
+    the one ``rebuild_scope`` call comes after the ``git_pull`` that sets it, so
+    the empty value reaches the roll only through a pull that returned none, which
+    ``test_an_empty_sha_is_refused_at_the_entry_of_rebuild_scope`` refuses.
+    """
+    agent = (Path(execution.__file__).parent / "agent.py").read_text().splitlines()
+    resets = [i for i, line in enumerate(agent) if 'self._current_git_sha = ""' in line]
+    (pull,) = [
+        i
+        for i, line in enumerate(agent)
+        if "self._current_git_sha = self.executor.git_pull(" in line
+    ]
+    (rebuild,) = [i for i, line in enumerate(agent) if ".rebuild_scope(" in line]
+    assert len(resets) == 2, "the initial value and the per-job reset"
+    assert resets[0] < resets[1] < pull < rebuild

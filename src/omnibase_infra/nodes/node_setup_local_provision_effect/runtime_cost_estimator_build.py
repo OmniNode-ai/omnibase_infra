@@ -290,6 +290,12 @@ def build_stability_lane_writers(
         services=services,
         stage_workspace=False,
     )
+    # OMN-25440: the images the roll will inspect are read here, before the boot
+    # preflight and the deps leg, so a writer built under another tag than the
+    # one the roll reads refuses the deploy before anything is converged.
+    _assert_images_at_deploy_sha(
+        execution, lane, services, execution._compose_env(), git_sha
+    )
     return services
 
 
@@ -340,14 +346,47 @@ def writer_roll(
         return {}
     if not git_sha:
         raise RuntimeError(_NO_SHA)
-    return {
-        "after_migrations": lambda extra_env=None: roll_writers(
-            execution, lane, git_sha, extra_env
-        )
-    }
+    return {"after_migrations": _HandedOverRoll(execution, lane, git_sha)}
 
 
 _NO_SHA = "stability lane writer check needs the deploy's git sha"
+_NOT_ROLLED = (
+    "stability lane writer roll was handed to the runtime up and did not run; "
+    "the writers were not rolled"
+)
+
+
+class _HandedOverRoll:
+    """The ``after_migrations`` step; it records whether ``_compose_up`` ran it."""
+
+    def __init__(self, execution: ModuleType, lane: str, git_sha: str) -> None:
+        self.execution, self.lane, self.git_sha = execution, lane, git_sha
+        self.ran = False
+
+    def __call__(self, extra_env: dict[str, str] | None = None) -> tuple[str, ...]:
+        rolled = roll_writers(self.execution, self.lane, self.git_sha, extra_env)
+        self.ran = True
+        return rolled
+
+
+def handed_over(
+    compose_up: Callable[..., None], roll: dict[str, Callable[..., object]]
+) -> Callable[..., None]:
+    """``compose_up`` with ``roll`` handed over; raises when a handed roll did not run.
+
+    OMN-25440: ``_compose_up`` runs ``after_migrations`` only inside its RUNTIME
+    block and returns early, before that block, for a request of retired roles
+    only. A roll skipped that way would leave the old writers running under a
+    passing deploy, so the deploy fails instead.
+    """
+
+    def up(*args: object, **kwargs: object) -> None:
+        compose_up(*args, **kwargs, **roll)
+        step = roll.get("after_migrations")
+        if isinstance(step, _HandedOverRoll) and not step.ran:
+            raise RuntimeError(_NOT_ROLLED)
+
+    return up
 
 
 def roll_writers(

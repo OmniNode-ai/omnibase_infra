@@ -876,6 +876,7 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
         lane=EnumRuntimeLane.STABILITY_TEST,
         compose_files=(COMPOSE_FILE, _STABILITY_OVERLAY),
         compose_project="omnibase-infra-stability-test",
+        build_project=f"{COMPOSE_PROJECT}-{EnumRuntimeLane.STABILITY_TEST.value}",
         postgres_container="omnibase-infra-stability-test-postgres",
         # The overlay disables these by profile and gives them no container_name of
         # their own, so an explicit start by name would create them under the dev
@@ -4781,7 +4782,7 @@ class DeployExecutor:
             )
             # OMN-18143: every image was built above; compose must not build
             # them again inside the up ceiling.
-            self._compose_up(
+            _rcb().handed_over(self._compose_up, roll)(
                 Phase.RUNTIME,
                 Scope.RUNTIME,
                 [],
@@ -4789,7 +4790,6 @@ class DeployExecutor:
                 lane=lane,
                 compose_may_build=False,
                 extra_env=estimator_env,
-                **roll,
             )
             self._deploy_gateway_lane(
                 on_phase_update,
@@ -4830,7 +4830,7 @@ class DeployExecutor:
                     read_settings=lambda: settings,
                 )
                 self._preflight_runtime_boot(services, on_phase_update, lane=lane)
-        self._compose_up(
+        _rcb().handed_over(self._compose_up, roll)(
             phase,
             scope,
             services,
@@ -4838,7 +4838,6 @@ class DeployExecutor:
             lane=lane,
             compose_may_build=False,
             extra_env=estimator_env,
-            **roll,
         )
         # After the infra family, never before it: the forwarder mirrors off
         # this lane's broker, so deploying it against a lane that is still

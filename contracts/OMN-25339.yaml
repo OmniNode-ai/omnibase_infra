@@ -11,15 +11,15 @@ requirements:
     statement: The blocking review findings on the stability writer roll at head 0b0a4b819f86 are fixed or argued with evidence.
     acceptance:
       - id: AC1
-        statement: "AC1: a rebuild with returncode 1 raises and no compose up runs, and in the full roll the writer recreate sits inside the block that holds the preflight, after the deps leg, with a test asserting that order -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails those tests at head 0b0a4b819f86 and passes at the new head"
+        statement: "AC1: a rebuild with returncode 1 raises and no runtime up runs, and the writer recreate runs inside the runtime _compose_up after the migrations, after the boot preflight and, in the full roll, after the deps leg, with a test asserting that order -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails those tests at head 0b0a4b819f86 and passes at the new head"
       - id: AC2
         statement: "AC2: the writer up takes its compose environment from the one builder that the stack up uses, and a test runs it with that builder unstubbed -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the writer up is given a bare environment"
       - id: AC3
         statement: "AC3: a writer with health none fails the roll, or a test over the overlay asserts that all seven writers declare a healthcheck -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when one writer drops its healthcheck"
       - id: AC4
-        statement: "AC4: the revision and empty-sha checks run before the force-recreate with zero up calls on a mismatch, and a test over the Dockerfile shows the label is stamped from GIT_SHA and the build passes the full sha -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the checks move after the up"
+        statement: "AC4: the revision and empty-sha checks run before the force-recreate with zero up calls on a mismatch, and a test over the Dockerfile shows the runtime stage stamps the label from VCS_REF and the build passes the full sha as VCS_REF and GIT_SHA -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the checks move after the up"
       - id: AC5
-        statement: "AC5: the stability test reads the operator environment file for DEV_LANE_SKILL_OVERLAY_ROOTS_DIR, shows that dev sets no store directory, and asserts the line 317 default by its resolved value -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the variable is absent from the environment file"
+        statement: "AC5: the stability test reads the tracked env template the deploy agent unit's DEPLOY_AGENT_ENV_FILE documents for DEV_LANE_SKILL_OVERLAY_ROOTS_DIR, shows that no tracked env file sets the store directory, and asserts the store default by its resolved value -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the variable is absent from the environment file"
       - id: AC6
         statement: "AC6: the unterminalised-row fixture records the terminal unknown value and the I10 row and the test asserts both, and the build source is parametrized over the tag source that stability rolls from -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the fixture drops the I10 row"
       - id: AC7
@@ -53,7 +53,7 @@ dod_evidence:
       - AC2
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "environment_compose_up_uses or bare_environment" -q --no-cov -n 0 -p no:cacheprovider
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k real_runtime_up_gets -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
   - id: dod-omn25339-ac3
     description: >-
