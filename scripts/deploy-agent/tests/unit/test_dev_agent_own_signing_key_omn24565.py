@@ -279,10 +279,12 @@ def test_control_without_the_protected_entry_the_shared_value_wins(
 # --------------------------------------------------------------------------
 
 
-#: The check this unit carried at the reviewed head: a test on the environment.
+#: The check this unit carried at the first reviewed head 08f64f57f7ca: a test on the
+#: environment, copied from its ExecStartPre line.
 _OLD_ENVIRONMENT_CHECK = (
     '/bin/sh -c \'test -n "$${DEPLOY_AGENT_HMAC_SECRET:-}" || '
-    '{ echo "unset or empty" >&2; exit 2; }\''
+    '{ echo "deploy-agent-dev: DEPLOY_AGENT_HMAC_SECRET is unset or empty in the key '
+    "file, refusing to start (OMN-24611)\" >&2; exit 2; }'"
 )
 
 
