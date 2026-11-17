@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
@@ -160,13 +161,14 @@ def test_a_fragment_may_set_the_provenance_overlay() -> None:
 
 @pytest.mark.unit
 def test_provenance_allowlist_literals_are_the_names_the_stamp_reads() -> None:
-    # The allowlist names them as literals so the deploy agent need not import
-    # omnibase_infra; this pins them to the model that reads them.
-    from omnibase_infra.models.event_bus.model_event_provenance_overlay import (
-        ModelEventProvenanceOverlay,
-    )
-
-    read = frozenset(name for _, name in ModelEventProvenanceOverlay.VARIABLES)
+    # The allowlist names them as literals because the agent's own venv pins a
+    # published omnibase_infra that need not carry the model, so the names are
+    # read from the model's source file in the checkout, never imported.
+    source = (
+        Path(__file__).resolve().parents[4]
+        / "src/omnibase_infra/models/event_bus/model_event_provenance_overlay.py"
+    ).read_text(encoding="utf-8")
+    read = frozenset(re.findall(r'"(ONEX_PROVENANCE_[A-Z_]+)"', source))
     allowed = LANE_ENV_FRAGMENT_SCHEMA_KEYS[SCHEMA]
     assert read == frozenset(PROVENANCE)
     assert {k for k in allowed if k.startswith("ONEX_PROVENANCE_")} == read
