@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-24903
 title: A stability runtime deploy also builds and recreates the projection writers its overlay declares
 summary: >-
-  Dev's delegation-regression-nightly run 43826372809 (job 133161076598) read a delegation_events row with terminal_ok NULL for every case, I9 and I10 included. On the stability lane the runtime was redeployed on 2026-11-16 at 07:08Z with omnimarket 0.4.321, while the lane's projection-delegation-writer still ran omnimarket 0.4.283 from its 2026-11-12 build and sent each delegate-skill terminal to onex.dlq.omnimarket.projection-delegation-malformed.v1 (ModelDelegateSkillTerminalProjection refused the newer fields and the cause returned_to_caller), so only the compat event reached the row. The writers are declared in the stability lane's compose overlay, but services_for_scope names them for the dev lane only and the lane-only build is dev only, so no stability deploy rebuilt or recreated them. roll_stability_lane_writers (src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py) builds the seven writers from the stability compose files at the deploy's sha and recreates them before the runtime family; build_dev_lane_services calls it, and DeployExecutor runs that on every RUNTIME and FULL rebuild. A lane whose compose files do not include the stability overlay is untouched, and services_for_scope and the executor are unchanged. The fixture scripts/deploy-agent/tests/unit/fixtures/stability_nightly_unterminalised_row_omn24903.json is the recorded I9 row and its DLQ record. The nightly also needs the stability runtime to read the code budget overlay (every case refused with "no call budget declared"), which this change does not touch.
+  Dev's delegation-regression-nightly run 43826372809 (job 133161076598) read a delegation_events row with terminal_ok NULL for every case, I9 and I10 included. On the stability lane the runtime was redeployed on 2026-11-16 at 07:08Z with omnimarket 0.4.321, while the lane's projection-delegation-writer still ran omnimarket 0.4.283 from its 2026-11-12 build and sent each delegate-skill terminal to onex.dlq.omnimarket.projection-delegation-malformed.v1 (ModelDelegateSkillTerminalProjection refused the newer fields and the cause returned_to_caller), so only the compat event reached the row. The writers are declared in the stability lane's compose overlay, but services_for_scope names them for the dev lane only and the lane-only build is dev only, so no stability deploy rebuilt or recreated them. roll_stability_lane_writers (src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py) builds the seven writers from the stability compose files at the deploy's sha and recreates them before the runtime family; build_dev_lane_services calls it, and DeployExecutor runs that on every RUNTIME and FULL rebuild. A lane whose compose files do not include the stability overlay is untouched, and services_for_scope and the executor are unchanged. The fixture scripts/deploy-agent/tests/unit/fixtures/stability_nightly_unterminalised_row_omn24903.json is the recorded I9 row and its DLQ record. The nightly also needs the stability runtime to read the code budget overlay (every case refused with "no call budget declared"): per RULING 2026-11-17T00:45:37Z the stability runtime main now takes the dev runtime main's ONEX_SKILL_OVERLAY_ROOTS and its two overlay mounts, from the same host directories. Per RULING 2026-11-16T17:37:23Z the OMN-18108 assertion that a stability build names no dev-lane-only service is inverted: a stability build must name the writers dev runs.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -41,7 +41,7 @@ dod_evidence:
         cwd: .
   - id: dod-omn24903-ac2-writers-roll
     description: >-
-      A stability RUNTIME or FULL rebuild builds and recreates every writer the stability overlay declares, before the runtime is recreated. Eight of the nine tests fail at the merge base.
+      A stability RUNTIME or FULL rebuild builds and recreates every writer the stability overlay declares, before the runtime is recreated, and the stability runtime main reads the same overlay roots as dev's. Nine of the ten tests fail at the merge base.
     source: manual
     binds_ac:
       - AC2
@@ -61,7 +61,7 @@ dod_evidence:
         cwd: .
   - id: dod-omn24903-ac4-no-widening
     description: >-
-      The neighbour tests that pin the dev lane's and the other lanes' scope and the estimator's dev-only build pass unchanged; the diff edits no test assertion and no workflow.
+      The neighbour tests that pin the dev lane's and the other lanes' scope and the estimator's dev-only build pass; the one assertion the diff changes is the OMN-18108 stability assertion, inverted (not removed or skipped) under RULING 2026-11-16T17:37:23Z, and the diff edits no workflow.
     source: manual
     binds_ac:
       - AC4

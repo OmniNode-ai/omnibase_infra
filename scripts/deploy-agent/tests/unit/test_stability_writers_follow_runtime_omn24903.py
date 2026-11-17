@@ -199,3 +199,39 @@ def test_a_stability_runtime_deploy_rolls_the_writers_before_the_runtime(
     assert "projection-delegation-writer" in up
     assert "build:writers" in order
     assert order.index("build:writers") < order.index("up:runtime")
+
+
+DEV_FOLD_OVERLAY = REPO / "docker" / "docker-compose.dev-tenant-fold.yml"
+OVERLAY_TARGETS = ("/etc/onex/skill-overlays", "/etc/onex/skill-overlays-store")
+
+
+def _overlay_mounts(service: dict[str, object]) -> list[str]:
+    volumes = service.get("volumes") or []
+    assert isinstance(volumes, list)
+    return sorted(
+        str(v)
+        for v in volumes
+        if isinstance(v, str) and v.rsplit(":", 2)[-2] in OVERLAY_TARGETS
+    )
+
+
+def test_stability_runtime_main_reads_the_same_overlay_roots_as_dev() -> None:
+    """RULING 2026-11-17T00:45:37Z: stability takes dev's overlays.
+
+    Without ONEX_SKILL_OVERLAY_ROOTS the stability runtime main refused every
+    delegation of the nightly with "no call budget declared".
+    """
+    dev = execution._read_compose_services((str(DEV_FOLD_OVERLAY),))
+    stability = _overlay_services()
+    assert isinstance(dev, dict)
+    dev_main, stab_main = dev["omninode-runtime"], stability["omninode-runtime"]
+    assert isinstance(dev_main, dict) and isinstance(stab_main, dict)
+    dev_env, stab_env = dev_main["environment"], stab_main["environment"]
+    assert isinstance(dev_env, dict) and isinstance(stab_env, dict)
+    assert dev_env["ONEX_SKILL_OVERLAY_ROOTS"]
+    assert (
+        stab_env.get("ONEX_SKILL_OVERLAY_ROOTS") == dev_env["ONEX_SKILL_OVERLAY_ROOTS"]
+    )
+    dev_mounts = _overlay_mounts(dev_main)
+    assert len(dev_mounts) == 2
+    assert _overlay_mounts(stab_main) == dev_mounts

@@ -283,10 +283,15 @@ class TestTheBuildPhaseReachesThem:
             "without the lane overlay compose cannot resolve these services at all"
         )
 
-    def test_a_stability_build_names_no_dev_lane_only_service(self) -> None:
+    def test_a_stability_build_names_the_writers_dev_runs(self) -> None:
+        # OMN-24903: RULING 2026-11-16T17:37:23Z retires the rule that a
+        # stability build names no dev-lane-only service (stability deploys a
+        # copy of dev). A stability build now builds the projection writers at
+        # the deploy's sha, so they run the same omnimarket as the runtime.
         builds = self._captured_build_commands(EnumRuntimeLane.STABILITY_TEST)
         flat = {tok for cmd in builds for tok in cmd}
-        assert flat.isdisjoint(set(DEV_LANE_ONLY_RUNTIME_SERVICES))
+        missing = [s for s in DEV_LANE_ONLY_BUILDABLE_SERVICES if s not in flat]
+        assert not missing, f"a stability build left these writers stale: {missing}"
 
     def test_a_stability_build_does_not_pass_the_dev_lane_overlay(self) -> None:
         builds = self._captured_build_commands(EnumRuntimeLane.STABILITY_TEST)
