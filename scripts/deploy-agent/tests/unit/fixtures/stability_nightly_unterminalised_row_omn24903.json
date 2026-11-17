@@ -53,5 +53,20 @@
       "omnimarket": "0.4.321",
       "omnibase_infra": "0.38.77"
     }
-  }
+  },
+  "nightly_cases": [
+    {
+      "case": "I9",
+      "check": "terminal",
+      "expected": "completed",
+      "got": "unknown"
+    },
+    {
+      "case": "I10",
+      "check": "terminal",
+      "expected": "failed",
+      "got": "unknown"
+    }
+  ],
+  "nightly_cases_source": "the case results the nightly printed for run 43826372809, job 133161076598 (quoted in the pull request body). Case I10's own delegation_events row was not readable from the lane (the job log is not cached), so no row is recorded for it."
 }

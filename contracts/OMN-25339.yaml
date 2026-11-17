@@ -1,0 +1,118 @@
+schema_version: 1.0.0
+ticket_id: OMN-25339
+title: Review findings 1 to 9 on omnibase_infra PR 6047 at head 0b0a4b819f86 are fixed or argued
+summary: >-
+  The second review of the stability writer roll found that the FULL roll recreated the writers before the deps leg converged, that a revision mismatch was read only after the force-recreate and against the deploy's sha alone, that a writer with no healthcheck passed the health wait at once, that the test stubbed the compose environment it compared with itself, that the overlay roots directory and the store default were asserted by suffix, that the fixture lacked the nightly's terminal unknown cases, and that the Lab check could not fail. This change recreates the writers after the deps leg, reads the runtime image's revision label and each writer's before any up, fails health none, runs the environment test with the real builder, resolves the overlay paths, records cases I9 and I10 and compares the Lab comment's head in the ledger row beside it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25339-review-findings
+    statement: The blocking review findings on the stability writer roll at head 0b0a4b819f86 are fixed or argued with evidence.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a rebuild with returncode 1 raises and no compose up runs, and in the full roll the writer recreate sits inside the block that holds the preflight, after the deps leg, with a test asserting that order -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails those tests at head 0b0a4b819f86 and passes at the new head"
+      - id: AC2
+        statement: "AC2: the writer up takes its compose environment from the one builder that the stack up uses, and a test runs it with that builder unstubbed -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the writer up is given a bare environment"
+      - id: AC3
+        statement: "AC3: a writer with health none fails the roll, or a test over the overlay asserts that all seven writers declare a healthcheck -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when one writer drops its healthcheck"
+      - id: AC4
+        statement: "AC4: the revision and empty-sha checks run before the force-recreate with zero up calls on a mismatch, and a test over the Dockerfile shows the label is stamped from GIT_SHA and the build passes the full sha -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the checks move after the up"
+      - id: AC5
+        statement: "AC5: the stability test reads the operator environment file for DEV_LANE_SKILL_OVERLAY_ROOTS_DIR, shows that dev sets no store directory, and asserts the line 317 default by its resolved value -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the variable is absent from the environment file"
+      - id: AC6
+        statement: "AC6: the unterminalised-row fixture records the terminal unknown value and the I10 row and the test asserts both, and the build source is parametrized over the tag source that stability rolls from -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the fixture drops the I10 row"
+      - id: AC7
+        statement: "AC7: each blocking finding is fixed or argued with evidence in a PR comment, the contract check compares the Lab comment's full sha with the new head, and a comment starting Lab: head=<full head sha> is at the new head with the red run at the base shown -- falsifier: onex scm pr-view [OmniNode-ai/omnibase_infra#6047](https://linear.app/omninode/review/fixomn-24903-stability-lane-rolls-its-writers-and-reads-devs-overlay-2ee0a8b39e9c) lists a comment per finding and the Lab comment at the new head sha"
+      - id: AC8
+        statement: "AC8: the compose build mock is created with autospec, and the unrelated import reflow at the top of the deploy agent executor is reverted -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the build mock is called with a wrong argument"
+evidence_requirements:
+  - kind: tests
+    description: The stability writer roll tests and the dev-only scope tests pass.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py scripts/deploy-agent/tests/unit/test_dev_lane_only_scope_omn18108.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25339-ac1
+    description: >-
+      A failed writer recreate raises and no runtime up follows; the FULL roll recreates the writers after the build, the boot preflight and the deps leg.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "exiting_1 or rolls_order" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25339-ac2
+    description: >-
+      The writer up and every read run under the environment _compose_up runs under, with _compose_env unstubbed.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "environment_compose_up_uses or bare_environment" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25339-ac3
+    description: >-
+      A writer reading health none fails the roll, and the overlay gives all seven writers a healthcheck.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "healthcheck or no_healthcheck" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25339-ac4
+    description: >-
+      The runtime image's revision is read and compared before any up, with zero up calls on a mismatch or an empty sha; the Dockerfile's runtime stage stamps the label from the build argument the build passes as the full sha.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "before_any_up or runtime_image_that_was_read or no_deploy_sha or revision_mismatch or image_label or full_deploy_sha" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25339-ac5
+    description: >-
+      The deploy environment is read from an operator env file, the deploy refuses without the roots directory, no tracked env file sets the store directory, and the store default is asserted by its resolved path.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "overlay or operator_env or project_directory or store_directory" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25339-ac6
+    description: >-
+      The fixture records the terminal unknown value of cases I9 and I10 and the test asserts both; the build tests run over the workspace and release build sources.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "refused_the_terminal or workspace or release" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25339-ac7
+    description: >-
+      The pull request head is a new commit citing OMN-25339 on top of the reviewed head 0b0a4b819f86. No local reader returns a pull request comment body, and a ledger reader in a contract grows the ledger file census, so the per-finding comments and the Lab: comment at the new head are read by the reviewer; this check runs under the local Done gate only.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC7
+    checks:
+      - check_type: command
+        check_value: "onex scm pr-commits OmniNode-ai/omnibase_infra#6047 | python3 -c \"import json,sys; r=json.load(sys.stdin)['result']; old='0b0a4b819f86816491fb0dfa39a2bf84bc9107fc'; sys.exit(0 if r['head_sha'] != old and any(old in c['parents'] and 'OMN-25339' in c['subject'] for c in r['commits']) else 1)\""
+        cwd: .
+  - id: dod-omn25339-ac8
+    description: >-
+      The compose build mock is an autospec, so a call with an argument the real method lacks fails.
+    source: manual
+    binds_ac:
+      - AC8
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .

@@ -272,7 +272,7 @@ def build_stability_lane_writers(
     BEFORE ``_preflight_runtime_boot``. A build touches no running container, so
     a refused preflight leaves the lane as it was; the recreate is
     :func:`recreate_stability_lane_writers`, which the executor calls only once
-    the preflight has passed.
+    the preflight has passed and, on a FULL rebuild, the deps leg has converged.
     """
     services = stability_lane_writer_services(execution, lane)
     if not services:
@@ -291,14 +291,18 @@ def build_stability_lane_writers(
     return services
 
 
-#: The image label the runtime Dockerfile stamps from ``GIT_SHA``.
+#: The image label docker/Dockerfile.runtime stamps in its runtime stage from the
+#: ``VCS_REF`` build argument, which ``_compose_build`` passes as the full deploy
+#: sha beside ``GIT_SHA``.
 IMAGE_REVISION_LABEL = "org.opencontainers.image.revision"
+#: The runtime main, whose freshly built image the writers must match.
+RUNTIME_SERVICE = "omninode-runtime"
 #: ``healthcheck`` of a writer: 60 s start period, then 30 s interval, 3 retries.
 WRITER_HEALTH_WAIT_SECONDS = 240
 WRITER_HEALTH_POLL_SECONDS = 5
 _INSPECT_FORMAT = (
     "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}"
-    "{{else}}none{{end}}|{{.RestartCount}}|{{.Image}}"
+    "{{else}}none{{end}}|{{.RestartCount}}"
 )
 
 
@@ -311,18 +315,20 @@ def recreate_stability_lane_writers(
     poll_seconds: float = WRITER_HEALTH_POLL_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
 ) -> tuple[str, ...]:
-    """Recreate the writers on their fresh images, then read them healthy and current.
+    """Recreate the writers on their fresh images, then read them healthy.
 
-    ``up -d`` exiting 0 says only that compose started a container. The roll
-    therefore fails the deploy unless every writer is running, healthy and has
-    not restarted, and carries the same image revision as the runtime image
-    this deploy just built (a recreate on an unchanged tag leaves a writer on
-    the old code). The compose environment is the one ``_compose_up`` runs under.
+    The images are checked BEFORE anything is replaced: every writer image must
+    carry the runtime image's revision, and that revision must be the deploy's
+    sha, so a mismatch leaves the running writers untouched. ``up -d`` exiting 0
+    says only that compose started a container, so the roll then fails the
+    deploy unless every writer is running, healthy and has not restarted. The
+    compose environment is the one ``_compose_up`` runs under.
     """
     services = stability_lane_writer_services(execution, lane)
     if not services:
         return ()
     environment = execution._compose_env()
+    _assert_images_at_deploy_sha(execution, lane, services, environment, git_sha)
     argv = [
         *execution._compose_argv(lane),
         "--profile",
@@ -347,7 +353,6 @@ def recreate_stability_lane_writers(
     _wait_writers_healthy(
         execution, lane, services, environment, wait_seconds, poll_seconds, sleep
     )
-    _assert_writers_at_deploy_sha(execution, lane, services, environment, git_sha)
     return services
 
 
@@ -377,13 +382,13 @@ def _writer_container(
 
 def _writer_state(
     execution: ModuleType, container: str, environment: dict[str, str]
-) -> tuple[str, str, int, str]:
-    status, health, restarts, image = _read_docker(
+) -> tuple[str, str, int]:
+    status, health, restarts = _read_docker(
         execution,
         ["docker", "inspect", "--format", _INSPECT_FORMAT, container],
         environment,
     ).split("|")
-    return status, health, int(restarts), image
+    return status, health, int(restarts)
 
 
 def _wait_writers_healthy(
@@ -400,19 +405,17 @@ def _wait_writers_healthy(
     while pending:
         for service in tuple(pending):
             container = _writer_container(execution, lane, service, environment)
-            status, health, restarts, _ = _writer_state(
-                execution, container, environment
-            )
+            status, health, restarts = _writer_state(execution, container, environment)
             if (
                 status in ("restarting", "exited", "dead")
                 or restarts
-                or (health == "unhealthy")
+                or health in ("unhealthy", "none")
             ):
                 raise RuntimeError(
                     f"stability lane writer {service} is not stable after the "
                     f"recreate: status={status} health={health} restarts={restarts}"
                 )
-            if status == "running" and health in ("healthy", "none"):
+            if status == "running" and health == "healthy":
                 pending.remove(service)
         if not pending:
             return
@@ -424,44 +427,69 @@ def _wait_writers_healthy(
         sleep(poll_seconds)
 
 
-def _assert_writers_at_deploy_sha(
+def _service_revision(
+    execution: ModuleType, lane: str, service: str, environment: dict[str, str]
+) -> str:
+    """The revision label of the image compose will start ``service`` from."""
+    image = _read_docker(
+        execution,
+        [
+            *execution._compose_argv(lane),
+            "--profile",
+            "runtime",
+            "config",
+            "--images",
+            service,
+        ],
+        environment,
+    ).splitlines()[-1:]
+    if not image:
+        raise RuntimeError(f"stability lane writer check: {service} names no image")
+    return _read_docker(
+        execution,
+        [
+            "docker",
+            "image",
+            "inspect",
+            "--format",
+            f'{{{{index .Config.Labels "{IMAGE_REVISION_LABEL}"}}}}',
+            image[0].strip(),
+        ],
+        environment,
+    )
+
+
+def _assert_images_at_deploy_sha(
     execution: ModuleType,
     lane: str,
     services: tuple[str, ...],
     environment: dict[str, str],
     git_sha: str,
 ) -> None:
-    """Each writer's image was built from the deploy's sha, as the runtime's was.
+    """Each writer image carries the revision of the runtime image this deploy built.
 
-    The runtime image of this deploy and the writers' are built from one
-    Dockerfile with one ``GIT_SHA`` build argument, which the Dockerfile stamps
-    as the image's revision label: a writer whose label differs from it is on an
-    older image than the runtime this deploy is rolling out.
+    Runs before the recreate. The runtime image's label is read (never taken
+    from ``git_sha`` alone) and must equal the deploy's sha; each writer's label
+    must equal the runtime's, so a writer left on an older image than the
+    runtime this deploy is rolling out is refused with nothing replaced.
     """
     if not git_sha:
         raise RuntimeError("stability lane writer check needs the deploy's git sha")
-    stale = []
-    for service in services:
-        container = _writer_container(execution, lane, service, environment)
-        image = _writer_state(execution, container, environment)[3]
-        revision = _read_docker(
-            execution,
-            [
-                "docker",
-                "image",
-                "inspect",
-                "--format",
-                f'{{{{index .Config.Labels "{IMAGE_REVISION_LABEL}"}}}}',
-                image,
-            ],
-            environment,
+    runtime = _service_revision(execution, lane, RUNTIME_SERVICE, environment)
+    if runtime != git_sha:
+        raise RuntimeError(
+            f"stability lane runtime image revision {runtime[:12] or 'unset'} is "
+            f"not the deploy's {git_sha[:12]}; no writer was recreated"
         )
-        if revision != git_sha:
-            stale.append(service)
+    stale = [
+        service
+        for service in services
+        if _service_revision(execution, lane, service, environment) != runtime
+    ]
     if stale:
         raise RuntimeError(
             "stability lane writer(s) not on the runtime's image revision "
-            f"{git_sha[:12]}: {', '.join(stale)}"
+            f"{runtime[:12]}; no writer was recreated: {', '.join(stale)}"
         )
 
 

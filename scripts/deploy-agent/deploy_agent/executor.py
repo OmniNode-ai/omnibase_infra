@@ -4748,9 +4748,6 @@ class DeployExecutor:
                     read_settings=lambda: settings,
                 )
                 self._preflight_runtime_boot([], on_phase_update, lane=lane)
-            # OMN-24903: only a build and a boot preflight that both passed may
-            # replace a running writer.
-            self._recreate_stability_writers(lane, git_sha)
             # OMN-18640: the deps leg of a FULL rebuild CONVERGES rather than
             # recreates. A FULL rebuild is a request to rebuild and replace the
             # RUNTIME images; the broker, the database and the cache are
@@ -4767,6 +4764,9 @@ class DeployExecutor:
                 lane=lane,
                 force_recreate=False,
             )
+            # OMN-24903: the build and the boot preflight above passed and the
+            # deps have converged, so the writers find their broker and database.
+            self._recreate_stability_writers(lane, git_sha)
             # OMN-18143: every image was built above; compose must not build
             # them again inside the up ceiling.
             self._compose_up(
