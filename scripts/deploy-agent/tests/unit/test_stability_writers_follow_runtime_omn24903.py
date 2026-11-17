@@ -17,11 +17,23 @@ from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
+from deploy_agent import agent as agent_mod
 from deploy_agent import executor as execution
-from deploy_agent.events import BuildSource, EnumRuntimeLane, Scope
+from deploy_agent.events import (
+    BuildSource,
+    EnumRuntimeLane,
+    ModelRebuildRequested,
+    Scope,
+)
 from deploy_agent.executor import DeployExecutor
+from deploy_agent.job_state import JobStore
+
+from tests.unit.test_agent_prod_stability_digest_guard_wiring_omn15181 import (
+    _FakeExecutor,
+)
 
 pytestmark = [pytest.mark.unit]
 
@@ -129,7 +141,7 @@ def test_the_writer_that_refused_the_terminal_is_rolled_by_a_stability_deploy(
     assert built.kwargs["compose_files"] == (
         execution.lane_config_for(EnumRuntimeLane.STABILITY_TEST).compose_files
     )
-    assert built.kwargs["stage_workspace"] is False
+    assert built.kwargs.get("stage_workspace", True) is True
     (up,) = _ups(deploy)
     assert up[up.index("-p") + 1] == execution.lane_config_for(LANE).compose_project
     assert {"--no-deps", "--no-build", "--force-recreate"} <= set(up)
@@ -173,21 +185,45 @@ def test_another_lane_is_left_untouched(
     assert not deploy.calls
 
 
-@pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
-def test_a_stability_runtime_deploy_rolls_the_writers_before_the_runtime(
-    deploy: SimpleNamespace, scope: Scope
+def _executor_roll(state: SimpleNamespace, lane: EnumRuntimeLane) -> tuple[str, ...]:
+    rolled: tuple[str, ...] = state.executor.roll_stability_lane_writers(
+        SHA,
+        lambda *args: None,
+        build_source=BuildSource.WORKSPACE,
+        lane=lane,
+        git_ref="origin/dev",
+    )
+    return rolled
+
+
+def test_the_executor_step_builds_then_recreates_the_stability_writers(
+    deploy: SimpleNamespace,
 ) -> None:
-    order: list[str] = []
-    deploy.executor._compose_build.side_effect = lambda *a, **k: order.append(
-        "build:writers"
-        if "projection-delegation-writer" in k.get("services", ())
-        else "build"
-    )
-    deploy.executor._compose_up.side_effect = lambda phase, sc, *a, **k: order.append(
-        f"up:{sc.value}"
-    )
+    rolled = _executor_roll(deploy, EnumRuntimeLane.STABILITY_TEST)
+    assert "projection-delegation-writer" in rolled
+    built = deploy.executor._compose_build.call_args
+    assert built is not None
+    assert set(built.kwargs["services"]) == set(rolled)
+    (up,) = _ups(deploy)
+    assert set(rolled) <= set(up)
+
+
+@pytest.mark.parametrize("lane", [EnumRuntimeLane.DEV, EnumRuntimeLane.PROD])
+def test_the_executor_step_leaves_another_lane_untouched(
+    deploy: SimpleNamespace, lane: EnumRuntimeLane
+) -> None:
+    assert _executor_roll(deploy, lane) == ()
+    deploy.executor._compose_build.assert_not_called()
+    assert not deploy.calls
+
+
+def test_a_stability_runtime_rebuild_itself_still_builds_no_writer(
+    deploy: SimpleNamespace,
+) -> None:
+    """The OMN-18108 build assertion keeps its meaning: the writers are a step
+    of their own, so ``rebuild_scope`` names none of them."""
     deploy.executor.rebuild_scope(
-        scope,
+        Scope.RUNTIME,
         [],
         lambda *a: None,
         lane=LANE,
@@ -195,7 +231,73 @@ def test_a_stability_runtime_deploy_rolls_the_writers_before_the_runtime(
         build_source=BuildSource.WORKSPACE,
         git_ref="origin/dev",
     )
-    (up,) = _ups(deploy)
-    assert "projection-delegation-writer" in up
-    assert "build:writers" in order
-    assert order.index("build:writers") < order.index("up:runtime")
+    named: set[str] = set()
+    for call in deploy.executor._compose_build.call_args_list:
+        named |= set(call.kwargs.get("services", ()))
+    assert named.isdisjoint(_effect().STABILITY_LANE_WRITER_SERVICES)
+    assert not [argv for argv in deploy.calls if "--force-recreate" in argv]
+
+
+class _RollRecordingExecutor(_FakeExecutor):
+    def roll_stability_lane_writers(
+        self, git_sha: str, on_phase_update: object, **kwargs: object
+    ) -> tuple[str, ...]:
+        self.calls.append(f"roll:{kwargs['lane']}")
+        return ()
+
+
+def _run_agent_deploy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lane: EnumRuntimeLane,
+    scope: Scope,
+) -> list[str]:
+    cmd = ModelRebuildRequested(
+        correlation_id=uuid4(),
+        requested_by="test",
+        scope=scope,
+        runtime_lane=lane,
+    )
+    store = JobStore(tmp_path)
+    store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
+    monkeypatch.setattr(agent_mod, "STATE_DIR", tmp_path / "agent-state")
+    monkeypatch.setattr(
+        agent_mod, "capture_rollback_point", lambda executor, lane: object()
+    )
+    monkeypatch.setattr(agent_mod, "publish_result", lambda payload, config: False)
+    agent = agent_mod.DeployAgent(skip_self_update=True)
+    agent.job_store = store
+    executor = _RollRecordingExecutor(stability_ready_digest=None)
+    agent.executor = executor  # type: ignore[assignment]
+    agent._run_deploy(cmd)
+    return executor.calls
+
+
+@pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
+def test_a_stability_deploy_rolls_the_writers_after_the_rebuild_before_verify(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope: Scope
+) -> None:
+    calls = _run_agent_deploy(tmp_path, monkeypatch, LANE, scope)
+    assert "rebuild_scope" in calls, calls
+    assert f"roll:{LANE}" in calls, calls
+    assert calls.index("rebuild_scope") < calls.index(f"roll:{LANE}")
+    assert calls.index(f"roll:{LANE}") < calls.index("verify")
+
+
+@pytest.mark.parametrize(
+    ("lane", "scope"),
+    [
+        (EnumRuntimeLane.DEV, Scope.RUNTIME),
+        (EnumRuntimeLane.STABILITY_TEST, Scope.CORE),
+    ],
+)
+def test_no_other_deploy_rolls_the_writers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lane: EnumRuntimeLane,
+    scope: Scope,
+) -> None:
+    calls = _run_agent_deploy(tmp_path, monkeypatch, lane, scope)
+    assert "rebuild_scope" in calls, "positive control: the deploy ran"
+    assert not [call for call in calls if call.startswith("roll:")], calls

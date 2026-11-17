@@ -253,10 +253,11 @@ def roll_stability_lane_writers(
 ) -> tuple[str, ...]:
     """Build the stability lane's writers at the deploy's sha, then recreate them.
 
-    Called from ``build_dev_lane_services``, which the executor runs on every
-    RUNTIME and FULL rebuild before the runtime family is recreated, so the
-    readers of the runtime's events move first. A lane whose compose files do
-    not include the stability overlay is left untouched. A failed recreate
+    Called by the executor's own step after a stability RUNTIME or FULL rebuild
+    has returned, never from ``rebuild_scope``: that rebuild builds the runtime
+    scope's services only (``test_a_stability_build_names_no_dev_lane_only_service``
+    pins it). A lane whose compose files do not include the stability overlay
+    is left untouched. A failed recreate
     raises, so the deploy fails rather than reporting a lane whose writers kept
     the previous image.
     """
@@ -279,7 +280,6 @@ def roll_stability_lane_writers(
         git_ref=git_ref,
         compose_files=config.compose_files,
         services=services,
-        stage_workspace=False,
     )
     argv = [
         *execution._compose_argv(lane),
@@ -320,15 +320,6 @@ def build_dev_lane_services(
     | None = None,
 ) -> dict[str, str]:
     """Validate first, then build dev images before the existing recreate."""
-    roll_stability_lane_writers(
-        execution,
-        build_images,
-        git_sha,
-        on_phase_update,
-        build_source=build_source,
-        lane=lane,
-        git_ref=git_ref,
-    )
     if lane != execution.EnumRuntimeLane.DEV:
         return {}
     settings = (

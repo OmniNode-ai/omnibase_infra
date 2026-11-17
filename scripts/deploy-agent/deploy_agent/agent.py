@@ -2072,6 +2072,19 @@ class DeployAgent:
                         declared_pr=cmd.open_pr,
                         sibling_tags=cmd.sibling_tags,
                     )
+                    # OMN-24903: the stability lane's projection writers are
+                    # rebuilt beside its runtime, or they keep the previous image.
+                    if (
+                        cmd.runtime_lane == EnumRuntimeLane.STABILITY_TEST
+                        and cmd.scope in (Scope.RUNTIME, Scope.FULL)
+                    ):
+                        self.executor.roll_stability_lane_writers(
+                            self._current_git_sha,
+                            on_phase_update,
+                            build_source=cmd.build_source,
+                            lane=cmd.runtime_lane,
+                            git_ref=cmd.git_ref,
+                        )
 
                     if dev_guard is not None:
                         dev_guard.wait(deployed_generation=True)

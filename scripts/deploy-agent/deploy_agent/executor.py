@@ -5150,6 +5150,39 @@ class DeployExecutor:
         )
         return environment
 
+    def roll_stability_lane_writers(
+        self,
+        git_sha: str,
+        on_phase_update: PhaseCallback,
+        *,
+        build_source: BuildSource | str,
+        lane: EnumRuntimeLane,
+        git_ref: str,
+    ) -> tuple[str, ...]:
+        """OMN-24903: build and recreate the stability lane's projection writers.
+
+        A step of its own, after ``rebuild_scope`` has returned, because that
+        method builds the runtime scope's services only. It holds the build
+        context itself and stages again (the ``_compose_build`` default), since
+        the hold ``rebuild_scope`` took has ended. Any lane but stability-test
+        returns at once and takes no lock.
+        """
+        if lane != EnumRuntimeLane.STABILITY_TEST:
+            return ()
+        with _hold_build_context(f"deploy-agent stability writers {git_sha[:12]}"):
+            rolled: tuple[str, ...] = load_dev_boot_guard(
+                "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+            ).roll_stability_lane_writers(
+                sys.modules[__name__],
+                self._compose_build,
+                git_sha,
+                on_phase_update,
+                build_source=build_source,
+                lane=lane,
+                git_ref=git_ref,
+            )
+        return rolled
+
     def _pull_pinned_image(self, image_digest: str, lane: EnumRuntimeLane) -> None:
         """Resolve the exact stability-proven image digest for a prod deploy.
 
