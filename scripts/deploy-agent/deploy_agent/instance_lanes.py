@@ -63,6 +63,7 @@ from typing import Final, NoReturn
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+import omnibase_infra.models.event_bus.model_event_provenance_overlay as overlay_model
 from deploy_agent.events import (
     EnumLaneMirrorOutcome,
     ModelLaneMirrorForwarder,
@@ -141,14 +142,18 @@ def parse_instance_lanes(text: str) -> dict[str, ModelInstanceLane]:
     return lanes
 
 
-def load_instance_lanes(repo_root: str | Path) -> dict[str, ModelInstanceLane]:
-    """The blocks in ``repo_root``'s committed table."""
+def _read_routing_table(repo_root: str | Path) -> str:
+    """The text of ``repo_root``'s committed routing table."""
     path = Path(repo_root) / ROUTING_TABLE_RELPATH
     try:
-        text = path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8")
     except OSError as exc:
         raise RoutingTableError(f"routing table unreadable at {path}: {exc}") from exc
-    return parse_instance_lanes(text)
+
+
+def load_instance_lanes(repo_root: str | Path) -> dict[str, ModelInstanceLane]:
+    """The blocks in ``repo_root``'s committed table."""
+    return parse_instance_lanes(_read_routing_table(repo_root))
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +189,10 @@ LANE_ENV_FRAGMENT_SUFFIX: Final = ".runtime.env.json"
 #: act switches, read through contract ``${env.VAR:default}`` references whose
 #: inline default is the shipped behaviour; and the lane class the runtime is an
 #: instance of with the class contracts it takes, read by the auto-wiring
-#: ownership filter.
+#: ownership filter; and the five variables the Kafka envelope publish seam
+#: reads to stamp the deployment's provenance on events it publishes
+#: (OMN-23981, ``ModelEventProvenanceOverlay.VARIABLES``), which a partial set
+#: leaves unstamped.
 LANE_ENV_FRAGMENT_SCHEMA_KEYS: Final[dict[str, frozenset[str]]] = {
     "runtime_lane_env.v1": frozenset(
         {
@@ -196,6 +204,7 @@ LANE_ENV_FRAGMENT_SCHEMA_KEYS: Final[dict[str, frozenset[str]]] = {
             "ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD",
             "ONEX_RUNTIME_LANE_CLASS",
             "ONEX_RUNTIME_LANE_CLASS_CONTRACTS",
+            *(name for _, name in overlay_model.ModelEventProvenanceOverlay.VARIABLES),
             "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY",
             "COST_ESTIMATOR_WEB_SOURCE_URL",
             "ESTIMATOR_GATE_OPEN_SOURCES",
@@ -247,12 +256,7 @@ def instance_runtime_lanes_from_text(text: str) -> dict[str, str]:
 
 def load_instance_runtime_lanes(repo_root: str | Path) -> dict[str, str]:
     """The runtime lane ids in ``repo_root``'s committed table."""
-    path = Path(repo_root) / ROUTING_TABLE_RELPATH
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise RoutingTableError(f"routing table unreadable at {path}: {exc}") from exc
-    return instance_runtime_lanes_from_text(text)
+    return instance_runtime_lanes_from_text(_read_routing_table(repo_root))
 
 
 def parse_lane_env_fragment(text: str, *, lane_id: str, source: str) -> dict[str, str]:

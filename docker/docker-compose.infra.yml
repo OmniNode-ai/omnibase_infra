@@ -526,6 +526,12 @@ x-runtime-env: &runtime-env
 # The lane class a runtime is an instance of and the class contracts it takes
 # (ONEX_RUNTIME_LANE_CLASS, ONEX_RUNTIME_LANE_CLASS_CONTRACTS; read by the
 # auto-wiring ownership filter). Same rule: the overlay names the instance.
+#
+# The deployment's provenance overlay (OMN-23981; ONEX_PROVENANCE_LANE,
+# ONEX_PROVENANCE_LANE_KIND, ONEX_PROVENANCE_HOST, ONEX_PROVENANCE_INSTALL_SOURCE,
+# ONEX_PROVENANCE_REVISION), read by the Kafka envelope publish seam. A partial
+# or empty overlay stamps nothing, so an unset host value must stay unset in the
+# container; same rule, and the private overlay names the deployment.
 x-runtime-passthrough-env: &runtime-passthrough-env
   ONEX_PR_LANDING_GITHUB_MODE:
   ONEX_PR_LANDING_ARM_ACTION_MODE:
@@ -535,6 +541,11 @@ x-runtime-passthrough-env: &runtime-passthrough-env
   ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD:
   ONEX_RUNTIME_LANE_CLASS:
   ONEX_RUNTIME_LANE_CLASS_CONTRACTS:
+  ONEX_PROVENANCE_LANE:
+  ONEX_PROVENANCE_LANE_KIND:
+  ONEX_PROVENANCE_HOST:
+  ONEX_PROVENANCE_INSTALL_SOURCE:
+  ONEX_PROVENANCE_REVISION:
 # ==========================================================================
 # Services
 # ==========================================================================

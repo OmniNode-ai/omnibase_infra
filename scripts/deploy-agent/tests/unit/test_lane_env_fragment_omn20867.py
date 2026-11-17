@@ -57,6 +57,17 @@ LANE_CLASS = {
     "ONEX_RUNTIME_LANE_CLASS_CONTRACTS": "node_a,node_b",
 }
 
+# The deployment's provenance overlay (OMN-23981, OMN-25116): the five variables
+# the envelope publish seam stamps events from; a partial set stamps nothing, so
+# a fragment may set all of them.
+PROVENANCE = {
+    "ONEX_PROVENANCE_LANE": "dev",
+    "ONEX_PROVENANCE_LANE_KIND": "runtime",
+    "ONEX_PROVENANCE_HOST": "lab-host",
+    "ONEX_PROVENANCE_INSTALL_SOURCE": "tag",
+    "ONEX_PROVENANCE_REVISION": "0123456789ab",
+}
+
 ROUTING_TEXT = """\
 default_instance: inst-a
 instances:
@@ -126,6 +137,7 @@ def test_schema_declares_exactly_the_act_switches_and_the_lane_class() -> None:
     assert {
         SCHEMA: frozenset(NON_ACTING)
         | frozenset(LANE_CLASS)
+        | frozenset(PROVENANCE)
         | frozenset(
             {"COST_ESTIMATOR_WEB_SOURCE_REPOSITORY", "COST_ESTIMATOR_WEB_SOURCE_URL"}
         )
@@ -137,6 +149,23 @@ def test_schema_declares_exactly_the_act_switches_and_the_lane_class() -> None:
 def test_a_fragment_may_select_a_lane_class() -> None:
     env = {**NON_ACTING, **LANE_CLASS}
     assert parse_lane_env_fragment(_fragment(env), lane_id=LANE, source="t") == env
+
+
+@pytest.mark.unit
+def test_a_fragment_may_set_the_provenance_overlay() -> None:
+    assert parse_lane_env_fragment(
+        _fragment(PROVENANCE), lane_id=LANE, source="t"
+    ) == dict(PROVENANCE)
+
+
+@pytest.mark.unit
+def test_a_fragment_may_not_set_a_provenance_key_the_stamp_does_not_read() -> None:
+    with pytest.raises(LaneEnvFragmentError, match="ONEX_PROVENANCE_EXTRA"):
+        parse_lane_env_fragment(
+            _fragment({**PROVENANCE, "ONEX_PROVENANCE_EXTRA": "x"}),
+            lane_id=LANE,
+            source="t",
+        )
 
 
 @pytest.mark.unit
