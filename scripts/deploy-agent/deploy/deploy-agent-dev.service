@@ -174,13 +174,19 @@
 # the dev key too, because compose interpolates ${DEPLOY_AGENT_HMAC_SECRET} from the
 # agent's environment (docker-compose.infra.yml) and nothing loads the operator
 # store around it: no compose or other YAML file in this repository declares an
-# `env_file:` key, and the one compose argv the agent runs with `--env-file` is the
-# standalone factory-floor-web recreate (a different compose file and project,
-# whose env file is named by DEPLOY_AGENT_FACTORY_FLOOR_WEB_ENV_FILE). Every other
-# `--env-file` in the directories the agent runs code from is a flag of its own tool
-# or a pre-PR slot script. Both scans read every YAML file and every source line and
-# fail on anything not listed, in
-# tests/unit/test_dev_agent_own_signing_key_omn24565.py. auth.py, the
+# `env_file:` key, and the two compose argv the agent runs with `--env-file` are the
+# standalone factory-floor-web recreate (a different compose file and project, whose
+# env file is named by DEPLOY_AGENT_FACTORY_FLOOR_WEB_ENV_FILE) and a `config` render
+# of the dev broker stack on the tracked docker/runtime-policy.env (no signing key in
+# it). Every other `--env-file` in the scanned files is a flag of its own tool or a
+# pre-PR slot script. The scans read this repository only: every YAML file, and every
+# source line (extensionless scripts included) in the directories the agent runs code
+# from and in the single scripts its source names, each `--env-file` line pinned by
+# its text, in tests/unit/test_dev_agent_own_signing_key_omn24565.py. They do not read
+# the overlays repository (the agent's overlay home; its `env_file` keys belong to
+# host installer units and tools) or onex-runtime-deploy (a console script of
+# omnimarket, not a file of this repository): those were read by hand at their main
+# branches and are named in the pull request comments, not pinned here. auth.py, the
 # launcher and the compose files do not change.
 #
 # PORT PREFLIGHT (fail-fast, never destructive)

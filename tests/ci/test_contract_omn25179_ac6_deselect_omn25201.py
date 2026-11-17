@@ -12,8 +12,10 @@ failure of the work itself can never hide in the deselect list.
 
 from __future__ import annotations
 
+import copy
 import shlex
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -57,8 +59,7 @@ _OWN_TEST_FILES = (
 )
 
 
-def _ac6_deselected() -> list[str]:
-    document = yaml.safe_load(_CONTRACT.read_text(encoding="utf-8"))
+def _deselected_by(document: dict[str, Any]) -> list[str]:
     commands = [
         str(check["check_value"])
         for item in document["dod_evidence"]
@@ -75,6 +76,16 @@ def _ac6_deselected() -> list[str]:
         for index, word in enumerate(words[:-1])
         if word == "--deselect"
     ]
+
+
+def _contract() -> dict[str, Any]:
+    document = yaml.safe_load(_CONTRACT.read_text(encoding="utf-8"))
+    assert isinstance(document, dict), f"{_CONTRACT} is not a mapping"
+    return document
+
+
+def _ac6_deselected() -> list[str]:
+    return _deselected_by(_contract())
 
 
 def test_ac6_deselects_exactly_the_ten_base_failures() -> None:
@@ -105,7 +116,32 @@ def test_every_id_is_spelled_from_the_project_root() -> None:
         assert not node_id.startswith(_PROJECT), node_id
 
 
-def test_control_dropping_one_name_changes_the_set() -> None:
-    """The failing control: the pin above is not satisfied by nine names."""
-    nine = set(_ac6_deselected()) - {sorted(_BASE_FAILURES)[0]}
-    assert nine != _BASE_FAILURES
+@pytest.mark.parametrize("dropped", sorted(_BASE_FAILURES))
+def test_control_the_contract_without_one_of_the_ten_fails_the_pin(
+    dropped: str,
+) -> None:
+    """The failing control, run on the contract's own text: drop one id from the AC6 check.
+
+    The command is edited in a copy of the parsed contract and read back through the
+    same extractor the pin uses; the pin (``_BASE_FAILURES``, spelled in this file)
+    must then no longer hold, for each of the ten.
+    """
+    document = copy.deepcopy(_contract())
+    for item in document["dod_evidence"]:
+        if "AC6" in item["binds_ac"]:
+            for check in item["checks"]:
+                words = shlex.split(str(check["check_value"]))
+                kept: list[str] = []
+                skip = False
+                for index, word in enumerate(words):
+                    if skip:
+                        skip = False
+                    elif word == "--deselect" and words[index + 1] == dropped:
+                        skip = True
+                    else:
+                        kept.append(word)
+                check["check_value"] = shlex.join(kept)
+    remaining = _deselected_by(document)
+    assert len(remaining) == 9, remaining
+    assert dropped not in remaining
+    assert set(remaining) != _BASE_FAILURES

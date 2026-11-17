@@ -73,7 +73,7 @@ dod_evidence:
       - AC5
     checks:
       - check_type: test_passes
-        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "control_an_environment_check or rollout" -q
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "control_an_environment_check or control_the_line_check or rollout" -q
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn25201-ac6-suite-green
     description: The deploy agent's unit tests pass at the new head with the named base failures deselected; the per-finding comments and the Lab comment are on the pull request.

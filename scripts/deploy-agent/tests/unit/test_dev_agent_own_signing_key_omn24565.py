@@ -34,6 +34,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -147,6 +148,109 @@ def test_no_other_unit_reads_the_dev_signing_key_file() -> None:
     for text in texts:
         assert "deploy-agent-dev-signing-key" not in text, "EnvironmentFile="
         assert _DEV_STORE_NAME not in text, _DEV_STORE_NAME
+
+
+#: The contract of this pull request's own ticket: its summary carries the rollout order.
+_CONTRACT = _REPO_ROOT / "contracts" / "OMN-24611.yaml"
+_HEADER_ORDER = "put the key file on the host FIRST, then install this unit"
+_SUMMARY_ORDER = "Rollout order is the key file on h201 first and then the unit"
+
+
+def _flat(comment_lines: list[str]) -> str:
+    """Comment text with the ``#`` markers and line breaks collapsed to single spaces."""
+    return " ".join(line.lstrip("#").strip() for line in comment_lines if line.strip())
+
+
+def _unit_header_states_the_rollout_order(unit_text: str) -> bool:
+    """The comment block above ``[Unit]`` names the order: key file first, unit second."""
+    header = unit_text.split("\n[Unit]", 1)[0].splitlines()
+    return "ROLLOUT ORDER" in _flat(header) and _HEADER_ORDER in _flat(header)
+
+
+def _contract_summary_states_the_rollout_order(summary: str) -> bool:
+    return _SUMMARY_ORDER in " ".join(summary.split())
+
+
+_COUNT_CLAIM = re.compile(r"fails (\d+) of its (\d+) tests")
+
+
+def _collected_test_count() -> int:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "-n",
+            "0",
+            "-p",
+            "no:cacheprovider",
+            str(Path(__file__)),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout[-500:]
+    return sum(1 for line in result.stdout.splitlines() if "::" in line)
+
+
+def test_the_contract_counts_the_tests_of_this_file() -> None:
+    """The count in the contract is the measured count: both places state the same total.
+
+    The failing count (how many of them fail against the dev unit on origin/dev) is
+    measured on the lab and named in the pull request comment; the total is checked
+    here so a stale ``of its N tests`` cannot survive a new test.
+    """
+    total = _collected_test_count()
+    document = yaml.safe_load(_CONTRACT.read_text(encoding="utf-8"))
+    statements = [
+        criterion["statement"]
+        for requirement in document["requirements"]
+        for criterion in requirement["acceptance"]
+        if criterion["id"] == "AC1"
+    ] + [
+        item["description"]
+        for item in document["dod_evidence"]
+        if item["id"] == "dod-omn24611-ac1-unit"
+    ]
+    assert len(statements) == 2, statements
+    for statement in statements:
+        # The newest claim: the one about the dev unit on origin/dev at this head.
+        claims = _COUNT_CLAIM.findall(statement)
+        failing, of_total = (int(n) for n in claims[0])
+        assert of_total == total, (of_total, total)
+        assert 0 < failing < total, (failing, total)
+
+
+def test_control_a_stale_count_is_found() -> None:
+    assert _COUNT_CLAIM.findall("fails 28 of its 41 tests")[0] == ("28", "41")
+
+
+def test_rollout_order_is_stated_in_the_unit_header() -> None:
+    """The unit installed before its key file fails every start: the header says so."""
+    assert _unit_header_states_the_rollout_order(_DEV_UNIT.read_text())
+
+
+def test_rollout_order_is_stated_in_the_contract_summary() -> None:
+    document = yaml.safe_load(_CONTRACT.read_text(encoding="utf-8"))
+    assert _contract_summary_states_the_rollout_order(document["summary"])
+
+
+def test_rollout_order_control_removing_the_statement_is_found() -> None:
+    """The failing control: the checks above are red when the order is not stated."""
+    text = _DEV_UNIT.read_text()
+    assert not _unit_header_states_the_rollout_order(
+        text.replace("ROLLOUT ORDER", "ORDER")
+    )
+    assert not _unit_header_states_the_rollout_order(
+        text.replace("put the key file on the host FIRST", "install this unit FIRST")
+    )
+    summary = yaml.safe_load(_CONTRACT.read_text(encoding="utf-8"))["summary"]
+    assert not _contract_summary_states_the_rollout_order(
+        summary.replace("key file on h201 first", "unit first")
+    )
 
 
 # --------------------------------------------------------------------------
@@ -285,6 +389,16 @@ _OLD_ENVIRONMENT_CHECK = (
     '/bin/sh -c \'test -n "$${DEPLOY_AGENT_HMAC_SECRET:-}" || '
     '{ echo "deploy-agent-dev: DEPLOY_AGENT_HMAC_SECRET is unset or empty in the key '
     "file, refusing to start (OMN-24611)\" >&2; exit 2; }'"
+)
+
+#: The check this unit carried at the second reviewed head 835b8e9671e5: a test on the
+#: key FILE, one line check plus a count of lines starting with the name (the line
+#: check the review of OMN-25201 names as AC1's falsifier). Copied from that head's
+#: ExecStartPre line.
+_OLD_LINE_CHECK = (
+    '/bin/sh -c \'f="%h/.omnibase/deploy-agent-dev-signing-key.env"; grep -Eqx "DEPLOY_AGENT_HMAC_SECRET=[A-Za-z0-9_-]+" "$$f"'
+    ' && ! grep -Eqx "DEPLOY_AGENT_HMAC_SECRET=__REPLACE_WITH_.*" "$$f" && test "$$(grep -c "^DEPLOY_AGENT_HMAC_SECRET" "$$f")" = 1'
+    ' || { echo "deploy-agent-dev: the key file does not hold exactly one valid DEPLOY_AGENT_HMAC_SECRET line, refusing to start (OMN-24611)" >&2; exit 2; }\''
 )
 
 
@@ -470,6 +584,42 @@ def test_control_an_environment_check_passes_a_broken_file_with_an_inherited_nam
     )
 
     assert result.returncode == 0, (result.returncode, result.stderr)
+
+
+_LINE_CHECK_PASSES = [
+    case
+    for case in _OLD_CHECK_PASSES
+    if case.id != "garbage-line"  # the line check refuses it: that is its job
+]
+
+
+@pytest.mark.parametrize("key_file_text", _LINE_CHECK_PASSES)
+def test_control_the_line_check_of_the_reviewed_head_passes_a_broken_file(
+    tmp_path: Path, key_file_text: str
+) -> None:
+    """The error chain of OMN-25201: the line check lets the three shapes by (exit 0)."""
+    old_argv = _argv_of(_OLD_LINE_CHECK, tmp_path)
+    result = _run_start_check(tmp_path, key_file_text, argv=old_argv)
+
+    assert result.returncode == 0, (result.returncode, result.stderr)
+
+
+def test_control_the_line_check_of_the_reviewed_head_refuses_garbage(
+    tmp_path: Path,
+) -> None:
+    """Positive control for the line-check control: it is a real check, not `true`."""
+    old_argv = _argv_of(_OLD_LINE_CHECK, tmp_path)
+    result = _run_start_check(tmp_path, "this is not an assignment\n", argv=old_argv)
+
+    assert result.returncode == 2, (result.returncode, result.stderr)
+
+
+def test_the_units_start_check_refuses_a_missing_key_file(tmp_path: Path) -> None:
+    """No file at all (``key_file_text=None``): the check refuses, naming only the name."""
+    result = _run_start_check(tmp_path, None)
+
+    assert result.returncode == 2, (result.returncode, result.stdout)
+    assert _CODE_NAME in result.stderr, _CODE_NAME
 
 
 def test_the_units_start_check_passes_a_good_key_file(tmp_path: Path) -> None:
@@ -674,13 +824,15 @@ def _read_tagged(loader: _ComposeLoader, tag_suffix: str, node: yaml.Node) -> ob
 _ComposeLoader.add_multi_constructor("!", _read_tagged)
 
 
-def _tracked_files(root: Path, suffixes: tuple[str, ...]) -> list[Path]:
-    """Every file under ``root`` with one of ``suffixes``, whatever its directory."""
+def _tracked_files(root: Path, suffixes: tuple[str, ...] | None) -> list[Path]:
+    """Every file under ``root`` with one of ``suffixes`` (any file when ``None``)."""
     found: list[Path] = []
     for directory, subdirs, names in os.walk(root):
         subdirs[:] = sorted(name for name in subdirs if name not in _SKIPPED_DIRS)
         found.extend(
-            Path(directory) / name for name in sorted(names) if name.endswith(suffixes)
+            Path(directory) / name
+            for name in sorted(names)
+            if suffixes is None or name.endswith(suffixes)
         )
     return found
 
@@ -800,91 +952,201 @@ def test_control_a_service_without_an_env_file_is_not_a_finding(tmp_path: Path) 
 
 
 # ``--env-file`` on a compose command loads a file under the agent's environment, so
-# the same pin covers it. The scan reads every source line, not just Python list
-# literals, so it does not depend on how the argv is written: a split list, a tuple,
-# ``extend``, ``--env-file=<path>``, a ``self._run("compose", ...)`` call, a shell
-# line. Its scope is every directory the deploy agent runs code from: its own package
-# and scripts, the runtime build scripts it invokes, and the handlers it routes to.
-# Each hit is named below with the command it belongs to.
+# the same pin covers it. The scan reads every source line of every file -- whatever
+# its suffix, extensionless scripts included -- so it does not depend on how the argv
+# is written: a split list, a tuple, ``extend``, ``--env-file=<path>``, a
+# ``self._run("compose", ...)`` call, a shell line. Its scope is the directories the
+# deploy agent runs code from (its own package and scripts, the runtime build scripts
+# it invokes, the handlers it routes to) and the single scripts elsewhere in
+# ``scripts/`` that its source names (checked below, so a script the agent starts to
+# run cannot sit outside the scan). Each hit is pinned by its LINE TEXT with the
+# command it belongs to: swapping a listed line for another ``--env-file`` fails.
+#
+# What this scan does NOT read (the unit header says the same): the overlays
+# repository, which the agent reads as its overlay home and which holds
+# ``env_file`` keys of host installer units and tools, and ``onex-runtime-deploy``,
+# a console script of omnimarket (an extensionless file in the lab virtualenv, not a
+# file of this repository).
 _ARGV_ROOTS = (
     "scripts/deploy-agent",
     "scripts/runtime_build",
     "src/omnibase_infra/handlers",
 )
-_ARGV_SUFFIXES = (".py", ".sh", ".service", ".yml", ".yaml")
+_ARGV_FILES = (
+    "scripts/check_prod_promotion_lineage.py",
+    "scripts/ci/check_lab_probe_windows.py",
+    "scripts/ci/lab_pass_receipt.py",
+    "scripts/deploy-gateway.sh",
+    "scripts/preflight_required_compose_env.py",
+    "scripts/render_runtime_policy_env.py",
+    "scripts/run-forward-migrations.sh",
+    "scripts/seed-infisical.py",
+    "scripts/trigger_rebuild_on_merge.py",
+)
 
-#: ``path -> (matching lines, the command they belong to)``. Adding a line to a listed
-#: file, or an ``--env-file`` to any other file in scope, fails the scan until the
-#: command is traced and listed here.
-_ENV_FILE_ARGV_ALLOWED: dict[str, tuple[int, str]] = {
-    "scripts/deploy-agent/deploy_agent/executor.py": (
-        1,
-        "`python3 <REPOINT_ONEX_API_SCRIPT> --env-file <store>`: the onex-api pin "
-        "repoint script, not a compose command (traced by the AST test below)",
+#: ``(path, stripped line text) -> the command the line belongs to``. Adding a line to a
+#: listed file, editing a listed line, or an ``--env-file`` in any other file in scope,
+#: fails the scan until the command is traced and listed here.
+_ENV_FILE_ARGV_ALLOWED: dict[tuple[str, str], str] = {
+    ("scripts/deploy-agent/deploy_agent/executor.py", '"--env-file",'): (
+        "`python3 <REPOINT_ONEX_API_SCRIPT> --env-file <store>`: the onex-api pin repoint script, not a compose command (traced by the AST test below)"
     ),
-    "scripts/runtime_build/refresh_dev_lane.sh": (
-        1,
-        "the same repoint script, not a compose command",
+    (
+        "scripts/preflight_required_compose_env.py",
+        'command = ["docker", "compose", "--env-file", str(policy_env)]',
+    ): (
+        "`docker compose --env-file <runtime policy env> -f <files> --profile runtime config --format json`: a render of the dev broker stack with the tracked docker/runtime-policy.env, which the agent passes as --runtime-policy-env (no signing key in it, pinned below); it starts nothing"
     ),
-    "scripts/runtime_build/repoint_dev_lane_onex_api.py": (
-        3,
-        "the repoint script's own required `--env-file` flag",
+    (
+        "scripts/runtime_build/prepr_pool_prove.sh",
+        'uv run -q python -m omnibase_infra.docker.catalog.cli generate "$BUNDLE" --env-file "$W/local.env" 2>&1 | tail -2',
+    ): (
+        "pre-PR slot proof: the slot's own generated local.env, run by a lane, not by the deploy agent"
     ),
-    "src/omnibase_infra/handlers/handler_dev_lane_pin.py": (
-        3,
-        "the dev lane pin tool's own `--env-file` flag, not a compose command",
+    (
+        "scripts/runtime_build/prepr_pool_prove.sh",
+        'docker compose -f docker/docker-compose.generated.yml --env-file docker/runtime-policy.env --env-file "$W/local.env" build --build-arg BUILD_SOURCE=workspace --build-arg EXPECTED_BUILD_SOURCE=workspace --build-arg OMNI_HOME="$R" --build-arg PROMOTION_CLASS=stability-candidate --build-arg NON_MAIN_LINEAGE=true --build-arg GIT_SHA="$(git rev-parse HEAD)" --build-arg VCS_REF="$(git rev-parse HEAD)" --build-arg RUNTIME_VERSION="$RV" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.log" 2>&1',
+    ): (
+        "pre-PR slot proof: the slot's own generated local.env, run by a lane, not by the deploy agent"
     ),
-    "src/omnibase_infra/handlers/handler_standalone_compose_recreate.py": (
-        1,
-        "`docker compose --file <declared file> --env-file <env_file> up --no-deps "
-        "--force-recreate -- <service>`: the standalone recreate, whose node contract "
-        "declares one target, factory-floor-web, with the env file named by "
-        "DEPLOY_AGENT_FACTORY_FLOOR_WEB_ENV_FILE (the factory floor page's own file, "
-        "never the dev runtime's compose file)",
+    (
+        "scripts/runtime_build/prepr_pool_prove.sh",
+        'uv run -q python -m omnibase_infra.docker.catalog.cli up "$BUNDLE" --env-file "$W/local.env" $COMPOSED_FLAG > "$W/up.log" 2>&1',
+    ): (
+        "pre-PR slot proof: the slot's own generated local.env, run by a lane, not by the deploy agent"
     ),
-    "scripts/runtime_build/prepr_pool_prove.sh": (
-        3,
-        "pre-PR slot proof: the slot's own generated local.env, run by a lane, "
-        "not by the deploy agent",
+    (
+        "scripts/runtime_build/prepr_verify_lane.sh",
+        'ONEX_DB_SLOT="${DB_SLOT}" bash "${PROVISION_DB}" --apply --env-file "${PROVISIONER_ENV}" \\',
+    ): ("the slot's DB provisioner flag, run by a lane, not by the deploy agent"),
+    (
+        "scripts/runtime_build/prepr_verify_rendered_slot.py",
+        "an interpolation from the OS environment first and from ``--env-file`` only",
+    ): ("a docstring about compose's `--env-file` precedence"),
+    (
+        "scripts/runtime_build/refresh_dev_lane.sh",
+        '--env-file "${OMNIBASE_OPERATOR_ENV_FILE}" \\',
+    ): ("the same repoint script, not a compose command"),
+    (
+        "scripts/runtime_build/repoint_dev_lane_onex_api.py",
+        "NO DEFAULTS (rule 8). ``--env-file`` and ``--omninode-clone`` are both required.",
+    ): ("the repoint script's own required `--env-file` flag (docstring)"),
+    (
+        "scripts/runtime_build/repoint_dev_lane_onex_api.py",
+        'msg = f"--env-file {env_file} does not exist; nothing was written."',
+    ): ("the repoint script's own required `--env-file` flag (error message)"),
+    ("scripts/runtime_build/repoint_dev_lane_onex_api.py", '"--env-file",'): (
+        "the repoint script's own required `--env-file` flag (argparse)"
     ),
-    "scripts/runtime_build/prepr_verify_lane.sh": (
-        1,
-        "the slot's DB provisioner flag, run by a lane, not by the deploy agent",
+    (
+        "src/omnibase_infra/handlers/handler_dev_lane_pin.py",
+        "--env-file <store> --key ONEX_CLOUD_MIGRATE_IMAGE",
+    ): (
+        "the dev lane pin tool's own `--env-file` flag, not a compose command (docstring)"
     ),
-    "scripts/runtime_build/prepr_verify_rendered_slot.py": (
-        1,
-        "a docstring about compose's `--env-file` precedence",
+    (
+        "src/omnibase_infra/handlers/handler_dev_lane_pin.py",
+        "--env-file <store> --key ONEX_CLOUD_MIGRATE_IMAGE --value <image:tag> \\\\",
+    ): (
+        "the dev lane pin tool's own `--env-file` flag, not a compose command (docstring)"
+    ),
+    (
+        "src/omnibase_infra/handlers/handler_dev_lane_pin.py",
+        'sub.add_argument("--env-file", required=True, help="operator env store")',
+    ): (
+        "the dev lane pin tool's own `--env-file` flag, not a compose command (argparse)"
+    ),
+    (
+        "src/omnibase_infra/handlers/handler_standalone_compose_recreate.py",
+        '"--env-file",',
+    ): (
+        "`docker compose --file <declared file> --env-file <env_file> up --detach --no-deps --force-recreate -- <service>`: the standalone recreate, whose node contract declares one target, factory-floor-web (docker/docker-compose.factory-floor-web.yml), with the env file named by DEPLOY_AGENT_FACTORY_FLOOR_WEB_ENV_FILE; its own test is below"
     ),
 }
 
 
-def _env_file_argv_lines(root: Path) -> dict[str, int]:
-    """``path -> count`` of non-comment lines naming ``--env-file`` in the scan scope."""
-    counts: dict[str, int] = {}
-    for scope in _ARGV_ROOTS:
-        for path in _tracked_files(root / scope, _ARGV_SUFFIXES):
-            relative = path.relative_to(root)
-            # Tests quote the literal on purpose.
-            if "tests" in relative.parts:
-                continue
-            hits = sum(
-                1
-                for line in path.read_text(
-                    encoding="utf-8", errors="replace"
-                ).splitlines()
-                if "--env-file" in line and not line.lstrip().startswith("#")
-            )
-            if hits:
-                counts[str(relative)] = hits
-    return counts
+def _scanned_files(root: Path) -> list[Path]:
+    """Every text file in scope: the roots (any suffix) and the named single scripts."""
+    paths = [
+        path for scope in _ARGV_ROOTS for path in _tracked_files(root / scope, None)
+    ]
+    paths.extend(root / name for name in _ARGV_FILES if (root / name).is_file())
+    return paths
+
+
+def _env_file_argv_lines(root: Path) -> list[tuple[str, str]]:
+    """``(path, line)`` of every non-comment line naming ``--env-file`` in the scan scope."""
+    hits: list[tuple[str, str]] = []
+    for path in _scanned_files(root):
+        relative = path.relative_to(root)
+        # Tests quote the literal on purpose.
+        if "tests" in relative.parts:
+            continue
+        raw = path.read_bytes()
+        if b"\0" in raw[:1024]:
+            continue
+        hits.extend(
+            (str(relative), line.strip())
+            for line in raw.decode("utf-8", errors="replace").splitlines()
+            if "--env-file" in line and not line.lstrip().startswith("#")
+        )
+    return sorted(hits)
+
+
+def _unlisted(hits: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    return [hit for hit in hits if hit not in _ENV_FILE_ARGV_ALLOWED]
 
 
 def test_no_deploy_agent_compose_argv_passes_env_file() -> None:
-    counts = _env_file_argv_lines(_REPO_ROOT)
-    # The scan must see the one existing hit, or it proves nothing.
-    assert "scripts/deploy-agent/deploy_agent/executor.py" in counts, counts
-    expected = {path: count for path, (count, _) in _ENV_FILE_ARGV_ALLOWED.items()}
-    assert counts == expected, counts
+    hits = _env_file_argv_lines(_REPO_ROOT)
+    # The scan must see the one existing hit in the agent package, or it proves nothing.
+    assert any(path.endswith("deploy_agent/executor.py") for path, _ in hits), hits
+    assert _unlisted(hits) == []
+    # A listed line that no longer exists is a stale entry, not a pass.
+    assert sorted(_ENV_FILE_ARGV_ALLOWED) == hits, sorted(
+        set(hits) ^ set(_ENV_FILE_ARGV_ALLOWED)
+    )
+
+
+def _scripts_named_by_the_agent() -> set[str]:
+    """Repository scripts the agent's own source names, as ``scripts/...`` paths."""
+    named: set[str] = set()
+    sources = [
+        *sorted((_REPO_ROOT / "scripts/deploy-agent/deploy_agent").glob("*.py")),
+        *sorted((_REPO_ROOT / "scripts/deploy-agent/deploy").glob("*.sh")),
+    ]
+    assert len(sources) >= 10, "the agent's source files"
+    for source in sources:
+        text = source.read_text(encoding="utf-8", errors="replace")
+        named.update(re.findall(r"scripts/[A-Za-z0-9_./-]+\.(?:sh|py)\b", text))
+        for chain in re.findall(r'"scripts"(?:\s*/\s*"[^"]+")+', text):
+            named.add("/".join(re.findall(r'"([^"]+)"', chain)))
+    return {name for name in named if (_REPO_ROOT / name).is_file()}
+
+
+def _outside_the_scan(names: set[str]) -> list[str]:
+    return sorted(
+        name
+        for name in names
+        if name not in _ARGV_FILES
+        and not any(name.startswith(f"{scope}/") for scope in _ARGV_ROOTS)
+    )
+
+
+def test_every_script_the_agent_names_is_inside_the_scan() -> None:
+    """The roots are what the agent runs: a script it names that is not scanned fails."""
+    names = _scripts_named_by_the_agent()
+    assert "scripts/runtime_build/refresh_dev_lane.sh" in names, sorted(names)
+    assert "scripts/preflight_required_compose_env.py" in names, sorted(names)
+    assert _outside_the_scan(names) == []
+    for name in _ARGV_FILES:
+        assert (_REPO_ROOT / name).is_file(), name
+
+
+def test_control_a_script_the_agent_names_outside_the_scan_is_found() -> None:
+    assert _outside_the_scan({"scripts/brand_new_tool.sh"}) == [
+        "scripts/brand_new_tool.sh"
+    ]
 
 
 def test_the_executor_env_file_argv_is_the_repoint_script_and_no_compose_command() -> (
@@ -946,6 +1208,16 @@ def test_the_executor_env_file_argv_is_the_repoint_script_and_no_compose_command
             "docker compose --env-file x up\n",
             id="shell-script",
         ),
+        pytest.param(
+            "scripts/runtime_build/onex-new-tool",
+            "#!/bin/sh\ndocker compose --env-file x up\n",
+            id="extensionless-script",
+        ),
+        pytest.param(
+            "scripts/deploy-gateway.sh",
+            "docker compose --env-file x up\n",
+            id="named-single-script-outside-the-roots",
+        ),
     ],
 )
 def test_control_an_env_file_argv_in_any_form_is_found(
@@ -954,9 +1226,175 @@ def test_control_an_env_file_argv_in_any_form_is_found(
     target = tmp_path / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text)
-    assert _env_file_argv_lines(tmp_path) == {relative: 1}
+    hits = _env_file_argv_lines(tmp_path)
+    assert [path for path, _ in hits] == [relative], hits
+    assert _unlisted(hits) == hits, hits
+
+
+def test_control_swapping_an_allowed_line_for_a_compose_env_file_is_found(
+    tmp_path: Path,
+) -> None:
+    """The allow-list pins line text: a listed file with a swapped line is a finding.
+
+    ``prepr_verify_lane.sh`` is listed with one line; here the same file carries a
+    compose ``--env-file`` on the operator store instead. A count per file would pass
+    it (one hit, one listed).
+    """
+    listed = "scripts/runtime_build/prepr_verify_lane.sh"
+    assert sum(1 for path, _ in _ENV_FILE_ARGV_ALLOWED if path == listed) == 1
+    target = tmp_path / listed
+    target.parent.mkdir(parents=True)
+    target.write_text("docker compose --env-file ${OPERATOR_STORE} up\n")
+    hits = _env_file_argv_lines(tmp_path)
+    assert [path for path, _ in hits] == [listed], hits
+    assert _unlisted(hits) == hits, hits
 
 
 def test_control_a_comment_naming_env_file_is_not_a_hit(tmp_path: Path) -> None:
-    (tmp_path / "run.sh").write_text("# docker compose --env-file x up\n")
-    assert _env_file_argv_lines(tmp_path) == {}
+    """The comment skip: a comment line inside the scan scope is not a hit.
+
+    The file sits under ``scripts/deploy-agent/deploy/`` -- inside the scan roots --
+    so the empty result comes from the comment skip alone, and the same text without
+    its ``#`` is a hit (the positive control right below).
+    """
+    target = tmp_path / "scripts/deploy-agent/deploy/run.sh"
+    target.parent.mkdir(parents=True)
+    target.write_text("# docker compose --env-file x up\n")
+    assert target.relative_to(tmp_path).as_posix().startswith(_ARGV_ROOTS[0] + "/")
+    assert _env_file_argv_lines(tmp_path) == []
+
+    target.write_text("docker compose --env-file x up\n")
+    assert _env_file_argv_lines(tmp_path) != []
+
+
+# --------------------------------------------------------------------------
+# The two compose ``--env-file`` argv in scope that are real compose commands: each
+# is traced to the file it passes, and the files themselves are pinned not to carry
+# the signing key (OMN-25201 review).
+# --------------------------------------------------------------------------
+
+_STANDALONE_CONTRACT = (
+    _REPO_ROOT
+    / "src/omnibase_infra/nodes/node_standalone_compose_recreate_effect/contract.yaml"
+)
+_STANDALONE_HANDLER = (
+    _REPO_ROOT / "src/omnibase_infra/handlers/handler_standalone_compose_recreate.py"
+)
+_FACTORY_FLOOR_COMPOSE = "docker/docker-compose.factory-floor-web.yml"
+_FACTORY_FLOOR_ENV_VARIABLE = "DEPLOY_AGENT_FACTORY_FLOOR_WEB_ENV_FILE"
+
+
+def _standalone_targets_are_only_the_factory_floor(
+    targets: list[dict[str, str]],
+) -> bool:
+    """One target, the factory floor page's own compose file, its own env-file variable."""
+    return (
+        len(targets) == 1
+        and targets[0]["compose_file"] == _FACTORY_FLOOR_COMPOSE
+        and targets[0]["service"] == "factory-floor-web"
+        and targets[0]["env_file_variable"] == _FACTORY_FLOOR_ENV_VARIABLE
+    )
+
+
+def test_the_standalone_recreate_env_file_is_the_one_targets_own_file() -> None:
+    """handler_standalone_compose_recreate.py: ``--env-file`` is not the operator store.
+
+    The argv takes the env file from the declared target's variable, and the node's
+    contract declares exactly one target, the factory floor page; the dev runtime's
+    compose file is not a target, and the factory floor compose file never names the
+    signing key, so no env file can carry it there.
+    """
+    contract = yaml.safe_load(_STANDALONE_CONTRACT.read_text(encoding="utf-8"))
+    assert _standalone_targets_are_only_the_factory_floor(
+        contract["standalone_targets"]
+    )
+    handler = _STANDALONE_HANDLER.read_text(encoding="utf-8")
+    # The env file is resolved from the target's variable and refused when undeclared...
+    assert "env_file = docker.resolve_env_file(target.env_file_variable)" in handler
+    # ...the request's compose file must be one the contract declares...
+    assert (
+        "request.compose_file not in {t.compose_file for t in policy.targets}"
+        in handler
+    )
+    # ...and the one compose argv passes that resolved value, nothing else.
+    assert (
+        "docker.recreate_service(request.compose_file, env_file, request.service)"
+        in handler
+    )
+    # The unit does not point the variable at the operator store.
+    assert not any(
+        _FACTORY_FLOOR_ENV_VARIABLE in line for line in _directive_lines(_DEV_UNIT)
+    )
+    compose = (_REPO_ROOT / _FACTORY_FLOOR_COMPOSE).read_text(encoding="utf-8")
+    assert _CODE_NAME not in compose, _CODE_NAME
+    assert _DEV_STORE_NAME not in compose, _DEV_STORE_NAME
+
+
+def test_control_a_second_standalone_target_on_the_dev_runtime_is_found() -> None:
+    target = {
+        "compose_file": _FACTORY_FLOOR_COMPOSE,
+        "service": "factory-floor-web",
+        "env_file_variable": _FACTORY_FLOOR_ENV_VARIABLE,
+    }
+    assert _standalone_targets_are_only_the_factory_floor([target])
+    dev_runtime = {**target, "compose_file": "docker/docker-compose.infra.yml"}
+    assert not _standalone_targets_are_only_the_factory_floor([target, dev_runtime])
+    assert not _standalone_targets_are_only_the_factory_floor([dev_runtime])
+    store = {**target, "env_file_variable": "DEPLOY_AGENT_ENV_FILE"}
+    assert not _standalone_targets_are_only_the_factory_floor([store])
+
+
+def test_the_runtime_policy_env_file_carries_no_signing_key() -> None:
+    """preflight_required_compose_env.py renders with ``--env-file`` on this file only."""
+    policy = (_REPO_ROOT / "docker/runtime-policy.env").read_text(encoding="utf-8")
+    assert "HMAC" not in policy, _CODE_NAME
+    assert _CODE_NAME not in policy, _CODE_NAME
+    executor = (_REPO_ROOT / "scripts/deploy-agent/deploy_agent/executor.py").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        '"--runtime-policy-env",\n            f"{REPO_DIR}/docker/runtime-policy.env",'
+        in executor
+    )
+
+
+#: ``DEPLOY_AGENT_HMAC_SECRET: ${DEPLOY_AGENT_HMAC_SECRET...}`` -- the runtime's
+#: containers take the signing key from the agent's environment by interpolation.
+_COMPOSE_INTERPOLATES_THE_NAME = re.compile(
+    r"^\s*DEPLOY_AGENT_HMAC_SECRET:\s*\$\{DEPLOY_AGENT_HMAC_SECRET[:?}-]", re.MULTILINE
+)
+
+
+def test_the_dev_runtime_compose_file_interpolates_the_signing_key_name() -> None:
+    """The dev key reaches the runtime's containers only through this interpolation."""
+    compose = (_REPO_ROOT / "docker/docker-compose.infra.yml").read_text(
+        encoding="utf-8"
+    )
+    assert len(_COMPOSE_INTERPOLATES_THE_NAME.findall(compose)) == 1
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        pytest.param("  DEPLOY_AGENT_HMAC_SECRET: literal-value\n", id="literal"),
+        pytest.param("  DEPLOY_AGENT_HMAC_SECRET: ${OTHER_NAME:-}\n", id="other-name"),
+        pytest.param(
+            "  DEPLOY_AGENT_HMAC_SECRET: ${DEPLOY_AGENT_DEV_HMAC_SECRET}\n",
+            id="store-name",
+        ),
+        pytest.param(
+            "  # DEPLOY_AGENT_HMAC_SECRET: ${DEPLOY_AGENT_HMAC_SECRET:?x}\n",
+            id="comment",
+        ),
+    ],
+)
+def test_control_the_interpolation_pin_rejects_anything_else(line: str) -> None:
+    assert _COMPOSE_INTERPOLATES_THE_NAME.findall(line) == []
+
+
+def test_the_unit_header_narrows_the_env_file_claim_to_what_is_scanned() -> None:
+    """The claim names its scope: this repository only; overlays and onex-runtime-deploy apart."""
+    header = _flat(_DEV_UNIT.read_text().split("\n[Unit]", 1)[0].splitlines())
+    assert "scans read this repository only" in header
+    assert "overlays repository" in header
+    assert "onex-runtime-deploy" in header

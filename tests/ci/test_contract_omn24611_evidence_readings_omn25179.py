@@ -12,20 +12,26 @@ disagrees:
 
 * AC2 reads the omnimarket sibling checkout at ``origin/dev``;
 * AC3 reads ``context.evidence_readings`` -- the two check values must be present and
-  equal, with the host, command and UTC time they were read at;
+  equal, each reading with its OWN host, command and UTC time (the agent's on h201,
+  the store's on a sending lab host: one host, command and time cannot cover both);
 * AC4 reads ``context.evidence_readings`` -- the no-op must be ``accepted`` and the two
-  unit digests present and equal, with the same provenance.
+  unit digests present and equal, read on h201, with a command and a time.
 
-A pair typed by hand without its provenance is red, and the checks are red until a
-lane records the readings after the install. Nothing here asserts the readings are
-empty: the suite stays green once real readings are recorded.
+A pair typed by hand without its provenance is red; so is one whose host is not a lab
+host, whose command is not the reader of that value, or whose time is outside the
+window from the day of this head (2026-11-17T06:16:00Z) up to now. The checks are red
+until a lane records the readings after the install. Nothing here asserts the readings
+are empty: the suite stays green once real readings are recorded.
 
-Every value below is a synthetic throwaway.
+The check values and digests below are synthetic throwaways, and a recent time is
+computed from the clock, never typed; they only drive the checks in a temporary copy
+of the contract.
 """
 
 from __future__ import annotations
 
 import copy
+import datetime
 import os
 import subprocess
 import sys
@@ -42,6 +48,11 @@ _READINGS_KEY = "evidence_readings"
 
 _CHECK = "a1b2c3d4e5f60718"
 _DIGEST = "0123456789abcdef" * 4
+
+
+def _utc(hours_ago: int) -> str:
+    moment = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=hours_ago)
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _contract() -> dict[str, Any]:
@@ -104,15 +115,21 @@ def _blank() -> dict[str, Any]:
     return _set(_contract())
 
 
-_AC3_PROVENANCE = {
-    "ac3_read_host": "synthetic-host",
-    "ac3_read_command": "synthetic read command",
-    "ac3_read_time": "2026-01-01T00:00:00Z",
+_AC3_AGENT_PROVENANCE = {
+    "ac3_agent_read_host": "h201",
+    "ac3_agent_read_command": "curl the agent health and read hmac_key_check",
+    "ac3_agent_read_time": _utc(0),
 }
+_AC3_STORE_PROVENANCE = {
+    "ac3_store_read_host": "h051",
+    "ac3_store_read_command": "onex node node_deploy_agent_key_check_effect",
+    "ac3_store_read_time": _utc(0),
+}
+_AC3_PROVENANCE = {**_AC3_AGENT_PROVENANCE, **_AC3_STORE_PROVENANCE}
 _AC4_PROVENANCE = {
-    "ac4_read_host": "synthetic-host",
-    "ac4_read_command": "synthetic read command",
-    "ac4_read_time": "2026-01-01T00:00:00Z",
+    "ac4_read_host": "h201",
+    "ac4_read_command": "sha256sum of the live unit file, then the signed no-op",
+    "ac4_read_time": _utc(0),
 }
 _AC3_AGREE = {
     "ac3_agent_check_value": _CHECK,
@@ -198,8 +215,78 @@ def test_ac3_is_red_when_one_provenance_slot_is_missing(
 
 def test_ac3_is_red_when_the_read_time_is_not_a_utc_time(tmp_path: Path) -> None:
     command = str(_readings_check(_contract(), "AC3")["check_value"])
-    readings = {**_AC3_AGREE, "ac3_read_time": "yesterday"}
+    readings = {**_AC3_AGREE, "ac3_agent_read_time": "yesterday"}
     assert _run(command, _with_contract(tmp_path, _set(_contract(), **readings))) == 1
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(
+            {"ac3_agent_read_host": "synthetic-host"}, id="invented-agent-host"
+        ),
+        pytest.param(
+            {"ac3_store_read_host": "synthetic-host"}, id="invented-store-host"
+        ),
+        pytest.param({"ac3_agent_read_host": "h051"}, id="agent-not-read-on-h201"),
+        pytest.param(
+            {"ac3_agent_read_command": "synthetic read command"},
+            id="agent-foreign-command",
+        ),
+        pytest.param(
+            {"ac3_store_read_command": "synthetic read command"},
+            id="store-foreign-command",
+        ),
+        pytest.param(
+            {"ac3_agent_read_command": _AC3_STORE_PROVENANCE["ac3_store_read_command"]},
+            id="one-command-covers-both-readings",
+        ),
+        pytest.param(
+            {"ac3_agent_read_time": "2026-01-01T00:00:00Z"},
+            id="agent-time-before-this-head",
+        ),
+        pytest.param(
+            {"ac3_store_read_time": "2026-01-01T00:00:00Z"},
+            id="store-time-before-this-head",
+        ),
+        pytest.param(
+            {"ac3_store_read_time": "2099-01-01T00:00:00Z"},
+            id="store-time-in-the-future",
+        ),
+    ],
+)
+def test_ac3_is_red_for_an_invented_host_command_or_date(
+    tmp_path: Path, change: dict[str, str]
+) -> None:
+    """The failing control the review asked for: invented provenance is no longer green.
+
+    The green case above passes the same readings with the real hosts, readers and a
+    time inside the window; each change here swaps in what a hand-typed set carries.
+    """
+    command = str(_readings_check(_contract(), "AC3")["check_value"])
+    root = _with_contract(tmp_path, _set(_contract(), **{**_AC3_AGREE, **change}))
+    assert _run(command, root) == 1
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param({"ac4_read_host": "synthetic-host"}, id="invented-host"),
+        pytest.param({"ac4_read_host": "h051"}, id="not-read-on-h201"),
+        pytest.param(
+            {"ac4_read_time": "2026-01-01T00:00:00Z"}, id="time-before-this-head"
+        ),
+        pytest.param(
+            {"ac4_read_time": "2099-01-01T00:00:00Z"}, id="time-in-the-future"
+        ),
+    ],
+)
+def test_ac4_is_red_for_an_invented_host_or_date(
+    tmp_path: Path, change: dict[str, str]
+) -> None:
+    command = str(_readings_check(_contract(), "AC4")["check_value"])
+    root = _with_contract(tmp_path, _set(_contract(), **{**_AC4_GOOD, **change}))
+    assert _run(command, root) == 1
 
 
 def test_ac3_is_red_when_the_check_values_differ(tmp_path: Path) -> None:

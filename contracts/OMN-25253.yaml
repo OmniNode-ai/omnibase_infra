@@ -1,0 +1,100 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25253
+title: Review findings 1 to 8 on the dev signing key pull request at the third review are fixed or argued
+summary: Third review round on the dev signing key pull request. The comment-skip and deselect tests can fail, the rollout order and the stale test count are tested, the env_file and --env-file claim is pinned by line text over the roots and scripts the agent runs and narrowed where it reads nothing (overlays, onex-runtime-deploy), the line check of the second reviewed head runs as a second old-check control, and the contract readings carry a host, command and time per reading with a window the invented values fall outside; no reading is recorded because the key file and the unit are not installed on h201 yet. No runtime source file changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25253-review
+    statement: The blocking review findings at the third review of the dev signing key pull request are fixed, or argued with evidence in a pull request comment.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: real readings with host, command and time per reading are recorded in contracts/OMN-24611.yaml after the install (agent on h201, store on the senders), or a PR comment argues with evidence why they cannot exist yet, and the contract-readings test no longer passes an invented host or date -- falsifier: `uv run pytest tests/ci/test_contract_omn24611_evidence_readings_omn25179.py -q` fails with an invented synthetic host and passes with recorded readings'
+      - id: AC2
+        statement: 'AC2: the comment-skip test in the key test writes run.sh under scripts/deploy-agent/deploy/ and goes red when the comment skip is removed -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q -k comment` fails with the comment skip removed and passes at the new head'
+      - id: AC3
+        statement: 'AC3: the tautology in tests/ci/test_contract_omn25179_ac6_deselect_omn25201.py is dropped and lab output is attached: a base run on 1f5f40f80b2d naming the ten failing tests, and the AC6 check of contracts/OMN-25179.yaml green at head and red with one id dropped -- falsifier: the AC6 command run on the lab passes with the ten deselected by name and fails when one of them is removed from the deselect list'
+      - id: AC4
+        statement: 'AC4: a test checks that the header of the unit and the summary of contracts/OMN-24611.yaml state the rollout order (the key file on h201 before the unit), and the -k expression of contracts/OMN-25201.yaml selects it -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q -k rollout` selects at least one test and fails when the order statement is removed from the unit'
+      - id: AC5
+        statement: 'AC5: the env-file claim is pinned or narrowed: the overlays of PR 571 and the roots the agent runs are scanned, extensionless scripts are read, the allow-list pins line text, handler_standalone_compose_recreate.py has its own test, and docker-compose.infra.yml is pinned to interpolate the name -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q` fails when an allowed line is swapped for a compose --env-file'
+      - id: AC6
+        statement: 'AC6: the 835b8e9671e5 line check runs as a second old-check control (exit 0 on the three cases) and the stale count in contracts/OMN-24611.yaml line 14 is corrected -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q` fails if the second control is removed or the count disagrees with the measured test counts'
+      - id: AC7
+        statement: 'AC7: the PR''s required suites pass on the lab at the new head (a whole-suite timeout is rerun in named parts and the parts are named), the new head is pushed to the PR''s own branch, each blocking finding is fixed or argued with evidence in its own PR comment, and a PR comment starting `Lab: head=<full head sha>` names exactly that full head sha -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6008` shows a head that differs from the Lab: comment''s head, no comment per blocking finding, or no Lab: comment'
+      - id: AC8
+        statement: 'AC8: the TERMINAL row of this lane carries the delegation cells (`delegated=<n> ...` or `delegated=0 delegation_reason=<why>`) and names every pull request pushed -- falsifier: the TERMINAL row of this lane carries no delegation cell'
+evidence_requirements:
+  - kind: tests
+    description: The focused tests of the dev unit's signing key, the launcher pin, the evidence checks and the deselect pin.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn25253-ac1-readings-need-real-provenance
+    description: Each reading carries its own host, command and UTC time; the agent's is read on h201 by the agent health reader, the store's by the key check node, and a synthetic host, a foreign command, a date before this head or a date in the future is red. No reading is recorded because the key file and the unit are not installed on h201; the pull request comment for finding 1 says why.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_omn24611_evidence_readings_omn25179.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25253-ac2-comment-skip-can-fail
+    description: The comment-skip control writes run.sh under scripts/deploy-agent/deploy/, inside the scan roots, so removing the comment skip makes it fail.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "comment" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25253-ac3-deselect-pin-can-fail
+    description: The tautology is gone; each of the ten ids dropped from the AC6 command of the earlier contract fails the pin. The lab output (base run on 1f5f40f80b2d, AC6 green at head and red with one id dropped) is in the pull request comment for finding 3.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_omn25179_ac6_deselect_omn25201.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25253-ac4-rollout-order-tested
+    description: The unit header and the contract summary state the order (the key file on h201 before the unit), each with a failing control; the -k expression of contracts/OMN-25201.yaml selects these tests.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "rollout" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25253-ac5-env-file-claim-pinned-and-narrowed
+    description: The scan covers the three roots and the single scripts the agent names (a test derives them), reads extensionless files, pins each --env-file line by its text, traces handler_standalone_compose_recreate.py and the runtime policy render, pins that docker-compose.infra.yml interpolates the name, and the unit header states that overlays and onex-runtime-deploy are not scanned.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "env_file or argv or standalone or interpolates or inside_the_scan or runtime_policy" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25253-ac6-second-old-check-control-and-count
+    description: The line check of the second reviewed head passes the three broken key files (exit 0) and refuses garbage, and the count in contracts/OMN-24611.yaml is the collected count of the key test file.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "control_the_line_check or counts" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25253-ac7-suites-green
+    description: The key test and the launcher test pass at the new head; the required suites ran on the lab (named parts) and the per-finding comments and the Lab comment are on the pull request.
+    source: manual
+    binds_ac:
+      - AC7
+      - AC8
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra

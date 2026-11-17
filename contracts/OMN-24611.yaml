@@ -11,7 +11,7 @@ requirements:
     statement: The dev agent unit declares its own signing key file and protects the key name, and no other unit names that file.
     acceptance:
       - id: AC1
-        statement: "AC1: the dev deploy agent's unit declares one EnvironmentFile for its own signing key file and lists the key name as protected, and no other unit names that file -- falsifier: pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py fails 28 of its 41 tests against the dev unit on origin/dev"
+        statement: "AC1: the dev deploy agent's unit declares one EnvironmentFile for its own signing key file and lists the key name as protected, and no other unit names that file -- falsifier: pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py fails 38 of its 88 tests against the dev unit on origin/dev"
   - id: req-omn24611-store
     statement: The secret store's own node generates the dev-only entry the key file carries; the node and its test are the omnimarket pull request of this ticket, and this repository names the entry in its environment example.
     acceptance:
@@ -36,14 +36,20 @@ evidence_requirements:
     command: uv run pytest tests/ci/test_contract_omn24611_evidence_readings_omn25179.py -q
 context:
   # Real readings only, each with the host it was read on, the command that read it and the UTC
-  # time. They are recorded AFTER the install (key file on h201 first, then the unit, then a
-  # signed no-op from h051), so every check below is red until then. Empty means not yet read.
+  # time. The agent's value and the store's value are two readings on two hosts, so each has its
+  # own host, command and time. They are recorded AFTER the install (key file on h201 first, then
+  # the unit, then a signed no-op from h051), so every check below is red until then. Empty means
+  # not yet read: no reading exists at this head, and none was typed in (the pull request comment
+  # for finding 1 says why none can exist before the install).
   evidence_readings:
     ac3_agent_check_value: ''
+    ac3_agent_read_host: ''
+    ac3_agent_read_command: ''
+    ac3_agent_read_time: ''
     ac3_store_check_value: ''
-    ac3_read_host: ''
-    ac3_read_command: ''
-    ac3_read_time: ''
+    ac3_store_read_host: ''
+    ac3_store_read_command: ''
+    ac3_store_read_time: ''
     ac4_noop_result: ''
     ac4_live_unit_digest_before: ''
     ac4_live_unit_digest_after: ''
@@ -56,7 +62,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn24611-ac1-unit
-    description: The dev unit declares the one signing key EnvironmentFile and protects DEPLOY_AGENT_HMAC_SECRET; the launcher keeps the dev value over the store's shared one; the executor overlay leaves the name out. The same test file fails 35 of its 64 tests with the dev unit from origin/dev (the file at the first head of this pull request failed 10 of its 15, and at the second head 28 of its 41).
+    description: The dev unit declares the one signing key EnvironmentFile and protects DEPLOY_AGENT_HMAC_SECRET; the launcher keeps the dev value over the store's shared one; the executor overlay leaves the name out. The same test file fails 38 of its 88 tests with the dev unit from origin/dev (the file at the first head of this pull request failed 10 of its 15, at the second head 28 of its 41, and at the third head 35 of its 64).
     source: manual
     binds_ac:
       - AC1
@@ -98,7 +104,7 @@ dod_evidence:
         check_value: grep -q 'DEPLOY_AGENT_DEV_HMAC_SECRET' docker/env-example-full.txt
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24611-ac3-same-key
-    description: The key check value the dev agent serves equals the key check value of the store's entry on the sending lab hosts. Both readings are recorded under context.evidence_readings (16 hex characters each, from the key check node) with the host, the command and the UTC time they were read at; the check requires all of it, both values present and equal, so it is red while any is absent, red when they differ, and red for a pair typed without its host, command and time. The readings are recorded after the unit is installed. The unit-level behaviour (the agent environment carries the unit file's value under the name auth.py reads) is the first check.
+    description: The key check value the dev agent serves equals the key check value of the store's entry on the sending lab hosts. Both readings are recorded under context.evidence_readings (16 hex characters each), each with its OWN host, command and UTC time (the agent's value read on h201 by the command that reads the agent's hmac_key_check, the store's value read on a sending lab host by the command that runs node_deploy_agent_key_check_effect). The check requires both values present and equal, the agent's host to be h201, the two commands to name those two readers, and both times to be UTC times from this head's day up to now, so it is red while any is absent, red when they differ, and red for a pair typed with a placeholder host, a foreign command or a date outside that window. No reading is recorded at this head because the key file and the unit are not installed on h201 yet, and the pull request comment for review finding 1 says why none can exist before. The readings are recorded after the unit is installed. The unit-level behaviour (the agent environment carries the unit file's value under the name auth.py reads) is the first check.
     source: manual
     binds_ac:
       - AC3
@@ -108,15 +114,35 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
         check_value: |-
-          python3 -c "import re,sys,yaml; r=(yaml.safe_load(open('contracts/OMN-24611.yaml')).get('context') or {}).get('evidence_readings') or {}; g=lambda k: str(r.get(k,'')); a=g('ac3_agent_check_value'); s=g('ac3_store_check_value'); ok=bool(re.fullmatch(r'[0-9a-f]{16}', a)) and a == s and bool(g('ac3_read_host')) and bool(g('ac3_read_command')) and bool(re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z', g('ac3_read_time'))); sys.exit(0 if ok else 1)"
+          python3 -c "
+          import datetime,re,sys,yaml
+          r=(yaml.safe_load(open('contracts/OMN-24611.yaml')).get('context') or {}).get('evidence_readings') or {}
+          g=lambda k: str(r.get(k,''))
+          now=datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+          when=lambda k: bool(re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z', g(k))) and '2026-11-17T06:16:00Z' <= g(k) <= now
+          a=g('ac3_agent_check_value'); s=g('ac3_store_check_value')
+          ok=bool(re.fullmatch(r'[0-9a-f]{16}', a)) and a == s
+          ok=ok and g('ac3_agent_read_host') == 'h201' and bool(re.fullmatch(r'h[0-9]{3}', g('ac3_store_read_host')))
+          ok=ok and 'hmac_key_check' in g('ac3_agent_read_command') and 'node_deploy_agent_key_check_effect' in g('ac3_store_read_command')
+          ok=ok and when('ac3_agent_read_time') and when('ac3_store_read_time')
+          sys.exit(0 if ok else 1)"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24611-ac4-integrated
-    description: The running reading is recorded under context.evidence_readings after the install (the no-op result read back from the dev agent on h201 and the live agent's unit digest, 64 hex characters, before and after the install), with the host, the command and the UTC time it was read at. The check requires the result to be accepted, the two digests present and equal, and the host, command and time, so it is red until the unit is installed and the no-op ran, red when the live unit changed, and red for readings typed without their provenance. Rollout order (the key file on h201 before the unit is installed) is in the unit header and the summary above. The deploy-probe check that read the unit from GitHub is dropped from this criterion because it passed with nothing installed.
+    description: The running reading is recorded under context.evidence_readings after the install (the no-op result read back from the dev agent on h201 and the live agent's unit digest, 64 hex characters, before and after the install), with the host (h201), the command and the UTC time it was read at. The check requires the result to be accepted, the two digests present and equal, the host to be h201, a command and a time in the window of this head's day up to now, so it is red until the unit is installed and the no-op ran, red when the live unit changed, and red for readings typed without their provenance. Rollout order (the key file on h201 before the unit is installed) is in the unit header and the summary above. The deploy-probe check that read the unit from GitHub is dropped from this criterion because it passed with nothing installed.
     source: manual
     binds_ac:
       - AC4
     checks:
       - check_type: command
         check_value: |-
-          python3 -c "import re,sys,yaml; r=(yaml.safe_load(open('contracts/OMN-24611.yaml')).get('context') or {}).get('evidence_readings') or {}; g=lambda k: str(r.get(k,'')); b=g('ac4_live_unit_digest_before'); a=g('ac4_live_unit_digest_after'); ok=g('ac4_noop_result') == 'accepted' and bool(re.fullmatch(r'[0-9a-f]{64}', b)) and b == a and bool(g('ac4_read_host')) and bool(g('ac4_read_command')) and bool(re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z', g('ac4_read_time'))); sys.exit(0 if ok else 1)"
+          python3 -c "
+          import datetime,re,sys,yaml
+          r=(yaml.safe_load(open('contracts/OMN-24611.yaml')).get('context') or {}).get('evidence_readings') or {}
+          g=lambda k: str(r.get(k,''))
+          now=datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+          when=lambda k: bool(re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z', g(k))) and '2026-11-17T06:16:00Z' <= g(k) <= now
+          b=g('ac4_live_unit_digest_before'); a=g('ac4_live_unit_digest_after')
+          ok=g('ac4_noop_result') == 'accepted' and bool(re.fullmatch(r'[0-9a-f]{64}', b)) and b == a
+          ok=ok and g('ac4_read_host') == 'h201' and bool(g('ac4_read_command')) and when('ac4_read_time')
+          sys.exit(0 if ok else 1)"
         cwd: ${OMNI_HOME}/omnibase_infra
