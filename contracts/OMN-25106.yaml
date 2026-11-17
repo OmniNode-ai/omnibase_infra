@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-25106
 title: The dlq-replay consumer left ghost members in the onex-dlq-replay group when its start or stop was cancelled, which kept the group in a rebalance storm on the h201 dev runtime
 summary: >-
-  On the h201 dev runtime (read 2026-11-16, 23:14Z to 23:40Z) the onex-dlq-replay group joined 409 times and logged 308 'Heartbeat failed ... because it is rebalancing' lines, with 8 and 9 members in one generation although the handler runs one consumer at a time. DLQConsumer.start() and stop() are bounded by asyncio.wait_for in the handler; a timeout cancelled them half way and left an AIOKafkaConsumer that had joined the group with no path to stop it (11 start timeouts, 11 'Unclosed AIOKafkaConsumer' errors). DLQConsumer now ends the member it began on every failure or cancellation of start() and finishes a close that a caller stopped waiting for, bounded and drained at shutdown. The same pull request makes the h201 deploy agent's idle restore treat a running container whose health probe failed 20 times in a row as wedged, restart it in the roll before compose waits on it (the rolling compose up recreates only a service whose configuration or image moved), and back off on a repeat wedge.
+  On the h201 dev runtime (read 2026-11-16, 23:14Z to 23:40Z) the onex-dlq-replay group joined 409 times and logged 308 'Heartbeat failed ... because it is rebalancing' lines, with 8 and 9 members in one generation although the handler runs one consumer at a time. DLQConsumer.start() and stop() are bounded by asyncio.wait_for in the handler; a timeout cancelled them half way and left an AIOKafkaConsumer that had joined the group with no path to stop it (11 start timeouts, 11 'Unclosed AIOKafkaConsumer' errors). DLQConsumer now ends the member it began on every failure or cancellation of start() and finishes a close that a caller stopped waiting for, bounded by member_close_timeout_seconds; a close that outlasts its bound is abandoned and its member can stay in the group until the process ends, and no shutdown drain is wired because the DLQ handler has no shutdown hook that the runtime calls. The same pull request makes the h201 deploy agent's idle restore treat a running container whose health probe failed 20 times in a row as wedged, restart it in the roll before compose waits on it (the rolling compose up recreates only a service whose configuration or image moved), and back off on a repeat wedge.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -46,7 +46,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn25106-ac2-ready-after-redeploy
     description: >-
-      The h201 dev runtime answers /ready with exactly 200 after a redeploy through the dev deploy agent, and its log holds the boot line the runtime writes once per start, read after the redeploy time. Read on h201 after the redeploy; the reading and its time are posted on the pull request. The unit tests below cannot show this criterion's falsifier and are bound to AC3.
+      The h201 dev runtime answers /ready with exactly 200 after a redeploy through the dev deploy agent, and its log holds a node run line (the DLQ replay node's 'DLQ replay run finished' line, written once per drain a trigger starts) logged after the redeploy time, which the environment variable REDEPLOY_AT names. A runtime that boots and then loses its consumers also logs its boot line, so the boot line is not read. Read on h201 after the redeploy; no reading exists at this pull request's head, so the criterion stays open until the reading and its time are posted. AC1 and AC4 are open too, so this pull request does not close the ticket. The unit tests below cannot show this criterion's falsifier and are bound to AC3.
     source: manual
     execution_scope: local_done_gate
     binds_ac:
@@ -56,11 +56,11 @@ dod_evidence:
         check_value: "test \"$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8085/ready)\" = 200"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: "docker logs --since 1h omninode-runtime 2>&1 | grep -c 'ONEX runtime started successfully'"
+        check_value: 'test "$(docker logs --since "$REDEPLOY_AT" omninode-runtime 2>&1 | grep -c "DLQ replay run finished")" -ge 1'
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn25106-ac3-ghost-member-test
     description: >-
-      The DLQConsumer ghost member tests fail on origin/dev (the engine has no detached close and no drain_member_closes) and pass at the pull request head. They cover a cancelled start, a failing start, a start after a cancelled start, a start-start-stop with both members stopped, a cancelled and a failed stop, each arm of the CancelledError absorb and re-raise, the bounded close with its warning, the logged close failure and the shutdown drain; the plain start and stop and the empty stop are positive controls.
+      The DLQConsumer ghost member tests fail on origin/dev (the engine has no detached close) and pass at the pull request head. They cover a cancelled start, a failing start, a start after a cancelled start, a start-start-stop with both members stopped, a cancelled and a failed stop, each arm of the CancelledError absorb and re-raise, the bounded close with its warning, the logged close failure, and a stop() whose close fails, once with a KafkaError (logged, stop returns) and once with a non-Kafka error (re-raised to the caller); the plain start and stop and the empty stop are positive controls.
     source: manual
     binds_ac:
       - AC3
@@ -89,7 +89,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "def restart_if_wedged" in src; assert "restart_if_wedged(" in src.split("def run_runtime_roll_step")[1]'
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "def restart_if_wedged" in src; assert "restart_if_wedged(" in src.split("def run_runtime_roll_step")[1].split("\ndef ")[0]'
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn25106-ac3-neighbours-hold
     description: >-

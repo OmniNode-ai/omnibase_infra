@@ -19,9 +19,12 @@ waits out ``RESTORE_RETRY_AFTER`` before the next restore.
 from __future__ import annotations
 
 import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
@@ -29,8 +32,8 @@ from deploy_agent import agent as agent_mod
 from deploy_agent import executor as executor_mod
 from deploy_agent import idle_converge
 from deploy_agent.agent import DeployAgent
-from deploy_agent.events import EnumRuntimeLane
-from deploy_agent.executor import lane_config_for
+from deploy_agent.events import EnumRuntimeLane, Phase, Scope
+from deploy_agent.executor import DeployExecutor, lane_config_for
 from deploy_agent.idle_converge import (
     IDLE_RESTORE_REQUESTER,
     RESTORE_AFTER,
@@ -222,10 +225,10 @@ def _agent(
     monkeypatch.setattr(agent.job_store, "last_completed_at", lambda: None)
     agent._idle_converge_started_at = NOW - timedelta(hours=1)
     agent._idle_converge_now = lambda: clock.now
-    # What the real read returns for ``running unhealthy 72``.
-    agent._idle_read_runtime_presence = lambda: (
-        EnumRuntimePresence.DOWN,
-        "omninode-runtime is running but unhealthy: 72 consecutive failed health probes",
+    # The handler's own read over docker's answer for the recorded wedge, so
+    # the back-off below is driven by the code this change added.
+    agent._idle_read_runtime_presence = lambda: read_lane_presence(
+        MAIN_ONLY, run=_docker({MAIN: "running unhealthy 72"})
     )
 
     def no_running_ref(repo: str) -> str | None:
@@ -284,3 +287,93 @@ def test_a_repeat_wedge_backs_off_for_the_retry_window(
     agent._idle_converge_last_check = None
     agent._maybe_idle_converge()
     assert len(_restore_jobs(tmp_path)) == 2
+
+
+def _executor_roll(
+    monkeypatch: pytest.MonkeyPatch, answers: dict[str, str]
+) -> list[list[str]]:
+    """Drive ``DeployExecutor._compose_up`` over the dev runtime and effects services.
+
+    ``_run`` is the executor's one subprocess boundary and, like the real one,
+    answers a non-zero exit with a result instead of raising. Docker answers
+    ``answers`` for an inspect and has no other container.
+    """
+    services = ["omninode-runtime", "runtime-effects"]
+    calls: list[list[str]] = []
+    executor = DeployExecutor()
+
+    def run(cmd: list[str], *_a: object, **_kw: object) -> Any:
+        calls.append(cmd)
+        if cmd[:2] == ["docker", "inspect"]:
+            return _docker(answers)(cmd, 0)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(executor_mod, "_run", run)
+    monkeypatch.setattr(executor_mod, "_compose_env", lambda *a, **k: {})
+    monkeypatch.setattr(
+        executor_mod,
+        "runtime_compose_up_budget",
+        lambda *a: SimpleNamespace(timeout_seconds=600, describe=lambda: "test"),
+    )
+    monkeypatch.setattr(executor_mod, "runtime_health_probe_budget", lambda *a: 60)
+    monkeypatch.setattr(executor, "_ensure_runtime_migrations_ready", Mock())
+    monkeypatch.setattr(executor, "rerun_changed_oneshots", Mock(return_value=[]))
+    monkeypatch.setattr(executor, "_require_compose_up_converged", Mock())
+    monkeypatch.setattr(
+        executor_mod,
+        "_compose_service_states",
+        lambda *a: dict.fromkeys(services, ("running", None)),
+    )
+    monkeypatch.setattr(
+        executor_mod, "verify_containers_up", lambda *a, **k: (True, [])
+    )
+    executor._compose_up(
+        Phase.RUNTIME,
+        Scope.RUNTIME,
+        services,
+        lambda phase, status: None,
+        lane=EnumRuntimeLane.DEV,
+    )
+    return calls
+
+
+def _index_of(calls: list[list[str]], *words: str) -> int:
+    return next(i for i, c in enumerate(calls) if all(w in c for w in words))
+
+
+def test_the_executor_restores_a_wedged_runtime_by_restarting_it_before_compose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole restore step: the executor's roll over a wedged docker answer."""
+    calls = _executor_roll(
+        monkeypatch,
+        {MAIN: "running unhealthy 72", f"{MAIN}-effects": "running healthy 0"},
+    )
+
+    restarts = [c for c in calls if c[:2] == ["docker", "restart"]]
+    assert restarts == [["docker", "restart", MAIN]]
+    assert _index_of(calls, "restart", MAIN) < _index_of(
+        calls, "up", "omninode-runtime"
+    )
+    # The healthy effects container is rolled by compose alone.
+    assert _index_of(calls, "up", "runtime-effects") > _index_of(
+        calls, "up", "omninode-runtime"
+    )
+
+
+def test_the_executor_run_returns_a_non_zero_exit_instead_of_raising() -> None:
+    """The roll's read of an absent container relies on this: no exception breaks the roll."""
+    result = executor_mod._run([sys.executable, "-c", "raise SystemExit(3)"], 30)
+
+    assert result.returncode == 3
+
+
+def test_the_executor_roll_goes_on_when_the_container_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _executor_roll(monkeypatch, {})
+
+    assert not [c for c in calls if c[:2] == ["docker", "restart"]]
+    assert _index_of(calls, "up", "omninode-runtime") < _index_of(
+        calls, "up", "runtime-effects"
+    )

@@ -205,8 +205,10 @@ class ModelDlqReplayEngineConfig(BaseModel):
     dependency_lifecycle_timeout_seconds: float = Field(default=15.0, gt=0.0)
     # OMN-25106: bounds ONE detached member close (``_begin_member_close``). A
     # ``stop()`` that never returns would otherwise keep its member joined, and
-    # its task alive, for the life of the process; past the bound the broker
-    # drops the member when its session times out.
+    # its task alive, for the life of the process. Past the bound the close is
+    # abandoned half way: aiokafka stops its heartbeat only after the
+    # coordination task ends, so the member can stay in the group until the
+    # process ends (group_coordinator.close(), aiokafka 0.14).
     member_close_timeout_seconds: float = Field(default=30.0, gt=0.0)
     # OMN-19241: how many times one record may FAIL (neither replayed nor
     # quarantined) before the drain stops attempting its partition. A failed
@@ -533,8 +535,9 @@ async def _close_member(consumer: AIOKafkaConsumer, timeout_seconds: float) -> N
         await asyncio.wait_for(consumer.stop(), timeout=timeout_seconds)
     except TimeoutError:
         logger.warning(
-            "DLQ consumer close did not finish within %.1fs; the broker drops "
-            "the member when its session times out",
+            "DLQ consumer close did not finish within %.1fs and was abandoned; "
+            "aiokafka stops the heartbeat only after the coordination task "
+            "ends, so the member can stay in the group until this process ends",
             timeout_seconds,
         )
     except KafkaError as exc:
@@ -581,27 +584,6 @@ def _begin_member_close(
     _MEMBER_CLOSES.add(task)
     task.add_done_callback(_member_close_finished)
     return task
-
-
-async def drain_member_closes(timeout_seconds: float | None = None) -> int:
-    """Wait for the closes in flight; the number still running (OMN-25106).
-
-    A detached close is not awaited by anyone, so a process that exits first
-    abandons it and leaves its member in the group until the session times
-    out. Every close is bounded by ``member_close_timeout_seconds``, so with no
-    ``timeout_seconds`` this returns once the last one has ended itself.
-    """
-    pending = set(_MEMBER_CLOSES)
-    if not pending:
-        return 0
-    _, unfinished = await asyncio.wait(pending, timeout=timeout_seconds)
-    if unfinished:
-        logger.warning(
-            "%d DLQ consumer close(s) still running after %.1fs at shutdown",
-            len(unfinished),
-            timeout_seconds,
-        )
-    return len(unfinished)
 
 
 class DLQConsumer:
@@ -1240,7 +1222,6 @@ __all__ = [
     "DlqGroupBacklogProbe",
     "ModelDlqReplayEngineConfig",
     "ModelDlqTargetReplayBound",
-    "drain_member_closes",
     "generate_replay_correlation_id",
     "parse_datetime_with_timezone",
     "safe_truncate",
