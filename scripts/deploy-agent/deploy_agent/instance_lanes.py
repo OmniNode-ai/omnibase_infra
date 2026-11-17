@@ -194,11 +194,11 @@ LANE_ENV_FRAGMENT_SUFFIX: Final = ".runtime.env.json"
 #: act switches, read through contract ``${env.VAR:default}`` references whose
 #: inline default is the shipped behaviour; and the lane class the runtime is an
 #: instance of with the class contracts it takes, read by the auto-wiring
-#: ownership filter; and the five variables the Kafka envelope publish seam
-#: reads to stamp the deployment's provenance on events it publishes
-#: (OMN-23981), which a partial set leaves unstamped. They are literals, not
-#: read from ``omnibase_infra``, which the deploy agent's env need not carry; a
-#: test pins them to ``ModelEventProvenanceOverlay.VARIABLES``.
+#: ownership filter; and the five provenance variables the Kafka envelope publish
+#: seam stamps from (OMN-23981): LANE, HOST, INSTALL_SOURCE and REVISION all set,
+#: LANE_KIND unset for lane dev or stability, else mac_unit, lane_worktree or
+#: hand_run. Literals, not read from ``omnibase_infra``, which the agent's env need
+#: not carry; a test pins them to ``ModelEventProvenanceOverlay.VARIABLES``.
 LANE_ENV_FRAGMENT_SCHEMA_KEYS: Final[dict[str, frozenset[str]]] = {
     "runtime_lane_env.v1": frozenset(
         {

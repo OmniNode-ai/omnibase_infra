@@ -47,6 +47,8 @@ dod_evidence:
       - check_type: command
         check_value: |-
           curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/docker/docker-compose.infra.yml" | grep -c '^  ONEX_PROVENANCE_REVISION:$' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
         check_value: |-
-          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/scripts/deploy-agent/deploy_agent/instance_lanes.py" | grep -c '"ONEX_PROVENANCE_REVISION"' >/dev/null
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/scripts/deploy-agent/deploy_agent/instance_lanes.py" | grep -c '^            "ONEX_PROVENANCE_REVISION",$' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
