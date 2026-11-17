@@ -3,7 +3,7 @@
     "source": "lab host replay of check_lane_sync's census call (scripts/lane-census-check.sh --json, KAFKA_BOOTSTRAP_SERVERS empty, LANE_MEMORY_BROKER_CONTAINER unset, LANE_CENSUS_HOST from the daemon) against the private CI overlay at f2a3eab59e017696868f707a226b9d2d9acc8fd4, the overlay revision the candidate's verify job (run 43816701323, job 133130456417, 2026-11-16T06:54:27Z) logged as 'lane census read from'",
     "captured_utc": "2026-11-16T19:48:57Z",
     "base_sha": "75969ce9e2ca8e8dd96ab38d5ae04aff11698f63",
-    "drift_dated": "the three profile_gated_present containers of the drifting lane report docker State.StartedAt 2026-11-16T02:09:59Z, 02:11:02Z and 02:12:08Z, before the candidate's verify job, so the same findings were present when its receipt was written",
+    "drift_dated": "The original receipt checks observed all four findings, including container_absent, at 00:44:59Z (omnimarket runtime ancestor) and 06:57:27Z (omnibase_infra). The later re-run is retained separately; its container StartedAt observations alone do not date container_absent.",
     "train_run": "Release Train (nightly) run 43823852608, Decide job 133152894900, 2026-11-16T07:26:53Z",
     "train_decisions": {
       "omnibase_infra": {
@@ -12,18 +12,27 @@
         "reason": "lab_receipt_indeterminate",
         "checks_not_established": [
           "lane_sync"
-        ]
+        ],
+        "receipt_sha": "0e5f656d03b70515dfdf418347c98ca0e833d188"
       },
       "omnimarket": {
-        "candidate": "0238884e3849",
+        "candidate": "0238884e3849e2917bf79cc164a8e1cb9a2eaf82",
         "verdict": "SKIP",
         "reason": "lab_receipt_indeterminate",
         "checks_not_established": [
           "lane_sync"
-        ]
+        ],
+        "receipt_sha": "fccc55217859f6091a2c746f7acbb06045ef54e3"
       }
     },
-    "redaction": "the lab daemon's host name and the plan's host label are replaced by lab-host-a, and each lab lane name by lane-<letter> (container names follow their lane), for the public-repo hygiene gate; exit codes, finding kinds, severities and counts are unchanged"
+    "redaction": "the lab daemon's host name and the plan's host label are replaced by lab-host-a, and each lab lane name by lane-<letter> (container names follow their lane), for the public-repo hygiene gate; exit codes, finding kinds, severities and counts are unchanged",
+    "evidence_scope": "responses is the census re-run captured at 19:48:57Z. candidate_receipts contains the skipped candidates own receipt checks. Hosts, lane names and corresponding container prefixes are redacted consistently; census exit codes and finding kinds are retained.",
+    "omnimarket_ancestor_resolution": "The train decision artifact for run 43823852608 names candidate 0238884e3849e2917bf79cc164a8e1cb9a2eaf82 and receipt sha fccc55217859f6091a2c746f7acbb06045ef54e3 in its additional lane read. release_train.decide resolves the runtime-affecting ancestor and queries that same sha on each lane. The candidate closed-PR rebuild run 43807159931 uploaded no artifact; the runtime ancestor receipt is in run 43780129690.",
+    "train_decision_artifact": {
+      "run_id": 43823852608,
+      "artifact_id": 14205552588,
+      "archive_sha256": "5bc9048565570e06464ce183d0486b04facb925fe7f0626682d1a14e81af0c87"
+    }
   },
   "responses": [
     {
@@ -36,5 +45,41 @@
       "stdout": "{\"schema_version\": \"1.1.0\", \"host\": \"lab-host-a\", \"lanes_checked\": [\"lane-a\", \"lane-b\", \"lane-c\", \"lane-d\", \"lane-e\", \"lane-f\", \"lane-g\"], \"lanes_not_applicable\": [\"lane-h\", \"lane-i\", \"lane-j\", \"lane-k\"], \"lanes_skipped_optional_down\": [\"lane-e\", \"lane-f\"], \"lab_sync_evaluated\": false, \"findings\": [{\"lane\": \"lane-a\", \"kind\": \"container_absent\", \"container\": \"lane-a-runtime-effects\", \"detail\": \"required service container 'lane-a-runtime-effects' is not running (desired replicas=1); lane 'lane-a' is degraded\", \"severity\": \"critical\"}, {\"lane\": \"lane-a\", \"kind\": \"profile_gated_present\", \"container\": \"lane-a-agent-actions-consumer\", \"detail\": \"container 'lane-a-agent-actions-consumer' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) \\u2014 something started it outside the lane's active profile\", \"severity\": \"warning\"}, {\"lane\": \"lane-a\", \"kind\": \"profile_gated_present\", \"container\": \"lane-a-skill-lifecycle-consumer\", \"detail\": \"container 'lane-a-skill-lifecycle-consumer' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) \\u2014 something started it outside the lane's active profile\", \"severity\": \"warning\"}, {\"lane\": \"lane-a\", \"kind\": \"profile_gated_present\", \"container\": \"lane-a-contract-resolver\", \"detail\": \"container 'lane-a-contract-resolver' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) \\u2014 something started it outside the lane's active profile\", \"severity\": \"warning\"}], \"has_drift\": true}\n",
       "stderr": "[2026-11-16T19:48:56Z] [lane-census] Starting (lane=ALL, host=lab-host-a, LIVE)\n[2026-11-16T19:48:57Z] [lane-census] DRIFT detected:\n  [critical] container_absent lane-a-runtime-effects (lane-a): required service container 'lane-a-runtime-effects' is not running (desired replicas=1); lane 'lane-a' is degraded\n  [warning] profile_gated_present lane-a-agent-actions-consumer (lane-a): container 'lane-a-agent-actions-consumer' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) — something started it outside the lane's active profile\n  [warning] profile_gated_present lane-a-skill-lifecycle-consumer (lane-a): container 'lane-a-skill-lifecycle-consumer' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) — something started it outside the lane's active profile\n  [warning] profile_gated_present lane-a-contract-resolver (lane-a): container 'lane-a-contract-resolver' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) — something started it outside the lane's active profile\n[2026-11-16T19:48:57Z] [lane-census] DRIFT event NOT published: LANE_MEMORY_BROKER_CONTAINER is unset (exit 8). Drift event logged above for manual replay.\n"
     }
-  ]
+  ],
+  "candidate_receipts": {
+    "omnibase_infra": {
+      "sha": "0e5f656d03b70515dfdf418347c98ca0e833d188",
+      "lane": "compose-dev",
+      "finished_at": "2026-11-16T06:57:28+00:00",
+      "lane_sync": {
+        "name": "lane_sync",
+        "ok": false,
+        "evidence": "census unreadable: ValueError: census exit=8: [2026-11-16T06:57:27Z] [lane-census] Starting (lane=ALL, host=lab-host-a, LIVE)\n[2026-11-16T06:57:27Z] [lane-census] DRIFT detected:\n  [critical] container_absent lane-a-runtime-effects (lane-a): required service container 'lane-a-runtime-effects' is not running (desired replicas=1); lane 'lane-a' is degraded\n  [warning] profile_gated_present lane-a-agent-actions-consumer (lane-a): container 'lane-a-agent-actions-consumer' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) — something started it outside the lane's active profile\n  [warning] profile_gated_present lane-a-skill-lifecycle-consumer (lane-a): container 'lane-a-skill-lifecycle-consumer' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) — something started it outside the lane's active profile\n  [warning] profile_gated_present lane-a-contract-resolver (lane-a): container 'lane-a-contract-resolver' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) — something started it outside the lane's active profile\n[2026-11-16T06:57:27Z] [lane-census] DRIFT event NOT published: LANE_MEMORY_BROKER_CONTAINER is unset (exit 8). Drift event logged above for manual replay.",
+        "outcome": "indeterminate"
+      },
+      "repo": "omnibase_infra",
+      "candidate_sha": "0e5f656d03b70515dfdf418347c98ca0e833d188",
+      "run_id": 43816701323,
+      "artifact_id": 14204441313,
+      "archive_sha256": "8e2998a122d5f0351dacdd06a3854a3cd2542ccc08c7bc25cd07d3c68c8fef7a",
+      "source": "onex scm run-download OmniNode-ai/omnibase_infra --run-id 43816701323 --artifact-id 14204441313; receipt.json lane_sync check"
+    },
+    "omnimarket": {
+      "sha": "fccc55217859f6091a2c746f7acbb06045ef54e3",
+      "lane": "compose-dev",
+      "finished_at": "2026-11-16T00:44:59+00:00",
+      "lane_sync": {
+        "name": "lane_sync",
+        "ok": false,
+        "evidence": "census unreadable: ValueError: census exit=8: [2026-11-16T00:44:59Z] [lane-census] Starting (lane=ALL, host=lab-host-a, LIVE)\n[2026-11-16T00:44:59Z] [lane-census] DRIFT detected:\n  [critical] container_absent lane-a-runtime-effects (lane-a): required service container 'lane-a-runtime-effects' is not running (desired replicas=1); lane 'lane-a' is degraded\n  [warning] profile_gated_present lane-a-agent-actions-consumer (lane-a): container 'lane-a-agent-actions-consumer' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) — something started it outside the lane's active profile\n  [warning] profile_gated_present lane-a-skill-lifecycle-consumer (lane-a): container 'lane-a-skill-lifecycle-consumer' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) — something started it outside the lane's active profile\n  [warning] profile_gated_present lane-a-contract-resolver (lane-a): container 'lane-a-contract-resolver' is running, but lane 'lane-a' disables it via a compose profile override (kind=profile_gated, expected absent) — something started it outside the lane's active profile\n[2026-11-16T00:44:59Z] [lane-census] DRIFT event NOT published: LANE_MEMORY_BROKER_CONTAINER is unset (exit 8). Drift event logged above for manual replay.",
+        "outcome": "indeterminate"
+      },
+      "repo": "omnimarket",
+      "candidate_sha": "0238884e3849e2917bf79cc164a8e1cb9a2eaf82",
+      "run_id": 43780129690,
+      "artifact_id": 14188589009,
+      "archive_sha256": "ecb771506fe825efed27624d793f397e0d59c75c458c2e537ec9c7becae9c519",
+      "source": "onex scm run-download OmniNode-ai/omnimarket --run-id 43780129690 --artifact-id 14188589009; receipt.json lane_sync check"
+    }
+  }
 }
