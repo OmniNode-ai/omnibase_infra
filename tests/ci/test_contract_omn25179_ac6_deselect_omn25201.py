@@ -22,7 +22,10 @@ pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[2]
 _CONTRACT = _REPO / "contracts" / "OMN-25179.yaml"
-_UNIT_TESTS = "scripts/deploy-agent/tests/unit"
+_UNIT_TESTS = "tests/unit"
+#: pytest's rootdir for the deploy agent is its own project directory, so a node id
+#: reads ``tests/unit/...``; an id spelled from the repository root deselects nothing.
+_PROJECT = "scripts/deploy-agent"
 
 #: The ten tests that fail on the merge base 1f5f40f80b2d, as pytest reported them.
 _BASE_FAILURES = frozenset(
@@ -64,7 +67,9 @@ def _ac6_deselected() -> list[str]:
     ]
     assert len(commands) == 1, commands
     words = shlex.split(commands[0])
-    assert f"{_UNIT_TESTS}" in words, "the AC6 check no longer runs tests/unit"
+    assert f"{_PROJECT}/{_UNIT_TESTS}" in words, (
+        "the AC6 check no longer runs tests/unit"
+    )
     return [
         words[index + 1]
         for index, word in enumerate(words[:-1])
@@ -87,10 +92,17 @@ def test_every_deselected_name_is_a_test_in_its_file() -> None:
     """A deselect that names no test deselects nothing and hides nothing -- but is stale."""
     for node_id in _ac6_deselected():
         path, *scope = node_id.split("::")
-        text = (_REPO / path).read_text(encoding="utf-8")
+        text = (_REPO / _PROJECT / path).read_text(encoding="utf-8")
         assert f"def {scope[-1].split('[')[0]}(" in text, node_id
         if len(scope) == 2:
             assert f"class {scope[0]}" in text, node_id
+
+
+def test_every_id_is_spelled_from_the_project_root() -> None:
+    """The failing control for the id shape: from the repository root nothing matches."""
+    for node_id in _ac6_deselected():
+        assert node_id.startswith(f"{_UNIT_TESTS}/"), node_id
+        assert not node_id.startswith(_PROJECT), node_id
 
 
 def test_control_dropping_one_name_changes_the_set() -> None:
