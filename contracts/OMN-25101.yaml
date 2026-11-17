@@ -69,7 +69,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci -q --no-cov -n auto -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn25101-ac4-ambient-broker-empty-variable-and-exits
+  - id: dod-omn25101-ac4-ambient-broker-empty-var-exits
     description: >-
       The broker-variable test sets an ambient value and asserts the runner's environment carries "" for it; the real census script with both variables empty exits 8; the every-other-exit test lists the exit 124 case.
     source: manual
