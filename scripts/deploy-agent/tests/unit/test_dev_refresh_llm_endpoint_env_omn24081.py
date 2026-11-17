@@ -34,12 +34,26 @@ SLOT_ID = "embeddings-201"
 ENV_STATE_DIR = "DEPLOY_AGENT_STATE_DIR"
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_lane_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A host that already applied a refresh holds these; a pin beats the tmp folders built here."""
+    monkeypatch.delenv("ONEX_LANE_DECLARATION_DIR", raising=False)
+    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("ONEX_SKILL_OVERLAY_ROOTS", raising=False)
+
+
 def dev_llm_endpoint_env_exports(
     environ: Mapping[str, str], search_root: Path, state_dir: Path
 ) -> str:
     """What the refresh script sources: the node module's ``refresh_exports`` over the executor."""
     guard = executor_mod.load_dev_boot_guard(executor_mod._LLM_ENV_MODULE)
-    exports: str = guard.refresh_exports(executor_mod, environ, search_root, state_dir)
+    exports: str = guard.refresh_exports(
+        executor_mod,
+        environ,
+        search_root,
+        state_dir,
+        mounts_lane_declaration=True,
+    )
     return exports
 
 

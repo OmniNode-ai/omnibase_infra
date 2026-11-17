@@ -161,7 +161,23 @@ def _render_dev_lane(
 def _refresh_exports(environ: dict[str, str], state: Path) -> str:
     guard = executor_mod.load_dev_boot_guard(executor_mod._LLM_ENV_MODULE)
     exports: str = guard.refresh_exports(
-        executor_mod, environ, state / "no-clones", state
+        executor_mod,
+        environ,
+        state / "no-clones",
+        state,
+        mounts_lane_declaration=True,
+    )
+    return exports
+
+
+def _stability_refresh_exports(environ: dict[str, str], state: Path) -> str:
+    guard = executor_mod.load_dev_boot_guard(executor_mod._LLM_ENV_MODULE)
+    exports: str = guard.refresh_exports(
+        executor_mod,
+        environ,
+        state / "no-clones",
+        state,
+        mounts_lane_declaration=False,
     )
     return exports
 
@@ -516,3 +532,87 @@ def test_seam_every_name_the_guard_skips_is_a_contract_slot_env_var(
 
     assert skipped
     assert set(skipped) <= slot_env_vars
+
+
+def test_control_the_workspace_config_root_is_a_second_source_of_the_overlay_dir(
+    dev_agent: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-25202: the no-overlay control above must drop this root too, so prove it is read.
+
+    With ``ONEX_LANE_OVERLAY_DIR`` gone, the agent resolves ``config/lab/lane-overlays`` under
+    ``ONEX_WORKSPACE_CONFIG_ROOT``; the ``dev_agent`` fixture deletes that variable so the
+    control reads no ambient host config.
+    """
+    root = dev_agent["tmp"] / "workspace-config"
+    folder = root / "config" / "lab"
+    (folder / "lane-overlays").mkdir(parents=True)
+    (folder / LANE_DECLARATION_FILE).write_text("lanes: {}\n", encoding="utf-8")
+    monkeypatch.delenv("ONEX_LANE_OVERLAY_DIR")
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(root))
+
+    env, _ = _render_dev_lane(dict(os.environ))
+
+    assert env["ONEX_LANE_DECLARATION_DIR"] == str(folder.resolve())
+
+
+def test_golden_a_stability_job_of_a_dev_agent_is_not_refused_for_a_stale_declaration_dir(
+    dev_agent: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-25202: the stability compose mounts no lane declaration folder, so it takes none."""
+    monkeypatch.setenv("ONEX_LANE_DECLARATION_DIR", "/stale/ambient/config/lab")
+
+    with executor_mod.active_deploy_lane(executor_mod.EnumRuntimeLane.STABILITY_TEST):
+        env, _ = _render_dev_lane(dict(os.environ))
+
+    assert env["LLM_EMBEDDING_URL"] == OVERLAY_ADDRESS
+    assert "ONEX_LANE_DECLARATION_DIR" not in env
+
+
+def test_golden_the_stability_refresh_exports_no_declaration_dir_and_refuses_none(
+    dev_agent: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (dev_agent["tmp"] / LANE_DECLARATION_FILE).unlink()
+    monkeypatch.setenv("ONEX_LANE_DECLARATION_DIR", "/stale/ambient/config/lab")
+
+    exports = _stability_refresh_exports(dict(os.environ), dev_agent["state"])
+
+    assert f"export LLM_EMBEDDING_URL={OVERLAY_ADDRESS}\n" in exports
+    assert "ONEX_LANE_DECLARATION_DIR" not in exports
+    with pytest.raises(RuntimeError, match="ONEX_LANE_DECLARATION_DIR names no"):
+        _refresh_exports(dict(os.environ), dev_agent["state"])
+
+
+def test_seam_only_the_lanes_that_layer_a_dev_lane_file_take_the_declaration_dir(
+    dev_agent: dict[str, Any],
+) -> None:
+    """OMN-25202: every job that layers either dev-lane file gets the folder from the agent.
+
+    A job's compose environment is ``_compose_env`` under that job's active lane. The lanes
+    whose compose files include the dev lane file or the tenant fold file are the dev lane's,
+    default and every dev instance; its jobs hold the variable. The other lanes layer neither
+    file, and their compose files never name the variable, so they hold none.
+    """
+    dev_files = {executor_mod._DEV_LANE_OVERLAY, executor_mod._DEV_TENANT_FOLD_OVERLAY}
+    configs = dict(executor_mod._LANE_CONFIGS)
+    layering = {
+        lane
+        for lane, config in configs.items()
+        if dev_files & set(config.compose_files)
+    }
+    assert layering == {executor_mod.EnumRuntimeLane.DEV}
+    for name, instance_config in executor_mod.DEV_INSTANCE_LANE_CONFIGS.items():
+        assert dev_files & set(instance_config.compose_files), name
+        assert instance_config.lane == executor_mod.EnumRuntimeLane.DEV, name
+    for lane in configs:
+        with executor_mod.active_deploy_lane(lane):
+            env = executor_mod._compose_env()
+        assert ("ONEX_LANE_DECLARATION_DIR" in env) == (lane in layering), lane
+    for other in (
+        executor_mod.EnumRuntimeLane.STABILITY_TEST,
+        executor_mod.EnumRuntimeLane.PROD,
+    ):
+        name = other.value
+        compose = (REPO_ROOT / "docker" / f"docker-compose.{name}.yml").read_text(
+            encoding="utf-8"
+        )
+        assert "ONEX_LANE_DECLARATION_DIR" not in compose, name

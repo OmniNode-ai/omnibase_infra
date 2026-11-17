@@ -132,15 +132,19 @@ _lane_overlay_dir_candidate() {
 
 # OMN-24854: the dev lane compose files mount ${ONEX_LANE_DECLARATION_DIR:?...} (the folder
 # that holds ci_bus_lanes.yaml) at the runtime container's config/lab. The deploy agent points
-# ONEX_LANE_OVERLAY_DIR at a rendered copy under its own state directory, so the overlay
-# directory's parent is not that folder: the agent and the warm refresh pin the real one, and
-# this helper keeps a pinned folder, else takes config/lab under ONEX_WORKSPACE_CONFIG_ROOT.
-# A folder that holds no ci_bus_lanes.yaml is never exported: the variable is left unset, so
-# compose itself refuses at the mount with the message that names it. Run by both overlay
-# functions below, so every caller of resolve_compose_file_args and the pre-PR slot get it.
+# ONEX_LANE_OVERLAY_DIR at a rendered copy under its own state directory, so that directory's
+# parent is not always the folder: the agent and the warm refresh pin the real one. In order, the
+# folder is (1) a pinned ONEX_LANE_DECLARATION_DIR, (2) the parent of the resolved overlay dir when
+# it holds ci_bus_lanes.yaml (the real overlay dir, as the Python derivation takes it), (3) config/lab
+# under ONEX_WORKSPACE_CONFIG_ROOT. A pinned folder that holds no ci_bus_lanes.yaml is stale: it is
+# never replaced and never exported, and the strict form refuses it by name (return 1). Any other
+# unresolved case leaves the variable unset, so compose itself refuses at the mount naming it. Run by
+# both overlay functions below, so every caller of resolve_compose_file_args and the pre-PR slot get it.
 _pin_lane_declaration_dir() {
-    local dir="${ONEX_LANE_DECLARATION_DIR:-${ONEX_WORKSPACE_CONFIG_ROOT:-/nonexistent}/config/lab}"
-    if [[ -f "${dir}/ci_bus_lanes.yaml" ]]; then ONEX_LANE_DECLARATION_DIR="$(cd "${dir}" && pwd -P)"; export ONEX_LANE_DECLARATION_DIR; else unset ONEX_LANE_DECLARATION_DIR; fi
+    local mode="$1" pin="${ONEX_LANE_DECLARATION_DIR:-}" overlay="${ONEX_LANE_OVERLAY_DIR:-}" dir; unset ONEX_LANE_DECLARATION_DIR
+    dir="${pin:-$([[ -f "${overlay}/../ci_bus_lanes.yaml" ]] && printf '%s' "${overlay}/.." || printf '%s' "${ONEX_WORKSPACE_CONFIG_ROOT:-/nonexistent}/config/lab")}"
+    if [[ -f "${dir}/ci_bus_lanes.yaml" ]]; then ONEX_LANE_DECLARATION_DIR="$(cd "${dir}" && pwd -P)"; export ONEX_LANE_DECLARATION_DIR; return 0; fi
+    [[ -z "${pin}" ]] || _compose_files_log_error "ONEX_LANE_DECLARATION_DIR names \"${pin}\", which holds no ci_bus_lanes.yaml: set it to the config/lab folder that holds it."; [[ -z "${pin}" || "${mode}" != strict ]]
 }
 
 # Strict form, for a caller that must stop before any compose call (the pre-PR
@@ -156,7 +160,7 @@ resolve_lane_overlay_dir() {
         _compose_files_log_error "  config root whose config/lab/lane-overlays/ holds it (OMN-20932)."
         return 1
     fi
-    ONEX_LANE_OVERLAY_DIR="$(cd "${dir}" && pwd -P)"; export ONEX_LANE_OVERLAY_DIR; _pin_lane_declaration_dir
+    ONEX_LANE_OVERLAY_DIR="$(cd "${dir}" && pwd -P)"; export ONEX_LANE_OVERLAY_DIR; _pin_lane_declaration_dir strict
 }
 
 # Export form, run by resolve_compose_file_args before every lane compose call:
@@ -171,7 +175,7 @@ export_lane_overlay_dir() {
         ONEX_LANE_OVERLAY_DIR="$(cd "${dir}" && pwd -P)"; export ONEX_LANE_OVERLAY_DIR
     else
         unset ONEX_LANE_OVERLAY_DIR
-    fi; _pin_lane_declaration_dir
+    fi; _pin_lane_declaration_dir export
 }
 
 resolve_compose_file_args() {

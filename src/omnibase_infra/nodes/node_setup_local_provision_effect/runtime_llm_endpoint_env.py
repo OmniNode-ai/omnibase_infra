@@ -47,6 +47,7 @@ LANE_DECLARATION_DIR_ENV = "ONEX_LANE_DECLARATION_DIR"
 #: The file that makes a folder the lane declaration folder: the runtime's commitment
 #: ledger source resolves its broker address from it.
 LANE_DECLARATION_FILE = "ci_bus_lanes.yaml"
+_WITH_DECLARATION = "with-declaration"
 
 
 class LaneDeclarationDirError(RuntimeError):
@@ -348,9 +349,17 @@ def render_dev_lane(
         return {}, None
     # OMN-24854: the declaration folder, taken before the caller repoints the overlay
     # directory at the rendered copy, so the compose mount keeps the real config/lab. A
-    # refusal here is about the folder, not the llm_endpoints overlay, and says so.
+    # refusal here is about the folder, not the llm_endpoints overlay, and says so. Only
+    # the dev lane's compose files mount it: a stability job of this agent takes the render
+    # and neither needs nor is refused for the folder.
     overlay_dir = lane_overlay_dir_or_refuse(execution, environ)
-    declaration_dir = lane_declaration_dir(execution, environ)
+    mounts_declaration = execution._ActiveDeployLane.lane in (
+        None,
+        execution.EnumRuntimeLane.DEV,
+    )
+    declaration_dir = (
+        lane_declaration_dir(execution, environ) if mounts_declaration else None
+    )
     try:
         rendered = render(execution, environ, lane_overlay_dir=overlay_dir)
     except LlmEndpointEnvError as exc:
@@ -369,6 +378,8 @@ def refresh_exports(
     environ: Mapping[str, str],
     search_root: Path,
     state_dir: Path,
+    *,
+    mounts_lane_declaration: bool,
 ) -> str:
     """Shell exports of a lab lane's LLM endpoint env rendered from the overlay, for the warm refresh.
 
@@ -380,6 +391,10 @@ def refresh_exports(
     home clone is the one under ``search_root`` that carries lane fragments, unless ``environ``
     already names one; the rewritten lane overlay directory lands under ``state_dir`` unless
     ``environ`` names a state directory. An overlay that cannot be rendered is a RuntimeError.
+    ``mounts_lane_declaration`` is true for the dev lane, whose compose files mount the lane
+    declaration folder (OMN-24854): the exports then carry ``ONEX_LANE_DECLARATION_DIR``, and a
+    folder that holds no ``ci_bus_lanes.yaml`` is refused. The stability lane mounts nothing,
+    so its refresh derives, exports and refuses nothing about the folder.
     """
     from deploy_agent.instance_lanes import (  # the agent source tree holds this
         discover_lane_overlay_clone,
@@ -392,7 +407,9 @@ def refresh_exports(
         env.setdefault("DEPLOY_AGENT_OVERLAY_HOME_CLONE", str(clone))
     env.setdefault(str(declaration(execution)["state_dir_env"]), str(state_dir))
     overlay_dir = lane_overlay_dir_or_refuse(execution, env)
-    declaration_dir = lane_declaration_dir(execution, env)
+    declaration_dir = (
+        lane_declaration_dir(execution, env) if mounts_lane_declaration else None
+    )
     try:
         rendered = render(execution, env, lane_overlay_dir=overlay_dir)
     except LlmEndpointEnvError as exc:
@@ -471,14 +488,22 @@ def validate_env_contract(
 def main(argv: Sequence[str]) -> int:
     """Print what a warm refresh sources: the exports, then the line that hands them to the deploy handler.
 
-    ``argv`` is the program name, the search root of the clones and the state directory.
+    ``argv`` is the program name, the search root of the clones, the state directory and
+    whether the lane the refresh script is hardcoded to mounts the lane declaration folder
+    (``with-declaration``, the dev lane) or not (``without-declaration``).
     ``onex-runtime-deploy`` sources the operator env again, so it takes the same exports in
     ``ONEX_DEPLOY_LANE_ENV_EXPORTS`` and sources them after it (OMN-24119). A render that
     cannot be made is the RuntimeError of :func:`refresh_exports`, a non-zero exit and no output.
     """
     from deploy_agent import executor  # the agent source tree holds this
 
-    exports = refresh_exports(executor, dict(os.environ), Path(argv[1]), Path(argv[2]))
+    exports = refresh_exports(
+        executor,
+        dict(os.environ),
+        Path(argv[1]),
+        Path(argv[2]),
+        mounts_lane_declaration=argv[3] == _WITH_DECLARATION,
+    )
     applied = " ".join(line.removeprefix("export ") for line in exports.splitlines())
     sys.stderr.write(f"LLM endpoint env applied from the overlays: {applied}\n")
     sys.stdout.write(

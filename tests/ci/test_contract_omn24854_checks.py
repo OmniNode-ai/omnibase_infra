@@ -58,9 +58,13 @@ def _can_fail(check: dict[str, str]) -> bool:
     ``test -f``, ``true`` and the like pass whatever the tree or the lab shows.
     """
     value = check["check_value"]
-    if check["check_type"] == "test_passes":
-        return any(path in value for path in EVIDENCE_TESTS)
     argv = shlex.split(value)
+    if check["check_type"] == "test_passes":
+        # A string that merely names an evidence path (an echo, a comment) passes whatever
+        # the tests do: it must be a pytest run whose argument list holds an evidence file.
+        return argv[:4] == ["uv", "run", "--frozen", "pytest"] and any(
+            arg in EVIDENCE_TESTS and (REPO_ROOT / arg).is_file() for arg in argv[4:]
+        )
     return (
         argv[:2] == ["grep", "-qE"]
         and len(argv) == 4
@@ -99,6 +103,18 @@ def test_every_declared_check_can_fail() -> None:
             "check_value": "grep -q ONEX_LANE_DECLARATION_DIR:? docker/docker-compose.dev-lane.yml",
         },
         {"check_type": "test_passes", "check_value": "uv run pytest tests/unit -q"},
+        {
+            "check_type": "test_passes",
+            "check_value": "echo tests/ci/test_dev_lane_ledger_source_binding.py",
+        },
+        {
+            "check_type": "test_passes",
+            "check_value": "true # tests/ci/test_dev_lane_ledger_source_binding.py",
+        },
+        {
+            "check_type": "test_passes",
+            "check_value": "uv run --frozen pytest tests/unit -q -k tests/ci/test_dev_lane_ledger_source_binding.pyx",
+        },
     ],
 )
 def test_control_checks_that_pass_whatever_the_tree_or_the_lab_shows_are_refused(

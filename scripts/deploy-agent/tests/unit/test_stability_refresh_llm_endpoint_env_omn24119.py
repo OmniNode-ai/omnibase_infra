@@ -35,12 +35,26 @@ ENV_STATE_DIR = "DEPLOY_AGENT_STATE_DIR"
 LANE_FILE = "lane-under-test.bifrost.yaml"
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_lane_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A host that already applied a refresh holds these; a pin beats the tmp folders built here."""
+    monkeypatch.delenv("ONEX_LANE_DECLARATION_DIR", raising=False)
+    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("ONEX_SKILL_OVERLAY_ROOTS", raising=False)
+
+
 def stability_llm_endpoint_env_exports(
     environ: Mapping[str, str], search_root: Path, state_dir: Path
 ) -> str:
     """What the refresh script sources: the node module's ``refresh_exports`` over the executor."""
     guard = executor_mod.load_dev_boot_guard(executor_mod._LLM_ENV_MODULE)
-    exports: str = guard.refresh_exports(executor_mod, environ, search_root, state_dir)
+    exports: str = guard.refresh_exports(
+        executor_mod,
+        environ,
+        search_root,
+        state_dir,
+        mounts_lane_declaration=False,
+    )
     return exports
 
 
@@ -73,8 +87,7 @@ def _overlay_home(root: Path, endpoint_urls: dict[str, str]) -> Path:
 def _lane_overlays(root: Path) -> Path:
     lane_dir = root / "lane-overlays"
     lane_dir.mkdir()
-    # OMN-24854: the folder above the lane overlays holds the lane declaration.
-    (root / "ci_bus_lanes.yaml").write_text("lanes: {}\n", encoding="utf-8")
+    # The stability compose mounts no lane declaration folder, so none is built here (OMN-24854).
     (lane_dir / LANE_FILE).write_text(
         yaml.safe_dump(
             {
@@ -210,7 +223,12 @@ def _run_module(
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run the program the stability script runs, over a stale operator value."""
     text = STABILITY_SCRIPT.read_text(encoding="utf-8")
-    path = re.search(r'run_python "\$\{REPO_ROOT\}/(\S+?' + MODULE + r')" ', text)
+    path = re.search(
+        r'run_python "\$\{REPO_ROOT\}/(\S+?'
+        + MODULE
+        + r')" "\$\{OMNI_HOME\}" "\$\{STATE_DIR\}" (\S+?)\)"',
+        text,
+    )
     assert path is not None
     lane_dir = _lane_overlays(tmp_path)
     home = _overlay_home(tmp_path, endpoint_urls)
@@ -222,6 +240,7 @@ def _run_module(
             str(REPO_ROOT / path.group(1)),
             str(tmp_path / "no-clones"),
             str(state),
+            path.group(2),
         ],
         check=False,
         capture_output=True,
