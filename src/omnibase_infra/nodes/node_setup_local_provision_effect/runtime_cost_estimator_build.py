@@ -223,6 +223,88 @@ def dev_lane_web_follow(
         return None
 
 
+#: OMN-24903: the projection writers the stability lane's compose overlay
+#: declares (OMN-17562). ``services_for_scope`` names them on the dev lane only, so a
+#: stability deploy rebuilt and recreated the runtime and never these: on
+#: 2026-11-16 the stability runtime carried omnimarket 0.4.321 while
+#: projection-delegation-writer still ran 0.4.283 from 2026-11-12, refused every
+#: delegate-skill terminal of the nightly as malformed, and left each
+#: delegation_events row with no terminal_ok.
+STABILITY_LANE_WRITER_SERVICES: tuple[str, ...] = (
+    "projection-tenant-registry-writer",
+    "projection-delegation-writer",
+    "projection-registration-writer",
+    "projection-savings-writer",
+    "projection-tenant-credentials-writer",
+    "projection-live-events-writer",
+    "tenant-projection-writer",
+)
+
+
+def roll_stability_lane_writers(
+    execution: ModuleType,
+    build_images: Callable[..., None],
+    git_sha: str,
+    on_phase_update: Callable[..., None],
+    *,
+    build_source: str,
+    lane: str,
+    git_ref: str,
+) -> tuple[str, ...]:
+    """Build the stability lane's writers at the deploy's sha, then recreate them.
+
+    Called from ``build_dev_lane_services``, which the executor runs on every
+    RUNTIME and FULL rebuild before the runtime family is recreated, so the
+    readers of the runtime's events move first. A lane whose compose files do
+    not include the stability overlay is left untouched. A failed recreate
+    raises, so the deploy fails rather than reporting a lane whose writers kept
+    the previous image.
+    """
+    config = execution.lane_config_for(lane)
+    if execution._STABILITY_OVERLAY not in config.compose_files:
+        return ()
+    services = tuple(
+        service
+        for service in STABILITY_LANE_WRITER_SERVICES
+        if service not in config.disabled_services
+    )
+    if not services:
+        return ()
+    build_images(
+        execution.Scope.RUNTIME,
+        git_sha,
+        on_phase_update,
+        build_source=build_source,
+        runtime_lane=lane,
+        git_ref=git_ref,
+        compose_files=config.compose_files,
+        services=services,
+        stage_workspace=False,
+    )
+    argv = [
+        *execution._compose_argv(lane),
+        "--profile",
+        "runtime",
+        "up",
+        "-d",
+        "--no-deps",
+        "--no-build",
+        "--force-recreate",
+        *services,
+    ]
+    result = execution._run(
+        argv,
+        timeout=execution.PHASE_TIMEOUTS[execution.Phase.RUNTIME],
+        env=execution._compose_env(),
+    )
+    if result.returncode:
+        raise RuntimeError(
+            f"stability lane writer recreate exited {result.returncode} "
+            f"for {', '.join(services)}"
+        )
+    return services
+
+
 def build_dev_lane_services(
     execution: ModuleType,
     build_images: Callable[..., None],
@@ -238,6 +320,15 @@ def build_dev_lane_services(
     | None = None,
 ) -> dict[str, str]:
     """Validate first, then build dev images before the existing recreate."""
+    roll_stability_lane_writers(
+        execution,
+        build_images,
+        git_sha,
+        on_phase_update,
+        build_source=build_source,
+        lane=lane,
+        git_ref=git_ref,
+    )
     if lane != execution.EnumRuntimeLane.DEV:
         return {}
     settings = (
