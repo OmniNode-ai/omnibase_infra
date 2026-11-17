@@ -156,17 +156,35 @@ def test_no_other_unit_reads_the_dev_signing_key_file() -> None:
 
 
 def _systemd_environment(key_file_text: str) -> dict[str, str]:
-    """What systemd's ``EnvironmentFile=`` hands the process for this key file.
+    r"""What systemd's ``EnvironmentFile=`` hands the process for this key file.
 
     Only ``NAME=value`` lines whose NAME is a valid identifier become variables.
-    Blank lines, lines starting with ``#`` or ``;``, and any other line are
+    Leading and trailing blanks are stripped, so an INDENTED assignment counts, and
+    the LAST assignment of a name wins. A line ending in a backslash continues on the
+    next physical line -- a comment line too, so ``# note \`` swallows the line after
+    it. Blank lines, lines starting with ``#`` or ``;``, and any other line are
     ignored -- silently, which is exactly the failure mode: a wrong-named or
     garbage line drops the key without a sound and the variable it was meant to
     set stays unset. Values lose their surrounding whitespace and one pair of
-    matching quotes.
+    matching quotes. Settings made here override the unit's own ``Environment=``
+    (systemd.exec: "Settings from these files override settings made with
+    Environment="), so an extra name such as ``DEPLOY_AGENT_ENV_PROTECTED=`` also
+    replaces the unit's value.
     """
+    logical: list[str] = []
+    pending = ""
+    for physical in key_file_text.splitlines():
+        joined = pending + physical
+        if joined.endswith("\\"):
+            pending = joined[:-1]
+            continue
+        logical.append(joined)
+        pending = ""
+    if pending:
+        logical.append(pending)
+
     variables: dict[str, str] = {}
-    for line in key_file_text.splitlines():
+    for line in logical:
         stripped = line.strip()
         if not stripped or stripped.startswith(("#", ";")):
             continue
@@ -358,6 +376,27 @@ _BAD_KEY_FILES = [
     ),
     # A value outside letters, digits, `-` and `_` (the generator never writes one).
     pytest.param(f'DEPLOY_AGENT_HMAC_SECRET="{_DEV_SYNTHETIC}"\n', id="quoted-value"),
+    # OMN-24611 review: systemd skips leading blanks and takes the LAST assignment, so
+    # a good line followed by an INDENTED one (here the placeholder) sets the name to
+    # the placeholder; a line-anchored count of the name sees one line.
+    pytest.param(
+        f"DEPLOY_AGENT_HMAC_SECRET={_DEV_SYNTHETIC}\n"
+        f"  DEPLOY_AGENT_HMAC_SECRET={_PLACEHOLDER}\n",
+        id="good-line-then-indented-placeholder",
+    ),
+    # A comment line ending in a backslash continues onto the next line, so it
+    # swallows the key line: the name is never set and the shared key wins.
+    pytest.param(
+        f"# delivered by the host installer \\\nDEPLOY_AGENT_HMAC_SECRET={_DEV_SYNTHETIC}\n",
+        id="backslash-comment-before-the-key-line",
+    ),
+    # Any other name overrides the unit's own Environment= (an EnvironmentFile=
+    # setting beats it): here the protected list is cut down to `PATH`, so the
+    # launcher's store source puts the shared key back.
+    pytest.param(
+        f"DEPLOY_AGENT_HMAC_SECRET={_DEV_SYNTHETIC}\nDEPLOY_AGENT_ENV_PROTECTED=PATH\n",
+        id="extra-name-overriding-the-units-environment",
+    ),
 ]
 
 
@@ -397,14 +436,33 @@ def test_the_units_start_check_refuses_a_broken_file_when_the_name_is_inherited(
     assert _INHERITED_SYNTHETIC not in result.stderr, _CODE_NAME
 
 
+#: Files the OLD environment check lets by with the name inherited from the user
+#: manager (or set by the file itself): garbage, plus the three shapes the line-based
+#: check of the reviewed head let by.
+_OLD_CHECK_PASSES = [
+    pytest.param("this is not an assignment\n", id="garbage-line"),
+    *[
+        pytest.param(case.values[0], id=str(case.id))
+        for case in _BAD_KEY_FILES
+        if case.id
+        in {
+            "good-line-then-indented-placeholder",
+            "backslash-comment-before-the-key-line",
+            "extra-name-overriding-the-units-environment",
+        }
+    ],
+]
+
+
+@pytest.mark.parametrize("key_file_text", _OLD_CHECK_PASSES)
 def test_control_an_environment_check_passes_a_broken_file_with_an_inherited_name(
-    tmp_path: Path,
+    tmp_path: Path, key_file_text: str
 ) -> None:
     """The error chain: the old check (on the environment) lets the broken file by."""
     old_argv = _argv_of(_OLD_ENVIRONMENT_CHECK)
     result = _run_start_check(
         tmp_path,
-        "this is not an assignment\n",
+        key_file_text,
         environment={_CODE_NAME: _INHERITED_SYNTHETIC},
         argv=old_argv,
     )
@@ -420,13 +478,11 @@ def test_the_units_start_check_passes_a_good_key_file(tmp_path: Path) -> None:
     assert _CODE_NAME not in result.stderr, _CODE_NAME
 
 
-def test_the_units_start_check_passes_a_good_key_file_with_comments(
+def test_the_units_start_check_passes_a_key_with_dash_and_underscore(
     tmp_path: Path,
 ) -> None:
-    """Positive control for the line check: comments and a key with `-` and `_` pass."""
-    result = _run_start_check(
-        tmp_path, f"# delivered by the host installer\n{_CODE_NAME}=Ab-9_zY\n"
-    )
+    """Positive control for the line check: the one line, a key with `-` and `_`."""
+    result = _run_start_check(tmp_path, f"{_CODE_NAME}=Ab-9_zY\n")
 
     assert result.returncode == 0, (result.returncode, result.stderr)
 
@@ -457,6 +513,25 @@ def test_the_units_start_check_passes_a_good_key_file_with_comments(
             f"DEPLOY_AGENT_HMAC_SECRET={_PLACEHOLDER}\n",
             _PLACEHOLDER,
             id="placeholder",
+        ),
+        # The last (indented) assignment wins: the agent signs with the placeholder.
+        pytest.param(
+            f"DEPLOY_AGENT_HMAC_SECRET={_DEV_SYNTHETIC}\n"
+            f"  DEPLOY_AGENT_HMAC_SECRET={_PLACEHOLDER}\n",
+            _PLACEHOLDER,
+            id="good-line-then-indented-placeholder",
+        ),
+        # The comment swallows the key line: the name is never set, the store wins.
+        pytest.param(
+            f"# delivered by the host installer \\\n{_CODE_NAME}={_DEV_SYNTHETIC}\n",
+            _SHARED_SYNTHETIC,
+            id="backslash-comment-before-the-key-line",
+        ),
+        # The protected list is cut down by the file, so the store's value wins.
+        pytest.param(
+            f"{_CODE_NAME}={_DEV_SYNTHETIC}\n{_PROTECTED_NAME}=PATH\n",
+            _SHARED_SYNTHETIC,
+            id="extra-name-overriding-the-units-environment",
         ),
     ],
 )
@@ -562,8 +637,22 @@ def test_control_the_overlay_reapplies_it_when_the_name_is_not_protected(
 # what they sign). Pin that nothing does.
 # --------------------------------------------------------------------------
 
-#: What names the operator store: its home directory, or the unit's own variable.
-_OPERATOR_STORE_MARKERS = (".omnibase", "DEPLOY_AGENT_ENV_FILE", "OMNIBASE_ENV_FILE")
+#: Directories no scan walks: VCS metadata, virtualenvs, caches, build output.
+_SKIPPED_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".pytest_cache",
+        ".onex_state",
+        ".tox",
+        "site-packages",
+    }
+)
 
 
 class _ComposeLoader(yaml.SafeLoader):
@@ -583,92 +672,289 @@ def _read_tagged(loader: _ComposeLoader, tag_suffix: str, node: yaml.Node) -> ob
 _ComposeLoader.add_multi_constructor("!", _read_tagged)
 
 
-def _env_file_entries(compose_text: str) -> list[str]:
-    """Every ``env_file`` entry of every service in one compose document, as text."""
-    loader = _ComposeLoader(compose_text)
-    try:
-        document = loader.get_single_data()
-    finally:
-        loader.dispose()
-    services = document.get("services") if isinstance(document, dict) else None
+def _tracked_files(root: Path, suffixes: tuple[str, ...]) -> list[Path]:
+    """Every file under ``root`` with one of ``suffixes``, whatever its directory."""
+    found: list[Path] = []
+    for directory, subdirs, names in os.walk(root):
+        subdirs[:] = sorted(name for name in subdirs if name not in _SKIPPED_DIRS)
+        found.extend(
+            Path(directory) / name for name in sorted(names) if name.endswith(suffixes)
+        )
+    return found
+
+
+def _env_file_keys(node: object) -> list[str]:
+    """Every ``env_file`` key anywhere in a parsed document, as text.
+
+    A recursive walk, not a read of ``services.<name>.env_file``: an ``env_file``
+    under an ``x-`` extension field, an anchor or a nested block loads the store just
+    the same once compose merges it.
+    """
     entries: list[str] = []
-    for service in (services or {}).values():
-        declared = service.get("env_file") if isinstance(service, dict) else None
-        if declared is None:
-            continue
-        for item in declared if isinstance(declared, list) else [declared]:
-            entries.append(
-                str(item.get("path", "") if isinstance(item, dict) else item)
-            )
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "env_file":
+                for item in value if isinstance(value, list) else [value]:
+                    entries.append(
+                        str(item.get("path", "") if isinstance(item, dict) else item)
+                    )
+            entries.extend(_env_file_keys(value))
+    elif isinstance(node, list):
+        for value in node:
+            entries.extend(_env_file_keys(value))
     return entries
 
 
-def _compose_files() -> list[Path]:
-    docker_dir = _REPO_ROOT / "docker"
-    files = sorted({*docker_dir.rglob("*.yml"), *docker_dir.rglob("*.yaml")})
-    return [path for path in files if "services:" in path.read_text()]
-
-
-def _operator_store_entries(compose_text: str) -> list[str]:
-    return [
-        entry
-        for entry in _env_file_entries(compose_text)
-        if any(marker in entry for marker in _OPERATOR_STORE_MARKERS)
-    ]
-
-
-def test_no_compose_file_loads_the_operator_store_through_env_file() -> None:
-    files = _compose_files()
-    # A glob that finds nothing would pass vacuously.
-    assert len(files) >= 10, "compose files under docker/"
-    assert any(path.name == "docker-compose.infra.yml" for path in files)
-    for path in files:
-        assert _operator_store_entries(path.read_text()) == [], path.name
-
-
-def test_control_a_compose_env_file_naming_the_operator_store_is_found() -> None:
-    """The failing control: the scan above is not blind to what it forbids."""
-    for declared in (
-        "      - ${HOME}/.omnibase/.env",
-        "      - path: ${DEPLOY_AGENT_ENV_FILE}\n        required: true",
-    ):
-        text = f"services:\n  runtime:\n    image: x\n    env_file:\n{declared}\n"
-        assert _operator_store_entries(text) != [], declared
-    # ...and a file that is not the operator store is not a finding.
-    other = "services:\n  runtime:\n    image: x\n    env_file:\n      - ./local.env\n"
-    assert _operator_store_entries(other) == []
-
-
-def _argv_lists_naming(source: Path, literal: str) -> list[list[object]]:
-    return [
-        [
-            element.value if isinstance(element, ast.Constant) else None
-            for element in node.elts
+def _env_file_entries(text: str) -> list[str]:
+    """Every ``env_file`` entry of one YAML file; an unparseable file is scanned as text."""
+    try:
+        documents = list(yaml.load_all(text, Loader=_ComposeLoader))
+    except yaml.YAMLError:
+        return [
+            match.group(0).strip()
+            for match in re.finditer(r"^\s*env_file\s*:.*$", text, re.MULTILINE)
         ]
-        for node in ast.walk(ast.parse(source.read_text()))
-        if isinstance(node, ast.List)
-        and any(
-            isinstance(element, ast.Constant) and element.value == literal
-            for element in node.elts
-        )
+    return [entry for document in documents for entry in _env_file_keys(document)]
+
+
+def _env_file_findings(root: Path) -> list[tuple[str, str]]:
+    """``(relative path, entry)`` for every ``env_file`` entry in every YAML file."""
+    return [
+        (str(path.relative_to(root)), entry)
+        for path in _tracked_files(root, (".yml", ".yaml"))
+        for entry in _env_file_entries(path.read_text(encoding="utf-8"))
     ]
+
+
+#: Every ``env_file`` entry the repository may carry, as ``(path, entry)``. None
+#: today: an entry here would load a file around the agent's environment and so
+#: could carry the shared key to the dev runtime's containers.
+_ALLOWED_ENV_FILES: frozenset[tuple[str, str]] = frozenset()
+
+
+def test_no_yaml_file_declares_an_env_file() -> None:
+    """Every YAML file in the repository, not only ``docker/``, and every entry."""
+    yaml_files = _tracked_files(_REPO_ROOT, (".yml", ".yaml"))
+    # A glob that finds nothing would pass vacuously.
+    assert len(yaml_files) >= 100, "YAML files in the repository"
+    names = {str(path.relative_to(_REPO_ROOT)) for path in yaml_files}
+    assert "docker/docker-compose.infra.yml" in names
+    # ...and files outside docker/ are in the scan.
+    assert any(not name.startswith("docker/") and "/" in name for name in names)
+
+    findings = [
+        finding
+        for finding in _env_file_findings(_REPO_ROOT)
+        if finding not in _ALLOWED_ENV_FILES
+    ]
+    assert findings == [], findings
+
+
+@pytest.mark.parametrize(
+    ("relative", "declared"),
+    [
+        pytest.param(
+            "ops/stack.yml", "      - ${HOME}/.env", id="outside-docker-home-env"
+        ),
+        pytest.param(
+            "docker/docker-compose.x.yml",
+            "      - ${HOME}/.omnibase/.env",
+            id="operator-store",
+        ),
+        pytest.param(
+            "docker/docker-compose.x.yml",
+            "      - path: ${DEPLOY_AGENT_ENV_FILE}\n        required: true",
+            id="long-form-variable",
+        ),
+        pytest.param("deploy/stack.yml", "      - ./local.env", id="any-other-file"),
+    ],
+)
+def test_control_an_env_file_entry_anywhere_is_found(
+    tmp_path: Path, relative: str, declared: str
+) -> None:
+    """The failing control: the scan is not blind to what it forbids."""
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        f"services:\n  runtime:\n    image: x\n    env_file:\n{declared}\n"
+    )
+    findings = _env_file_findings(tmp_path)
+    assert [path for path, _ in findings] == [relative], findings
+
+
+def test_control_an_env_file_in_an_extension_field_is_found(tmp_path: Path) -> None:
+    (tmp_path / "stack.yaml").write_text(
+        "x-common: &common\n  env_file:\n    - ${HOME}/.env\n"
+        "services:\n  runtime:\n    <<: *common\n    image: x\n"
+    )
+    assert _env_file_findings(tmp_path) != []
+
+
+def test_control_a_service_without_an_env_file_is_not_a_finding(tmp_path: Path) -> None:
+    (tmp_path / "stack.yml").write_text(
+        "services:\n  runtime:\n    image: x\n    environment:\n      A: b\n"
+    )
+    assert _env_file_findings(tmp_path) == []
+
+
+# ``--env-file`` on a compose command loads a file under the agent's environment, so
+# the same pin covers it. The scan reads every source line, not just Python list
+# literals, so it does not depend on how the argv is written: a split list, a tuple,
+# ``extend``, ``--env-file=<path>``, a ``self._run("compose", ...)`` call, a shell
+# line. Its scope is every directory the deploy agent runs code from: its own package
+# and scripts, the runtime build scripts it invokes, and the handlers it routes to.
+# Each hit is named below with the command it belongs to.
+_ARGV_ROOTS = (
+    "scripts/deploy-agent",
+    "scripts/runtime_build",
+    "src/omnibase_infra/handlers",
+)
+_ARGV_SUFFIXES = (".py", ".sh", ".service", ".yml", ".yaml")
+
+#: ``path -> (matching lines, the command they belong to)``. Adding a line to a listed
+#: file, or an ``--env-file`` to any other file in scope, fails the scan until the
+#: command is traced and listed here.
+_ENV_FILE_ARGV_ALLOWED: dict[str, tuple[int, str]] = {
+    "scripts/deploy-agent/deploy_agent/executor.py": (
+        1,
+        "`python3 <REPOINT_ONEX_API_SCRIPT> --env-file <store>`: the onex-api pin "
+        "repoint script, not a compose command (traced by the AST test below)",
+    ),
+    "scripts/runtime_build/refresh_dev_lane.sh": (
+        1,
+        "the same repoint script, not a compose command",
+    ),
+    "scripts/runtime_build/repoint_dev_lane_onex_api.py": (
+        3,
+        "the repoint script's own required `--env-file` flag",
+    ),
+    "src/omnibase_infra/handlers/handler_dev_lane_pin.py": (
+        3,
+        "the dev lane pin tool's own `--env-file` flag, not a compose command",
+    ),
+    "src/omnibase_infra/handlers/handler_standalone_compose_recreate.py": (
+        1,
+        "`docker compose --file <declared file> --env-file <env_file> up --no-deps "
+        "--force-recreate -- <service>`: the standalone recreate, whose node contract "
+        "declares one target, factory-floor-web, with the env file named by "
+        "DEPLOY_AGENT_FACTORY_FLOOR_WEB_ENV_FILE (the factory floor page's own file, "
+        "never the dev runtime's compose file)",
+    ),
+    "scripts/runtime_build/prepr_pool_prove.sh": (
+        3,
+        "pre-PR slot proof: the slot's own generated local.env, run by a lane, "
+        "not by the deploy agent",
+    ),
+    "scripts/runtime_build/prepr_verify_lane.sh": (
+        1,
+        "the slot's DB provisioner flag, run by a lane, not by the deploy agent",
+    ),
+    "scripts/runtime_build/prepr_verify_rendered_slot.py": (
+        1,
+        "a docstring about compose's `--env-file` precedence",
+    ),
+}
+
+
+def _env_file_argv_lines(root: Path) -> dict[str, int]:
+    """``path -> count`` of non-comment lines naming ``--env-file`` in the scan scope."""
+    counts: dict[str, int] = {}
+    for scope in _ARGV_ROOTS:
+        for path in _tracked_files(root / scope, _ARGV_SUFFIXES):
+            relative = path.relative_to(root)
+            # Tests quote the literal on purpose.
+            if "tests" in relative.parts:
+                continue
+            hits = sum(
+                1
+                for line in path.read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
+                if "--env-file" in line and not line.lstrip().startswith("#")
+            )
+            if hits:
+                counts[str(relative)] = hits
+    return counts
 
 
 def test_no_deploy_agent_compose_argv_passes_env_file() -> None:
-    """``--env-file`` on a compose command loads the store under the agent's environment."""
-    package = _REPO_ROOT / "scripts" / "deploy-agent" / "deploy_agent"
-    seen = 0
-    for source in sorted(package.glob("*.py")):
-        for argv in _argv_lists_naming(source, "--env-file"):
-            seen += 1
-            # The one argv that passes it is the dev-lane pin repoint script's, and
-            # it names no compose command.
-            assert "compose" not in argv and "docker" not in argv, (source.name, argv)
-    assert seen >= 1, "the --env-file scan found nothing, so it proves nothing"
+    counts = _env_file_argv_lines(_REPO_ROOT)
+    # The scan must see the one existing hit, or it proves nothing.
+    assert "scripts/deploy-agent/deploy_agent/executor.py" in counts, counts
+    expected = {path: count for path, (count, _) in _ENV_FILE_ARGV_ALLOWED.items()}
+    assert counts == expected, counts
 
 
-def test_control_a_compose_argv_with_env_file_is_found(tmp_path: Path) -> None:
-    source = tmp_path / "executor.py"
-    source.write_text('ARGV = ["docker", "compose", "--env-file", "x", "up"]\n')
-    (argv,) = _argv_lists_naming(source, "--env-file")
-    assert "compose" in argv
+def test_the_executor_env_file_argv_is_the_repoint_script_and_no_compose_command() -> (
+    None
+):
+    """Trace the one hit in the deploy-agent package to its command."""
+    source = (_REPO_ROOT / "scripts/deploy-agent/deploy_agent/executor.py").read_text()
+    lists = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.List)
+        and any(
+            isinstance(element, ast.Constant) and element.value == "--env-file"
+            for element in node.elts
+        )
+    ]
+    assert len(lists) == 1, "list literals naming --env-file"
+    (argv,) = lists
+    words = [
+        element.value
+        for element in argv.elts
+        if isinstance(element, ast.Constant) and isinstance(element.value, str)
+    ]
+    assert words[0] == "python3", words
+    assert "compose" not in words and "docker" not in words, words
+    # The script it runs is the repoint script, named in the list by its constant.
+    assert any(
+        isinstance(element, ast.Call)
+        and ast.unparse(element) == "str(REPOINT_ONEX_API_SCRIPT)"
+        for element in argv.elts
+    )
+
+
+@pytest.mark.parametrize(
+    ("relative", "text"),
+    [
+        pytest.param(
+            "scripts/deploy-agent/deploy_agent/new.py",
+            'ARGV = ["docker", "compose", "--env-file", "x", "up"]\n',
+            id="top-level-compose-list",
+        ),
+        pytest.param(
+            "scripts/deploy-agent/deploy_agent/new.py",
+            'ARGV = ["docker", "compose"]\nARGV += ["--env-file",\n  "x"]\n',
+            id="split-argv-extend",
+        ),
+        pytest.param(
+            "scripts/deploy-agent/deploy_agent/new.py",
+            'ARGV = ("run", "--env-file=x")\n',
+            id="tuple-with-equals",
+        ),
+        pytest.param(
+            "scripts/deploy-agent/deploy_agent/new.py",
+            'cmd = "docker compose --env-file x up"\n',
+            id="shell-string",
+        ),
+        pytest.param(
+            "scripts/deploy-agent/deploy/new.sh",
+            "docker compose --env-file x up\n",
+            id="shell-script",
+        ),
+    ],
+)
+def test_control_an_env_file_argv_in_any_form_is_found(
+    tmp_path: Path, relative: str, text: str
+) -> None:
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    assert _env_file_argv_lines(tmp_path) == {relative: 1}
+
+
+def test_control_a_comment_naming_env_file_is_not_a_hit(tmp_path: Path) -> None:
+    (tmp_path / "run.sh").write_text("# docker compose --env-file x up\n")
+    assert _env_file_argv_lines(tmp_path) == {}

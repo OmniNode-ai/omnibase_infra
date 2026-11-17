@@ -12,9 +12,13 @@ disagrees:
 
 * AC2 reads the omnimarket sibling checkout at ``origin/dev``;
 * AC3 reads ``context.evidence_readings`` -- the two check values must be present and
-  equal;
+  equal, with the host, command and UTC time they were read at;
 * AC4 reads ``context.evidence_readings`` -- the no-op must be ``accepted`` and the two
-  unit digests present and equal.
+  unit digests present and equal, with the same provenance.
+
+A pair typed by hand without its provenance is red, and the checks are red until a
+lane records the readings after the install. Nothing here asserts the readings are
+empty: the suite stays green once real readings are recorded.
 
 Every value below is a synthetic throwaway.
 """
@@ -83,16 +87,43 @@ def _with_contract(tmp_path: Path, document: dict[str, Any]) -> Path:
 
 
 def _set(document: dict[str, Any], **readings: str) -> dict[str, Any]:
+    """The contract with every slot blank, then ``readings`` -- never the recorded ones.
+
+    Each test states the whole reading it judges, so the suite does not depend on
+    whether a lane has recorded real readings in the contract yet.
+    """
     changed = copy.deepcopy(document)
-    changed["context"][_READINGS_KEY].update(readings)
+    slots = changed["context"][_READINGS_KEY]
+    for slot in slots:
+        slots[slot] = ""
+    slots.update(readings)
     return changed
 
 
-_AC3_AGREE = {"ac3_agent_check_value": _CHECK, "ac3_store_check_value": _CHECK}
+def _blank() -> dict[str, Any]:
+    return _set(_contract())
+
+
+_AC3_PROVENANCE = {
+    "ac3_read_host": "synthetic-host",
+    "ac3_read_command": "synthetic read command",
+    "ac3_read_time": "2026-01-01T00:00:00Z",
+}
+_AC4_PROVENANCE = {
+    "ac4_read_host": "synthetic-host",
+    "ac4_read_command": "synthetic read command",
+    "ac4_read_time": "2026-01-01T00:00:00Z",
+}
+_AC3_AGREE = {
+    "ac3_agent_check_value": _CHECK,
+    "ac3_store_check_value": _CHECK,
+    **_AC3_PROVENANCE,
+}
 _AC4_GOOD = {
     "ac4_noop_result": "accepted",
     "ac4_live_unit_digest_before": _DIGEST,
     "ac4_live_unit_digest_after": _DIGEST,
+    **_AC4_PROVENANCE,
 }
 
 
@@ -103,12 +134,11 @@ def test_the_contract_declares_every_reading_slot_the_checks_read() -> None:
     document = _contract()
     slots = document["context"][_READINGS_KEY]
     assert set(slots) == {*_AC3_AGREE, *_AC4_GOOD}, sorted(slots)
-    for criterion in ("AC3", "AC4"):
+    # Each check reads exactly the slots it binds -- not "whichever slots it names".
+    for criterion, expected in (("AC3", _AC3_AGREE), ("AC4", _AC4_GOOD)):
         command = str(_readings_check(document, criterion)["check_value"])
-        named = [slot for slot in slots if slot in command]
-        assert named, f"{criterion}: its check reads none of the declared slots"
-        for slot in named:
-            assert slot in slots, slot
+        named = {slot for slot in slots if slot in command}
+        assert named == set(expected), (criterion, sorted(named ^ set(expected)))
 
 
 def test_every_slot_is_read_by_a_check() -> None:
@@ -123,10 +153,17 @@ def test_every_slot_is_read_by_a_check() -> None:
         assert slot in commands, slot
 
 
-def test_the_readings_are_open_until_a_lane_records_them() -> None:
-    """No reading is invented here: the slots are empty and the criteria stay open."""
-    slots = _contract()["context"][_READINGS_KEY]
-    assert all(value == "" for value in slots.values()), slots
+def test_ac4_no_longer_carries_the_check_that_passes_with_nothing_installed() -> None:
+    """The deploy probe read the unit from GitHub at a commit: green with no install."""
+    commands = [
+        str(check["check_value"])
+        for item in _contract()["dod_evidence"]
+        if "AC4" in item["binds_ac"]
+        for check in item["checks"]
+    ]
+    assert len(commands) == 1, commands
+    assert "gh api" not in commands[0]
+    assert "'context'" in commands[0]
 
 
 # ---- AC3: the two check values are present and equal --------------------------
@@ -134,13 +171,35 @@ def test_the_readings_are_open_until_a_lane_records_them() -> None:
 
 def test_ac3_is_red_while_the_readings_are_absent(tmp_path: Path) -> None:
     command = str(_readings_check(_contract(), "AC3")["check_value"])
-    assert _run(command, _with_contract(tmp_path, _contract())) == 1
+    assert _run(command, _with_contract(tmp_path, _blank())) == 1
 
 
 def test_ac3_is_green_when_both_check_values_agree(tmp_path: Path) -> None:
     command = str(_readings_check(_contract(), "AC3")["check_value"])
     root = _with_contract(tmp_path, _set(_contract(), **_AC3_AGREE))
     assert _run(command, root) == 0
+
+
+def test_ac3_is_red_for_an_invented_pair_without_its_provenance(tmp_path: Path) -> None:
+    """An equal hex pair typed by hand proves nothing: host, command and time are required."""
+    command = str(_readings_check(_contract(), "AC3")["check_value"])
+    invented = {"ac3_agent_check_value": _CHECK, "ac3_store_check_value": _CHECK}
+    assert _run(command, _with_contract(tmp_path, _set(_contract(), **invented))) == 1
+
+
+@pytest.mark.parametrize("missing", sorted(_AC3_PROVENANCE))
+def test_ac3_is_red_when_one_provenance_slot_is_missing(
+    tmp_path: Path, missing: str
+) -> None:
+    command = str(_readings_check(_contract(), "AC3")["check_value"])
+    readings = {**_AC3_AGREE, missing: ""}
+    assert _run(command, _with_contract(tmp_path, _set(_contract(), **readings))) == 1
+
+
+def test_ac3_is_red_when_the_read_time_is_not_a_utc_time(tmp_path: Path) -> None:
+    command = str(_readings_check(_contract(), "AC3")["check_value"])
+    readings = {**_AC3_AGREE, "ac3_read_time": "yesterday"}
+    assert _run(command, _with_contract(tmp_path, _set(_contract(), **readings))) == 1
 
 
 def test_ac3_is_red_when_the_check_values_differ(tmp_path: Path) -> None:
@@ -167,7 +226,7 @@ def test_ac3_is_red_when_the_values_are_not_check_values(tmp_path: Path) -> None
 
 def test_ac4_is_red_while_the_readings_are_absent(tmp_path: Path) -> None:
     command = str(_readings_check(_contract(), "AC4")["check_value"])
-    assert _run(command, _with_contract(tmp_path, _contract())) == 1
+    assert _run(command, _with_contract(tmp_path, _blank())) == 1
 
 
 def test_ac4_is_green_for_an_accepted_no_op_and_an_unchanged_unit(
@@ -176,6 +235,28 @@ def test_ac4_is_green_for_an_accepted_no_op_and_an_unchanged_unit(
     command = str(_readings_check(_contract(), "AC4")["check_value"])
     root = _with_contract(tmp_path, _set(_contract(), **_AC4_GOOD))
     assert _run(command, root) == 0
+
+
+def test_ac4_is_red_for_invented_readings_without_their_provenance(
+    tmp_path: Path,
+) -> None:
+    """An equal digest pair plus ``accepted`` typed by hand is not evidence."""
+    command = str(_readings_check(_contract(), "AC4")["check_value"])
+    invented = {
+        "ac4_noop_result": "accepted",
+        "ac4_live_unit_digest_before": _DIGEST,
+        "ac4_live_unit_digest_after": _DIGEST,
+    }
+    assert _run(command, _with_contract(tmp_path, _set(_contract(), **invented))) == 1
+
+
+@pytest.mark.parametrize("missing", sorted(_AC4_PROVENANCE))
+def test_ac4_is_red_when_one_provenance_slot_is_missing(
+    tmp_path: Path, missing: str
+) -> None:
+    command = str(_readings_check(_contract(), "AC4")["check_value"])
+    readings = {**_AC4_GOOD, missing: ""}
+    assert _run(command, _with_contract(tmp_path, _set(_contract(), **readings))) == 1
 
 
 @pytest.mark.parametrize(

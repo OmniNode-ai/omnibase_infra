@@ -8,6 +8,13 @@
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now deploy-agent-dev.service
 #
+# ROLLOUT ORDER (OMN-24611): put the key file on the host FIRST, then install this
+# unit. The unit's EnvironmentFile= and its ExecStartPre both read
+# %h/.omnibase/deploy-agent-dev-signing-key.env, which holds the one
+# DEPLOY_AGENT_HMAC_SECRET line (the secret store's DEPLOY_AGENT_DEV_HMAC_SECRET
+# entry delivered to that path). A unit installed before the file exists fails
+# every start (the file is required, no leading `-`) until the file lands.
+#
 # WHY A SECOND UNIT EXISTS
 #
 # deploy-agent.service's tracked drop-in (deploy-agent.service.d/override.conf,
@@ -105,7 +112,7 @@
 # ref -- and prod image promotion is governed by the OMN-13418 grant path, not
 # by which branch this agent's own code tracks.
 #
-# ENV TRANSPORT: NO EnvironmentFile= ON THIS UNIT (OMN-18073)
+# ENV TRANSPORT: NO EnvironmentFile= FOR THE OPERATOR STORE (OMN-18073)
 #
 # This unit deliberately declares NO EnvironmentFile= for the operator store (the one
 # it does declare is the dev signing key, below). ExecStart runs
@@ -166,10 +173,15 @@
 # value either. The dev runtime's containers (which sign with the same name) get
 # the dev key too, because compose interpolates ${DEPLOY_AGENT_HMAC_SECRET} from the
 # agent's environment (docker-compose.infra.yml) and nothing loads the operator
-# store around it: no compose file declares `env_file:` and no deploy-agent compose
-# argv passes `--env-file` (both pinned by
-# tests/unit/test_dev_agent_own_signing_key_omn24565.py). auth.py, the launcher and
-# the compose files do not change.
+# store around it: no compose or other YAML file in this repository declares an
+# `env_file:` key, and the one compose argv the agent runs with `--env-file` is the
+# standalone factory-floor-web recreate (a different compose file and project,
+# whose env file is named by DEPLOY_AGENT_FACTORY_FLOOR_WEB_ENV_FILE). Every other
+# `--env-file` in the directories the agent runs code from is a flag of its own tool
+# or a pre-PR slot script. Both scans read every YAML file and every source line and
+# fail on anything not listed, in
+# tests/unit/test_dev_agent_own_signing_key_omn24565.py. auth.py, the
+# launcher and the compose files do not change.
 #
 # PORT PREFLIGHT (fail-fast, never destructive)
 #
@@ -274,12 +286,19 @@ Environment=KAFKA_SASL_ENV_PREFIX=DEV_
 # manager already carries DEPLOY_AGENT_HMAC_SECRET (environment.d, `systemctl --user
 # import-environment`), the name is protected, so that inherited value would
 # survive a broken file and a test on the environment would pass it. The file must
-# hold exactly one `DEPLOY_AGENT_HMAC_SECRET=<key>` line whose key is letters, digits,
-# `-` and `_` (the whole line, `grep -x`, so an empty, whitespace-only or quoted
-# value, or trailing blanks, fails), and the template placeholder
-# `__REPLACE_WITH_...__` (which has only those characters) is refused by name.
-# `%h` is the unit user's home, expanded by systemd in this line exactly as in
-# EnvironmentFile=. `$$` is systemd's escape for a literal `$`.
+# hold exactly ONE line, and that line must be `DEPLOY_AGENT_HMAC_SECRET=<key>` whose
+# key is letters, digits, `-` and `_` (the whole line, `grep -x`, so an empty,
+# whitespace-only or quoted value, or trailing blanks, fails); the template
+# placeholder `__REPLACE_WITH_...__` (which has only those characters) is refused by
+# name. Every other line is refused -- comments and blank lines included -- because
+# systemd does not read the file the way a line-anchored grep does: it strips leading
+# blanks and takes the LAST assignment of a name (an indented second assignment
+# wins), a comment line ending in a backslash continues onto the next line and
+# swallows a key line that follows it, and any other NAME=value line (for example
+# DEPLOY_AGENT_ENV_PROTECTED=) overrides the unit's own Environment=, since an
+# EnvironmentFile= setting beats Environment= (systemd.exec). A file that is exactly
+# the key line has none of those. `%h` is the unit user's home, expanded by systemd
+# in this line exactly as in EnvironmentFile=. `$$` is systemd's escape for a literal `$`.
 #
 # THE EXIT-2 REFUSAL DOES NOT LOOP. systemd's RestartPreventExitStatus= tests the
 # MAIN process's exit status, not a control process such as ExecStartPre, so it
@@ -287,7 +306,7 @@ Environment=KAFKA_SASL_ENV_PREFIX=DEV_
 # Restart=on-failure and RestartSec=5, a refused start is retried at 5 s spacing
 # and the sixth start inside StartLimitIntervalSec=300 is refused by systemd, so the
 # unit lands in `failed` after five tries (~25 s) instead of looping forever.
-ExecStartPre=/bin/sh -c 'f="%h/.omnibase/deploy-agent-dev-signing-key.env"; grep -Eqx "DEPLOY_AGENT_HMAC_SECRET=[A-Za-z0-9_-]+" "$$f" && ! grep -Eqx "DEPLOY_AGENT_HMAC_SECRET=__REPLACE_WITH_.*" "$$f" && test "$$(grep -c "^DEPLOY_AGENT_HMAC_SECRET" "$$f")" = 1 || { echo "deploy-agent-dev: the key file does not hold exactly one valid DEPLOY_AGENT_HMAC_SECRET line, refusing to start (OMN-24611)" >&2; exit 2; }'
+ExecStartPre=/bin/sh -c 'f="%h/.omnibase/deploy-agent-dev-signing-key.env"; test "$$(grep -c "" "$$f")" = 1 && grep -Eqx "DEPLOY_AGENT_HMAC_SECRET=[A-Za-z0-9_-]+" "$$f" && ! grep -Eqx "DEPLOY_AGENT_HMAC_SECRET=__REPLACE_WITH_.*" "$$f" || { echo "deploy-agent-dev: the key file does not hold exactly one valid DEPLOY_AGENT_HMAC_SECRET line, refusing to start (OMN-24611)" >&2; exit 2; }'
 ExecStartPre=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/preflight_port_free.sh 8098
 ExecStart=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/deploy-agent-launch.sh
 Restart=on-failure
