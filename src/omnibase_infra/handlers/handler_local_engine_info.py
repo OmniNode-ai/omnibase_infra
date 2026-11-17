@@ -18,6 +18,9 @@ from uuid import UUID, uuid4
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.model_local_engine_info_request import (
+    ModelLocalEngineInfoRequest,
+)
 from omnibase_infra.models.model_local_engine_info_result import (
     ModelLocalEngineInfoResult,
 )
@@ -89,6 +92,16 @@ class HandlerLocalEngineInfo:
     async def shutdown(self) -> None:
         """Shut down the handler (no-op for this handler)."""
         self._initialized = False
+
+    async def handle_async(
+        self, request: ModelLocalEngineInfoRequest
+    ) -> ModelLocalEngineInfoResult:
+        """Dispatch entrypoint (OMN-14135): one engine read for one request."""
+        output = await self.execute({"correlation_id": request.correlation_id})
+        result = output.result
+        if not isinstance(result, ModelLocalEngineInfoResult):
+            raise TypeError("engine_info returned no ModelLocalEngineInfoResult")
+        return result
 
     async def execute(self, envelope: dict[str, object]) -> ModelHandlerOutput:
         """Read the engine's CPU count and total memory in bytes.

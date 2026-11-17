@@ -157,3 +157,23 @@ def test_contract_routes_engine_info_to_the_handler() -> None:
         "name": "ModelLocalEngineInfoResult",
         "module": "omnibase_infra.models.model_local_engine_info_result",
     }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_dispatch_entrypoint_returns_the_typed_result() -> None:
+    """OMN-14135: a contract-routed handler is executable through handle_async."""
+    from omnibase_infra.models.model_local_engine_info_request import (
+        ModelLocalEngineInfoRequest,
+    )
+
+    correlation_id = uuid4()
+    proc = _proc(stdout=json.dumps(_GOOD).encode())
+    with patch(_EXEC, AsyncMock(return_value=proc)):
+        result = await HandlerLocalEngineInfo(MagicMock()).handle_async(
+            ModelLocalEngineInfoRequest(correlation_id=correlation_id)
+        )
+    assert isinstance(result, ModelLocalEngineInfoResult)
+    assert result.correlation_id == correlation_id
+    assert result.engine_status == "read"
+    assert result.engine_cpus == 8

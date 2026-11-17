@@ -60,6 +60,9 @@ handler_routing:
 config:
   local_engine_info:
     description: "Read the Docker engine's CPU count and memory via docker info; a read only, nothing is started or changed."
+    input_model:
+      name: ModelLocalEngineInfoRequest
+      module: omnibase_infra.models.model_local_engine_info_request
     output_model:
       name: ModelLocalEngineInfoResult
       module: omnibase_infra.models.model_local_engine_info_result
