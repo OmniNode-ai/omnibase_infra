@@ -1,0 +1,86 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25179
+title: Review findings 1 to 10 on the dev signing key pull request are fixed or argued
+summary: The dev deploy agent unit's start check reads the key file itself, the launcher test pins the operator store path exactly again, the evidence checks of OMN-24611 read the real readings and can fail, the claim that the dev runtime's containers get the dev key is pinned by a test, and the key file test cases and the restart bound are pinned. No runtime source file changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25179-review
+    statement: The ten review findings on the dev signing key pull request are fixed, or argued with evidence in a pull request comment.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the unit's start check validates the key file itself against the pattern for letters, digits, dash and underscore, and a test with the name preset in the environment plus a broken key file exits 2 -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q fails that test on the code at head 08f64f57f7ca and passes at the new head"
+      - id: AC2
+        statement: "AC2: the exact pin on DEPLOY_AGENT_ENV_FILE in the launcher test is an equality against the unit's value at the head, and the stale comment, assert message and dod id are corrected -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q fails when the unit's value is changed to another path"
+      - id: AC3
+        statement: "AC3: the contract checks for AC2, AC3 and AC4 read the real evidence (the store entry, the matching check values, the h051 to h201 no-op, the live unit digest before and after) and the failing-test count on origin/dev is the measured one -- falsifier: uv run pytest tests/ci -k contract -q goes red when the evidence line each check reads is removed from the contract"
+      - id: AC4
+        statement: "AC4: the claim about the dev runtime's containers getting the dev key is backed by a test that no compose file or invocation loads the operator store through env_file or --env-file, or the claim is corrected, and the wording on the empty-valued line is corrected -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q fails when a compose file in the repo adds an env_file entry naming the operator store"
+      - id: AC5
+        statement: "AC5: the key file test cases include a zero-byte file, a whitespace-only value and the placeholder value, the unit's restart policy does not loop on exit 2, and the rollout order (the key file on h201 before the unit is installed) is stated -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q fails each of the three new cases on the old check"
+      - id: AC6
+        statement: "AC6: each of the five blocking findings is fixed or argued with evidence in a PR comment, the required suites ran on the lab (in parts if a whole-suite run timed out, with the parts named), and a comment starting Lab: head=<full head sha> is at the new head -- falsifier: onex scm pr-view OmniNode-ai/omnibase_infra#6008 lists a comment per finding and the Lab comment at the new head sha"
+evidence_requirements:
+  - kind: tests
+    description: The focused tests of the dev unit's start check, the launcher pin and the evidence checks.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn25179-ac1-start-check-reads-the-file
+    description: The unit's ExecStartPre reads the key file and refuses every broken shape with exit 2, also when the name is already in the environment; the same tests are red on the check of the first head.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "start_check" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25179-ac2-launcher-pin-exact
+    description: The launcher test compares the unit's DEPLOY_AGENT_ENV_FILE value for equality; it fails when the unit names another path.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25179-ac3-evidence-checks-can-fail
+    description: The AC2, AC3 and AC4 checks of the OMN-24611 contract read the omnimarket dev branch and the recorded readings; each is red while its reading is absent and red when it disagrees.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_omn24611_evidence_readings_omn25179.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25179-ac4-no-store-load-around-the-env
+    description: No compose file declares an env_file naming the operator store and no deploy-agent compose argv passes --env-file; each scan has a failing control.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "env_file" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25179-ac5-bad-key-files-and-restart-bound
+    description: The zero-byte, whitespace-only and placeholder key files are refused, and the exit 2 refusal is bounded by the start limit.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "start_check or start_limit" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25179-ac6-suite-green
+    description: The deploy agent's unit tests pass at the new head; the per-finding comments and the Lab comment are on the pull request.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -q
+        cwd: ${OMNI_HOME}/omnibase_infra

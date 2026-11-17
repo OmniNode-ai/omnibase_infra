@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-24611
 title: The dev deploy agent signs with its own dev-only key
-summary: The dev deploy agent unit (deploy-agent-dev.service) reads its signing key from its own file, EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env (one DEPLOY_AGENT_HMAC_SECRET line holding the secret store's DEPLOY_AGENT_DEV_HMAC_SECRET), and lists DEPLOY_AGENT_HMAC_SECRET in DEPLOY_AGENT_ENV_PROTECTED so the launcher's source of the operator store and the executor's store re-read never put the shared value back. The live agent's unit and drop-in are not touched; The dev unit also declares one ExecStartPre that refuses the start (exit 2, the name only, never a value) when DEPLOY_AGENT_HMAC_SECRET is unset or empty in the environment its key file gives it, before the launcher sources the operator store, so a key file that is empty, wrong-named or unparseable no longer lets the dev agent run on the shared key. The launcher (a baselined file that only shrinks), auth.py and the compose files do not change.
+summary: The dev deploy agent unit (deploy-agent-dev.service) reads its signing key from its own file, EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env (one DEPLOY_AGENT_HMAC_SECRET line holding the secret store's DEPLOY_AGENT_DEV_HMAC_SECRET), and lists DEPLOY_AGENT_HMAC_SECRET in DEPLOY_AGENT_ENV_PROTECTED so the launcher's source of the operator store and the executor's store re-read never put the shared value back. The live agent's unit and drop-in are not touched; The dev unit also declares one ExecStartPre that reads the key file itself and refuses the start (exit 2, the name only, never a value) unless the file holds exactly one DEPLOY_AGENT_HMAC_SECRET=<letters, digits, - and _> line that is not the template placeholder, before the launcher sources the operator store, so a key file that is empty, whitespace-only, a placeholder, wrong-named or unparseable no longer lets the dev agent start with an empty key, the placeholder or the shared key, even when the user manager already carries the name. The launcher (a baselined file that only shrinks), auth.py and the compose files do not change.
 is_seam_ticket: true
 interface_change: true
 interfaces_touched:
@@ -11,7 +11,7 @@ requirements:
     statement: The dev agent unit declares its own signing key file and protects the key name, and no other unit names that file.
     acceptance:
       - id: AC1
-        statement: "AC1: the dev deploy agent's unit declares one EnvironmentFile for its own signing key file and lists the key name as protected, and no other unit names that file -- falsifier: pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py fails 4 tests against the dev unit on origin/dev"
+        statement: "AC1: the dev deploy agent's unit declares one EnvironmentFile for its own signing key file and lists the key name as protected, and no other unit names that file -- falsifier: pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py fails 28 of its 41 tests against the dev unit on origin/dev"
   - id: req-omn24611-store
     statement: The secret store's own node generates the dev-only entry the key file carries; the node and its test are the omnimarket pull request of this ticket, and this repository names the entry in its environment example.
     acceptance:
@@ -31,13 +31,23 @@ evidence_requirements:
   - kind: tests
     description: The focused tests of the dev unit's own signing key and the launcher.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q
+  - kind: tests
+    description: The evidence checks of AC2, AC3 and AC4 read slots that exist in this contract and fail for what they bind.
+    command: uv run pytest tests/ci/test_contract_omn24611_evidence_readings_omn25179.py -q
+context:
+  evidence_readings:
+    ac3_agent_check_value: ''
+    ac3_store_check_value: ''
+    ac4_noop_result: ''
+    ac4_live_unit_digest_before: ''
+    ac4_live_unit_digest_after: ''
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn24611-ac1-unit
-    description: The dev unit declares the one signing key EnvironmentFile and protects DEPLOY_AGENT_HMAC_SECRET; the launcher keeps the dev value over the store's shared one; the executor overlay leaves the name out. The same test file fails 4 tests with the dev unit from origin/dev.
+    description: The dev unit declares the one signing key EnvironmentFile and protects DEPLOY_AGENT_HMAC_SECRET; the launcher keeps the dev value over the store's shared one; the executor overlay leaves the name out. The same test file fails 28 of its 41 tests with the dev unit from origin/dev (the file at the first head of this pull request failed 10 of its 15).
     source: manual
     binds_ac:
       - AC1
@@ -45,8 +55,8 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn24611-ac1-launcher-refuses
-    description: A key file that is empty, wrong-named or unparseable leaves the name unset or empty; the unit's ExecStartPre refuses the start (exit 2) before the launcher sources the store, and without it the same three files start the agent on the shared or an empty value (the failing control).
+  - id: dod-omn24611-ac1-start-check-refuses
+    description: The unit's ExecStartPre reads the key file itself; a key file that is empty, zero-byte, whitespace-only, a placeholder, wrong-named or unparseable is refused with exit 2 before the launcher sources the store, also when the user manager already carries the name, and without the check the same files start the agent on an empty, placeholder or shared value (the failing controls).
     source: manual
     binds_ac:
       - AC1
@@ -54,8 +64,17 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "start_check" -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24611-ac1-no-store-load-around-the-env
+    description: The dev runtime's containers get the dev key because compose interpolates it from the agent's environment; no compose file declares an env_file naming the operator store and no deploy-agent compose argv passes --env-file (each scan has a failing control).
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "env_file" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24611-ac2-store-entry-named
-    description: The generation itself is the omnimarket pull request of this ticket (its contract entry and test). Here, the environment example names the dev-only entry DEPLOY_AGENT_DEV_HMAC_SECRET, read at the checked-out commit.
+    description: The secret store's own node holds the generated dev-only entry and its generate test is on the omnimarket dev branch. This reads the sibling checkout of omnimarket at origin/dev, so it stays red while the omnimarket pull request of this ticket is unmerged (the criterion is open until then). The environment example of this repository also names the entry.
     source: manual
     binds_ac:
       - AC2
@@ -63,11 +82,14 @@ dod_evidence:
       - check_type: command
         check_value: |-
           set -eu;
-          doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/env-example-full.txt?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
-          grep -q 'DEPLOY_AGENT_DEV_HMAC_SECRET' <<<"$doc"
+          git show origin/dev:src/omnimarket/nodes/node_secret_store_effect/contract.yaml | grep -q 'key: DEPLOY_AGENT_DEV_HMAC_SECRET';
+          git cat-file -e origin/dev:tests/unit/nodes/node_secret_store_effect/test_generate_deploy_agent_dev_key.py
+        cwd: ${OMNI_HOME}/omnimarket
+      - check_type: command
+        check_value: grep -q 'DEPLOY_AGENT_DEV_HMAC_SECRET' docker/env-example-full.txt
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24611-ac3-same-key
-    description: With the dev value presented by the unit's file, the agent environment carries that value under the name auth.py reads, so the check value the agent serves is the dev key's. The reading against the store's entry on the sending hosts is cited in a pull request comment.
+    description: The key check value the dev agent serves equals the key check value of the store's entry on the sending lab hosts. Both readings are recorded under context.evidence_readings (16 hex characters each, from the key check node); the check requires both present and equal, so it is red while either is absent and red when they differ. The unit-level behaviour (the agent environment carries the unit file's value under the name auth.py reads) is the first check.
     source: manual
     binds_ac:
       - AC3
@@ -75,8 +97,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "launcher_keeps_the_dev_key" -q
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          python3 -c "import re,sys,yaml; r=(yaml.safe_load(open('contracts/OMN-24611.yaml')).get('context') or {}).get('evidence_readings') or {}; a=str(r.get('ac3_agent_check_value','')); s=str(r.get('ac3_store_check_value','')); sys.exit(0 if re.fullmatch(r'[0-9a-f]{16}', a) and a == s else 1)"
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24611-ac4-integrated
-    description: Hosted-runner deploy probe reads the dev unit from GitHub at the checked-out commit and requires the signing key EnvironmentFile, so a checkout without the change fails it. The running reading (one signed no-op accepted on h201 and the live unit digest before and after) is cited in a pull request comment.
+    description: Hosted-runner deploy probe reads the dev unit from GitHub at the checked-out commit and requires the signing key EnvironmentFile. The running reading is recorded under context.evidence_readings (the no-op result read back from the dev agent on h201 and the live agent's unit digest, 64 hex characters, before and after the install). The check requires the result to be accepted and the two digests to be present and equal, so it is red until the unit is installed and the no-op ran, and red when the live unit changed.
     source: manual
     binds_ac:
       - AC4
@@ -86,4 +112,8 @@ dod_evidence:
           set -eu;
           doc="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy/deploy-agent-dev.service?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
           grep -q '^EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env$' <<<"$doc"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          python3 -c "import re,sys,yaml; r=(yaml.safe_load(open('contracts/OMN-24611.yaml')).get('context') or {}).get('evidence_readings') or {}; b=str(r.get('ac4_live_unit_digest_before','')); a=str(r.get('ac4_live_unit_digest_after','')); sys.exit(0 if r.get('ac4_noop_result') == 'accepted' and re.fullmatch(r'[0-9a-f]{64}', b) and b == a else 1)"
         cwd: ${OMNI_HOME}/omnibase_infra

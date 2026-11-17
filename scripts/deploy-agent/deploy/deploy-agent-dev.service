@@ -163,8 +163,13 @@
 # before it sources the store and restores it after, so the dev key survives the
 # store's shared value; deploy_agent.executor.operator_store_overlay leaves the
 # protected names out of its re-read, so no compose command re-applies the shared
-# value either, and the dev runtime's containers (which sign with the same name)
-# get the dev key too. auth.py, the launcher and the compose files do not change.
+# value either. The dev runtime's containers (which sign with the same name) get
+# the dev key too, because compose interpolates ${DEPLOY_AGENT_HMAC_SECRET} from the
+# agent's environment (docker-compose.infra.yml) and nothing loads the operator
+# store around it: no compose file declares `env_file:` and no deploy-agent compose
+# argv passes `--env-file` (both pinned by
+# tests/unit/test_dev_agent_own_signing_key_omn24565.py). auth.py, the launcher and
+# the compose files do not change.
 #
 # PORT PREFLIGHT (fail-fast, never destructive)
 #
@@ -244,28 +249,45 @@ Environment=KAFKA_ENVIRONMENT=dev
 Environment=KAFKA_SECURITY_PROTOCOL=SASL_PLAINTEXT
 Environment=KAFKA_SASL_MECHANISM=SCRAM-SHA-256
 Environment=KAFKA_SASL_ENV_PREFIX=DEV_
-# OMN-24611: the key file must also PARSE -- refuse the start when it does not.
+# OMN-24611: the key FILE must hold a usable key -- refuse the start when it does not.
 #
 # The EnvironmentFile= above is required-to-exist (no leading `-`), but that is
-# not required-to-parse. Three broken-file shapes leave DEPLOY_AGENT_HMAC_SECRET
-# unset or empty in the environment systemd hands ExecStartPre (EnvironmentFile=
-# applies to ExecStartPre), each measured with real systemd:
+# not required-to-parse. A broken file leaves DEPLOY_AGENT_HMAC_SECRET unset or
+# empty in the environment systemd hands ExecStartPre (EnvironmentFile= applies to
+# ExecStartPre), and the launcher then either keeps the EMPTY value or sources the
+# operator env store:
 #
 #   1. an empty-valued line (`DEPLOY_AGENT_HMAC_SECRET=`) sets the name to the
-#      EMPTY string;
+#      EMPTY string, which the launcher's protected snapshot restores: the agent
+#      starts with an empty key;
 #   2. a wrong-named line (`DEPLOY_AGENT_HMAC=...`) sets only the wrong name --
 #      the real one is never set at all;
 #   3. an unparseable line (not `NAME=value` at all) sets nothing.
 #
-# In every case the launcher then sources the operator env store and this agent
-# silently runs on the SHARED signing key -- exactly what the unit's own key
-# file exists to prevent. The launcher is a baselined file that cannot grow the
-# check, so the unit refuses the start itself: exit 2 when the name is unset or
-# empty, printing only the NAME to stderr, never a value. It is ordered BEFORE
-# the port preflight below and runs before the launcher sources the store.
-# `$$` is systemd's escape for a literal `$`, so /bin/sh evaluates the test
-# against the environment systemd already assembled.
-ExecStartPre=/bin/sh -c 'test -n "$${DEPLOY_AGENT_HMAC_SECRET:-}" || { echo "deploy-agent-dev: DEPLOY_AGENT_HMAC_SECRET is unset or empty in the key file, refusing to start (OMN-24611)" >&2; exit 2; }'
+# In cases 2 and 3 the agent silently runs on the SHARED signing key -- exactly what
+# the unit's own key file exists to prevent. The launcher is a baselined file that
+# cannot grow the check, so the unit refuses the start itself: exit 2, printing only
+# the NAME to stderr, never a value. It is ordered BEFORE the port preflight below and
+# runs before the launcher sources the store.
+#
+# The check reads the key FILE, not the assembled environment: when the user
+# manager already carries DEPLOY_AGENT_HMAC_SECRET (environment.d, `systemctl --user
+# import-environment`), the name is protected, so that inherited value would
+# survive a broken file and a test on the environment would pass it. The file must
+# hold exactly one `DEPLOY_AGENT_HMAC_SECRET=<key>` line whose key is letters, digits,
+# `-` and `_` (the whole line, `grep -x`, so an empty, whitespace-only or quoted
+# value, or trailing blanks, fails), and the template placeholder
+# `__REPLACE_WITH_...__` (which has only those characters) is refused by name.
+# `%h` is the unit user's home, expanded by systemd in this line exactly as in
+# EnvironmentFile=. `$$` is systemd's escape for a literal `$`.
+#
+# THE EXIT-2 REFUSAL DOES NOT LOOP. systemd's RestartPreventExitStatus= tests the
+# MAIN process's exit status, not a control process such as ExecStartPre, so it
+# would not stop this refusal; the bound is the start limit in [Unit]. With
+# Restart=on-failure and RestartSec=5, a refused start is retried at 5 s spacing
+# and the sixth start inside StartLimitIntervalSec=300 is refused by systemd, so the
+# unit lands in `failed` after five tries (~25 s) instead of looping forever.
+ExecStartPre=/bin/sh -c 'f="%h/.omnibase/deploy-agent-dev-signing-key.env"; grep -Eqx "DEPLOY_AGENT_HMAC_SECRET=[A-Za-z0-9_-]+" "$$f" && ! grep -Eqx "DEPLOY_AGENT_HMAC_SECRET=__REPLACE_WITH_.*" "$$f" && test "$$(grep -c "^DEPLOY_AGENT_HMAC_SECRET" "$$f")" = 1 || { echo "deploy-agent-dev: the key file does not hold exactly one valid DEPLOY_AGENT_HMAC_SECRET line, refusing to start (OMN-24611)" >&2; exit 2; }'
 ExecStartPre=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/preflight_port_free.sh 8098
 ExecStart=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/deploy-agent-launch.sh
 Restart=on-failure

@@ -16,6 +16,7 @@ do disagree -- the positive control without which "the launcher works" is an
 untested assertion.
 """
 
+import hashlib
 import os
 import re
 import subprocess
@@ -28,7 +29,11 @@ _DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
 _DEV_UNIT = _DEPLOY_DIR / "deploy-agent-dev.service"
 _LAUNCHER = _DEPLOY_DIR / "deploy-agent-launch.sh"
 
-_OPERATOR_ENV_STORE_SUFFIX = "/.omnibase/.env"
+#: The exact value the unit pins, kept as a digest so no home directory is spelled
+#: in this file; the operator-store test compares the unit's value to it for equality.
+_OPERATOR_ENV_STORE_SHA256 = (
+    "918c5dd13eb50835a07a94ea8e9d182bf09558f8942aba672e3280913a071efc"
+)
 
 _ENVIRONMENT_RE = re.compile(r'^Environment="?([A-Za-z_][A-Za-z0-9_]*)=')
 
@@ -58,7 +63,8 @@ def test_dev_unit_declares_no_environment_file_on_the_operator_store() -> None:
     the only env file this unit ever had.
     """
     # OMN-24565: the one EnvironmentFile= allowed is the dev agent's own signing-key
-    # file (one hex line, nothing the store's quoting could mangle), never the store.
+    # file (one line of letters, digits, `-` and `_`, nothing the store's quoting
+    # could mangle), never the store.
     offenders = [
         line
         for line in _directive_lines(_DEV_UNIT)
@@ -66,14 +72,17 @@ def test_dev_unit_declares_no_environment_file_on_the_operator_store() -> None:
         and line != "EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env"
     ]
     assert offenders == [], (
-        "deploy-agent-dev.service must not use EnvironmentFile= -- systemd's "
+        "deploy-agent-dev.service must not use EnvironmentFile= for the operator "
+        "store (only its own signing-key file) -- systemd's "
         "parser mangles the store's ANSI-C-quoted value (OMN-18073). Source it "
         f"through {_LAUNCHER.name} instead. Found: {offenders}"
     )
     # The store must still be reachable, by the name the launcher requires.
     store = _unit_value(_DEV_UNIT, "DEPLOY_AGENT_ENV_FILE")
-    assert store.startswith("/")
-    assert store.endswith(_OPERATOR_ENV_STORE_SUFFIX)
+    assert store.endswith("/.omnibase/.env"), "DEPLOY_AGENT_ENV_FILE"
+    assert hashlib.sha256(store.encode()).hexdigest() == _OPERATOR_ENV_STORE_SHA256, (
+        "DEPLOY_AGENT_ENV_FILE is not the operator store path this test pins"
+    )
 
 
 def test_dev_unit_exec_start_goes_through_the_launcher() -> None:
