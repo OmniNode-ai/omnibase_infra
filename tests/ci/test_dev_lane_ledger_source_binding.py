@@ -20,6 +20,8 @@ import os
 import posixpath
 import re
 import shlex
+import subprocess
+from pathlib import Path
 from typing import Any
 
 import click
@@ -30,6 +32,7 @@ from tests.ci._compose_render_omn21099 import (
     DEV_LANE_OVERLAY,
     DEV_LANE_STACK,
     DOCKER_DIR,
+    _compose_environment,
     docker_compose_available,
     load_compose,
     render_stack,
@@ -71,7 +74,10 @@ def require_compose(available: bool, in_ci: bool) -> None:
 
 @pytest.fixture
 def compose_cli() -> None:
-    require_compose(docker_compose_available(), bool(os.environ.get("CI")))
+    require_compose(
+        docker_compose_available(),
+        bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS")),
+    )
 
 
 needs_compose = pytest.mark.usefixtures("compose_cli")
@@ -165,12 +171,128 @@ def test_no_compose_file_mounts_the_overlay_dir_parent() -> None:
     # parent is no lane declaration, so no compose file may mount it.
     offenders = sorted(
         f"{path.name}:{number}"
-        for path in DOCKER_DIR.glob("*.yml")
+        for path in sorted({*DOCKER_DIR.rglob("*.yml"), *DOCKER_DIR.rglob("*.yaml")})
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
         if re.search(r"\$\{ONEX_LANE_OVERLAY_DIR\}/\.\.", line)
         and not line.strip().startswith("#")
     )
     assert offenders == []
+
+
+@pytest.mark.parametrize(
+    "resolver",
+    [
+        'resolve_compose_file_args args "$2" omnibase-infra',
+        "resolve_lane_overlay_dir omnibase-infra-prepr-1",
+    ],
+)
+def test_compose_helpers_export_the_declaration_dir(
+    tmp_path: Path, resolver: str
+) -> None:
+    overlay = tmp_path / "lane-overlays"
+    overlay.mkdir()
+    (tmp_path / "ci_bus_lanes.yaml").write_text("lanes: {}\n", encoding="utf-8")
+    for project in ("omnibase-infra", "omnibase-infra-prepr-1"):
+        (overlay / f"{project}.bifrost.yaml").write_text(
+            "backends: []\n", encoding="utf-8"
+        )
+    result = subprocess.run(
+        [
+            "bash",
+            "-eu",
+            "-c",
+            'source "$1"; ' + resolver + '; printf "%s" "$ONEX_LANE_DECLARATION_DIR"',
+            "compose-test",
+            str(DOCKER_DIR.parent / "scripts/runtime_build/compose_files.sh"),
+            str(DOCKER_DIR.parent),
+        ],
+        env={"PATH": os.environ["PATH"], "ONEX_LANE_OVERLAY_DIR": str(overlay)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == str(tmp_path.resolve())
+
+
+def test_the_integration_render_fixture_supplies_the_required_declaration_dir() -> None:
+    from tests.integration.infra.test_dev_runtime_compose_render import (
+        BASE_REQUIRED_ENV,
+    )
+
+    assert BASE_REQUIRED_ENV["ONEX_LANE_DECLARATION_DIR"]
+
+
+@pytest.mark.parametrize(
+    "stack", [DEV_LANE_STACK, (*DEV_LANE_STACK, "docker-compose.dev-tenant-fold.yml")]
+)
+def test_the_shared_renderer_supplies_the_required_declaration_dir(
+    stack: tuple[str, ...],
+) -> None:
+    assert _compose_environment(stack, {})["ONEX_LANE_DECLARATION_DIR"]
+
+
+def test_both_required_env_manifests_declare_the_mount_source() -> None:
+    for filename in (
+        "dev-lane-required-env.manifest.txt",
+        "dev-tenant-fold-required-env.manifest.txt",
+    ):
+        declared = {
+            line.strip()
+            for line in (DOCKER_DIR / filename).read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        assert "ONEX_LANE_DECLARATION_DIR" in declared
+
+
+@pytest.mark.parametrize("project", ["omnibase-infra-typo", "omnibase-infra-dev"])
+def test_compose_helper_does_not_accept_an_unknown_dev_alias(project: str) -> None:
+    result = subprocess.run(
+        [
+            "bash",
+            "-eu",
+            "-c",
+            'source "$1"; resolve_lane_overlay_filename "$2"',
+            "compose-test",
+            str(DOCKER_DIR.parent / "scripts/runtime_build/compose_files.sh"),
+            project,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode != 0
+    assert "Unknown lane" in result.stderr
+
+
+@needs_compose
+@pytest.mark.parametrize(
+    "stack", [DEV_LANE_STACK, (*DEV_LANE_STACK, "docker-compose.dev-tenant-fold.yml")]
+)
+def test_compose_refuses_only_the_overlay_dir_without_a_declaration_dir(
+    stack: tuple[str, ...],
+) -> None:
+    environment = _compose_environment(
+        stack, {"ONEX_LANE_OVERLAY_DIR": "/srv/state/rendered-lane-overlays"}
+    )
+    # The generic renderer supplies path-shaped placeholders for every required
+    # variable. Remove this one to exercise Compose's own required-variable gate.
+    assert environment.pop("ONEX_LANE_DECLARATION_DIR")
+    command = ["docker", "compose"]
+    for filename in stack:
+        command.extend(["-f", str(DOCKER_DIR / filename)])
+    command.extend(["config", "--format", "json"])
+    result = subprocess.run(
+        command,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert result.returncode != 0
+    assert "ONEX_LANE_DECLARATION_DIR" in result.stderr
 
 
 def _rendered_declaration_mount(stack: tuple[str, ...], name: str) -> dict[str, Any]:

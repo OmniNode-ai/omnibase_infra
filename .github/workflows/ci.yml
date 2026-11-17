@@ -2066,6 +2066,11 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_compose_required_env_coverage.py -v --tb=short
 
+      - name: Check dev lane declaration mounts and evidence (OMN-24854)
+        env:
+          CI: "true"
+        run: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py tests/ci/test_contract_omn24854_checks.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:cacheprovider
+
       - name: Check compose proof teardown/retention policy (OMN-16367)
         run: |
           echo "================================================================"

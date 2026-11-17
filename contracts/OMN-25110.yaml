@@ -1,0 +1,97 @@
+schema_version: 1.0.0
+ticket_id: OMN-25110
+title: Resolve the second review of the lane declaration mount
+summary: Review fixes on the existing PR branch. The launching host commits and pushes the staged tree; required
+  lab suites and the exact-head comment remain pending until recorded.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+- id: req-omn25110-review-findings
+  statement: Each blocking review finding is fixed with a regression or argued with evidence.
+  acceptance:
+  - id: AC1
+    statement: The PR contract keeps its lab-observation criteria unmet until recorded h201 evidence exists and
+      does not bind those observations to mount unit tests.
+  - id: AC2
+    statement: The refresh and dev agent reject pinned and derived declaration folders without ci_bus_lanes.yaml,
+      including a shell holding only a legacy rendered overlay directory.
+  - id: AC3
+    statement: Dev compose callers supply ONEX_LANE_DECLARATION_DIR and both required-env manifests declare it;
+      compose refuses an overlay-only environment.
+  - id: AC4
+    statement: The dev agent fixture isolates the ambient declaration folder and both render entrypoints reject
+      a configured overlay path that names no directory.
+  - id: AC5
+    statement: The pushed head has a Lab comment naming the required lab suites, exit codes and each blocking finding;
+      no runtime observation is claimed without recorded evidence.
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+- id: dod-omn25110-ac1
+  description: The PR contract keeps its lab-observation criteria unmet until recorded h201 evidence exists and
+    does not bind those observations to mount unit tests.
+  source: manual
+  binds_ac:
+  - AC1
+  checks:
+  - check_type: test_passes
+    check_value: uv run --frozen pytest tests/ci/test_contract_omn24854_checks.py -q -p no:cacheprovider
+    cwd: ${OMNI_HOME}/omnibase_infra
+- id: dod-omn25110-ac2
+  description: The refresh and dev agent reject pinned and derived declaration folders without ci_bus_lanes.yaml,
+    including a shell holding only a legacy rendered overlay directory.
+  source: manual
+  binds_ac:
+  - AC2
+  checks:
+  - check_type: test_passes
+    check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py
+      -k without_the_lane_file -q -p no:cacheprovider
+    cwd: ${OMNI_HOME}/omnibase_infra
+- id: dod-omn25110-ac3
+  description: Dev compose callers supply ONEX_LANE_DECLARATION_DIR and both required-env manifests declare it;
+    compose refuses an overlay-only environment.
+  source: manual
+  binds_ac:
+  - AC3
+  checks:
+  - check_type: test_passes
+    check_value: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -p no:cacheprovider
+    cwd: ${OMNI_HOME}/omnibase_infra
+  - check_type: command
+    check_value: 'bash -c ''set -euo pipefail; probe_dir=$(mktemp -d); trap ''"''"''rm -rf "$probe_dir"''"''"''
+      EXIT; uv run python -c ''"''"''from tests.ci._compose_render_omn21099 import DEV_LANE_STACK, _compose_environment;
+      import json, pathlib, sys; env=_compose_environment((*DEV_LANE_STACK,"docker-compose.dev-tenant-fold.yml"),
+      {"ONEX_LANE_DECLARATION_DIR":"/srv/probe/config/lab","ONEX_LANE_OVERLAY_DIR":"/srv/probe/state/rendered-lane-overlays"});
+      pathlib.Path(sys.argv[1]).write_text("\n".join(k+"="+json.dumps(v) for k,v in env.items() if k not in {"PATH","HOME"})+"\n")''"''"''
+      "$probe_dir/env"; env -i PATH="$PATH" HOME="$HOME" LANDING_REAL_DOCKER="${LANDING_REAL_DOCKER:-}" COMPOSE_PROJECT_NAME=declaration-probe
+      docker compose --env-file "$probe_dir/env" --profile "*" -f docker/docker-compose.infra.yml -f docker/docker-compose.dev-lane.yml
+      -f docker/docker-compose.dev-tenant-fold.yml config --format json | uv run python -c ''"''"''import json,
+      posixpath, sys; services=json.load(sys.stdin)["services"]; target="/etc/onex/workspace-config/config/lab";
+      mounts=[[v for v in services[name]["volumes"] if v["target"]==target] for name in ("runtime-effects","omninode-runtime")];
+      assert all(len(ms)==1 and posixpath.normpath(ms[0]["source"])=="/srv/probe/config/lab" and ms[0]["read_only"]
+      is True for ms in mounts); print("declaration mount preflight: both sources verified")''"''"'''''
+    cwd: ${OMNI_HOME}/omnibase_infra
+- id: dod-omn25110-ac4
+  description: The dev agent fixture isolates the ambient declaration folder and both render entrypoints reject
+    a configured overlay path that names no directory.
+  source: manual
+  binds_ac:
+  - AC4
+  checks:
+  - check_type: test_passes
+    check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py
+      -q -p no:cacheprovider
+    cwd: ${OMNI_HOME}/omnibase_infra
+- id: dod-omn25110-ac5
+  description: UNMET until the launcher records the real exact-head Lab comment and required suite results.
+  source: manual
+  binds_ac:
+  - AC5
+  checks:
+  - check_type: command
+    check_value: 'grep -Eq ''^Lab: head=[0-9a-f]{40} host=h053 lane=fix6039-2248 '' docs/validation/OMN-25110-lab-comment.txt'
+    cwd: ${OMNI_HOME}/omnibase_infra

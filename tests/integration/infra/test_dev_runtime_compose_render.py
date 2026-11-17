@@ -85,6 +85,7 @@ _RENDER_ONLY = "render-only"
 BASE_REQUIRED_ENV: dict[str, str] = {
     # OMN-20932: lane overlays are private; the mount refuses without this.
     "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
+    "ONEX_LANE_DECLARATION_DIR": "/nonexistent/onex-lane-declarations",
     "POSTGRES_PASSWORD": "test",
     "VALKEY_PASSWORD": "test",
     "INFISICAL_ENCRYPTION_KEY": "0" * 64,

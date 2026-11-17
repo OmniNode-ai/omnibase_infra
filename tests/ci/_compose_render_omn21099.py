@@ -115,6 +115,11 @@ def _compose_environment(
     stack: tuple[str, ...], overrides: dict[str, str]
 ) -> dict[str, str]:
     environment = {name: os.environ[name] for name in ("PATH", "HOME")}
+    # Keep the lab's compose isolation shim active under a hermetic render.
+    # Its real-binary pointer avoids rediscovering itself through a symlinked PATH.
+    for name in ("LANDING_REAL_DOCKER", "COMPOSE_PROJECT_NAME"):
+        if name in os.environ:
+            environment[name] = os.environ[name]
     for name in stack:
         contents = (DOCKER_DIR / name).read_text(encoding="utf-8")
         for variable in _REQUIRED_VARIABLE_RE.findall(contents):

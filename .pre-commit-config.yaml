@@ -2232,6 +2232,13 @@ repos:
         language: system
         files: docker/(docker-compose\.dev-lane\.yml|dev-lane-required-env\.manifest\.txt)
         pass_filenames: false
+      - id: dev-lane-declaration-mount
+        name: Check dev lane declaration mount and evidence bindings
+        entry: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py tests/ci/test_contract_omn24854_checks.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:cacheprovider
+        language: system
+        files: ^(docker/docker-compose\.dev-(lane|tenant-fold)\.yml|docker/dev-(lane|tenant-fold)-required-env\.manifest\.txt|contracts/OMN-(24854|25110)\.yaml|scripts/runtime_build/compose_files\.sh|src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env\.py|tests/ci/(_compose_render_omn21099|test_dev_lane_ledger_source_binding|test_contract_omn24854_checks)\.py|scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025\.py|tests/integration/infra/test_dev_runtime_compose_render\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-15645: cover the explicit tiers pin, including catalog workers.
       - id: delegation-routing-tiers-binding
         name: Check delegation routing tiers deployment bindings

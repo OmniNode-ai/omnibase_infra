@@ -1,39 +1,112 @@
 schema_version: 1.0.0
 ticket_id: OMN-24854
-title: The dev runtime container mounts the folder that holds the lane declaration, so the commitment ledger source resolves on the dev lane
-summary: >-
-  The dev runtime on the lab host runs omnimarket PR 5347 but every commitment check run ends failed with DelegateLaneSelectionError and the work-state projection reads item_count 0, because config/lab/ci_bus_lanes.yaml is absent in the container. The dev lane compose files mount ${ONEX_LANE_OVERLAY_DIR}/.. at the container's config/lab folder, and the deploy agent rewrites ONEX_LANE_OVERLAY_DIR to its rendered overlay copy under its own state directory, so the parent that is mounted is the agent's job state directory, which holds no lane declaration. This change makes the dev render the agent already applies (render_dev_lane) and the warm refresh export ONEX_LANE_DECLARATION_DIR, computed from the real lane overlay directory before the rewrite, and makes both dev compose files mount ${ONEX_LANE_DECLARATION_DIR:?...}. The change does not run on the lab by itself: the dev runtime reads the lane declaration only after the deploy agent redeploys the dev lane from a revision that carries it, and that redeploy is the step that is not yet done at this head.
+title: The dev runtime container mounts the folder that holds the lane declaration, so the commitment ledger source
+  resolves on the dev lane
+summary: 'The dev runtime on the lab host runs omnimarket PR 5347 but every commitment check run ends failed with
+  DelegateLaneSelectionError and the work-state projection reads item_count 0, because config/lab/ci_bus_lanes.yaml
+  is absent in the container. The dev lane compose files mount ${ONEX_LANE_OVERLAY_DIR}/.. at the container''s config/lab
+  folder, and the deploy agent rewrites ONEX_LANE_OVERLAY_DIR to its rendered overlay copy under its own state directory,
+  so the parent that is mounted is the agent''s job state directory, which holds no lane declaration. This change
+  makes the dev render the agent already applies (render_dev_lane) and the warm refresh export ONEX_LANE_DECLARATION_DIR,
+  computed from the real lane overlay directory before the rewrite, and makes both dev compose files mount ${ONEX_LANE_DECLARATION_DIR:?...}.
+  The change does not run on the lab by itself: the dev runtime reads the lane declaration only after the deploy
+  agent redeploys the dev lane from a revision that carries it, and that redeploy is the step that is not yet done
+  at this head.'
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-omn24854-ledger-source-mount
-    statement: The dev runtime container mounts the real config/lab folder, so the five commitment and work-state nodes read the ledger and run handled on the dev runtime.
-    acceptance:
-      - id: AC1
-        statement: "AC1: one demand or tick reaches node_commitment_check_runner_effect, node_commitment_ledger_compute, node_commitment_writer_effect, node_work_state_projection_compute and node_work_state_projection_effect on the dev runtime on h201 and the log or dispatch record shows it handled -- falsifier: read the dev runtime log on h201 for the run line naming all five nodes after the install"
+- id: req-omn24854-ledger-source-mount
+  statement: The dev runtime container mounts the real config/lab folder, so the five commitment and work-state
+    nodes read the ledger and run handled on the dev runtime.
+  acceptance:
+  - id: AC1
+    statement: 'AC1: one demand or tick reaches node_commitment_check_runner_effect, node_commitment_ledger_compute,
+      node_commitment_writer_effect, node_work_state_projection_compute and node_work_state_projection_effect on
+      the dev runtime on h201 and the log or dispatch record shows it handled -- falsifier: read the dev runtime
+      log on h201 for the run line naming all five nodes after the install'
+  - id: AC2
+    statement: 'AC2: a STATUS row kv pr=omnimarket#5347 installed=h201:revision observed=what ran read_at=UTC is
+      on the rolling ledger -- falsifier: grep -F ''pr=omnimarket#5347'' on the ledger and its archive shows that
+      STATUS row with installed=, observed= and read_at='
+  - id: AC3
+    statement: 'AC3: the next hourly integration pass marks omnimarket PR 5347 SEEN RUNNING -- falsifier: the integration
+      pass line for omnimarket#5347 reads SEEN RUNNING and not NOT RUNNING'
+  - id: AC4
+    statement: The agent, refresh and compose helpers keep the lane declaration mount on a folder containing ci_bus_lanes.yaml
+      when the LLM endpoint render rewrites the overlay directory.
 evidence_requirements:
-  - kind: tests
-    description: The deploy agent and the warm refresh export the declaration folder from the real lane overlay directory, and both dev compose files mount it. The agent test file runs in the deploy-agent-tests job; the compose render file runs in the full suite.
-    command: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:cacheprovider
+- kind: tests
+  description: The deploy agent and the warm refresh export the declaration folder from the real lane overlay directory,
+    and both dev compose files mount it. The agent test file runs in the deploy-agent-tests job; the compose render
+    file runs in the full suite.
+  command: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py
+    -q -p no:cacheprovider
 emergency_bypass:
   enabled: false
-  justification: ""
-  follow_up_ticket_id: ""
+  justification: ''
+  follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn24854-ac1-mount-source
-    description: >-
-      The mount half of AC1: the compose render of the dev lane stack and of the folded main service takes the ledger mount source from ONEX_LANE_DECLARATION_DIR and not from the rendered overlay directory, and the deploy agent's compose environment and the warm refresh keep that variable on the real folder when they rewrite ONEX_LANE_OVERLAY_DIR (dev-fenced agent). The run line naming all five nodes on the dev runtime is read on the lab after the deploy agent redeploys dev and is recorded in a STATUS row of the lane; it is not claimed by these checks. AC2 and AC3 of the ticket are lab observations (the STATUS row and the integration pass line) that exist only after that redeploy; the contract gate refuses an acceptance criterion with no check bound to it, and a check that passes whatever the lab shows is the defect this contract removes, so neither is declared here and both stay unmet on the ticket until the h201 run line, the STATUS row and the SEEN RUNNING line are recorded.
-    source: manual
-    binds_ac:
-      - AC1
-    checks:
-      - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:cacheprovider
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: command
-        check_value: grep -q 'ONEX_LANE_DECLARATION_DIR:?' docker/docker-compose.dev-lane.yml
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: command
-        check_value: grep -q 'ONEX_LANE_DECLARATION_DIR:?' docker/docker-compose.dev-tenant-fold.yml
-        cwd: ${OMNI_HOME}/omnibase_infra
+- id: dod-omn24854-ac1-h201-run
+  description: 'UNMET: record the real lab observation at this path after the dev redeploy. The check fails while
+    that record is absent or incomplete. No observation is claimed by this branch.'
+  source: manual
+  binds_ac:
+  - AC1
+  checks:
+  - check_type: command
+    check_value: 'grep -Eq ''^Lab: host=h201 revision=[0-9a-f]{40} read_at=[0-9TZ:-]+ nodes=node_commitment_check_runner_effect,node_commitment_ledger_compute,node_commitment_writer_effect,node_work_state_projection_compute,node_work_state_projection_effect
+      observed=handled$'' docs/validation/OMN-24854-lab-run.txt'
+    cwd: ${OMNI_HOME}/omnibase_infra
+- id: dod-omn24854-ac2-status-row
+  description: 'UNMET: record the real lab observation at this path after the dev redeploy. The check fails while
+    that record is absent or incomplete. No observation is claimed by this branch.'
+  source: manual
+  binds_ac:
+  - AC2
+  checks:
+  - check_type: command
+    check_value: grep -Eq '^STATUS pr=omnimarket#5347 installed=h201:[0-9a-f]{40} observed=.+ read_at=[0-9TZ:-]+$'
+      docs/validation/OMN-24854-status-row.txt
+    cwd: ${OMNI_HOME}/omnibase_infra
+- id: dod-omn24854-ac3-integration-pass
+  description: 'UNMET: record the real lab observation at this path after the dev redeploy. The check fails while
+    that record is absent or incomplete. No observation is claimed by this branch.'
+  source: manual
+  binds_ac:
+  - AC3
+  checks:
+  - check_type: command
+    check_value: grep -Eq '^SEEN RUNNING pr=omnimarket#5347 revision=[0-9a-f]{40} read_at=[0-9TZ:-]+$' docs/validation/OMN-24854-integration-pass.txt
+    cwd: ${OMNI_HOME}/omnibase_infra
+- id: dod-omn24854-ac4-mount-source
+  description: The mount-source regression checks AC4 only. AC1, AC2 and AC3 remain unmet until the separate recorded
+    lab observations below exist. Unit tests and compose renders do not establish those observations.
+  source: manual
+  binds_ac:
+  - AC4
+  checks:
+  - check_type: test_passes
+    check_value: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py
+      -q -p no:cacheprovider
+    cwd: ${OMNI_HOME}/omnibase_infra
+  - check_type: command
+    check_value: grep -q 'ONEX_LANE_DECLARATION_DIR:?' docker/docker-compose.dev-lane.yml
+    cwd: ${OMNI_HOME}/omnibase_infra
+  - check_type: command
+    check_value: grep -q 'ONEX_LANE_DECLARATION_DIR:?' docker/docker-compose.dev-tenant-fold.yml
+    cwd: ${OMNI_HOME}/omnibase_infra
+  - check_type: command
+    check_value: 'bash -c ''set -euo pipefail; probe_dir=$(mktemp -d); trap ''"''"''rm -rf "$probe_dir"''"''"''
+      EXIT; uv run python -c ''"''"''from tests.ci._compose_render_omn21099 import DEV_LANE_STACK, _compose_environment;
+      import json, pathlib, sys; env=_compose_environment((*DEV_LANE_STACK,"docker-compose.dev-tenant-fold.yml"),
+      {"ONEX_LANE_DECLARATION_DIR":"/srv/probe/config/lab","ONEX_LANE_OVERLAY_DIR":"/srv/probe/state/rendered-lane-overlays"});
+      pathlib.Path(sys.argv[1]).write_text("\n".join(k+"="+json.dumps(v) for k,v in env.items() if k not in {"PATH","HOME"})+"\n")''"''"''
+      "$probe_dir/env"; env -i PATH="$PATH" HOME="$HOME" LANDING_REAL_DOCKER="${LANDING_REAL_DOCKER:-}" COMPOSE_PROJECT_NAME=declaration-probe
+      docker compose --env-file "$probe_dir/env" --profile "*" -f docker/docker-compose.infra.yml -f docker/docker-compose.dev-lane.yml
+      -f docker/docker-compose.dev-tenant-fold.yml config --format json | uv run python -c ''"''"''import json,
+      posixpath, sys; services=json.load(sys.stdin)["services"]; target="/etc/onex/workspace-config/config/lab";
+      mounts=[[v for v in services[name]["volumes"] if v["target"]==target] for name in ("runtime-effects","omninode-runtime")];
+      assert all(len(ms)==1 and posixpath.normpath(ms[0]["source"])=="/srv/probe/config/lab" and ms[0]["read_only"]
+      is True for ms in mounts); print("declaration mount preflight: both sources verified")''"''"'''''
+    cwd: ${OMNI_HOME}/omnibase_infra

@@ -61,6 +61,7 @@ def _overlay_home(root: Path, endpoint_urls: dict[str, str]) -> Path:
 
 
 def _lane_overlays(root: Path) -> Path:
+    (root / "ci_bus_lanes.yaml").write_text("lanes: {}\n", encoding="utf-8")
     lane_dir = root / "lane-overlays"
     lane_dir.mkdir()
     (lane_dir / "dev.bifrost.yaml").write_text(
@@ -97,6 +98,7 @@ def dev_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
     # workspace clone must not.
     monkeypatch.delenv("ONEX_SKILL_OVERLAY_ROOTS", raising=False)
     monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("ONEX_LANE_DECLARATION_DIR", raising=False)
     monkeypatch.setattr(executor_mod._LaneOverlayClone, "path", None)
     monkeypatch.setattr(executor_mod, "operator_store_overlay", dict)
     monkeypatch.setattr(executor_mod, "_load_runtime_policy_env", dict)
@@ -265,6 +267,7 @@ def test_golden_an_already_set_declaration_dir_is_kept(
 ) -> None:
     pinned = dev_agent["tmp"] / "pinned-config-lab"
     pinned.mkdir()
+    (pinned / "ci_bus_lanes.yaml").write_text("lanes: {}\n", encoding="utf-8")
     monkeypatch.setenv("ONEX_LANE_DECLARATION_DIR", str(pinned))
 
     env, _ = _render_dev_lane(dict(os.environ))
@@ -281,6 +284,48 @@ def test_error_a_declaration_dir_that_names_no_directory_is_refused(
 
     with pytest.raises(RuntimeError, match="ONEX_LANE_DECLARATION_DIR names no"):
         _render_dev_lane(dict(os.environ))
+
+
+@pytest.mark.parametrize("entrypoint", ["agent", "refresh"])
+@pytest.mark.parametrize("source", ["pinned", "derived", "legacy-rendered-only"])
+def test_error_declaration_folder_without_the_lane_file_is_refused(
+    dev_agent: dict[str, Any], entrypoint: str, source: str
+) -> None:
+    environ = dict(os.environ)
+    environ.pop("ONEX_LANE_DECLARATION_DIR", None)
+    missing = dev_agent["tmp"] / "missing-declaration"
+    missing.mkdir()
+    if source == "pinned":
+        environ["ONEX_LANE_DECLARATION_DIR"] = str(missing)
+    elif source == "derived":
+        overlays = missing / "lane-overlays"
+        overlays.mkdir()
+        environ["ONEX_LANE_OVERLAY_DIR"] = str(overlays)
+    else:
+        # A shell that sourced a pre-change refresh has only this export.
+        rendered = dev_agent["state"] / "rendered-lane-overlays"
+        rendered.mkdir()
+        environ["ONEX_LANE_OVERLAY_DIR"] = str(rendered)
+    with pytest.raises(RuntimeError, match=r"ci_bus_lanes\.yaml") as error:
+        if entrypoint == "agent":
+            _render_dev_lane(environ)
+        else:
+            _refresh_exports(environ, dev_agent["state"])
+    assert "llm_endpoints overlay" not in str(error.value)
+
+
+@pytest.mark.parametrize("entrypoint", ["agent", "refresh"])
+def test_error_a_mistyped_overlay_directory_is_refused(
+    dev_agent: dict[str, Any], entrypoint: str
+) -> None:
+    environ = dict(os.environ)
+    environ.pop("ONEX_LANE_DECLARATION_DIR", None)
+    environ["ONEX_LANE_OVERLAY_DIR"] = str(dev_agent["tmp"] / "typo")
+    with pytest.raises(RuntimeError, match="ONEX_LANE_OVERLAY_DIR"):
+        if entrypoint == "agent":
+            _render_dev_lane(environ)
+        else:
+            _refresh_exports(environ, dev_agent["state"])
 
 
 def test_control_an_agent_not_fenced_to_dev_keeps_the_stores_address(
