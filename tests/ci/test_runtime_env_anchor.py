@@ -22,10 +22,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from omnibase_infra.models.event_bus.model_event_provenance_overlay import (
-    ModelEventProvenanceOverlay,
-)
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -464,10 +460,18 @@ class TestRuntimeLaneActSwitchPassthrough:
         {"ONEX_RUNTIME_LANE_CLASS", "ONEX_RUNTIME_LANE_CLASS_CONTRACTS"}
     )
     # The deployment's provenance overlay (OMN-23981, OMN-25116): the names the
-    # envelope publish seam reads, taken from the model that reads them so the
-    # two cannot drift. A partial overlay stamps nothing, so all five pass.
+    # envelope publish seam reads. A partial overlay stamps nothing, so all five
+    # pass. Literals, so this file collects where omnibase_infra is not
+    # installed; test_provenance_overlay_names_are_the_five_the_stamp_reads pins
+    # them to the model that reads them.
     PROVENANCE_KEYS: frozenset[str] = frozenset(
-        name for _, name in ModelEventProvenanceOverlay.VARIABLES
+        {
+            "ONEX_PROVENANCE_LANE",
+            "ONEX_PROVENANCE_LANE_KIND",
+            "ONEX_PROVENANCE_HOST",
+            "ONEX_PROVENANCE_INSTALL_SOURCE",
+            "ONEX_PROVENANCE_REVISION",
+        }
     )
     PASSTHROUGH_KEYS: frozenset[str] = (
         LANE_ACT_SWITCH_KEYS | LANE_CLASS_KEYS | PROVENANCE_KEYS
@@ -475,14 +479,14 @@ class TestRuntimeLaneActSwitchPassthrough:
 
     @pytest.mark.unit
     def test_provenance_overlay_names_are_the_five_the_stamp_reads(self) -> None:
-        assert len(self.PROVENANCE_KEYS) == 5
-        assert {
-            "ONEX_PROVENANCE_LANE",
-            "ONEX_PROVENANCE_LANE_KIND",
-            "ONEX_PROVENANCE_HOST",
-            "ONEX_PROVENANCE_INSTALL_SOURCE",
-            "ONEX_PROVENANCE_REVISION",
-        } == self.PROVENANCE_KEYS
+        from omnibase_infra.models.event_bus.model_event_provenance_overlay import (
+            ModelEventProvenanceOverlay,
+        )
+
+        assert (
+            frozenset(name for _, name in ModelEventProvenanceOverlay.VARIABLES)
+            == self.PROVENANCE_KEYS
+        )
 
     @pytest.mark.unit
     def test_passthrough_anchor_declares_each_switch_value_less(self) -> None:

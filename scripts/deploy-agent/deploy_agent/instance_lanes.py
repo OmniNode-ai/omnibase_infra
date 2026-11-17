@@ -58,12 +58,11 @@ import tarfile
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Final, NoReturn
+from typing import Any, Final, NoReturn
 
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-import omnibase_infra.models.event_bus.model_event_provenance_overlay as overlay_model
 from deploy_agent.events import (
     EnumLaneMirrorOutcome,
     ModelLaneMirrorForwarder,
@@ -99,18 +98,24 @@ class ModelInstanceLane(BaseModel):
     proves: tuple[str, ...]
 
 
-def parse_instance_lanes(text: str) -> dict[str, ModelInstanceLane]:
-    """Every non-default instance's block, keyed by instance name.
-
-    Refuses when a non-default instance has no block, when the default
-    instance has one, or when a block does not validate.
-    """
+def _routing_instances(text: str) -> dict[str, Any]:
+    """The routing table's parsed document, which declares an ``instances`` map."""
     try:
         raw = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise RoutingTableError(f"routing table is not YAML: {exc}") from exc
     if not isinstance(raw, dict) or not isinstance(raw.get("instances"), dict):
         raise RoutingTableError("routing table declares no instances")
+    return raw
+
+
+def parse_instance_lanes(text: str) -> dict[str, ModelInstanceLane]:
+    """Every non-default instance's block, keyed by instance name.
+
+    Refuses when a non-default instance has no block, when the default
+    instance has one, or when a block does not validate.
+    """
+    raw = _routing_instances(text)
     default = str(raw.get("default_instance") or "").strip()
     lanes: dict[str, ModelInstanceLane] = {}
     for name, spec in raw["instances"].items():
@@ -191,8 +196,9 @@ LANE_ENV_FRAGMENT_SUFFIX: Final = ".runtime.env.json"
 #: instance of with the class contracts it takes, read by the auto-wiring
 #: ownership filter; and the five variables the Kafka envelope publish seam
 #: reads to stamp the deployment's provenance on events it publishes
-#: (OMN-23981, ``ModelEventProvenanceOverlay.VARIABLES``), which a partial set
-#: leaves unstamped.
+#: (OMN-23981), which a partial set leaves unstamped. They are literals, not
+#: read from ``omnibase_infra``, which the deploy agent's env need not carry; a
+#: test pins them to ``ModelEventProvenanceOverlay.VARIABLES``.
 LANE_ENV_FRAGMENT_SCHEMA_KEYS: Final[dict[str, frozenset[str]]] = {
     "runtime_lane_env.v1": frozenset(
         {
@@ -204,7 +210,11 @@ LANE_ENV_FRAGMENT_SCHEMA_KEYS: Final[dict[str, frozenset[str]]] = {
             "ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD",
             "ONEX_RUNTIME_LANE_CLASS",
             "ONEX_RUNTIME_LANE_CLASS_CONTRACTS",
-            *(name for _, name in overlay_model.ModelEventProvenanceOverlay.VARIABLES),
+            "ONEX_PROVENANCE_LANE",
+            "ONEX_PROVENANCE_LANE_KIND",
+            "ONEX_PROVENANCE_HOST",
+            "ONEX_PROVENANCE_INSTALL_SOURCE",
+            "ONEX_PROVENANCE_REVISION",
             "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY",
             "COST_ESTIMATOR_WEB_SOURCE_URL",
             "ESTIMATOR_GATE_OPEN_SOURCES",
@@ -231,12 +241,7 @@ class ModelLaneEnvFragment(BaseModel):
 
 def instance_runtime_lanes_from_text(text: str) -> dict[str, str]:
     """Each instance's runtime lane id: its ``verify.receipt_lane``."""
-    try:
-        raw = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        raise RoutingTableError(f"routing table is not YAML: {exc}") from exc
-    if not isinstance(raw, dict) or not isinstance(raw.get("instances"), dict):
-        raise RoutingTableError("routing table declares no instances")
+    raw = _routing_instances(text)
     lanes: dict[str, str] = {}
     for name, spec in raw["instances"].items():
         verify = spec.get("verify") if isinstance(spec, dict) else None
@@ -379,8 +384,7 @@ def default_instance_lane_env_exports(repo_root: str | Path, search_root: Path) 
     does, and a refresh never undoes what the agent applied. The overlay clone
     is the one under ``search_root`` that carries fragments.
     """
-    path = Path(repo_root) / ROUTING_TABLE_RELPATH
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw = _routing_instances(_read_routing_table(repo_root))
     default = str(raw.get("default_instance") or "").strip()
     lanes = load_instance_runtime_lanes(repo_root)
     if default not in lanes:

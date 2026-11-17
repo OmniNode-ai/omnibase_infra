@@ -159,6 +159,20 @@ def test_a_fragment_may_set_the_provenance_overlay() -> None:
 
 
 @pytest.mark.unit
+def test_provenance_allowlist_literals_are_the_names_the_stamp_reads() -> None:
+    # The allowlist names them as literals so the deploy agent need not import
+    # omnibase_infra; this pins them to the model that reads them.
+    from omnibase_infra.models.event_bus.model_event_provenance_overlay import (
+        ModelEventProvenanceOverlay,
+    )
+
+    read = frozenset(name for _, name in ModelEventProvenanceOverlay.VARIABLES)
+    allowed = LANE_ENV_FRAGMENT_SCHEMA_KEYS[SCHEMA]
+    assert read == frozenset(PROVENANCE)
+    assert {k for k in allowed if k.startswith("ONEX_PROVENANCE_")} == read
+
+
+@pytest.mark.unit
 def test_a_fragment_may_not_set_a_provenance_key_the_stamp_does_not_read() -> None:
     with pytest.raises(LaneEnvFragmentError, match="ONEX_PROVENANCE_EXTRA"):
         parse_lane_env_fragment(
