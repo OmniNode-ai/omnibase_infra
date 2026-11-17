@@ -18,8 +18,8 @@ from uuid import UUID, uuid4
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.nodes.node_setup_local_provision_effect.models.model_local_provision_effect_output import (
-    ModelLocalProvisionEffectOutput,
+from omnibase_infra.models.model_local_engine_info_result import (
+    ModelLocalEngineInfoResult,
 )
 
 if TYPE_CHECKING:
@@ -97,7 +97,7 @@ class HandlerLocalEngineInfo:
             correlation_id: UUID — for tracing.
 
         Returns:
-            ModelHandlerOutput wrapping ModelLocalProvisionEffectOutput. Every
+            ModelHandlerOutput wrapping ModelLocalEngineInfoResult. Every
             failure is a result with success False and an engine_status of
             ``unavailable`` (Docker missing or the engine not answering) or
             ``malformed`` (an answer without a positive whole NCPU and MemTotal).
@@ -142,7 +142,7 @@ def _output(
         input_envelope_id=uuid4(),
         correlation_id=corr_id,
         handler_id="handler-local-engine-info",
-        result=ModelLocalProvisionEffectOutput(
+        result=ModelLocalEngineInfoResult(
             success=status == "read",
             correlation_id=corr_id,
             engine_status=status,

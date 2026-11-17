@@ -28,8 +28,8 @@ import yaml
 from omnibase_infra.handlers.handler_local_engine_info import (
     HandlerLocalEngineInfo,
 )
-from omnibase_infra.nodes.node_setup_local_provision_effect.models.model_local_provision_effect_output import (
-    ModelLocalProvisionEffectOutput,
+from omnibase_infra.models.model_local_engine_info_result import (
+    ModelLocalEngineInfoResult,
 )
 
 _EXEC = (
@@ -49,13 +49,13 @@ def _proc(stdout: bytes = b"", stderr: bytes = b"", returncode: int = 0) -> Magi
     return proc
 
 
-async def _run(exec_mock: Any) -> ModelLocalProvisionEffectOutput:
+async def _run(exec_mock: Any) -> ModelLocalEngineInfoResult:
     with patch(_EXEC, exec_mock):
         output = await HandlerLocalEngineInfo(MagicMock()).execute(
             {"correlation_id": uuid4()}
         )
     result = output.result
-    assert isinstance(result, ModelLocalProvisionEffectOutput)
+    assert isinstance(result, ModelLocalEngineInfoResult)
     return result
 
 
@@ -153,5 +153,7 @@ def test_contract_routes_engine_info_to_the_handler() -> None:
         "name": "HandlerLocalEngineInfo",
         "module": "omnibase_infra.handlers.handler_local_engine_info",
     }
-    operations = {row["name"] for row in contract["io_operations"]}
-    assert "engine_info" in operations
+    assert contract["config"]["local_engine_info"]["output_model"] == {
+        "name": "ModelLocalEngineInfoResult",
+        "module": "omnibase_infra.models.model_local_engine_info_result",
+    }

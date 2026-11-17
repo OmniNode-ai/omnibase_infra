@@ -33,10 +33,6 @@ io_operations:
     description: "Query which local services are currently running."
     input_fields: ["topology", "compose_file_path", "correlation_id", "whole_project", "env_files"]
     output_fields: ["success", "services_running", "error"]
-  - name: "engine_info"
-    description: "Read the Docker engine's CPU count and memory via docker info; a read only, nothing is started or changed."
-    input_fields: ["correlation_id"]
-    output_fields: ["success", "engine_status", "engine_cpus", "engine_memory_bytes", "error"]
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
@@ -62,6 +58,11 @@ handler_routing:
         module: "omnibase_infra.handlers.handler_cost_estimator_build"
       description: "Build the dev estimator image before the deploy agent recreates it (OMN-21487)."
 config:
+  local_engine_info:
+    description: "Read the Docker engine's CPU count and memory via docker info; a read only, nothing is started or changed."
+    output_model:
+      name: ModelLocalEngineInfoResult
+      module: omnibase_infra.models.model_local_engine_info_result
   cost_estimator_build:
     input_model:
       name: ModelCostEstimatorBuildRequest
