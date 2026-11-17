@@ -3,8 +3,8 @@
 """OMN-25201: the AC6 check of ``contracts/OMN-25179.yaml`` names its ten base failures.
 
 The deploy agent's whole ``tests/unit`` tree reads ``10 failed, 2265 passed`` on the
-merge base ``1f5f40f80b2d`` (lab host h051, read 2026-11-17): the failures are in files
-this pull request does not touch. The AC6 check therefore deselects those ten by name
+merge base ``1f5f40f80b2d`` (lab host h051, read 2026-11-17, 16 workers): the failures are in
+files this pull request does not touch. The AC6 check therefore deselects those ten by name
 and nothing else. These checks pin that list: exactly the ten, each naming a real test
 in a real file, and none of them in the dev signing key test or the launcher test, so a
 failure of the work itself can never hide in the deselect list.
@@ -29,7 +29,8 @@ _UNIT_TESTS = "tests/unit"
 #: reads ``tests/unit/...``; an id spelled from the repository root deselects nothing.
 _PROJECT = "scripts/deploy-agent"
 
-#: The ten tests that fail on the merge base 1f5f40f80b2d, as pytest reported them.
+#: The ten tests that fail on the merge base 1f5f40f80b2d, as pytest reported them on
+#: lab host h051 (read 2026-11-17: ``10 failed, 2265 passed``).
 _BASE_FAILURES = frozenset(
     {
         f"{_UNIT_TESTS}/test_companion_restore_omn22845.py::{name}"
@@ -44,13 +45,12 @@ _BASE_FAILURES = frozenset(
         )
     }
     | {
-        f"{_UNIT_TESTS}/test_executor_prod_image_slot_omn15181.py::"
-        f"TestProdComposeImageSlotRealDocker::{name}"
-        for name in (
-            "test_default_resolves_to_the_exact_preexisting_autoderived_name",
-            "test_override_env_var_repoints_the_resolved_image",
-            "test_red_reproduction_without_the_image_key_resolves_to_none",
-        )
+        f"{_UNIT_TESTS}/test_dev_refresh_llm_endpoint_env_omn24081.py::"
+        "test_seam_the_scripts_own_python_renders_the_overlay_address",
+        f"{_UNIT_TESTS}/test_stability_refresh_llm_endpoint_env_omn24119.py::"
+        "test_error_the_scripts_own_program_prints_nothing_for_an_overlay_without_the_slot",
+        f"{_UNIT_TESTS}/test_stability_refresh_llm_endpoint_env_omn24119.py::"
+        "test_golden_the_scripts_own_program_renders_the_overlay_address",
     }
 )
 _OWN_TEST_FILES = (
