@@ -52,7 +52,17 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c 'd=$(mktemp -d); trap "git worktree remove --force $d" EXIT; git worktree add -q --detach "$d" HEAD; cd "$d"; git show 75969ce9e:scripts/ci/lab_pass_receipt.py > scripts/ci/lab_pass_receipt.py; rc=0; out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider 2>&1) || rc=$?; printf "%s\n" "$out" | grep -E "^(FAILED|[0-9]+ failed)"; test "$rc" -eq 1 && printf "%s\n" "$out" | grep -Eq "^9 failed, 14 passed in "'
+        check_value: |-
+          bash -o pipefail -c '
+          d=$(mktemp -d) || exit 1
+          trap "git worktree remove --force $d" EXIT
+          git worktree add -q --detach "$d" HEAD || exit 1
+          cd "$d" || exit 1
+          git show 75969ce9e:scripts/ci/lab_pass_receipt.py > scripts/ci/lab_pass_receipt.py || exit 1
+          rc=0
+          out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider 2>&1) || rc=$?
+          printf "%s\n" "$out" | grep -E "^(FAILED|[0-9]+ failed)"
+          test "$rc" -eq 1 && printf "%s\n" "$out" | grep -Eq "^9 failed, 14 passed in "'
         cwd: .
   - id: dod-omn25101-ac3-no-other-pin-and-full-suite
     description: >-
@@ -61,7 +71,12 @@ dod_evidence:
     binds_ac: [AC3]
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c 'out=$(grep -rl "check_lane_sync" tests/ | sort); printf "%s\n" "$out"; test -z "$(printf "%s\n" "$out" | grep -v "^tests/ci/")"'
+        check_value: |-
+          bash -o pipefail -c '
+          out=$(grep -rl "check_lane_sync" tests/ | sort) &&
+          printf "%s\n" "$out" &&
+          test -n "$out" &&
+          test "$(printf "%s\n" "$out" | grep -vc "^tests/ci/")" = 0'
         cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider -k "superseded_by_a_newer_pass"

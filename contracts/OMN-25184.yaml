@@ -48,22 +48,45 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c 'out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider 2>&1); printf "%s\n" "$out" | tail -3; ! printf "%s\n" "$out" | grep -Eqi "skipped|deselected"'
+        check_value: |-
+          bash -o pipefail -c '
+          out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider 2>&1)
+          printf "%s\n" "$out" | tail -3
+          printf "%s\n" "$out" | grep -Eq "^23 passed in " &&
+          test "$(printf "%s\n" "$out" | grep -Eci "skipped|deselected")" = 0'
         cwd: .
       - check_type: command
-        check_value: bash -o pipefail -c '! grep -rnE "not live_contact|deselect.*live_contact" .github/workflows pyproject.toml tests/conftest.py tests/ci/conftest.py conftest.py'
+        check_value: |-
+          bash -o pipefail -c '
+          grep -rnE "(not|deselect|ignore)[^#]*live_contact" .github/workflows pyproject.toml tests/conftest.py tests/ci/conftest.py conftest.py
+          test $? -eq 1'
         cwd: .
   - id: dod-omn25184-ac3-cwd-dot-and-nine-failed
     description: >-
-      No check of the two contracts names OMNI_HOME in a cwd line, and the AC2 count check of the OMN-25101 contract matches "^9 failed".
+      No check of the review contracts names OMNI_HOME in a cwd line, every check of each carries `cwd: .` (the count of cwd lines equals the count of checks), and the AC2 count check of the OMN-25101 contract matches "^9 failed".
     source: manual
     binds_ac: [AC3]
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c '! grep -nE "cwd:.*OMNI_HOME" contracts/OMN-25101.yaml contracts/OMN-24976.yaml'
+        check_value: |-
+          bash -o pipefail -c '
+          grep -nE "^ +cwd:.*OMNI_HOM[E]" contracts/OMN-25101.yaml contracts/OMN-24976.yaml contracts/OMN-25184.yaml contracts/OMN-25199.yaml
+          test $? -eq 1'
         cwd: .
       - check_type: command
-        check_value: bash -o pipefail -c 'grep -n "failed, 14 passed" contracts/OMN-25101.yaml; test "$(grep -c "grep -Eq \"^9 failed, 14 passed in \"" contracts/OMN-25101.yaml)" = 1; ! grep -nE "\^\[0-9\]\+ failed" contracts/OMN-25101.yaml'
+        check_value: |-
+          bash -o pipefail -c '
+          for f in contracts/OMN-25101.yaml contracts/OMN-24976.yaml contracts/OMN-25184.yaml contracts/OMN-25199.yaml; do
+          c=$(grep -cE "^ +cwd: \.$" "$f") && t=$(grep -cE "^ +- check_type:" "$f") &&
+          test "$c" -gt 0 && test "$c" = "$t" || exit 1
+          done'
+        cwd: .
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          grep -n "failed, 14 passed" contracts/OMN-25101.yaml &&
+          test "$(grep -c "grep -Eq \"^9 failed, 14 passed in \"" contracts/OMN-25101.yaml)" = 1 &&
+          test "$(grep -cE "\^\[0-9\]\+ failed" contracts/OMN-25101.yaml)" = 0'
         cwd: .
   - id: dod-omn25184-ac4-tests-wide-grep
     description: >-
@@ -72,7 +95,12 @@ dod_evidence:
     binds_ac: [AC4]
     checks:
       - check_type: command
-        check_value: bash -o pipefail -c 'out=$(grep -rl "check_lane_sync" tests/ | sort); printf "%s\n" "$out"; test -n "$out"; test -z "$(printf "%s\n" "$out" | grep -v "^tests/ci/")"'
+        check_value: |-
+          bash -o pipefail -c '
+          out=$(grep -rl "check_lane_sync" tests/ | sort) &&
+          printf "%s\n" "$out" &&
+          test -n "$out" &&
+          test "$(printf "%s\n" "$out" | grep -vc "^tests/ci/")" = 0'
         cwd: .
   - id: dod-omn25184-ac5-no-git-closure-path
     description: >-
@@ -81,7 +109,11 @@ dod_evidence:
     binds_ac: [AC5]
     checks:
       - check_type: command
-        check_value: grep -n "completed" .github/workflows/linear-done-guard-armed.yml
+        check_value: |-
+          bash -o pipefail -c '
+          msgs=$(git log --format="%H %s%n%b" 75969ce9e..HEAD) &&
+          test -n "$msgs" &&
+          test "$(printf "%s\n" "$msgs" | grep -ciE "(clos(e|es|ed|ing)|fix(es|ed|ing)?|resolv(e|es|ed|ing)|complet(e|es|ed|ing))[: ]+(https://[^ ]*/)?OMN-24976")" = 0'
         cwd: .
   - id: dod-omn25184-ac6-run-defaults-none
     description: >-
