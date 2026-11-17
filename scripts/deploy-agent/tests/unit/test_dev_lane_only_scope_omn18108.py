@@ -51,7 +51,11 @@ from deploy_agent.events import (
     Scope,
     services_for_scope,
 )
-from deploy_agent.executor import DeployExecutor, _requested_services_for_up
+from deploy_agent.executor import (
+    DeployExecutor,
+    _requested_services_for_up,
+    load_dev_boot_guard,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -81,6 +85,15 @@ def _bash_array(name: str) -> list[str]:
         if line:
             entries.extend(line.split())
     return entries
+
+
+def _stability_writers() -> tuple[str, ...]:
+    """The seven writers OMN-24903 moves onto the stability build."""
+    effect = load_dev_boot_guard(
+        "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+    )
+    writers: tuple[str, ...] = effect.STABILITY_LANE_WRITER_SERVICES
+    return writers
 
 
 def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:
@@ -255,6 +268,11 @@ class TestTheBuildPhaseReachesThem:
                 side_effect=lambda purpose: nullcontext(),
             ),
             patch.object(DeployExecutor, "_compose_up", return_value=None),
+            # OMN-24903: the writers' recreate and health read are not builds;
+            # test_stability_writers_follow_runtime_omn24903 owns them.
+            patch.object(
+                DeployExecutor, "_recreate_stability_writers", return_value=None
+            ),
         ):
             executor.rebuild_scope(
                 Scope.RUNTIME,
@@ -292,6 +310,19 @@ class TestTheBuildPhaseReachesThem:
         flat = {tok for cmd in builds for tok in cmd}
         missing = [s for s in DEV_LANE_ONLY_BUILDABLE_SERVICES if s not in flat]
         assert not missing, f"a stability build left these writers stale: {missing}"
+
+    def test_a_stability_build_names_no_dev_lane_only_service_but_the_writers(
+        self,
+    ) -> None:
+        # OMN-18108 rule, kept for every dev-only service the ruling does not
+        # move: only the seven writers follow the runtime build onto stability.
+        writers = set(_stability_writers())
+        outside = set(DEV_LANE_ONLY_RUNTIME_SERVICES) - writers
+        assert outside, "positive control: dev-only services outside the writers"
+        builds = self._captured_build_commands(EnumRuntimeLane.STABILITY_TEST)
+        flat = {tok for cmd in builds for tok in cmd}
+        assert flat.isdisjoint(outside)
+        assert writers <= set(DEV_LANE_ONLY_RUNTIME_SERVICES)
 
     def test_a_stability_build_does_not_pass_the_dev_lane_overlay(self) -> None:
         builds = self._captured_build_commands(EnumRuntimeLane.STABILITY_TEST)

@@ -308,8 +308,12 @@ services:
       - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
-      # OMN-24903: the dev runtime main's two overlay mounts, unchanged.
-      - ${DEV_LANE_SKILL_OVERLAY_ROOTS_DIR:-./skill-overlay-roots}:/etc/onex/skill-overlays:ro
+      # OMN-24903: the dev runtime main's two overlay mounts. The roots directory
+      # is the operator env's, shared by every lane this agent deploys, so an
+      # unset value fails the deploy instead of mounting an empty directory. The
+      # store directory keeps dev's own default: no env sets it, and both lanes
+      # share this project directory, so the default resolves to the same clone.
+      - ${DEV_LANE_SKILL_OVERLAY_ROOTS_DIR:?operator env must set DEV_LANE_SKILL_OVERLAY_ROOTS_DIR (the dev lane's overlay roots)}:/etc/onex/skill-overlays:ro
       - ${DEV_LANE_OVERLAY_STORE_ROOTS_DIR:-../../overlays/overlays}:/etc/onex/skill-overlays-store:ro
     # OMN-15217: strict semantic healthcheck — this lane's green is cited as
     # stability-proof for prod promotion (OMN-13418), so it must not be able to

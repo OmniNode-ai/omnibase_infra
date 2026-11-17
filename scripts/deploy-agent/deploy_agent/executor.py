@@ -87,10 +87,7 @@ from deploy_agent.instance_lanes import (
     parse_lane_env_fragment,
     read_lane_env_fragment,
 )
-from deploy_agent.lane_lock_client import (
-    DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
-    lane_lock,
-)
+from deploy_agent.lane_lock_client import DEFAULT_LANE_LOCK_TIMEOUT_SECONDS, lane_lock
 from deploy_agent.lane_policy import (
     ENV_ALLOWED_LANES,
     is_lab_dev_fence,
@@ -106,10 +103,7 @@ from deploy_agent.recreate_supervisor import (
     derive_deps_recreate_budget,
     supervise_compose_up,
 )
-from deploy_agent.ref_fence import (
-    ModelRefLineageFacts,
-    assert_ref_not_stale_branch,
-)
+from deploy_agent.ref_fence import ModelRefLineageFacts, assert_ref_not_stale_branch
 from deploy_agent.routing import AGENT_CLONE_ROOT, lane_flags_for_instance
 from deploy_agent.tracking_ref import (
     load_tracking_ref_from_env,
@@ -4754,6 +4748,9 @@ class DeployExecutor:
                     read_settings=lambda: settings,
                 )
                 self._preflight_runtime_boot([], on_phase_update, lane=lane)
+            # OMN-24903: only a build and a boot preflight that both passed may
+            # replace a running writer.
+            self._recreate_stability_writers(lane, git_sha)
             # OMN-18640: the deps leg of a FULL rebuild CONVERGES rather than
             # recreates. A FULL rebuild is a request to rebuild and replace the
             # RUNTIME images; the broker, the database and the cache are
@@ -4824,6 +4821,9 @@ class DeployExecutor:
                     read_settings=lambda: settings,
                 )
                 self._preflight_runtime_boot(services, on_phase_update, lane=lane)
+                # OMN-24903: after the runtime build and the boot preflight,
+                # before the runtime is recreated, so its events find new writers.
+                self._recreate_stability_writers(lane, git_sha)
         self._compose_up(
             phase,
             scope,
@@ -5149,6 +5149,11 @@ class DeployExecutor:
             read_settings=read_settings,
         )
         return environment
+
+    def _recreate_stability_writers(self, lane: EnumRuntimeLane, sha: str) -> None:
+        load_dev_boot_guard(
+            "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+        ).recreate_stability_lane_writers(sys.modules[__name__], lane=lane, git_sha=sha)
 
     def _pull_pinned_image(self, image_digest: str, lane: EnumRuntimeLane) -> None:
         """Resolve the exact stability-proven image digest for a prod deploy.
