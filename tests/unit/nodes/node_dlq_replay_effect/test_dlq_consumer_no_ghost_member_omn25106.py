@@ -40,14 +40,18 @@ Ticket: OMN-25106
 from __future__ import annotations
 
 import asyncio
+import logging
+from typing import cast
 
 import pytest
+from aiokafka import AIOKafkaConsumer
 from aiokafka.errors import KafkaConnectionError
 
 from omnibase_infra.nodes.node_dlq_replay_effect import engine_dlq_replay
 from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     DLQConsumer,
     ModelDlqReplayEngineConfig,
+    drain_member_closes,
 )
 
 pytestmark = pytest.mark.unit
@@ -60,6 +64,7 @@ class _FakeAIOKafkaConsumer:
 
     instances: list[_FakeAIOKafkaConsumer] = []
     start_mode: str = "ok"  # ok | hang | refuse
+    stop_mode: str = "ok"  # ok | cancel | boom
     stop_seconds: float = 0.0
 
     def __init__(self, *topics: str, **kwargs: object) -> None:
@@ -79,6 +84,11 @@ class _FakeAIOKafkaConsumer:
 
     async def stop(self) -> None:
         await asyncio.sleep(_FakeAIOKafkaConsumer.stop_seconds)
+        if _FakeAIOKafkaConsumer.stop_mode == "cancel":
+            # aiokafka's close-race: a CancelledError this task did not receive.
+            raise asyncio.CancelledError
+        if _FakeAIOKafkaConsumer.stop_mode == "boom":
+            raise RuntimeError("stop failed")
         self.stopped = True
 
 
@@ -86,8 +96,10 @@ class _FakeAIOKafkaConsumer:
 def _fake_kafka_consumer(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeAIOKafkaConsumer.instances = []
     _FakeAIOKafkaConsumer.start_mode = "ok"
+    _FakeAIOKafkaConsumer.stop_mode = "ok"
     _FakeAIOKafkaConsumer.stop_seconds = 0.0
     monkeypatch.setattr(engine_dlq_replay, "AIOKafkaConsumer", _FakeAIOKafkaConsumer)
+    engine_dlq_replay._MEMBER_CLOSES.clear()
 
 
 def _consumer() -> DLQConsumer:
@@ -97,9 +109,8 @@ def _consumer() -> DLQConsumer:
 
 
 async def _settle() -> None:
-    """Let a detached close run to completion."""
-    for _ in range(20):
-        await asyncio.sleep(0.01)
+    """Await every detached close, by the tasks the engine itself tracks."""
+    assert await drain_member_closes() == 0
 
 
 async def test_start_then_stop_stops_the_one_consumer_it_made() -> None:
@@ -159,7 +170,7 @@ async def test_stop_cancelled_mid_close_still_finishes_the_close() -> None:
 
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(consumer.stop(), timeout=0.02)
-    await asyncio.sleep(0.3)
+    await _settle()
 
     assert [c.stopped for c in _FakeAIOKafkaConsumer.instances] == [True]
 
@@ -167,3 +178,119 @@ async def test_stop_cancelled_mid_close_still_finishes_the_close() -> None:
 async def test_stop_returns_when_no_consumer_was_ever_started() -> None:
     await _consumer().stop()
     assert _FakeAIOKafkaConsumer.instances == []
+
+
+async def test_start_start_stop_stops_both_members() -> None:
+    """A second ``start()`` ends the member the first one left, then ``stop()`` the second.
+
+    Both starts succeed, so the first member is neither cleared by a failed
+    start nor stopped by a ``stop()``; only ``start()``'s own close of the
+    reference it still holds ends it.
+    """
+    consumer = _consumer()
+    await consumer.start()
+    await consumer.start()
+    await consumer.stop()
+    await _settle()
+
+    assert len(_FakeAIOKafkaConsumer.instances) == 2
+    assert [c.stopped for c in _FakeAIOKafkaConsumer.instances] == [True, True]
+
+
+async def test_a_close_race_cancelled_error_is_absorbed() -> None:
+    """A CancelledError the close did not receive does not cancel ``stop()``."""
+    consumer = _consumer()
+    await consumer.start()
+    _FakeAIOKafkaConsumer.stop_mode = "cancel"
+
+    await consumer.stop()
+
+    assert not engine_dlq_replay._MEMBER_CLOSES
+
+
+async def test_a_real_cancellation_of_the_close_is_not_absorbed() -> None:
+    fake = _FakeAIOKafkaConsumer()
+    _FakeAIOKafkaConsumer.stop_seconds = 3600.0
+    task = engine_dlq_replay._begin_member_close(cast("AIOKafkaConsumer", fake), 60.0)
+    await asyncio.sleep(0)
+
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert task.cancelled()
+    assert not engine_dlq_replay._MEMBER_CLOSES
+
+
+async def test_a_close_that_never_returns_is_bounded(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _FakeAIOKafkaConsumer.stop_seconds = 3600.0
+    consumer = DLQConsumer(
+        ModelDlqReplayEngineConfig(
+            bootstrap_servers="localhost:9092",
+            dlq_topic=_TOPIC,
+            member_close_timeout_seconds=0.05,
+        )
+    )
+    await consumer.start()
+    caplog.set_level(logging.WARNING, logger=engine_dlq_replay.logger.name)
+
+    await consumer.stop()
+    await _settle()
+
+    assert not engine_dlq_replay._MEMBER_CLOSES
+    assert "did not finish within" in caplog.text
+
+
+async def test_a_close_that_fails_is_logged_not_left_unretrieved(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A non-Kafka error on the start-failure path, where nothing awaits the close."""
+    _FakeAIOKafkaConsumer.start_mode = "refuse"
+    _FakeAIOKafkaConsumer.stop_mode = "boom"
+    caplog.set_level(logging.ERROR, logger=engine_dlq_replay.logger.name)
+    consumer = _consumer()
+
+    with pytest.raises(KafkaConnectionError):
+        await consumer.start()
+    await _settle()
+
+    failures = [r for r in caplog.records if "close failed" in r.getMessage()]
+    assert len(failures) == 1
+    assert failures[0].exc_info is not None
+    assert isinstance(failures[0].exc_info[1], RuntimeError)
+    assert not engine_dlq_replay._MEMBER_CLOSES
+
+
+async def test_shutdown_drain_waits_for_a_close_in_flight() -> None:
+    consumer = _consumer()
+    await consumer.start()
+    _FakeAIOKafkaConsumer.stop_seconds = 0.1
+    stopping = asyncio.ensure_future(asyncio.wait_for(consumer.stop(), timeout=0.02))
+    with pytest.raises(TimeoutError):
+        await stopping
+    assert len(engine_dlq_replay._MEMBER_CLOSES) == 1
+
+    assert await drain_member_closes() == 0
+
+    assert [c.stopped for c in _FakeAIOKafkaConsumer.instances] == [True]
+    assert not engine_dlq_replay._MEMBER_CLOSES
+
+
+async def test_shutdown_drain_reports_a_close_that_outlasts_it() -> None:
+    consumer = _consumer()
+    await consumer.start()
+    _FakeAIOKafkaConsumer.stop_seconds = 3600.0
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(consumer.stop(), timeout=0.02)
+
+    assert await drain_member_closes(timeout_seconds=0.05) == 1
+
+    for task in list(engine_dlq_replay._MEMBER_CLOSES):
+        task.cancel()
+    await asyncio.gather(*engine_dlq_replay._MEMBER_CLOSES, return_exceptions=True)
+
+
+async def test_shutdown_drain_with_nothing_in_flight_returns_at_once() -> None:
+    assert await drain_member_closes(timeout_seconds=0.0) == 0

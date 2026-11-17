@@ -245,6 +245,14 @@ def run_runtime_roll_step(
     """
     service = argv[-1]
     lane = execution.EnumRuntimeLane.DEV
+    if service in execution.SERVICE_HEALTH_TARGET_INDEX:
+        # OMN-25106: a running container that stayed unhealthy is not replaced
+        # by the compose up below, so it is restarted first.
+        restart_if_wedged(
+            execution._health_target_container(lane, service),
+            timeout,
+            execution=execution,
+        )
     wait_budget = execution.runtime_health_probe_budget(lane, service)
     command = list(argv)
     index = command.index("--no-deps")
@@ -511,22 +519,55 @@ PRESENCE_INSPECT_FORMAT: Final = (
 )
 
 
+def _is_wedged(fields: Sequence[str]) -> bool:
+    """Whether inspect fields read a RUNNING container that stayed unhealthy too long.
+
+    Only state ``running`` can be wedged: a paused or restarting container with
+    a failing streak is not what a restart cures, so it reads as it did before.
+    """
+    return (
+        len(fields) >= 3
+        and fields[0].lower() == "running"
+        and fields[1].lower() == "unhealthy"
+        and fields[2].isdigit()
+        and int(fields[2]) >= WEDGED_FAILING_STREAK
+    )
+
+
 def _presence_of(container: str, fields: Sequence[str]) -> tuple[str, str]:
     """``down`` or ``running`` with its detail, from one container's inspect fields."""
     state = fields[0].lower() if fields else ""
     if state in DOWN_STATES:
         return "down", f"{container} is {state}"
-    if (
-        len(fields) >= 3
-        and fields[1].lower() == "unhealthy"
-        and fields[2].isdigit()
-        and int(fields[2]) >= WEDGED_FAILING_STREAK
-    ):
+    if _is_wedged(fields):
         return "down", (
             f"{container} is {state} but unhealthy: {fields[2]} consecutive failed "
             f"health probes, at least {WEDGED_FAILING_STREAK} read as wedged"
         )
     return "running", f"{container} is {state}"
+
+
+def restart_if_wedged(container: str, timeout: int, *, execution: ModuleType) -> bool:
+    """``docker restart`` one container the presence read calls wedged (OMN-25106).
+
+    The restore's rebuild converges with ``compose up -d``, which leaves a
+    running container whose image and configuration are unchanged exactly as it
+    is, and the post-deploy verify declines to recreate a runtime that still
+    answers ``/health`` degraded. A wedged container therefore has to be
+    restarted before the roll waits on it. A read or a restart that docker
+    refuses is not an error here: the roll goes on and its own wait decides.
+    """
+    try:
+        read = execution._run(
+            ["docker", "inspect", "--format", PRESENCE_INSPECT_FORMAT, container],
+            timeout=DOCKER_READ_SECONDS,
+        )
+        if read.returncode != 0 or not _is_wedged(read.stdout.split()):
+            return False
+        restarted = execution._run(["docker", "restart", container], timeout=timeout)
+    except (OSError, execution.subprocess.TimeoutExpired):
+        return False
+    return bool(restarted.returncode == 0)
 
 
 def lane_runtime_containers(
