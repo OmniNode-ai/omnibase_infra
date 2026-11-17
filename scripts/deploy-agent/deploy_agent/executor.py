@@ -4713,6 +4713,9 @@ class DeployExecutor:
             )
             return services
 
+        # OMN-24903: a stability roll with no sha is refused before any build.
+        roll = _rcb().writer_roll(sys.modules[__name__], lane, scope, git_sha)
+
         # OMN-23368: before any build, refuse a service the lane's compose lacks.
         self.pin_staleness_report = load_dev_boot_guard(
             "handler_dev_lane_pin_compose_guard"
@@ -4776,9 +4779,6 @@ class DeployExecutor:
                 lane=lane,
                 force_recreate=False,
             )
-            # OMN-24903: the build and the boot preflight above passed and the
-            # deps have converged, so the writers find their broker and database.
-            _rcb().roll_writers(sys.modules[__name__], lane, git_sha, estimator_env)
             # OMN-18143: every image was built above; compose must not build
             # them again inside the up ceiling.
             self._compose_up(
@@ -4789,6 +4789,7 @@ class DeployExecutor:
                 lane=lane,
                 compose_may_build=False,
                 extra_env=estimator_env,
+                after_migrations=roll,
             )
             self._deploy_gateway_lane(
                 on_phase_update,
@@ -4807,10 +4808,8 @@ class DeployExecutor:
         # cannot reset staged provenance before the dev-only build consumes it.
         # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
         with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
-            settings = (
-                _rcb().dev_lane_build_settings(sys.modules[__name__], lane)
-                if scope == Scope.RUNTIME
-                else None
+            settings = _rcb().dev_lane_build_settings(
+                sys.modules[__name__], lane, scope
             )
             self._compose_build(
                 scope,
@@ -4831,9 +4830,6 @@ class DeployExecutor:
                     read_settings=lambda: settings,
                 )
                 self._preflight_runtime_boot(services, on_phase_update, lane=lane)
-                # OMN-24903: after the runtime build and the boot preflight,
-                # before the runtime is recreated, so its events find new writers.
-                _rcb().roll_writers(sys.modules[__name__], lane, git_sha, estimator_env)
         self._compose_up(
             phase,
             scope,
@@ -4842,6 +4838,7 @@ class DeployExecutor:
             lane=lane,
             compose_may_build=False,
             extra_env=estimator_env,
+            after_migrations=roll,
         )
         # After the infra family, never before it: the forwarder mirrors off
         # this lane's broker, so deploying it against a lane that is still
@@ -6247,6 +6244,7 @@ class DeployExecutor:
         force_recreate: bool = True,
         build: bool = True,
         compose_may_build: bool = True,
+        after_migrations: Callable[..., object] = lambda *_: None,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
 
@@ -6294,6 +6292,9 @@ class DeployExecutor:
             self.rerun_changed_oneshots(
                 lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME], build=build
             )
+            # OMN-24903: the stability writers roll here, on the migrated schema,
+            # before the runtime up and outside the build-context lock.
+            after_migrations(extra_env)
             if self.cloud_migration_failure:
                 had_requested_services = bool(requested_services)
                 requested_services = self._without_failed_cloud_consumers(

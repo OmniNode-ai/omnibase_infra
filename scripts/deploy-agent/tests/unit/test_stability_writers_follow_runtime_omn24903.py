@@ -11,11 +11,13 @@ never named that writer, so it kept the old image while the runtime moved on.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
 import subprocess
-from contextlib import nullcontext
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import create_autospec
@@ -98,6 +100,7 @@ def deploy(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         revisions={},
         images={},
         inspected=[],
+        events=[],
     )
 
     def container(service: str) -> dict[str, object]:
@@ -127,21 +130,49 @@ def deploy(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             built = argv[-1].removeprefix(f"{PROJECT}-")
             out = state.revisions.get(built, SHA) if built != argv[-1] else ""
             out = state.revisions.get(argv[-1], out)
+        if "up" in argv:
+            state.events.append(
+                "up:writers"
+                if WRITER in argv
+                else "up:runtime"
+                if RUNTIME in argv
+                else "up"
+            )
         code = state.returncode if "up" in argv else 0
         return subprocess.CompletedProcess(argv, code, out, "")
 
+    @contextmanager
+    def held(purpose: str) -> Iterator[None]:
+        state.events.append("lock-enter")
+        try:
+            yield
+        finally:
+            state.events.append("lock-exit")
+
     monkeypatch.setattr(execution, "_run", run)
     monkeypatch.setenv(*SENTINEL)
-    monkeypatch.setattr(execution, "_hold_build_context", lambda purpose: nullcontext())
+    monkeypatch.setattr(execution, "_hold_build_context", held)
     state.container = container
-    state.executor = DeployExecutor()
-    for name in (
-        "_compose_build",
-        "_preflight_runtime_boot",
-        "_compose_up",
-        "_deploy_gateway_lane",
+    executor = state.executor = DeployExecutor()
+    for name in ("_compose_build", "_preflight_runtime_boot", "_deploy_gateway_lane"):
+        setattr(executor, name, create_autospec(getattr(executor, name)))
+    # The real ``_compose_up``: the roll runs inside it, after the two migration
+    # helpers, which record their calls here. Only docker and its container reads
+    # are scripted.
+    real_up = DeployExecutor._compose_up.__get__(executor)
+    executor._compose_up = create_autospec(real_up, side_effect=real_up)
+    monkeypatch.setattr(execution, "verify_containers_up", lambda *a, **k: (True, []))
+    monkeypatch.setattr(execution, "finish_recreate_renames", lambda lane: None)
+    monkeypatch.setattr(execution, "remove_recreate_leftovers", lambda *a: None)
+    for name, event in (
+        ("_ensure_runtime_migrations_ready", "migrations"),
+        ("rerun_changed_oneshots", "oneshots"),
     ):
-        setattr(state.executor, name, create_autospec(getattr(state.executor, name)))
+        monkeypatch.setattr(
+            executor, name, lambda event=event, **kwargs: state.events.append(event)
+        )
+    monkeypatch.setattr(executor, "_supervised_deps_recreate", lambda *a, **k: "")
+    monkeypatch.setattr(executor, "observe_deps_convergence", lambda lane: None)
     return state
 
 
@@ -264,27 +295,6 @@ def test_every_writer_the_stability_overlay_declares_is_rolled() -> None:
     assert set(_effect().STABILITY_LANE_WRITER_SERVICES) == declared
 
 
-def test_the_writers_are_built_before_they_are_recreated(
-    deploy: SimpleNamespace,
-) -> None:
-    order: list[str] = []
-    deploy.executor._compose_build.side_effect = lambda *a, **k: order.append("build")
-    base = execution._run
-
-    def run(argv: list[str], timeout: int, **kwargs: object) -> object:
-        if "up" in argv:
-            order.append("up")
-        return base(argv, timeout, **kwargs)
-
-    execution._run = run
-    try:
-        _build(deploy, LANE)
-        _recreate(deploy, LANE)
-    finally:
-        execution._run = base
-    assert order == ["build", "up"]
-
-
 @pytest.mark.parametrize("build_source", BUILD_SOURCES)
 def test_building_the_writers_recreates_nothing(
     deploy: SimpleNamespace, build_source: BuildSource
@@ -318,8 +328,10 @@ def test_a_writer_recreate_exiting_1_fails_the_roll_before_the_runtime_up(
 
 def _assert_only_the_deps_leg_ran(deploy: SimpleNamespace, scope: Scope) -> None:
     """No runtime up: none at all on a RUNTIME roll, the deps leg alone on FULL."""
-    ups = [c.args[:2] for c in deploy.executor._compose_up.call_args_list]
-    assert ups == ([(Phase.CORE, Scope.CORE)] if scope == Scope.FULL else [])
+    assert "up:runtime" not in deploy.events
+    phases = [c.args[:2] for c in deploy.executor._compose_up.call_args_list]
+    expected = [(Phase.CORE, Scope.CORE)] if scope == Scope.FULL else []
+    assert [p for p in phases if p[1] == Scope.CORE] == expected
 
 
 OTHER_LANES = [lane for lane in EnumRuntimeLane if lane != LANE]
@@ -367,23 +379,8 @@ def test_the_writers_are_staged_built_and_recreated_in_the_rolls_order(
     deploy.executor._preflight_runtime_boot.side_effect = lambda *a, **k: order.append(
         "preflight"
     )
-    deploy.executor._compose_up.side_effect = lambda phase, sc, *a, **k: order.append(
-        f"up:{sc.value}"
-    )
-    base = execution._run
-
-    def run(argv: list[str], timeout: int, **kwargs: object) -> object:
-        if "up" in argv and WRITER in argv:
-            order.append("up:writers")
-        elif argv[:2] == ["docker", "inspect"] and "health" not in order:
-            order.append("health")
-        return base(argv, timeout, **kwargs)
-
-    execution._run = run
-    try:
-        _rebuild(deploy, scope, build_source)
-    finally:
-        execution._run = base
+    _rebuild(deploy, scope, build_source)
+    order += deploy.events
     last_main = max(i for i, step in enumerate(order) if step == "build:main")
     # The main build stages the workspace at the deploy's sha; the writers' build
     # reuses it (stage_workspace=False), so it must come after a staging build.
@@ -399,14 +396,35 @@ def test_the_writers_are_staged_built_and_recreated_in_the_rolls_order(
     writers_call = deploy.executor._compose_build.call_args_list[-1]
     assert writers_call.kwargs["stage_workspace"] is False
     assert writers_call.kwargs["build_source"] == build_source
-    # Nothing running is replaced until the build and the boot preflight passed and,
-    # on a FULL roll, the deps leg converged: a writer started before the broker and
-    # the database are up would fail its health wait and the deploy with it.
-    expected = ["build:writers", "preflight"]
-    expected += ["up:core"] if scope == Scope.FULL else []
-    expected += ["up:writers", "health", "up:runtime"]
+    # Nothing running is replaced until the build and the boot preflight passed.
+    expected = ["build:writers", "preflight", "up:writers", "up:runtime"]
     assert [step for step in order if step in expected] == expected
-    assert len(_ups(deploy)) == 1
+
+
+@pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
+def test_the_writers_roll_after_the_migrations_and_the_changed_oneshots(
+    deploy: SimpleNamespace, scope: Scope
+) -> None:
+    """New writers start on the migrated schema, as dev's folded writers do.
+
+    The runtime ``_compose_up`` runs ``_ensure_runtime_migrations_ready`` and
+    ``rerun_changed_oneshots`` before its up. Both record their calls in the
+    fixture, so a roll moved ahead of either fails here, not only a stubbed order.
+    """
+    _rebuild(deploy, scope)
+    steps = ("migrations", "oneshots", "up:writers", "up:runtime")
+    assert [e for e in deploy.events if e in steps] == list(steps)
+
+
+@pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
+def test_the_writers_roll_after_the_build_context_lock_is_released(
+    deploy: SimpleNamespace, scope: Scope
+) -> None:
+    """The lock waits up to 240 s for the reconcile hosts; a roll inside holds it."""
+    _rebuild(deploy, scope)
+    events = deploy.events
+    assert events.count("lock-enter") == events.count("lock-exit") == 1
+    assert events.index("lock-exit") < events.index("up:writers")
 
 
 @pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
@@ -439,24 +457,13 @@ BUILDER_ENV = {"WRITER_ROLL_BUILDER_SENTINEL": "returned by the dev-only builder
 def test_the_writer_up_runs_under_the_environment_the_real_runtime_up_gets(
     deploy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, scope: Scope
 ) -> None:
-    """The real ``_compose_up``: only docker itself and its container reads are stubbed.
-
-    The builder's environment reaches the runtime up as ``extra_env``; a writer up
+    """The builder's environment reaches the runtime up as ``extra_env``; a writer up
     run under ``_compose_env()`` alone would lack it.
     """
     executor = deploy.executor
-    executor._compose_up = DeployExecutor._compose_up.__get__(executor)
     monkeypatch.setattr(
         executor, "_build_dev_lane_only_services", lambda *a, **k: dict(BUILDER_ENV)
     )
-    monkeypatch.setattr(execution, "verify_containers_up", lambda *a, **k: (True, []))
-    monkeypatch.setattr(execution, "finish_recreate_renames", lambda lane: None)
-    monkeypatch.setattr(execution, "remove_recreate_leftovers", lambda *a: None)
-    for name in ("_ensure_runtime_migrations_ready", "rerun_changed_oneshots"):
-        monkeypatch.setattr(executor, name, lambda **kwargs: None)
-    if scope == Scope.FULL:
-        monkeypatch.setattr(executor, "_supervised_deps_recreate", lambda *a, **k: "")
-        monkeypatch.setattr(executor, "observe_deps_convergence", lambda lane: None)
     _rebuild(deploy, scope)
     ups = [
         (argv, env)
@@ -870,3 +877,136 @@ def test_the_overlay_mount_reader_reads_both_syntaxes_without_failing() -> None:
         ("/host/a", "/etc/onex/skill-overlays", "ro"),
         ("/host/b", "/etc/onex/skill-overlays-store", "ro"),
     ]
+
+
+# --- OMN-25390 review of fca8c3ea6891 -------------------------------------
+
+
+def test_every_compose_command_of_the_roll_shares_one_argv_prefix(
+    deploy: SimpleNamespace,
+) -> None:
+    """``up``, ``config`` and ``ps`` all pass ``--profile runtime``.
+
+    The writers sit in the ``runtime`` profile. ``ps`` was the one command that
+    lacked it (review 1345-3); a read of a profile the command does not enable
+    is not the read ``up`` acts on.
+    """
+    _recreate(deploy, LANE)
+    commands = [c for c in deploy.calls if c[:2] == ["docker", "compose"]]
+    prefixes = {}
+    for argv in commands:
+        sub = next(t for t in argv if t in ("up", "ps", "config"))
+        prefixes.setdefault(sub, set()).add(tuple(argv[: argv.index(sub)]))
+    assert set(prefixes) == {"up", "ps", "config"}, "positive control: all three ran"
+    (shared,) = {p for group in prefixes.values() for p in group}
+    assert shared[-2:] == ("--profile", "runtime")
+    # Each writer is listed in the wait and again on the final read.
+    assert sum("ps" in c for c in commands) == 2 * len(_writers())
+
+
+def _merged_lane_services() -> dict[str, dict[str, object]]:
+    files = [
+        str(REPO / "docker" / Path(f).name)
+        for f in execution.lane_config_for(LANE).compose_files
+    ]
+    services = execution._read_compose_services(tuple(files))
+    assert isinstance(services, dict)
+    return services
+
+
+def _built_stage(service: dict[str, object], dockerfile_text: str) -> str:
+    """The Dockerfile stage compose builds for ``service``: ``target``, else the last."""
+    build = service["build"]
+    assert isinstance(build, dict)
+    assert build["dockerfile"] == "docker/Dockerfile.runtime"
+    assert (REPO / "docker" / str(build["context"])).resolve() == REPO
+    target = build.get("target")
+    if target:
+        return str(target)
+    return re.findall(r"^FROM [^\n]* AS (\w+)$", dockerfile_text, re.M)[-1]
+
+
+def test_the_runtime_and_every_writer_build_the_stage_that_carries_the_label() -> None:
+    """A writer built from another stage has no revision label: every deploy refused."""
+    text = (REPO / "docker" / "Dockerfile.runtime").read_text()
+    label = _effect().IMAGE_REVISION_LABEL
+    assert f'{label}="${{VCS_REF}}"' in _runtime_stage(), "the runtime stage stamps it"
+    services = _merged_lane_services()
+    built = (RUNTIME, *_writers())
+    assert len(built) == 8, "positive control: the runtime and the seven writers"
+    assert {
+        name: _built_stage(services[name], text) for name in built
+    } == dict.fromkeys(built, "runtime")
+
+
+def test_a_writer_built_from_another_stage_is_named() -> None:
+    text = (REPO / "docker" / "Dockerfile.runtime").read_text()
+    build = {"context": "..", "dockerfile": "docker/Dockerfile.runtime"}
+    assert _built_stage({"build": build}, text) == "runtime", "positive control"
+    assert _built_stage({"build": {**build, "target": "builder"}}, text) == "builder"
+
+
+@pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
+def test_an_empty_sha_is_refused_at_the_entry_of_rebuild_scope(
+    deploy: SimpleNamespace, scope: Scope
+) -> None:
+    """Before any build, preflight, deps up, lock or docker call."""
+    with pytest.raises(RuntimeError, match="needs the deploy's git sha"):
+        deploy.executor.rebuild_scope(
+            scope, [], lambda *a: None, lane=LANE, git_sha="", git_ref="origin/dev"
+        )
+    deploy.executor._compose_build.assert_not_called()
+    deploy.executor._preflight_runtime_boot.assert_not_called()
+    deploy.executor._compose_up.assert_not_called()
+    assert deploy.calls == [] and deploy.events == []
+
+
+def test_an_empty_sha_is_refused_only_where_the_roll_needs_it() -> None:
+    roll = _effect().writer_roll
+    roll(execution, EnumRuntimeLane.DEV, Scope.RUNTIME, "")
+    roll(execution, LANE, Scope.CORE, "")
+    roll(execution, LANE, Scope.RUNTIME, SHA)
+    with pytest.raises(RuntimeError, match="needs the deploy's git sha"):
+        roll(execution, LANE, Scope.RUNTIME, "")
+
+
+def test_the_only_caller_of_rebuild_scope_passes_the_sha_the_job_pulled() -> None:
+    """The agent's job handler is the one production caller; a test per caller."""
+    package = Path(execution.__file__).parent
+    callers = []
+    for path in sorted(package.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "rebuild_scope"
+            ):
+                keywords = {k.arg: ast.unparse(k.value) for k in node.keywords}
+                callers.append((path.name, keywords.get("git_sha")))
+    assert callers == [("agent.py", "self._current_git_sha")]
+    agent = (package / "agent.py").read_text()
+    assert "self._current_git_sha = self.executor.git_pull(" in agent
+
+
+def test_a_writer_healthy_on_the_first_read_and_unhealthy_on_the_last_fails_the_roll(
+    deploy: SimpleNamespace,
+) -> None:
+    """The wait loop drops a writer once it reads healthy; a final pass re-reads all."""
+    first, last = _writers()[0], _writers()[-1]
+    base = execution._run
+    seen: list[str] = []
+
+    def run(argv: list[str], timeout: int, **kwargs: object) -> object:
+        if argv[:2] == ["docker", "inspect"]:
+            seen.append(argv[-1])
+            if argv[-1] == f"id-{last}":
+                deploy.container(first)["health"] = "unhealthy"
+        return base(argv, timeout, **kwargs)
+
+    execution._run = run
+    try:
+        with pytest.raises(RuntimeError, match=first):
+            _recreate(deploy, LANE)
+    finally:
+        execution._run = base
+    assert seen.count(f"id-{first}") == 2, "read once in the loop, once at the end"

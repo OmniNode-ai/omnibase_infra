@@ -89,10 +89,12 @@ def _declaration(execution: ModuleType) -> dict[str, object]:
 
 
 def dev_lane_build_settings(
-    execution: ModuleType, lane: str
+    execution: ModuleType, lane: str, scope: object = None
 ) -> tuple[ModelCostEstimatorBuildConfig, dict[str, str]] | None:
+    """The estimator build settings, or ``None``; a given ``scope`` must be RUNTIME."""
     if (
         lane != execution.EnumRuntimeLane.DEV
+        or scope not in (None, execution.Scope.RUNTIME)
         or "cost-estimator-web" in execution.lane_config_for(lane).disabled_services
     ):
         return None
@@ -306,6 +308,40 @@ _INSPECT_FORMAT = (
 )
 
 
+def _compose_prefix(execution: ModuleType, lane: str) -> list[str]:
+    """The one argv prefix of every compose command the roll runs.
+
+    ``up``, ``config`` and ``ps`` read the same project and the same profile:
+    the writers sit in the ``runtime`` profile, so a command without it does not
+    see them.
+    """
+    return [*execution._compose_argv(lane), "--profile", "runtime"]
+
+
+def writer_roll(
+    execution: ModuleType, lane: str, scope: object, git_sha: str
+) -> Callable[..., tuple[str, ...]]:
+    """The roll as a step ``_compose_up`` runs once the migrations are ready.
+
+    The runtime ``_compose_up`` runs ``_ensure_runtime_migrations_ready`` and
+    ``rerun_changed_oneshots`` first; the writers must start on the migrated
+    schema, so the executor hands this to ``_compose_up`` instead of rolling
+    them before it. ``_compose_up`` runs outside the build-context lock, and
+    the step receives the environment the runtime up runs under.
+
+    Called at the top of ``rebuild_scope``: the roll compares every image's
+    revision label with ``git_sha``, so an empty one is refused here, before
+    any build, boot preflight or deps up, instead of after them.
+    """
+    rolls = scope in (execution.Scope.RUNTIME, execution.Scope.FULL)
+    if rolls and stability_lane_writer_services(execution, lane) and not git_sha:
+        raise RuntimeError(_NO_SHA)
+    return lambda extra_env=None: roll_writers(execution, lane, git_sha, extra_env)
+
+
+_NO_SHA = "stability lane writer check needs the deploy's git sha"
+
+
 def roll_writers(
     execution: ModuleType,
     lane: str,
@@ -335,9 +371,7 @@ def roll_writers(
     environment = execution._compose_env(extra_env)
     _assert_images_at_deploy_sha(execution, lane, services, environment, git_sha)
     argv = [
-        *execution._compose_argv(lane),
-        "--profile",
-        "runtime",
+        *_compose_prefix(execution, lane),
         "up",
         "-d",
         "--no-deps",
@@ -377,7 +411,7 @@ def _writer_container(
 ) -> str:
     container = _read_docker(
         execution,
-        [*execution._compose_argv(lane), "ps", "-a", "-q", service],
+        [*_compose_prefix(execution, lane), "ps", "-a", "-q", service],
         environment,
     )
     if not container:
@@ -396,6 +430,24 @@ def _writer_state(
     return status, health, int(restarts)
 
 
+def _read_writer(
+    execution: ModuleType, lane: str, service: str, environment: dict[str, str]
+) -> tuple[str, str]:
+    """One writer's (status, health); raises when it is crashing or has no health."""
+    container = _writer_container(execution, lane, service, environment)
+    status, health, restarts = _writer_state(execution, container, environment)
+    if (
+        status in ("restarting", "exited", "dead")
+        or restarts
+        or health in ("unhealthy", "none")
+    ):
+        raise RuntimeError(
+            f"stability lane writer {service} is not stable after the "
+            f"recreate: status={status} health={health} restarts={restarts}"
+        )
+    return status, health
+
+
 def _wait_writers_healthy(
     execution: ModuleType,
     lane: str,
@@ -409,27 +461,32 @@ def _wait_writers_healthy(
     pending = list(services)
     while pending:
         for service in tuple(pending):
-            container = _writer_container(execution, lane, service, environment)
-            status, health, restarts = _writer_state(execution, container, environment)
-            if (
-                status in ("restarting", "exited", "dead")
-                or restarts
-                or health in ("unhealthy", "none")
+            if _read_writer(execution, lane, service, environment) == (
+                "running",
+                "healthy",
             ):
-                raise RuntimeError(
-                    f"stability lane writer {service} is not stable after the "
-                    f"recreate: status={status} health={health} restarts={restarts}"
-                )
-            if status == "running" and health == "healthy":
                 pending.remove(service)
         if not pending:
-            return
+            break
         if time.monotonic() >= deadline:
             raise RuntimeError(
                 "stability lane writer(s) not healthy within "
                 f"{wait_seconds:g}s: {', '.join(pending)}"
             )
         sleep(poll_seconds)
+    # A writer read healthy early is not read again by the loop above, and a
+    # later one may take a while: the roll passes only when every writer is
+    # still running, healthy and unrestarted on one last read after the others.
+    unhealthy = [
+        service
+        for service in services
+        if _read_writer(execution, lane, service, environment) != ("running", "healthy")
+    ]
+    if unhealthy:
+        raise RuntimeError(
+            f"stability lane writer(s) not healthy on the final read: "
+            f"{', '.join(unhealthy)}"
+        )
 
 
 def _service_image(
@@ -447,9 +504,7 @@ def _service_image(
         _read_docker(
             execution,
             [
-                *execution._compose_argv(lane),
-                "--profile",
-                "runtime",
+                *_compose_prefix(execution, lane),
                 "config",
                 "--format",
                 "json",
@@ -498,7 +553,7 @@ def _assert_images_at_deploy_sha(
     runtime this deploy is rolling out is refused with nothing replaced.
     """
     if not git_sha:
-        raise RuntimeError("stability lane writer check needs the deploy's git sha")
+        raise RuntimeError(_NO_SHA)
     runtime = _service_revision(execution, lane, RUNTIME_SERVICE, environment)
     if runtime != git_sha:
         raise RuntimeError(

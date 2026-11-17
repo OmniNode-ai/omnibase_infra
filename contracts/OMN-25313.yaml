@@ -83,7 +83,7 @@ dod_evidence:
         cwd: .
   - id: dod-omn25313-ac6
     description: >-
-      The pull request head moved off the reviewed head 7ce37985d13c. The per-finding comments and the Lab comment at the new head are posted by the lane and read by the reviewer, so this check runs under the local Done gate only.
+      The pull request head moved off the reviewed head 7ce37985d13c. The check reads the pull request head only, never a comment: the per-finding comments and the Lab comment at the new head are posted by the lane and read by the reviewer, so this check runs under the local Done gate only.
     source: manual
     execution_scope: local_done_gate
     binds_ac:

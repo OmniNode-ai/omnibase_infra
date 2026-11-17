@@ -19,13 +19,13 @@ requirements:
       - id: AC4
         statement: "AC4: the unrelated import reflow at the top of the deploy agent executor is reverted and the diff of that file shows no import-only hunk -- falsifier: `git diff origin/dev HEAD -- scripts/deploy-agent/deploy_agent/executor.py` shows a hunk that changes only import lines"
       - id: AC5
-        statement: "AC5: one PR comment starts `Lab: head=<full 40 character head sha>` at the new head with the red run at the base shown, one comment per finding 1 to 9 is posted, and the contracts' dod check reads the Lab comment's full sha (or AC7 of the contract is amended) -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6047` lists no comment starting with the full new head sha"
+        statement: "AC5: one PR comment starts `Lab: head=<full 40 character head sha>` at the new head with the red run at the base shown, one comment per finding 1 to 9 is posted, and the contracts' dod check reads the pull request's commits or head only (no local reader returns a comment body, so the reviewer reads the sha in the Lab comment; amended by OMN-25390) -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6047` lists no comment starting with the full new head sha"
       - id: AC6
         statement: "AC6: the unterminalised-row fixture records the I10 row and a test asserts both rows from the fixture, or the PR's AC6 is amended in a comment with the reason -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q` fails when the fixture drops the I10 row"
       - id: AC7
-        statement: "AC7: the Lab comment names the five deploy-agent unit files that fail at the head and shows each also fails at origin/dev, and none of them is test_cost_estimator_build_omn21487 or test_gateway_lane_scope_omn18134 -- falsifier: the Lab comment lists fewer than five file names or names one of those two files"
+        statement: "AC7: the Lab comment names the four deploy-agent unit files that fail at the head and shows each also fails at origin/dev, and none of them is test_cost_estimator_build_omn21487 or test_gateway_lane_scope_omn18134 -- falsifier: the Lab comment lists fewer than four file names or names one of those two files"
       - id: AC8
-        statement: "AC8: the full recreate leg asserts that the compose up helper is not called for the runtime leg and that core only is brought up for the full leg, and sits inside the block that holds the preflight -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q` fails when the recreate moves out of that block"
+        statement: "AC8: the full recreate leg asserts that the compose up helper is not called for the runtime leg and that core only is brought up for the full leg, and the writer roll sits outside the block that holds the build context and the preflight, inside the runtime _compose_up after its migrations (amended by OMN-25390) -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q` fails when the recreate moves out of that block"
       - id: AC9
         statement: "AC9: the two vacuous assertions (the env check that passes for None, and the constant sha length check) are dropped, and every caller of the rebuild scope passes a full sha -- falsifier: `grep -n \"len(SHA) == 40\" scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py` matches a line"
 evidence_requirements:
@@ -80,7 +80,7 @@ dod_evidence:
         cwd: .
   - id: dod-omn25367-ac5
     description: >-
-      The pull request head is a commit citing OMN-25367 on top of the reviewed head 9bdbc60874d2. No local reader returns a pull request comment body (onex scm verbs lists no comment read, and pr-view returns no comments), so the Lab comment's head is read by the reviewer; this check runs under the local Done gate only.
+      The pull request head is a commit citing OMN-25367 on top of the reviewed head 9bdbc60874d2. No local reader returns a pull request comment body (onex scm verbs lists no comment read, and pr-view returns no comments), so this check reads commits only and the reviewer reads the head in the Lab comment; it runs under the local Done gate only.
     source: manual
     execution_scope: local_done_gate
     binds_ac:
