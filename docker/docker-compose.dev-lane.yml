@@ -145,6 +145,22 @@ x-dev-lane-logging: &dev_lane_logging
   options:
     max-size: "10m"
     max-file: "3"
+# OMN-25194: omninode-runtime's own log retention. The base file's 10m x 3
+# held 18 to 27 minutes of this service, because the main runtime writes about
+# 79 MB of json-file an hour (measured on the dev lane host, 2026-11-17: 101,974
+# lines, 17.6 MB of `docker logs --timestamps` text over 16.4 minutes, about 22
+# MB on disk with the json-file envelope). The hourly integration pass reads
+# merged changes running on the lane from this log, and an hourly or daily node
+# run never shows in 20 minutes. json-file drops its oldest file whole, so the
+# guaranteed window is (max-file - 1) x max-size: 14 x 200m = 2800 MB, 35 hours
+# at the measured rate, against a 26 hour floor of 2080 MB. A change to either
+# number below the floor fails tests/ci/test_dev_runtime_log_retention_omn25194.py.
+# Only omninode-runtime takes this; every other service keeps `dev_lane_logging`.
+x-dev-lane-runtime-logging: &dev_lane_runtime_logging
+  driver: json-file
+  options:
+    max-size: "200m"
+    max-file: "15"
 # OMN-19812: the runtime image's open-file limit, as x-runtime-base declares
 # it in the base file (anchors do not cross compose files).
 x-dev-lane-runtime-ulimits: &dev_lane_runtime_ulimits
@@ -980,6 +996,8 @@ services:
       - "com.omninode.service=runtime-main"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+    # OMN-25194: 26 hours of this service's log, not 20 minutes (see the anchor).
+    logging: *dev_lane_runtime_logging
   runtime-effects:
     build: *dev_lane_composed_runtime_build
     # OMN-22930 (T8): gated from the runtime policy like the folded writers. On
