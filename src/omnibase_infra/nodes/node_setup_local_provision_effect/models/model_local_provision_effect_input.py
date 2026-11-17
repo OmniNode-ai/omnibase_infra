@@ -38,13 +38,16 @@ class ModelLocalProvisionEffectInput(BaseModel):
         ...,
         description="Correlation ID for tracing.",
     )
-    operation: Literal["provision_local", "teardown_local", "status_check"] = Field(
+    operation: Literal[
+        "provision_local", "teardown_local", "status_check", "engine_info"
+    ] = Field(
         ...,
         description=(
             "Operation to perform: "
             "provision_local (start services), "
             "teardown_local (stop and remove), "
-            "status_check (query running state)."
+            "status_check (query running state), "
+            "engine_info (read the engine's CPU count and memory)."
         ),
     )
     max_wait_seconds: int = Field(

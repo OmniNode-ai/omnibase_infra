@@ -1,0 +1,32 @@
+schema_version: 1.0.0
+ticket_id: OMN-23413
+title: The local provision node reads the Docker engine's CPU count and memory
+summary: The local provision effect node gains a read-only engine_info operation that runs docker info once and returns the engine's CPU count and memory, so the onex setup stack check compares the selected services' reservations with the engine through this node instead of calling Docker itself. Every failure is a typed result (unavailable or malformed), never an exception, and nothing is started or changed.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn23413-engine-info
+    statement: The selected local stack's engine resources are read through the local provision node, its existing owner.
+    acceptance:
+      - id: AC7
+        statement: "AC7: the advanced local-stack capability reconciles through its existing owner; the engine CPU and memory read is the node's engine_info operation, which returns a typed unavailable or malformed result for Docker missing, the engine not answering, non-JSON output and missing, zero, negative, fractional, boolean or non-finite NCPU or MemTotal -- falsifier: uv run pytest tests/unit/nodes/test_node_setup_local_provision_effect/test_engine_info.py -q"
+evidence_requirements:
+  - kind: tests
+    description: The local provision node tests pass at the pushed head.
+    command: uv run pytest tests/unit/nodes/test_node_setup_local_provision_effect -q -n 0 --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23413-ac7-engine-info
+    description: 'AC7: the engine_info operation reads NCPU and MemTotal with one docker info call and refuses Docker missing, a daemon that does not answer and every malformed value as a typed result; the contract routes engine_info to HandlerLocalEngineInfo.'
+    source: manual
+    binds_ac:
+      - AC7
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/test_node_setup_local_provision_effect/test_engine_info.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .

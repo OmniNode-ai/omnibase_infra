@@ -9,6 +9,7 @@ Ticket: OMN-3491
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -38,6 +39,23 @@ class ModelLocalProvisionEffectOutput(BaseModel):
     services_running: tuple[str, ...] = Field(
         default=(),
         description="Names of services currently running (status_check only).",
+    )
+    engine_status: Literal["read", "unavailable", "malformed"] | None = Field(
+        default=None,
+        description=(
+            "engine_info only: read, unavailable (Docker missing or the engine "
+            "not answering) or malformed (no positive whole NCPU and MemTotal)."
+        ),
+    )
+    engine_cpus: int | None = Field(
+        default=None,
+        ge=1,
+        description="engine_info only: CPUs the Docker engine exposes.",
+    )
+    engine_memory_bytes: int | None = Field(
+        default=None,
+        ge=1,
+        description="engine_info only: memory the Docker engine exposes, in bytes.",
     )
     error: str | None = Field(
         default=None,
