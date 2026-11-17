@@ -40,3 +40,14 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "from omnibase_infra.handlers.handler_k3s_lab_preflight import check_k3s_server_config as c; from omnibase_infra.models.model_k3s_lab_preflight_request import ModelK3sLabPreflightRequest as R; assert c(R(config_text=\"flannel-iface: eth0\", require_rendered=False)).reason == \"node-ip-unset\""'
+  - id: dod-omn24956-preflight-integration-proof
+    description: >-
+      The preflight handler passes a config whose node-ip a live interface of the host holds and refuses one it does not, read from the host's real ip -br addr table on a lab host through the lab work runner. Hosted CI cannot reach the lab, so only the local Done gate runs this check.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-24956 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/handlers/test_handler_k3s_lab_preflight_integration.py -q --no-cov
+        cwd: .
