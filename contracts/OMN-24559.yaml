@@ -56,11 +56,11 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/mixins/test_mixin_node_introspection_heartbeat_health.py tests/unit/runtime/test_runtime_host_process_heartbeat_required.py -q --no-cov -p no:cacheprovider
         cwd: .
   - id: dod-omn24559-ac4
-    description: 'hosted proxy for AC4: the tests pass here; the heartbeat events per runtime id and the forced-failure not-ready reading are read on the dev runtime after the branch image or the next roll and posted as a pull request comment naming the running revision.'
+    description: 'hosted proxy for AC4: the new heartbeat and runtime-error seam tests pass here; the heartbeat events per runtime id and the forced-failure not-ready reading are read on the dev runtime after the branch image or the next roll and posted as a pull request comment naming the running revision.'
     source: manual
     binds_ac:
       - AC4
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/integration/runtime/test_runtime_heartbeat_mandatory.py -q --no-cov -p no:cacheprovider
+        check_value: uv run --frozen pytest tests/integration/runtime/test_runtime_heartbeat_seams_omn24559.py -q --no-cov -p no:cacheprovider
         cwd: .
