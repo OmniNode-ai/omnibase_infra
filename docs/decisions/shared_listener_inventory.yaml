@@ -46,6 +46,13 @@ probe_sites:
       the dispatch loop task ended unexpectedly (is_loop_healthy), or the phantom-subscription probe flagged a core-runtime topic: assigned, HWM advanced by this runtime's own polls, LAG 0 and zero messages dispatched (PhantomAlarmMonitor.evaluate)
     flips_without_fault_of_its_runtime: >-
       no. Both inputs are this runtime's own task and its own poll and dispatch counters. Note for T2: a paused standby must keep polled_by_topic at zero, or the phantom rule reads a paused partition as a phantom
+  src/omnibase_infra/runtime/runtime_host_process.py:
+    count: 1
+    probe: heartbeat (HandlerRuntimeIntrospectionStartup.heartbeat_readiness)
+    flips_when: >-
+      the introspection heartbeat cannot publish: consecutive publish failures reach introspection_heartbeat_unhealthy_after_failures, or the heartbeat never started. Registered only when heartbeat_required is set
+    flips_without_fault_of_its_runtime: >-
+      no. The inputs are this runtime's own heartbeat publish success and failure counts
 # Contract HTTP mounts and local-ingress handlers, served by both runtimes during
 # an overlap. The listener's second web.Application is built by the same
 # ServiceHealth._build_app as the in-container one, including the AsgiMounts
