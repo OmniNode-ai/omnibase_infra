@@ -31,7 +31,7 @@ _RUN_ID = 37928489908
 _NOW = datetime(2026, 10, 9, 12, 0, 0, tzinfo=UTC)
 _RUNS: list[dict[str, object]] = [
     {"id": 1, "event": "pull_request"},
-    {"id": _RUN_ID, "event": "pull_request_target"},
+    {"id": _RUN_ID, "event": "pull_request"},
 ]
 
 
@@ -102,7 +102,7 @@ def test_ci_summary_registration_absent_dod_verify_blocks_pull_request(
     assert _DOD_VERIFY in report
 
 
-def test_ci_summary_registration_green_pull_request_target_dod_verify_satisfies(
+def test_ci_summary_registration_green_pull_request_dod_verify_satisfies(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     rows = [*_other_expected_rows(), _row(_DOD_VERIFY)]
