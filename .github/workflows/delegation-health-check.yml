@@ -4,29 +4,25 @@
 # delegation-health-check.yml -- OMN-19451. omnibase_infra's caller of the
 # delegation-health check (see delegation-health-reusable.yml for the design).
 #
-# ENFORCING. The check-run this caller produces, `delegation-health-check /
-# Delegation Health Check`, is a member of EXPECTED_EXTERNAL_CONTEXTS in
-# scripts/ci/ci_summary_gate.py, so CI Summary requires it present, completed
-# and green on every pull request head and every merge-queue head (operator
-# ruling 2026-09-29T12:02:35Z, OMN-19998: no shadow or advisory mode). That
-# registration is what the shape below exists to satisfy: it runs on
-# `pull_request` AND `merge_group`, the one job carries no `needs:`, no
-# job-level `if:` and no path filter, so it can neither skip-as-passed nor
-# leave a queue head waiting on a context that never reports. A fork pull
-# request carries no secrets, so it cannot read the verdicts and fails closed.
+# A SIGNAL, NOT A GATE (OMN-25514). The check-run this caller produces,
+# `delegation-health-check / Delegation Health Check`, is in no required list:
+# it reads delegation verdicts from lab and stability runs, and a broken lab
+# froze dev merges while dev was healthy. It runs on a schedule and on every
+# push to dev and writes its verdict to the job summary.
+# scripts/ci/ci_summary_sweep_exclusions.json admits the row a
+# head that ran the old pull_request caller still carries, until it expires.
 # tests/ci/test_delegation_health_check_omn19451.py pins all of it.
 name: Delegation Health Check
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+  schedule:
+    - cron: "23 */4 * * *"
+  push:
     branches: [dev]
-  merge_group:
 
 concurrency:
-  # A merge-queue entry carries its own github.ref, so queue heads never
-  # cancel one another; pull-request runs cancel their superseded predecessor.
-  group: delegation-health-check-${{ github.event.pull_request.number || github.ref }}
+  # One run per ref at a time; a newer push to dev supersedes an older run.
+  group: delegation-health-check-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -35,9 +31,9 @@ permissions:
 
 jobs:
   # No `name:` on purpose: the check-run is then `<job id> / <called job name>`,
-  # `delegation-health-check / Delegation Health Check`, the exact context
-  # EXPECTED_EXTERNAL_CONTEXTS registers and the prefix the omniclaude
-  # advisory-job gate matches a called workflow's job by.
+  # `delegation-health-check / Delegation Health Check`, the name the sweep
+  # exclusion admits and the prefix the omniclaude advisory-job gate matches a
+  # called workflow's job by.
   delegation-health-check:
     uses: ./.github/workflows/delegation-health-reusable.yml
     with:
