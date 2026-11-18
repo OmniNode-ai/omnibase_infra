@@ -1,8 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-24562
-title: "The deploy agent resets only its own deploy-source clone and the stability lane retires the roles its main runtime folds"
-summary: >-
-  The deploy agent's deploy-source clone is a declared path under its state directory, created on first start at the commit the agent was serving, and a guard refuses a deploy-source path that resolves to a canonical clone; a pinned job no longer moves the canonical clone off dev. The stability lane retires the container of every role its main runtime folds, so the old runtime-effects container no longer holds port 18086.
+title: "A failed deploy-agent job, or a code-ref pin within six hours of expiry, writes an alarm row with an owner line"
+summary: "Stacked on the job reading of OMN-24617 (omnibase_infra#6012, related, not superseded). The node_deploy_job_reading_effect handler now also writes one ledger STATUS row with src=alarm and an owner line for a failed dev or stability job (alarm=deploy-job-failed), and the agent's idle tick writes one for a live code-ref pin inside the contract's six-hour window before its expiry (alarm=pin-near-expiry). Prod writes nothing. The deploy agent also resets only its own deploy-source clone: the clone is a declared path under its state directory, created on first start at the commit the agent was serving, and a guard refuses a deploy-source path that resolves to a canonical clone."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -27,6 +26,22 @@ requirements:
         statement: "AC13: the contract is read and parsed once per process and a failing read logs once per interval -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
       - id: AC14
         statement: "AC14: the alarm owner is the item lane OMN-24562 and no owner line names one host -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
+  - id: req-omn24562-agent-own-clone
+    statement: >-
+      The deploy agent runs git fetch, reset and checkout only in its own clone, creates it on start without losing the served commit, and refuses a canonical clone as its deploy source.
+    acceptance:
+      - id: AC15
+        statement: >-
+          AC15: A pinned job through the real git_pull leaves the canonical clone's HEAD, branch and working tree unchanged and puts the agent's own clone on the pinned ref; a deploy source configured as the canonical clone runs nothing. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k PinnedJob -q
+      - id: AC16
+        statement: >-
+          AC16: First start with no agent clone creates it at the previously served commit; a second start leaves it and its pin untouched. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k MigrationOnStart -q
+      - id: AC17
+        statement: >-
+          AC17: An unreachable mirror falls back to origin, is counted and logged; a reachable mirror is the fetch url and origin stays the push url. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k Mirror -q
+      - id: AC18
+        statement: >-
+          AC18: A deploy-source path that resolves to a canonical clone (equal, symlinked, or the OMNI_HOME clone) is refused with a typed error, and unset settings have no default. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k Guard -q
   - id: req-omn24562-stability-job-renders-overlay-address
     statement: A stability job of a dev-fenced deploy agent takes LLM_EMBEDDING_URL, BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL and the rewritten lane overlay directory from the llm_endpoints overlay, in its compose environment and in its env contract guard, and a prod job takes nothing from the render.
     acceptance:
@@ -43,22 +58,6 @@ requirements:
         statement: 'AC4: for the stability lane the agent''s lane configuration disables the runtime-effects service, the runtime phase retires its old container with a stop and a remove that carry no volume flag, removes nothing when none exists, and prod retires nothing -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_retires_folded_effects_omn24562.py -q fails when the retirement call in the runtime phase or the census branch of _retire_folded_dev_services is deleted'
       - id: AC5
         statement: 'AC5: the pull request branch''s executor.py carries the guard line `if "runtime-effects" in retired:` (in lane_config_for, where a lane that retires the effects role reads the effects health target from main), a line the merge base does not carry -- falsifier: that line is absent from the branch''s executor.py, or present at the merge base 6deccc76f9768b2be6b4ba8939eb0a9d52cd1082'
-  - id: req-omn24562-agent-own-clone
-    statement: >-
-      The deploy agent runs git fetch, reset and checkout only in its own clone, creates it on start without losing the served commit, and refuses a canonical clone as its deploy source.
-    acceptance:
-      - id: AC7
-        statement: >-
-          AC7: A pinned job through the real git_pull leaves the canonical clone's HEAD, branch and working tree unchanged and puts the agent's own clone on the pinned ref; a deploy source configured as the canonical clone runs nothing. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k PinnedJob -q
-      - id: AC8
-        statement: >-
-          AC8: First start with no agent clone creates it at the previously served commit; a second start leaves it and its pin untouched. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k MigrationOnStart -q
-      - id: AC9
-        statement: >-
-          AC9: An unreachable mirror falls back to origin, is counted and logged; a reachable mirror is the fetch url and origin stays the push url. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k Mirror -q
-      - id: AC10
-        statement: >-
-          AC10: A deploy-source path that resolves to a canonical clone (equal, symlinked, or the OMNI_HOME clone) is refused with a typed error, and unset settings have no default. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k Guard -q
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -205,7 +204,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k PinnedJob
         cwd: .
-    binds_ac: [AC7]
+    binds_ac: [AC15]
   - id: dod-omn24562-ac8-migration
     description: >-
       Creation is seeded from the canonical clone's HEAD, including an unpushed head, and an existing clone is never reset.
@@ -214,7 +213,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k MigrationOnStart
         cwd: .
-    binds_ac: [AC8]
+    binds_ac: [AC16]
   - id: dod-omn24562-ac9-mirror-fallback
     description: >-
       The fallback count is kept in a file beside the clone.
@@ -223,7 +222,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k Mirror
         cwd: .
-    binds_ac: [AC9]
+    binds_ac: [AC17]
   - id: dod-omn24562-ac10-guard
     description: >-
       The guard compares real paths.
@@ -232,4 +231,4 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k Guard
         cwd: .
-    binds_ac: [AC10]
+    binds_ac: [AC18]

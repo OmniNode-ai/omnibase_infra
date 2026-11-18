@@ -1516,13 +1516,18 @@ def test_dev_lane_overlay_is_wired_into_both_lane_mappings() -> None:
         REPO_ROOT / "scripts" / "deploy-agent" / "deploy_agent" / "executor.py"
     ).read_text(encoding="utf-8")
     dev_config = re.search(
-        r"EnumRuntimeLane\.DEV:\s*ModelLaneConfig\((?P<body>.*?)\n        \),",
+        r"EnumRuntimeLane\.DEV:\s*ModelLaneConfig\((?P<body>.*?)\n    \),",
         executor,
         re.DOTALL,
     )
-    assert dev_config is not None, "_lane_configs()[EnumRuntimeLane.DEV] not found"
-    assert overlay_filename in dev_config.group("body"), (
-        f"_lane_configs()[DEV].compose_files does not include {overlay_filename}"
+    assert dev_config is not None, "_LANE_TEMPLATES[EnumRuntimeLane.DEV] not found"
+    # OMN-24562: the templates hold paths relative to the agent's own clone, spelled
+    # from the shared ``_D`` prefix; ``_lane_configs`` resolves them on first use.
+    assert 'f"{_D}' + overlay_filename.removeprefix("docker-compose") in (
+        dev_config.group("body")
+    ), f"_LANE_TEMPLATES[DEV].compose_files does not include {overlay_filename}"
+    assert re.search(r'^_D = "docker/docker-compose"$', executor, re.MULTILINE), (
+        f"_D no longer spells the docker/docker-compose prefix of {overlay_filename}"
     )
 
 
