@@ -69,6 +69,17 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_lane_only_scope_omn18108.py scripts/deploy-agent/tests/unit/test_cost_estimator_build_omn21487.py scripts/deploy-agent/tests/unit/test_gateway_lane_scope_omn18134.py -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
+  - id: dod-omn24903-integration-proof-ac2
+    description: >-
+      The shipped stability compose file read from disk declares every writer the roll names and gives the runtime main the dev overlay roots and both mounts, run on a lab host at the pushed head.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-24903 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/docker/test_stability_writers_compose_omn24903.py -q -n 0 --no-cov
+        cwd: .
   - id: dod-omn24903-ac5-nightly
     description: >-
       Post-merge: the deploy agent rolls the stability lane from a tag carrying this change, then delegation-regression-nightly is dispatched on dev with the stability lane input. AC5 stays open until the newest run of that workflow on dev reads success; this check reads the run list and exits non-zero while it does not, so it runs under the local Done gate only (a hosted runner has no bus lane to read it).
