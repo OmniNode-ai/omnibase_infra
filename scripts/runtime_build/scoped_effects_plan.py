@@ -17,9 +17,9 @@ SourceSha = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
 ProbeTimeoutSeconds = Annotated[int, Field(ge=30, le=1800)]
 
 SourceName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")]
-_OVERLAYS = Path(__file__).resolve().parents[2] / "config/onex/overlays"
+_SOURCES = Path(__file__).resolve().parent / "scoped_effects_sources.yaml"
 SIBLINGS = TypeAdapter(tuple[SourceName, Literal["omnimarket"]]).validate_python(
-    yaml.safe_load((_OVERLAYS / "scoped_effects_sources.yaml").read_bytes())
+    yaml.safe_load(_SOURCES.read_bytes())
 )
 if SIBLINGS[0] in ("omnibase_infra", SIBLINGS[1]):
     raise ValueError("the foundation, replacement and infra sources must be distinct")

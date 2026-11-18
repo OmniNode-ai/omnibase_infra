@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
 # The scoped candidate attests the foundation, then replaces the Market wheel.
 - omnibase_core
 - omnimarket
