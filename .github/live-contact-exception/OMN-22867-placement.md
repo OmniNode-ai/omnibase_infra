@@ -1,0 +1,1 @@
+Live-contact exception: the Public Runner Placement job runs omnibase_core.validation.validator_public_runner_placement, the module the pinned hook rev dev-20261118030813-4f0a188ab62c ships, in place of the removed handler CLI; it reads workflow files only and contacts no service, and its own run on this pull request is the contact record (OMN-22867).
