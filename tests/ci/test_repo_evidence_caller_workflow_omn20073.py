@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-20073/OMN-20074: repo-owned evidence caller and its S6 part 1 trigger."""
+"""Repo-owned evidence caller and its pull request verdicts."""
 
 from __future__ import annotations
 
@@ -47,19 +47,15 @@ def test_caller_workflow_shape() -> None:
     # PyYAML 1.1 resolves the bare `on:` key to the boolean True.
     triggers = data.get("on", data.get(True))
     assert isinstance(triggers, dict), "caller must declare a mapping on: block"
-    # OMN-20074: the base-branch trigger makes GitHub read this definition from
-    # the base branch, so a pull request cannot edit what judges it. The operator
-    # ruled (2026-10-08T22:41:24Z) that this one file is the single named
-    # exception to the OMN-15699 ban in scripts/audit-runner-routing.py.
-    assert set(triggers) == {"pull_request_target"}, (
-        "caller must only use the base-branch pull request trigger"
-    )
-    target = triggers["pull_request_target"]
-    assert not {"paths", "paths-ignore"} & set(target), (
+    assert set(triggers) == {"pull_request"}, "caller must only use pull_request"
+    pull_request = triggers["pull_request"]
+    assert not {"paths", "paths-ignore"} & set(pull_request), (
         "the registered verdict must report without a paths filter"
     )
-    assert target["branches"] == ["dev", "main"], "caller must target dev and main"
-    assert target["types"] == [
+    assert pull_request["branches"] == ["dev", "main"], (
+        "caller must target dev and main"
+    )
+    assert pull_request["types"] == [
         "opened",
         "synchronize",
         "reopened",
@@ -166,8 +162,8 @@ def _sweep(
 
 def test_ci_summary_sweep_accepts_the_caller_shape() -> None:
     """Green caller rows pass both layers now that dod-verify is registered."""
-    assert {"pull_request", "pull_request_target"}.isdisjoint(SWEEP_NON_PR_EVENTS), (
-        "the sweep judges the caller's pull_request and pull_request_target rows"
+    assert "pull_request" not in SWEEP_NON_PR_EVENTS, (
+        "the sweep judges the caller's pull_request rows"
     )
     assert _DOD_VERIFY in EXPECTED_EXTERNAL_CONTEXTS
     assert _VERIFY not in EXPECTED_EXTERNAL_CONTEXTS
@@ -190,10 +186,10 @@ def test_ci_summary_sweep_accepts_the_caller_shape() -> None:
         pytest.param("success", "failure", _DOD_VERIFY, id="red-dod-verify"),
     ],
 )
-def test_ci_summary_sweep_judges_the_base_branch_trigger_rows(
+def test_ci_summary_sweep_judges_legacy_base_branch_trigger_rows(
     verify: str, dod_verify: str, refused: str | None
 ) -> None:
-    """Base-branch rows use the sweep for verify and expected contexts for dod-verify."""
+    """The sweep and expected-context checks still judge rows from the old caller."""
     failures, swept, expected_judged = _sweep(
         _caller_rows(verify=verify, dod_verify=dod_verify), "pull_request_target"
     )
@@ -370,7 +366,7 @@ def test_contract_binding_refuses_a_node_id_of_a_missing_test() -> None:
             id="node-id",
         ),
         pytest.param(
-            "uv run pytest 'tests/ci/test_repo_evidence_caller_workflow_omn20073.py::test_ci_summary_sweep_judges_the_base_branch_trigger_rows[green]' -q",
+            "uv run pytest 'tests/ci/test_repo_evidence_caller_workflow_omn20073.py::test_ci_summary_sweep_judges_legacy_base_branch_trigger_rows[green]' -q",
             "tests/ci/test_repo_evidence_caller_workflow_omn20073.py",
             id="parametrized-node-id",
         ),

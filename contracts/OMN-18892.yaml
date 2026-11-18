@@ -1,0 +1,108 @@
+schema_version: 1.0.0
+ticket_id: OMN-18892
+title: Per-slot databases and per-slot principals, with a bounded migration path
+summary: >-
+  A pre-PR verify slot shares the dev lane's Postgres server, and roles are cluster-wide, so a slot gets its own suffixed databases and its own login principals rather than a suffix alone. scripts/provision_db_slot.sh mints the slot's databases and principals behind a name fence and an ownership fence and refuses to report success until it has read from the catalog that every principal it minted reaches the slot's databases and nothing else, with a positive control in the same pass. scripts/run-forward-migrations.sh and scripts/run-intelligence-migrations.sh, under the slot token, target the suffixed names, skip the four role-provisioning seams by name, connect as the database's own slot principal, and refuse a shared or escalated identity before branch SQL. With the token unset the fence is inert. Both pull requests are merged (omnibase_infra#3890 at 833d692e6d54, omnibase_infra#4711 at 0084b4725ddc). The checks bound here are the parts of each criterion a hosted runner can run with no Postgres and no Docker, pinned to the shell scripts themselves. The live parts are readings, not checks, and each is recorded where it was taken - the 2026-09-20 lab readback in the omnibase_infra#3890 body (10 of 10 dev databases refused to the slot principal, 16 of 16 dev role credential verifiers byte-identical before and after, rolsuper and rolbypassrls false, CREATE ROLE, ALTER ROLE and CREATE DATABASE refused under the slot principal), the in-band catalog proof of every provision (261 out-of-fence pairs refused, 6 principals reach their own database, omnibase_infra#5102 run 5), and the forward migration completing on pre-PR slot 2 on 2026-10-19 (omnibase_infra#5170). Postgres records no password-changed timestamp, so the criterion's timestamp is read as the md5 of the role's SCRAM verifier in pg_authid, which moves on every password set.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18892-slot-principals
+    statement: A slot gets its own login principals and its own databases, scoped to the slot and to nothing else, and no existing role's credential is touched.
+    acceptance:
+      - id: AC1
+        statement: "AC1: every database and login role the provisioner derives carries the slot suffix, a malformed or empty slot token is refused with its own exit code, and the three maps are pinned equal to the initialiser's -- falsifier: the command fails when a derived name loses the suffix or a map drifts from 000_create_multiple_databases.sh"
+      - id: AC2
+        statement: "AC2: the slot's principals have no CONNECT on any unsuffixed database -- the name fence refuses an out-of-slot database before a connection is opened, no unsuffixed name appears in the derived scope, and two slots derive disjoint scopes -- falsifier: the command fails when the runner connects to a database without the slot suffix or the scope names an unsuffixed object"
+      - id: AC3
+        statement: "AC3: no existing role's credential is altered -- the initialiser refuses under a slot token and names the replacement tool, all four role-provisioning seams of the runner are skipped under a slot by name with a count that equals the seam count, and the intelligence runner refuses a shared principal before it connects -- falsifier: the command fails when a role seam runs under a slot or the initialiser does not refuse"
+  - id: req-omn18892-bounded-migration
+    statement: A branch migration runs as the slot principal, which cannot create or alter roles, and the forward migration applies to the suffixed names.
+    acceptance:
+      - id: AC4
+        statement: "AC4: a slot migration refuses an identity that is not the database's own slot principal, refuses an escalated or unreadable role attribute reading (rolsuper, rolbypassrls) before any branch SQL, and every managed role named in a migration file is confined to the slot's own principal -- falsifier: the command fails when the runner applies SQL under a shared, superuser or unreadable identity"
+      - id: AC5
+        statement: "AC5: the forward migration targets the suffixed names, a file that declares a cross-database action no slot can deliver is skipped with a printed line, and every principal the migration needs is granted by the provisioner and read back -- falsifier: the command fails when the runner targets an unsuffixed database under a slot or the provisioner omits a grant a slot migration needs"
+      - id: AC6
+        statement: "AC6: with the slot token unset or empty, the runner's target names, its fence assertion and the migration file it would apply are the shared lane's own, read from a run of the fence block and not from its text, and a slot run through the same probe differs -- falsifier: the command fails when the fence block activates without a token (the probe was run against a runner with SLOT_ACTIVE defaulting to 1 and failed)"
+evidence_requirements:
+  - kind: tests
+    description: The slot provisioner, runner fence, slot connection and role confinement suites.
+    command: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn18892-ac1-derived-scope
+    description: >-
+      The provisioner derives every database and login role with the slot suffix, refuses an absent, empty or malformed token with its own exit code, and the provisioner's three maps equal the initialiser's. The scope mode opens no connection, so the check needs no Postgres.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -k "TestSlotTokenGrammar or TestDerivedScope or TestMapsArePinnedAcrossSeams" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn18892-ac2-no-unsuffixed-reach
+    description: >-
+      No unsuffixed name appears in the derived scope, two slots derive disjoint scopes, the runner refuses a database outside the slot before it connects, and every connect grant the slot needs is on the slot's own database.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -k "no_unsuffixed or two_slots_derive_disjoint or forward_connections_refuse_out_of_slot or TestRuntimePrincipalReaches or TestTenantProjectionWriter" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_forward_migration_slot_connect_confinement_omn18893.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn18892-ac3-no-existing-role-altered
+    description: >-
+      The initialiser refuses under a slot token, every role-provisioning seam of the runner is skipped under a slot, and the intelligence runner refuses a shared principal before it opens a connection.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -k "TestSeamsAreFenced or TestTheInitialiserRefusesUnderASlotToken or every_role_provisioning_seam or refuses_shared_principal" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn18892-ac4-bounded-identity
+    description: >-
+      The runner refuses an identity that is not the database's own slot principal, an escalated or unreadable attribute reading and a missing slot credential before branch SQL, the overlay binds both migration one-shots to existing slot principals, and the managed roles named in a migration file are confined to the slot's own principals.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -k "refuses_escalated or missing_slot_credential or slot_overlay_binds" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_forward_migration_slot_role_confinement.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn18892-ac5-forward-migration-targets
+    description: >-
+      The forward migration connects to each database as its own slot principal, takes the suffixed names, skips the flat files no slot can deliver, and the provisioner grants and reads back the CREATE and CONNECT rights the corpus needs.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -k "forward_connections_use_the_database_own or TestDirectiveDatabasesAreProvisioned or TestOmnidashPrincipalCanCreate or TestIntelligencePrincipalCanCreate or cloud_history_discovery or directive_database_takes" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_forward_migration_slot_undeliverable_omn19064.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_db_slot_connection_budget.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn18892-ac6-unset-identical
+    description: >-
+      The fence block of the runner is run with the token unset and empty and reports the shared lane's names, an admitting fence and the migration file itself, with no temporary copy written; the same probe under a slot reports suffixed names and a refusal, so the unchanged output cannot be a probe that reads nothing. Run against a runner whose SLOT_ACTIVE defaults to 1 the unset cases fail.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -k "TestRunnerTargetsAreUnchanged or fence_is_inert or with_no_slot_token" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
