@@ -1523,6 +1523,35 @@ def test_the_acl_proof_file_holds_no_bare_hosted_pin_allowlist_entry() -> None:
     assert ".github/workflows/application-acl-postgres16-proof.yml" not in paths
 
 
+@pytest.mark.parametrize(
+    ("workflow", "job", "uses_docker_seam"),
+    [
+        ("application-acl-postgres16-proof.yml", "rebuilt-postgres16-proof", True),
+        ("deploy-agent-tests.yml", "deploy-agent-tests", False),
+        ("legacy-rds-fixture-proof.yml", "fixture-proof", True),
+    ],
+)
+def test_public_ci_proofs_use_a_hosted_runner(
+    workflow: str, job: str, uses_docker_seam: bool
+) -> None:
+    """Public runs use GitHub-hosted compute while private callers keep their routing."""
+    import yaml
+
+    path = REPO_ROOT / ".github" / "workflows" / workflow
+    runs_on = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"][job]["runs-on"]
+    hosted = "'[\"ubuntu-latest\"]'"
+    docker = "vars.OMNI_DOCKER_CI_RUNS_ON_JSON || " if uses_docker_seam else ""
+    expected = (
+        "${{ github.event.repository.private && ( "
+        "(github.event_name == 'pull_request' && "
+        "github.event.pull_request.head.repo.full_name != github.repository) "
+        f"&& fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || {hosted}) "
+        f"|| fromJSON({docker}vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || {hosted})"
+        f" ) || fromJSON({hosted}) }}}}"
+    )
+    assert " ".join(runs_on.split()) == expected
+
+
 def test_public_pr_runner_variable_drift_is_reported_at_org_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
