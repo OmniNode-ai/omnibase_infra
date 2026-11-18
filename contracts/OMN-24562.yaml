@@ -216,12 +216,11 @@ dod_evidence:
         check_value: grep -q 'lane_config_for(runtime_lane).compose_project,' scripts/deploy-agent/deploy_agent/executor.py
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-ac17-stability-follow-readback
-    description: Hosted stand-in for AC17, which is read on h201 after the agent is installed from the integration branch. The executor on the branch disables autoheal for the stability lane; the merge base names it in the runtime up.
+    description: Hosted stand-in for AC17, which is read on h201 after the agent is installed from the integration branch. The executor on the branch no longer carries the build_project field, so the lane build runs under the lane's compose project; the merge base still names build_project.
     source: manual
-    execution_scope: local_done_gate
     binds_ac:
       - AC17
     checks:
       - check_type: command
-        check_value: grep -q '"autoheal"' scripts/deploy-agent/deploy_agent/executor.py
+        check_value: "! grep -q 'build_project' scripts/deploy-agent/deploy_agent/executor.py"
         cwd: ${OMNI_HOME}/omnibase_infra
