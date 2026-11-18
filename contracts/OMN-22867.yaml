@@ -107,3 +107,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_migration_sequence_check_node.py tests/ci/test_node_parity_migration_sequence_parity_omn20568.py -k "GitDiscovery or git_failure" -q -o addopts=''
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22867-ac1-git-staged-paths-deployed
+    description: The runtime container imports the staged-paths git helper the migration sequence hook now reads through; the probe fails while the deployed runtime lacks the module.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'import omnibase_infra.handlers.git_staged_paths'
