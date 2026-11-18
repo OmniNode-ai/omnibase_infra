@@ -33,7 +33,7 @@ dod_evidence:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/models/registration/test_model_node_introspection_event_runtime_id.py tests/unit/models/registration/test_model_node_introspection_event.py -q --no-cov -p no:cacheprovider
+        check_value: uv run --frozen pytest tests/unit/models/registration/test_model_node_introspection_event_runtime_id.py tests/unit/models/registration/test_model_node_introspection_event.py tests/integration/registration/test_introspection_event_runtime_id_wire.py -q --no-cov -p no:cacheprovider
         cwd: .
   - id: dod-omn24529-ac2
     description: 'AC2: a self-parented message and an unknown field are refused; with the validator removed (control test) the self-parent is accepted.'
