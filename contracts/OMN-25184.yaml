@@ -90,28 +90,40 @@ dod_evidence:
         cwd: .
   - id: dod-omn25184-ac4-tests-wide-grep
     description: >-
-      The grep for check_lane_sync covers all of tests/ and lists no file outside tests/ci; the tests/ci files it lists are run in the head-bound Lab comment.
+      The grep for check_lane_sync covers all of tests/ at the PR head, or at the commit that introduced this fix once it is on dev, and lists no file outside tests/ci; the tests/ci files it lists are run in the head-bound Lab comment.
     source: manual
     binds_ac: [AC4]
     checks:
       - check_type: command
         check_value: |-
           bash -o pipefail -c '
-          out=$(grep -rl "check_lane_sync" tests/ | sort) &&
+          end=HEAD &&
+          added=$(git log --first-parent -1 --diff-filter=A --format=%H HEAD -- contracts/OMN-24976.yaml) &&
+          if test -n "$added"; then
+            landed=$(git for-each-ref --contains "$added" --format="%(refname)" refs/remotes/origin/dev) &&
+            if test "$landed" = refs/remotes/origin/dev; then end="$added"; fi
+          fi &&
+          out=$(git grep -l "check_lane_sync" "$end" -- tests/ | cut -d: -f2- | sort) &&
           printf "%s\n" "$out" &&
           test -n "$out" &&
           test "$(printf "%s\n" "$out" | grep -vc "^tests/ci/")" = 0'
         cwd: .
   - id: dod-omn25184-ac5-no-git-closure-path
     description: >-
-      The check reads the commit messages of the branch (75969ce9e..HEAD) and finds no closing keyword before OMN-24976, an id list or a bracket included. It does not read the pull request body, the title or the branch name, which a check run from the checkout cannot see; the OMN-25205 pull request comment gives the body readback and the OMN-24976 state.
+      The check reads the commit messages from 75969ce9e through the PR head, or through the commit that introduced this fix once it is on dev, and finds no closing keyword before OMN-24976, an id list or a bracket included. It does not read the pull request body, the title or the branch name, which a check run from the checkout cannot see; the OMN-25205 pull request comment gives the body readback and the OMN-24976 state.
     source: manual
     binds_ac: [AC5]
     checks:
       - check_type: command
         check_value: |-
           bash -o pipefail -c '
-          msgs=$(git log --format="%H %s%n%b" 75969ce9e..HEAD) &&
+          end=HEAD &&
+          added=$(git log --first-parent -1 --diff-filter=A --format=%H HEAD -- contracts/OMN-24976.yaml) &&
+          if test -n "$added"; then
+            landed=$(git for-each-ref --contains "$added" --format="%(refname)" refs/remotes/origin/dev) &&
+            if test "$landed" = refs/remotes/origin/dev; then end="$added"; fi
+          fi &&
+          msgs=$(git log --format="%H %s%n%b" 75969ce9e.."$end") &&
           test -n "$msgs" &&
           test "$(printf "%s\n" "$msgs" | grep -ciE "(clos(e|es|ed|ing)|fix(es|ed|ing)?|resolv(e|es|ed|ing)|complet(e|es|ed|ing))[: ]+((\[?(https://[^ ]*/)?OMN-[0-9]+\]?(\([^)]*\))?)[ ,]+(and +)?)*\[?(https://[^ ]*/)?OMN-24976")" = 0'
         cwd: .

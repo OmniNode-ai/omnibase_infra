@@ -32,14 +32,20 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn25199-ac1-closure-claim
     description: >-
-      No commit message of the branch carries a closing keyword before OMN-24976, and the test runs that check on a synthetic repository with closing and plain references. The check reads commit messages only. The pull request body is not readable from the repository: the OMN-25205 pull request comment gives its readback, and the orchestrator edits its closing line.
+      The check reads commit messages through the PR head, or through the commit that introduced this fix once it is on dev. The tests exercise closing and plain references in synthetic repositories. The pull request body and the current Linear status are documented in the pull request evidence.
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: command
         check_value: |-
           bash -o pipefail -c '
-          msgs=$(git log --format="%H %s%n%b" 75969ce9e..HEAD) &&
+          end=HEAD &&
+          added=$(git log --first-parent -1 --diff-filter=A --format=%H HEAD -- contracts/OMN-24976.yaml) &&
+          if test -n "$added"; then
+            landed=$(git for-each-ref --contains "$added" --format="%(refname)" refs/remotes/origin/dev) &&
+            if test "$landed" = refs/remotes/origin/dev; then end="$added"; fi
+          fi &&
+          msgs=$(git log --format="%H %s%n%b" 75969ce9e.."$end") &&
           test -n "$msgs" &&
           test "$(printf "%s\n" "$msgs" | grep -ciE "(clos(e|es|ed|ing)|fix(es|ed|ing)?|resolv(e|es|ed|ing)|complet(e|es|ed|ing))[: ]+((\[?(https://[^ ]*/)?OMN-[0-9]+\]?(\([^)]*\))?)[ ,]+(and +)?)*\[?(https://[^ ]*/)?OMN-24976")" = 0'
         cwd: .

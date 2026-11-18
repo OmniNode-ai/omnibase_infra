@@ -132,22 +132,29 @@ def test_guard_passes_in_the_checkout_and_fails_in_a_wrong_cwd(
 
 @pytest.mark.parametrize("name", sorted(TESTS_WIDE))
 def test_tests_wide_grep_reads_the_tree_it_runs_in(name: str, tmp_path: Path) -> None:
-    """Positive and negative control on a synthetic tests/ tree (no repo coupling)."""
+    """Check the PR tree, then keep the same evidence after dev advances."""
     ticket, evidence_id, index = TESTS_WIDE[name]
     command = _command(ticket, evidence_id, index)
-    only_ci = tmp_path / "only_ci"
-    (only_ci / "tests" / "ci").mkdir(parents=True)
-    (only_ci / "tests" / "ci" / "test_a.py").write_text("check_lane_sync\n")
-    assert _sh(command, only_ci).returncode == 0
-    outside = tmp_path / "outside"
-    (outside / "tests" / "unit").mkdir(parents=True)
-    (outside / "tests" / "unit" / "test_b.py").write_text("check_lane_sync\n")
-    (outside / "tests" / "ci").mkdir()
-    (outside / "tests" / "ci" / "test_a.py").write_text("check_lane_sync\n")
-    assert _sh(command, outside).returncode != 0
-    nothing = tmp_path / "nothing"
-    (nothing / "tests" / "ci").mkdir(parents=True)
-    assert _sh(command, nothing).returncode != 0
+    repo, _ = _synthetic_repo(tmp_path, [])
+    assert _sh(command, repo).returncode != 0
+    inside = repo / "tests" / "ci" / "test_a.py"
+    inside.parent.mkdir(parents=True)
+    inside.write_text("check_lane_sync\n")
+    landed = _introduce_ticket_contract(repo, "reviewed fix")
+    assert _sh(command, repo).returncode == 0
+
+    outside = repo / "tests" / "unit" / "test_b.py"
+    outside.parent.mkdir(parents=True)
+    outside.write_text("check_lane_sync\n")
+    _git(repo, "add", "tests")
+    _git(repo, "commit", "-qm", "follow-up test")
+    assert _sh(command, repo).returncode != 0
+
+    _git(repo, "update-ref", "refs/remotes/origin/dev", "HEAD")
+    result = _sh(command, repo)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["tests/ci/test_a.py"]
+    assert _git(repo, "rev-parse", "HEAD") != landed
     no_tests_dir = tmp_path / "no_tests_dir"
     no_tests_dir.mkdir()
     assert _sh(command, no_tests_dir).returncode != 0
@@ -337,35 +344,44 @@ def test_old_ac2_form_passed_when_pytest_never_ran(tmp_path: Path) -> None:
     assert _sh(old, REPO_ROOT, env).returncode == 0
 
 
+def _git(repo: Path, *args: str) -> str:
+    done = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    return done.stdout.strip()
+
+
 def _synthetic_repo(tmp_path: Path, messages: list[str]) -> tuple[Path, str]:
     repo = tmp_path / "repo"
     repo.mkdir()
-
-    def git(*args: str) -> str:
-        done = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repo),
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                *args,
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-            env=scrub_git_location_env(os.environ),
-        )
-        return done.stdout.strip()
-
-    git("init", "-q")
-    git("commit", "-q", "--allow-empty", "-m", "base")
-    base = git("rev-parse", "HEAD")
+    _git(repo, "init", "-q")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
     for message in messages:
-        git("commit", "-q", "--allow-empty", "-m", message)
+        _git(repo, "commit", "-q", "--allow-empty", "-m", message)
     return repo, base
+
+
+def _introduce_ticket_contract(repo: Path, message: str) -> str:
+    contract = repo / "contracts" / "OMN-24976.yaml"
+    contract.parent.mkdir()
+    contract.write_text("ticket_id: OMN-24976\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", message)
+    return _git(repo, "rev-parse", "HEAD")
 
 
 CLOSURE_CHECKS = {
@@ -423,6 +439,24 @@ def test_a_closing_keyword_before_the_ticket_fails_the_check(
 ) -> None:
     repo, base = _synthetic_repo(tmp_path, ["fine", message])
     assert _sh(_closure_command(base, name), repo).returncode != 0
+
+
+@pytest.mark.parametrize("name", sorted(CLOSURE_CHECKS))
+@pytest.mark.parametrize(
+    ("original_message", "expected_rc"),
+    [("Refs OMN-24976", 0), ("Closes OMN-24976", 1)],
+)
+def test_closing_keyword_evidence_ends_at_the_landed_fix(
+    name: str, original_message: str, expected_rc: int, tmp_path: Path
+) -> None:
+    repo, base = _synthetic_repo(tmp_path, [])
+    _introduce_ticket_contract(repo, original_message)
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "Closes OMN-24976")
+    command = _closure_command(base, name)
+    assert _sh(command, repo).returncode == 1
+
+    _git(repo, "update-ref", "refs/remotes/origin/dev", "HEAD")
+    assert _sh(command, repo).returncode == expected_rc
 
 
 @pytest.mark.parametrize("name", sorted(CLOSURE_CHECKS))

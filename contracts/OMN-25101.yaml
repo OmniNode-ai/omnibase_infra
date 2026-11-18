@@ -66,14 +66,20 @@ dod_evidence:
         cwd: .
   - id: dod-omn25101-ac3-no-other-pin-and-full-suite
     description: >-
-      No file under tests/ outside tests/ci names check_lane_sync (the grep covers all of tests/, so a positional CompletedProcess, a parametrised 8 or a returncode key cannot hide); the tests/ci files that do name it are run by the AC6 check; the supersession test covers the train reader's FAIL-then-PASS and PASS-then-FAIL orders; the whole tests/ci suite passes at the head.
+      The tests-wide scan reads the PR head before landing and the commit that introduced this fix once it is on dev. No file outside tests/ci at that revision names check_lane_sync; the tests/ci files that do name it are run by the AC6 check; the supersession test covers the train reader's FAIL-then-PASS and PASS-then-FAIL orders; the whole tests/ci suite passes at the head.
     source: manual
     binds_ac: [AC3]
     checks:
       - check_type: command
         check_value: |-
           bash -o pipefail -c '
-          out=$(grep -rl "check_lane_sync" tests/ | sort) &&
+          end=HEAD &&
+          added=$(git log --first-parent -1 --diff-filter=A --format=%H HEAD -- contracts/OMN-24976.yaml) &&
+          if test -n "$added"; then
+            landed=$(git for-each-ref --contains "$added" --format="%(refname)" refs/remotes/origin/dev) &&
+            if test "$landed" = refs/remotes/origin/dev; then end="$added"; fi
+          fi &&
+          out=$(git grep -l "check_lane_sync" "$end" -- tests/ | cut -d: -f2- | sort) &&
           printf "%s\n" "$out" &&
           test -n "$out" &&
           test "$(printf "%s\n" "$out" | grep -vc "^tests/ci/")" = 0'

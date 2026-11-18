@@ -30,6 +30,7 @@ shim:
 from __future__ import annotations
 
 import inspect
+import json
 import os
 import stat
 import subprocess
@@ -156,11 +157,14 @@ def test_lane_census_empty_broker_variable_is_unset_not_indeterminate(
     named but empty publishes nothing and exits 8, exactly as an unset one does.
     """
     proc, calls, sent = _run(
-        ["--lane", _LANE], tmp_path, broker_container="", bootstrap=""
+        ["--lane", _LANE, "--json"], tmp_path, broker_container="", bootstrap=""
     )
     assert proc.returncode == 8, proc.stderr
     assert "produce" not in calls and not sent, calls
     assert "LANE_MEMORY_BROKER_CONTAINER is unset" in proc.stderr
+    plan = json.loads(proc.stdout)
+    assert plan["has_drift"] is True
+    assert plan["findings"]
 
 
 def test_lane_census_unpublishable_drift_fails_when_the_produce_fails(
