@@ -470,9 +470,11 @@ class TestDev202PhasesOff:
             if (spec or {}).get("profiles") == ["dev-202-disabled"]
         }
         cfg = DEV_INSTANCE_LANE_CONFIGS["dev-202"]
-        assert disabled_by_overlay >= _DEV_202_DISABLED
+        # OMN-24476: the three removed services are declared by no overlay any
+        # more; the table still lists them so no argv on this instance names one.
+        assert disabled_by_overlay >= {"keycloak", "infisical"}
         assert cfg.disabled_services == frozenset(
-            disabled_by_overlay | set(DEV_LANE_GATEWAY_SERVICES)
+            disabled_by_overlay | set(DEV_LANE_GATEWAY_SERVICES) | _DEV_202_DISABLED
         )
 
     def test_dev_202_phases_off_restarted_services_exclude_disabled(
@@ -533,7 +535,9 @@ class TestDev201Unchanged:
         up = ups[0]
         assert _project_of(up) == "omnibase-infra"
         assert len(_files_of(up)) == 3
-        assert "onex-api" in [c[-1] for c in ups]
+        # OMN-24476: onex-api is no longer a dev-lane service.
+        assert "onex-api" not in [c[-1] for c in ups]
+        assert "cost-estimator-web" in [c[-1] for c in ups]
 
         builds = _capture_build(DeployExecutor())
         assert {_project_of(c) for c in builds} == {"omnibase-infra"}

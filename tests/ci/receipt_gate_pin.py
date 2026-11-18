@@ -7,10 +7,10 @@ node_receipt_gate_pin_advance_compute rewrites them in the same commit as the
 caller's ``uses:`` line and the required-checks.yaml ``cross_repo_ref``, so a pin
 advance never leaves a test asserting the previous pin.
 
-The caller is a ``pull_request_target`` workflow that scripts/audit-runner-routing.py
-holds to a full-SHA pin, so the line carries the commit sha with the dev-merge tag
-named beside it; test_repo_evidence_caller_check_timeout_omn21433.py resolves that
-tag through the GitHub API and requires it to point at the pinned sha.
+The caller runs on ``pull_request``. The runner-routing audit requires a full-SHA
+pin, and the uses line names the corresponding dev-merge tag beside it.
+test_repo_evidence_caller_check_timeout_omn21433.py resolves that tag and
+requires it to point at the pinned sha.
 """
 
 RECEIPT_GATE_REUSABLE = "OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml"

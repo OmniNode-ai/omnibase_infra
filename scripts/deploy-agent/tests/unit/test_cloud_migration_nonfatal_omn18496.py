@@ -38,6 +38,11 @@ DEPLOY_SCRIPT = (
     / "src/omnibase_infra/handlers/handler_runtime_deploy.sh"
 )
 
+# OMN-24476 emptied the dev lane's cloud declarations; these restore the
+# pre-OMN-24476 values so the (now inert) failure gating stays tested.
+PRE_OMN24476_ONESHOTS = ("cloud-migration-files", "cloud-migration")
+PRE_OMN24476_CONSUMERS = ("onex-api",)
+
 
 def _bash_array(name: str) -> list[str]:
     match = re.search(
@@ -80,16 +85,31 @@ def failing_migration(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     return calls
 
 
-def test_cloud_consumers_match_nonempty_bash_array() -> None:
-    bash = _bash_array("DEV_LANE_CLOUD_DB_SERVICES")
-    assert bash == ["onex-api"]  # Positive control: an empty parse cannot pass.
-    assert tuple(bash) == events.DEV_LANE_CLOUD_DB_SERVICES
+@pytest.fixture
+def cloud_machinery_declared(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restores the declarations as they were before OMN-24476 so the inert failure gating stays tested."""
+    monkeypatch.setattr(
+        executor_mod, "DEV_LANE_ONLY_MIGRATION_SERVICES", PRE_OMN24476_ONESHOTS
+    )
+    monkeypatch.setattr(
+        events, "DEV_LANE_ONLY_MIGRATION_SERVICES", PRE_OMN24476_ONESHOTS
+    )
+    monkeypatch.setattr(
+        executor_mod, "DEV_LANE_CLOUD_DB_SERVICES", PRE_OMN24476_CONSUMERS
+    )
+    monkeypatch.setattr(events, "DEV_LANE_CLOUD_DB_SERVICES", PRE_OMN24476_CONSUMERS)
+
+
+def test_cloud_declarations_are_empty_on_both_sides() -> None:
+    assert events.DEV_LANE_CLOUD_DB_SERVICES == ()
+    assert _bash_array("DEV_LANE_CLOUD_DB_SERVICES") == []
 
 
 @pytest.mark.parametrize("failure_mode", ["recreate", "exit-zero"])
 def test_cloud_failure_stops_consumer_and_preserves_applied_fingerprint(
     tmp_path: Path,
     failing_migration: list[list[str]],
+    cloud_machinery_declared: None,
     monkeypatch: pytest.MonkeyPatch,
     failure_mode: str,
 ) -> None:
@@ -141,6 +161,7 @@ def test_cloud_failure_stops_consumer_and_preserves_applied_fingerprint(
 
 def test_failed_copier_never_launches_applier(
     failing_migration: list[list[str]],
+    cloud_machinery_declared: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run = executor_mod._run
@@ -212,6 +233,7 @@ def test_runtime_up_and_readback_exclude_cloud_consumer(
 
 def test_cloud_consumer_only_request_refuses_empty_scope(
     failing_migration: list[list[str]],
+    cloud_machinery_declared: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_runtime_budget(monkeypatch)
@@ -229,6 +251,7 @@ def test_cloud_consumer_only_request_refuses_empty_scope(
 
 def test_idle_converge_keeps_cloud_failure_fatal(
     failing_migration: list[list[str]],
+    cloud_machinery_declared: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -294,6 +317,7 @@ async def test_agent_verifies_runtime_before_cloud_failure_verdict(
 
 def test_failed_consumer_stop_is_recorded_without_aborting_runtime(
     failing_migration: list[list[str]],
+    cloud_machinery_declared: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run = executor_mod._run
@@ -392,4 +416,5 @@ def test_restarted_services_report_only_ungated_consumers(
         scope, [], lambda *args: None, lane=EnumRuntimeLane.DEV
     )
     assert "omninode-runtime" in restarted
-    assert ("onex-api" in restarted) == (not failure)
+    # OMN-24476: onex-api left the dev lane, so no deploy restarts it either way.
+    assert "onex-api" not in restarted

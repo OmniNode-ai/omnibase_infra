@@ -144,10 +144,12 @@ def test_registry_covers_all_24_dispatch_shims() -> None:
 def test_registry_result_models_are_fully_qualified() -> None:
     registry = load_skill_registry()
     for skill in registry.skills:
-        assert "." in skill.result_model, (
-            f"{skill.skill_name}: result_model must be a fully qualified name, "
-            f"got {skill.result_model!r}"
-        )
+        # OMN-23143: result_model is optional and never names a market package.
+        if skill.result_model is not None:
+            assert "." in skill.result_model, (
+                f"{skill.skill_name}: result_model must be a fully qualified "
+                f"name, got {skill.result_model!r}"
+            )
         assert skill.node_name.startswith("node_"), skill.node_name
 
 
@@ -511,10 +513,9 @@ def test_env_parity_mapping_has_no_static_lane_snapshot() -> None:
         "env_parity static_payload carries a nested mapping; env snapshots "
         "must be collected live, never baked into the dispatch mapping"
     )
-    assert "ModelEnvParityCollectResult" in mapping.result_model, (
-        "env_parity result_model must be the collect receipt (provenance + "
-        f"parity), got {mapping.result_model!r}"
-    )
+    # OMN-23143: the collect receipt is a market model, so the mapping names no
+    # result model; the receipt stamps the handler's own at run time.
+    assert mapping.result_model is None
 
 
 def test_registry_rejects_duplicate_skill_names() -> None:
@@ -1009,10 +1010,7 @@ def test_dep_cascade_dedup_registered_and_wired() -> None:
     mapping = registry.get("dep_cascade_dedup")
     assert mapping is not None, "dep_cascade_dedup absent from skill_mapping.yaml"
     assert mapping.node_name == "node_dep_cascade_dedup_orchestrator"
-    assert mapping.result_model == (
-        "omnimarket.nodes.node_dep_cascade_dedup_orchestrator.models."
-        "model_dep_cascade_dedup_result.ModelDepCascadeDedupResult"
-    )
+    assert mapping.result_model is None  # OMN-23143: no market name in the mapping
 
 
 # --------------------------------------------------------------------------- #
@@ -1341,7 +1339,7 @@ def test_omn_17018_dispatch_queue_drainer_is_registered() -> None:
         "`onex skill dispatch_queue_drainer` returns 'Unknown skill'"
     )
     assert mapping.node_name == _OMN_17018_DRAINER_NODE
-    assert mapping.result_model.endswith("ModelDispatchQueueDrainerResult")
+    assert mapping.result_model is None  # OMN-23143: no market name in the mapping
 
     declared_args = {arg.payload_field for arg in mapping.args}
     assert declared_args == _OMN_17018_DRAINER_PAYLOAD_FIELDS, (
@@ -1375,9 +1373,7 @@ def test_authorize_registered_and_wired() -> None:
     mapping = registry.get("authorize")
     assert mapping is not None, "authorize absent from skill_mapping.yaml"
     assert mapping.node_name == "node_authorize"
-    assert mapping.result_model == (
-        "omnimarket.nodes.node_authorize.handlers.handler_authorize.AuthorizeResult"
-    )
+    assert mapping.result_model is None  # OMN-23143: no market name in the mapping
 
 
 def test_authorize_payload_matches_request_model_fields() -> None:

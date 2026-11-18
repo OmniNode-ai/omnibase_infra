@@ -472,35 +472,6 @@ def test_a_roll_whose_check_could_not_run_does_not_rewrite_the_pin(
     assert lab.pin() == _NEXT
 
 
-def test_the_roll_heals_the_pin_before_it_recreates_onex_api(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The wiring, driven through the real roll: the first onex-api ``up`` sees the healed pin."""
-    lab = _Lab(
-        tmp_path,
-        monkeypatch,
-        router_imports=f"from {_NEW_IMPORT} import X",
-        pinned=_NEXT,
-        local_tags=[_NEXT, _PINNED],
-        bad_images=(_NEXT,),
-    )
-    monkeypatch.setattr(
-        executor_mod, "verify_containers_up", lambda *a, **k: (True, [])
-    )
-    steps = [
-        ["docker", "compose", "up", "-d", "--no-deps", "omninode-runtime"],
-        ["docker", "compose", "up", "-d", "--no-deps", executor_mod.ONEX_API_SERVICE],
-    ]
-
-    _result, error = executor_mod.load_dev_boot_guard().run_compose_up_steps(
-        steps, 60, rolling=True, lane=EnumRuntimeLane.DEV, execution=executor_mod
-    )
-
-    assert error is None
-    assert len(lab.compose_calls) == 2
-    assert lab.pin_at_compose == [_PINNED, _PINNED], "the pin is healed before step one"
-
-
 def test_a_roll_that_does_not_touch_onex_api_does_not_check_its_pin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
