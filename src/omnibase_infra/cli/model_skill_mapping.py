@@ -39,7 +39,7 @@ __all__ = ["ModelSkillMapping"]
 class ModelSkillMapping(BaseModel):
     """One ``onex skill <name>`` → backing node mapping."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", regex_engine="python-re")
 
     skill_name: str = Field(
         ...,
@@ -53,13 +53,13 @@ class ModelSkillMapping(BaseModel):
             "Backing node registered under the 'onex.nodes' entry-point group."
         ),
     )
-    result_model: str = Field(
-        ...,
+    result_model: str | None = Field(
+        default=None,
         min_length=1,
+        pattern=r"^(?!omnimarket\.)",
         description=(
-            "Fully qualified name of the backing node's typed handler result "
-            "model — schema identity surfaced in the receipt (ticket "
-            "deliverable 3)."
+            "OPTIONAL FQN of a core or infra result model; a market package is "
+            "refused (OMN-23143), the receipt stamps the handler's own model."
         ),
     )
     event_bus: str = Field(

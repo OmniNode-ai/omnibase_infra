@@ -1,0 +1,59 @@
+schema_version: 1.0.0
+ticket_id: OMN-24716
+title: 'The second review of omnibase_infra#6029 at head 4ba6768c6077 has two blocking findings: a settled dev-lane row fails the live tests and the unmet record is incomplete'
+summary: 'Second Fable review of omnibase_infra#6029 at head 4ba6768c6077 (comment 6906454722). A dev-lane row published after the overlay settle and the repair build is now bounded by the settle ceiling plus one tick and no longer fails the live golden and error assertions; the unmet record is completed in the two contract files; the late-row, contract-check, source-grep, docstring and window-parse findings are fixed in tests and contracts. Tests and contracts only; nothing under src/ changes and the deploy agent is untouched, so no deploy-scope surface is changed. NOT MET and left to follow-up-append-half (open, not yet filed; ticket id pending, named in the TERMINAL of lane fix6029-0610): the real append command, the failed job the test induces, and the lab wiring of the kafka tests.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24716-second-review
+    statement: The live deploy job reading tests fail only on a real defect, and the record of what is not met is complete.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a correct dev-lane row published after a settle (completed_at before the settle and the repair build, published_at after them) passes the live golden and error assertions, bounded by the settle ceiling plus one tick, and a hermetic test covers it -- falsifier: uv run pytest tests/integration/chain_canary -q -k "deploy_job_reading and published_after_settle" fails on head 4ba6768c6077 and passes after the fix'
+      - id: AC2
+        statement: 'AC2: contracts/OMN-24695.yaml records the induced failed job and the lab wiring of the kafka tests as NOT MET, one open ticket is named for the append half, the induced job and the lab wiring in both contract files, and the OMN-24674 ticket text is amended to match -- falsifier: grep -c "NOT MET" contracts/OMN-24695.yaml returns at least 2 and grep -n "OMN-" contracts/OMN-24674.yaml names the open follow-up ticket'
+      - id: AC4
+        statement: 'AC4: the two late rows (a7b921db at 2876 s and 7179dcca at 347 s) are ticketed, the contract check at contracts/OMN-24695.yaml:40 no longer depends on OMN-24674 saying NOT MET, the live_assertions source-grep test at :276-290 is deleted or asserts behaviour, the :157 docstring matches handler_deploy_job_reading.py:103-116, and the window is parsed inside the fixture -- falsifier: uv run pytest tests/integration/chain_canary -q -k "deploy_job_reading and window_parse" fails on head 4ba6768c6077 with a non-numeric window and passes after the fix'
+evidence_requirements:
+  - kind: tests
+    description: The hermetic deploy_job_reading tests pass at the pushed head; the published_after_settle and window_parse tests fail without the fix.
+    command: uv run --frozen pytest tests/integration/chain_canary -q -m "not kafka" -p no:cacheprovider -k deploy_job_reading
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24716-ac1
+    description: A dev-lane row published after a settle passes the shared row check, which bounds a dev row by SETTLE_CEILING_SECONDS plus ONE_TICK_SECONDS; a dev row past that, and a stability row past one tick, are still named.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/chain_canary -q -m "not kafka" -p no:cacheprovider -k "deploy_job_reading and published_after_settle"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24716-ac2
+    description: 'The OMN-24695 contract records the induced failed job and the lab wiring as NOT MET and names follow-up-append-half in both contract files. NOT MET at this head: the ticket id of follow-up-append-half is pending (a lab lane files no ticket) and the OMN-24674 Linear text is not amended by this lane; both are named in the TERMINAL for the orchestrator.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: test "$(grep -c 'NOT MET' contracts/OMN-24695.yaml)" -ge 2
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -q 'follow-up-append-half' contracts/OMN-24674.yaml && grep -q 'follow-up-append-half' contracts/OMN-24695.yaml
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24716-ac4
+    description: The window is parsed at test time and a non-numeric window fails the test that asks for it, the source-grep test is deleted, the docstring of the unknown-step test matches the handler, and the OMN-24695 check no longer counts NOT MET in the OMN-24674 contract. The two late rows are named in the OMN-24695 contract as tracked in follow-up-late-rows (open, id pending).
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/chain_canary -q -m "not kafka" -p no:cacheprovider -k "deploy_job_reading and window_parse"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: '! grep -q ''in_the_sources'' tests/integration/chain_canary/test_deploy_job_reading_live_assertions_omn24695.py && ! grep -q "grep -c ''NOT MET at this head'' contracts/OMN-24674.yaml" contracts/OMN-24695.yaml && grep -q ''follow-up-late-rows'' contracts/OMN-24695.yaml'
+        cwd: ${OMNI_HOME}/omnibase_infra
