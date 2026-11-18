@@ -1,0 +1,72 @@
+schema_version: 1.0.0
+ticket_id: OMN-25650
+title: Boot creates the topics an unwired contract declares outside event_bus
+summary: >-
+  The 13:33Z integration sweep of 2026-11-18 read 72 NOT RUNNING lines that name a node with no consumer group or an output topic that is absent on the dev broker. Read live in the dev runtime (omnimarket 0.4.321, ONEX_BOOT_UNIVERSE_PROVISION=0), 27 of those lines name a node whose declared command, terminal or externally consumed topics were never created: boot creates an unwired contract's event_bus.publish_topics only (OMN-23951), and 564 topics declared in runtime_dispatch.command_topic, runtime_dispatch.terminal_events, terminal_event, externally_consumed_topics and published_events across 208 nodes were absent on the dev broker. The unattached-contract boot pass now reads those declared topics from the contract file and creates them with the publish topics.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25650-declared-topics-provisioned
+    statement: Boot creates every topic a contract the runtime does not wire declares, so the answer topics of a node served by its own host process exist on the broker.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the NOT RUNNING lines that read no consumer group or an absent or unreadable output topic are each placed in exactly one reason group, each row backed by a live read command and its result at the merged head and on the dev runtime -- falsifier: a grep of the group table for one of the lines' omnimarket or overlays numbers finds no row, two rows, or a row with no read command"
+      - id: AC2
+        statement: "AC2: the biggest group is fixed at its declared source (contract topics provisioned at boot) with no hand edit on any host, and a test built from the real declarations of three listed nodes fails at the merge base and passes at the change head -- falsifier: uv run pytest on the new test at the merge base exits non-zero"
+      - id: AC3
+        statement: "AC3: integrated: with the change installed on the dev runtime on h201 through the declared dev install, at least five nodes of that group each show their declared topics on the dev broker, written as a STATUS row carrying pr=, installed=<host>:<revision>, observed= and read_at= -- falsifier: a topic listing of the dev broker lacks a declared topic of one of the five nodes"
+      - id: AC4
+        statement: "AC4: the lines each fix should turn are listed for the next integration pass, one row per line with the group and the read that turns it -- falsifier: a grep of the list for a line of the biggest group finds it missing"
+evidence_requirements:
+  - kind: tests
+    description: The unattached-contract boot provisioning tests.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_provision_unattached_declared_topics_omn25650.py tests/unit/runtime/auto_wiring/test_provision_unattached_publish_topics_omn23951.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25650-ac1-reason-table
+    description: >-
+      The reason table (72 lines, six groups, each row with its read command and result) is written to the lane report and posted as a ticket comment on OMN-25650; the biggest group, 27 lines, is the topic-never-provisioned group this change fixes. The hosted runner reads the in-repo half: the three real node declarations the table cites are held in the new test.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_provision_unattached_declared_topics_omn25650.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25650-ac2-three-real-nodes
+    description: >-
+      Built from the real contract declarations of node_lab_fill_effect, node_remote_lane_start_effect and node_stability_lane_refresh_effect, boot provisioning creates their command, terminal and externally consumed topics; the test fails at the merge base, where only event_bus.publish_topics were created.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_provision_unattached_declared_topics_omn25650.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25650-ac3-integrated
+    description: >-
+      Deploy check the hosted runner can run: the unattached boot pass reads the declared topics from the contract file and creates them. The read of the dev broker after the next dev runtime roll on this branch is posted as a STATUS row and a pull request comment naming the head and the revision running; it is not claimed by this check.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: grep -q "_read_declared_topics" src/omnibase_infra/handlers/boot_topic_provisioning.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_provision_unattached_publish_topics_omn23951.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25650-ac4-turned-lines
+    description: >-
+      The list of integration-pass lines this change should turn (the 27 lines of the biggest group, each with the read that turns it) is written to the lane report and posted as a ticket comment on OMN-25650. The hosted runner reads the in-repo half: the topics of the three listed nodes that the list names.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_provision_unattached_declared_topics_omn25650.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
