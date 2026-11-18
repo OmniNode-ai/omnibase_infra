@@ -8,6 +8,11 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn22867-pr-runner-placement
+    statement: Fix the public runner placement findings in the first batch of remaining PR gates.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: each of the five pull requests reads every required check green at its head or has its own red fixed forward on its branch, with each fix proven on a lab host -- falsifier: uv run pytest of each fix''s focused tests plus the check-runs read at each head'
   - id: req-omn22867-family1-hosted
     statement: Each gate workflow of the family selects only the GitHub-hosted label and is allowlisted with a reason.
     acceptance:
@@ -44,6 +49,15 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn22867-ac1-pr-runner-placement
+    description: Verify public hosted placement and the preserved private routing for the three PR gate workflows in this batch.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runner_routing_audit.py -k public_ci_proofs_use_a_hosted_runner -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn22867-ac1-family-hosted
     description: Every job of each family workflow selects ubuntu-latest and each file is allowlisted with a reason.
     source: manual
