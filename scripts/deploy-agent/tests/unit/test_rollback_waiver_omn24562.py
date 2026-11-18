@@ -4,10 +4,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
+import sys
 from collections.abc import Sequence
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import Mock
 from uuid import UUID, uuid4
 
@@ -17,19 +20,34 @@ from deploy_agent import executor as executor_mod
 from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested, Scope
 from deploy_agent.job_state import JobState
 
-import omnibase_infra.handlers.handler_stability_rollback_waiver as waiver_mod
-from omnibase_infra.handlers.handler_stability_rollback_waiver import (
-    HandlerStabilityRollbackWaiver,
-    admit_rollback_point,
-    classify_readings,
-    take_readings,
-)
-from omnibase_infra.models.model_stability_rollback_waiver_request import (
-    ModelStabilityRollbackWaiverRequest,
-)
 from tests.unit.test_auto_rollback import _agent, _check
 
 pytestmark = pytest.mark.unit
+
+# The standalone agent venv carries no handlers package: load the modules by path,
+# exactly as the agent does.
+waiver_mod = executor_mod.load_dev_boot_guard("handler_stability_rollback_waiver")
+HandlerStabilityRollbackWaiver = waiver_mod.HandlerStabilityRollbackWaiver
+admit_rollback_point = waiver_mod.admit_rollback_point
+classify_readings = waiver_mod.classify_readings
+take_readings = waiver_mod.take_readings
+_MODELS = Path(executor_mod.__file__).resolve().parents[3] / "src/omnibase_infra/models"
+
+
+def _load_model(stem: str) -> ModuleType:
+    """Load a waiver model by path under its real name, as the node path would."""
+    name = f"omnibase_infra.models.{stem}"
+    spec = importlib.util.spec_from_file_location(name, _MODELS / f"{stem}.py")
+    assert spec is not None and spec.loader is not None
+    module = sys.modules[name] = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+ModelStabilityRollbackWaiverRequest = _load_model(
+    "model_stability_rollback_waiver_request"
+).ModelStabilityRollbackWaiverRequest
+_load_model("model_stability_rollback_waiver_result")
 
 _LANE = EnumRuntimeLane.STABILITY_TEST.value
 _TIMEOUT = subprocess.TimeoutExpired(["curl"], 10)
