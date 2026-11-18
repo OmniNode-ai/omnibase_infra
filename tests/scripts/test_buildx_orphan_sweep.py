@@ -54,6 +54,7 @@ def _write_docker_stub(
     registered_nodes: list[str],
     containers: dict[str, dict[str, Any]],
     calls_log: Path,
+    current_buildx_format: bool = False,
 ) -> None:
     """Write a bash `docker` stub covering exactly the subcommands the
     sweep script issues: `buildx ls`, `ps -a --filter ... --format ...`,
@@ -71,9 +72,14 @@ def _write_docker_stub(
     ls_lines = ["NAME/NODE       DRIVER/ENDPOINT       STATUS  BUILDKIT PLATFORMS"]
     for node in registered_nodes:
         ls_lines.append(f"{node}-builder      docker-container")
-        ls_lines.append(
-            f"  {node} unix:///var/run/docker.sock running v0.12.0 linux/amd64"
-        )
+        if current_buildx_format:
+            ls_lines.append(
+                rf"  \_ {node} \_ unix:///var/run/docker.sock running v0.34.1 linux/amd64"
+            )
+        else:
+            ls_lines.append(
+                f"  {node} unix:///var/run/docker.sock running v0.12.0 linux/amd64"
+            )
     ls_output = "\n".join(ls_lines)
 
     ps_output = "\n".join(containers.keys())
@@ -214,6 +220,37 @@ def test_registered_builder_is_never_touched_regardless_of_age(tmp_path: Path) -
             name: {"created": OLD_ISO, "status": "running", "mounts": [f"{name}_state"]}
         },
         calls_log=calls_log,
+    )
+
+    result = _run(bin_dir, execute=True)
+
+    assert result.returncode == 0, result.stderr
+    assert 'candidates": []' in result.stdout
+    assert "registered" in result.stderr
+    calls = calls_log.read_text() if calls_log.exists() else ""
+    assert f"rm {name}" not in calls
+    assert "stats" not in calls  # never even sampled -- filtered before idle check
+
+
+def test_registered_builder_in_current_buildx_format_is_never_touched(
+    tmp_path: Path,
+) -> None:
+    bin_dir = tmp_path / "bin"
+    calls_log = tmp_path / "calls.log"
+    name = "buildx_buildkit_onex-lane-buildkit-mem12g0"
+    _write_docker_stub(
+        bin_dir,
+        registered_nodes=["onex-lane-buildkit-mem12g0"],
+        containers={
+            name: {
+                "created": OLD_ISO,
+                "status": "running",
+                "mounts": [f"{name}_state"],
+                "stats": [("0.00%", "1MB / 1MB"), ("0.00%", "1MB / 1MB")],
+            }
+        },
+        calls_log=calls_log,
+        current_buildx_format=True,
     )
 
     result = _run(bin_dir, execute=True)
