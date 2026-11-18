@@ -54,11 +54,6 @@ QUIET = datetime(2026, 9, 25, 4, 53, tzinfo=UTC)
 NOW = datetime(2026, 10, 10, tzinfo=UTC)
 UNTIL = datetime(2026, 10, 19, 7, tzinfo=UTC)
 FREEZE_REASON = "stable demo lane"
-#: OMN-24474: the one hold a full dev lane may carry, as (ticket in its reason, latest expiry).
-#: Remove the entry in the PR that lifts the hold.
-TIME_BOXED_DEV_HOLDS = {
-    "dev-201": ("OMN-24474", datetime(2026, 11, 15, 6, tzinfo=UTC)),
-}
 FROZEN_DETAIL = "FROZEN until 2026-10-19T07:00Z: stable demo lane"
 
 TABLE_WITH_OMNIMARKET_ROUTE = """
@@ -288,14 +283,6 @@ def test_committed_dev_lanes_carry_no_freeze() -> None:
         if instance in satellites:
             continue
         other_flags = lane_flags_for_instance(REPO_ROOT, instance)
-        if instance in TIME_BOXED_DEV_HOLDS:
-            # OMN-24474: one named, self-expiring hold, never a standing freeze.
-            ticket, latest_until = TIME_BOXED_DEV_HOLDS[instance]
-            freeze = other_flags.freeze
-            assert freeze is not None
-            assert ticket in freeze.reason
-            assert freeze.until <= latest_until
-            continue
         assert other_flags.frozen_reason(NOW) is None
         assert other_flags.frozen_reason(UNTIL) is None
 

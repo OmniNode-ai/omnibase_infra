@@ -315,13 +315,13 @@ def _good_render(slot: int = 1) -> dict[str, Any]:
 
 def test_positive_control_a_correct_render_reports_no_problems() -> None:
     """Without this, a verifier that never reports anything looks correct."""
-    assert verifier.check(_good_render(), policy.resolve_slot(1), False) == []
+    assert verifier.check(_good_render(), policy.resolve_slot(1)) == []
 
 
 def _mutate(fn: Any) -> list[str]:
     rendered = _good_render()
     fn(rendered)
-    return verifier.check(rendered, policy.resolve_slot(1), False)
+    return verifier.check(rendered, policy.resolve_slot(1))
 
 
 def test_an_ambient_kafka_environment_leak_is_caught() -> None:
@@ -420,13 +420,13 @@ def test_the_build_only_infra_image_is_not_a_shared_dependency() -> None:
         "scale": 0,
         "networks": {"omnibase-infra-network": None},
     }
-    assert verifier.check(rendered, policy.resolve_slot(1), False) == []
+    assert verifier.check(rendered, policy.resolve_slot(1)) == []
 
 
 def test_a_build_only_image_that_would_start_a_container_is_still_caught() -> None:
     rendered = _good_render()
     rendered["services"][BUILD_ONLY_IMAGE] = {"profiles": ["prepr"], "scale": 1}
-    problems = verifier.check(rendered, policy.resolve_slot(1), False)
+    problems = verifier.check(rendered, policy.resolve_slot(1))
     assert any(BUILD_ONLY_IMAGE in p for p in problems)
 
 
@@ -449,7 +449,7 @@ def test_a_build_only_image_with_extra_attributes_is_caught(
         "networks": {"omnibase-infra-network": None},
         **extra,
     }
-    problems = verifier.check(rendered, policy.resolve_slot(1), False)
+    problems = verifier.check(rendered, policy.resolve_slot(1))
     assert any(BUILD_ONLY_IMAGE in p for p in problems)
 
 
@@ -474,7 +474,7 @@ def test_a_build_only_image_without_scale_or_on_wrong_network_is_caught(
 ) -> None:
     rendered = _good_render()
     rendered["services"][BUILD_ONLY_IMAGE] = svc
-    problems = verifier.check(rendered, policy.resolve_slot(1), False)
+    problems = verifier.check(rendered, policy.resolve_slot(1))
     assert any(BUILD_ONLY_IMAGE in p for p in problems)
 
 
@@ -580,10 +580,11 @@ def test_the_overlay_container_names_match_the_manifest_services(slot: int) -> N
 def test_every_overlay_container_carries_the_slot_marker(slot: int) -> None:
     """The render check accepts every container name the overlay renders.
 
-    The gateway is ``onex-api-prepr-<slot>``, which ends at the slot number.
-    The check required ``-prepr-<slot>-`` with a trailing dash, so it refused
-    the whole slot before anything booted (OMN-19972). This reads the overlay
-    through the verifier's own predicate.
+    A slot container name may end at the slot number. The check once required
+    ``-prepr-<slot>-`` with a trailing dash, so it refused the whole slot before
+    anything booted (OMN-19972). This reads the overlay through the verifier's
+    own predicate. OMN-24476 removed the slot gateway (``onex-api-prepr-<slot>``),
+    the container that ended at the slot number.
     """
     slot_policy = policy.resolve_slot(slot)
     overlay = _overlay_for_slot(slot)
@@ -592,7 +593,8 @@ def test_every_overlay_container_carries_the_slot_marker(slot: int) -> None:
         for name, svc in overlay["services"].items()
         if isinstance(svc, dict) and "container_name" in svc
     }
-    assert "onex-api" in named, "positive control: the gateway must be checked."
+    assert "omninode-runtime" in named, "positive control: the runtime must be checked."
+    assert "onex-api" not in named, "the slot runs no gateway (OMN-24476)."
     bare = {
         n: c
         for n, c in named.items()
@@ -605,11 +607,11 @@ def test_every_overlay_container_carries_the_slot_marker(slot: int) -> None:
 def test_the_slot_marker_is_a_whole_segment_not_a_substring(slot: int) -> None:
     slot_policy = policy.resolve_slot(slot)
     carries = verifier.carries_slot_marker
-    assert carries(f"onex-api-prepr-{slot}", slot_policy)
+    assert carries(f"example-prepr-{slot}", slot_policy)
     assert carries(f"omninode-prepr-{slot}-runtime", slot_policy)
-    assert not carries(f"onex-api-prepr-{slot}0", slot_policy)
+    assert not carries(f"example-prepr-{slot}0", slot_policy)
     assert not carries(f"omninode-prepr-{slot}0-runtime", slot_policy)
-    assert not carries("onex-api", slot_policy)
+    assert not carries("example", slot_policy)
     assert not carries(f"omninode-prepr-{slot + 1}-runtime", slot_policy)
 
 
@@ -1257,11 +1259,10 @@ def test_every_slot_service_is_built_with_the_workspace_args_and_up_never_builds
     assert len(build_lines) == 1, build_lines
     assert '"${SLOT_BUILD_SERVICES[@]}"' in build_lines[0]
     assert 'SLOT_BUILD_SERVICES=("${SLOT_SERVICES[@]}")' in body
-    # onex-api is image-referenced and must be appended AFTER the build list is
-    # taken, or the build would try to build an image it only references.
-    assert body.index('SLOT_BUILD_SERVICES=("${SLOT_SERVICES[@]}")') < body.index(
-        "SLOT_SERVICES+=(onex-api)"
-    )
+    # OMN-24476: the slot runs no gateway, so nothing is appended to the list and
+    # no image-referenced service can reach the build.
+    assert "SLOT_SERVICES+=(" not in body
+    assert "onex-api" not in body
     up_lines = [ln for ln in body.splitlines() if " up -d " in ln]
     assert up_lines, "no `up -d` found; the pin would pass vacuously"
     assert all("--no-build" in ln for ln in up_lines), up_lines
@@ -1492,7 +1493,7 @@ def test_entrypoint_stages_siblings_at_dev_tag_with_a_branch_name_that_is_not_sh
     plan = json.loads("\n".join(lines[lines.index("{") :]))
     assert plan["target_branch"] == branch
     assert plan["slot"] == 1
-    assert plan["with_gateway"] is True
+    assert plan["with_gateway"] is False
 
 
 def test_entrypoint_stages_siblings_at_dev_tag_checks_every_pin_line_it_reads() -> None:

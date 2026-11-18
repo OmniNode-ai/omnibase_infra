@@ -535,11 +535,16 @@ def test_capture_folded_effects_resolves_the_main_service(
     monkeypatch.setattr(
         executor_mod,
         "lane_folded_profiles",
-        lambda lane: (
+        lambda lane, policy=None: (
             frozenset({"effects"})
             if lane is EnumRuntimeLane.STABILITY_TEST
             else frozenset()
         ),
+    )
+    monkeypatch.setattr(
+        executor_mod,
+        "_load_runtime_policy_env",
+        lambda: {"DEV_RUNTIME_MAIN_FOLDABLE_SERVICES": '{"effects":"runtime-effects"}'},
     )
     executor = DeployExecutor()
     monkeypatch.setattr(

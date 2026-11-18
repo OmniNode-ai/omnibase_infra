@@ -240,14 +240,13 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
 # ::test_python_declaration_equals_the_bash_array, which PARSES the array out
 # of onex-runtime-deploy rather than restating it, and carries a positive control
 # so an empty parse cannot read as agreement.
-DEV_LANE_ONLY_MIGRATION_SERVICES: tuple[str, ...] = (
-    "cloud-migration-files",
-    "cloud-migration",
-)
+# OMN-24476: empty, the dev lane declares no omninode_cloud one-shot any more.
+DEV_LANE_ONLY_MIGRATION_SERVICES: tuple[str, ...] = ()
 
 # OMN-18496: the only services that read omninode_cloud; bound by a test to
 # the bash array of the same name in handler_runtime_deploy.sh.
-DEV_LANE_CLOUD_DB_SERVICES: tuple[str, ...] = ("onex-api",)
+# OMN-24476: empty, onex-api is removed from the dev lane.
+DEV_LANE_CLOUD_DB_SERVICES: tuple[str, ...] = ()
 
 
 DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
@@ -257,7 +256,6 @@ DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
     "projection-savings-writer",
     "projection-tenant-credentials-writer",
     "projection-live-events-writer",
-    "onex-api",
     # OMN-18114: the TENANT-domain projection carrier, for a reason that is the
     # OPPOSITE of the writers' reason above and is stated separately so the two
     # do not merge. That service IS declared in docker-compose.infra.yml, so
@@ -296,7 +294,7 @@ DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
 # out of the web front end's repository on the lab host and carries that
 # repository's revision (docker/docker-compose.dev-lane.yml spells the build).
 DEV_LANE_ONLY_TAG_REFERENCED_SERVICES: frozenset[str] = frozenset(
-    {"onex-api", "cost-estimator-web"}
+    {"cost-estimator-web"}
 )
 
 # The subset ``docker compose build`` can be handed. Derived, never a second
@@ -1383,7 +1381,7 @@ class ModelRebuildCompleted(_StrictFrozenModel):
     # OMN-17135: repo -> the commit SHA RT-1 resolved and vendored for that
     # sibling in a workspace-mode build. ``requested_git_ref`` above pins ONE
     # repository (omnibase_infra), so on its own it said nothing about which
-    # omnibase_core / omnibase_compat / omnimarket commit the image carries.
+    # omnibase_core / omnimarket commit the image carries.
     # This is EVIDENCE beside the infra pin, never a key: the rule-24 lab-pass
     # receipt is keyed by the infra sha and stays that way. Empty for a
     # release-mode or prod digest deploy, which vendors no sibling trees.

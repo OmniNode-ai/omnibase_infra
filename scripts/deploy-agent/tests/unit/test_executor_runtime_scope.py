@@ -268,6 +268,12 @@ class TestCoreAndFullScopeComposeUp:
             requested, timeout_s=120, lane=EnumRuntimeLane.DEV
         )
 
+    # OMN-24476 emptied the dev lane's cloud one-shots; restore the pair so the preflight
+    # ordering they exercised stays tested.
+    @patch(
+        "deploy_agent.executor.DEV_LANE_ONLY_MIGRATION_SERVICES",
+        ("cloud-migration-files", "cloud-migration"),
+    )
     def test_runtime_scope_runs_migration_preflight_before_runtime_services(
         self,
     ) -> None:

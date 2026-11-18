@@ -63,29 +63,32 @@ def test_revocation_precedes_container_and_database_removal() -> None:
     ), "an unproven revoke must preserve the gateway and credential for retry"
 
 
-def test_bringup_mints_through_existing_adapter_after_gateway_readiness() -> None:
+def test_bringup_starts_no_gateway_and_mints_no_tenant() -> None:
+    """OMN-24476: the slot runs no gateway, so bring-up mints nothing.
+
+    The teardown still revokes a credential an earlier slot left behind
+    (``revoke_tenant``), and returns at once for a slot with none.
+    """
     source = VERIFY.read_text()
-    assert "--tenant-lifecycle mint" in source
-    mint = source.index("--tenant-lifecycle mint")
-    assert mint > source.index('compose "${PROFILES[@]}" up')
-    assert mint < source.index("# 12. THE SLOT DESCRIPTOR")
-    assert 'LAB_TENANT_SLUG="onex-${DB_SLOT}"' in source
+    assert "--tenant-lifecycle mint" not in source
+    assert "onex-api" not in source
+    assert "--with-gateway" not in source
+    assert "printf '  \"gateway_started\": false,\\n'" in source
 
 
-def test_gateway_gets_private_admin_sentinels() -> None:
+def test_slot_gets_no_gateway_admin_sentinels() -> None:
     source = VERIFY.read_text()
-    assert "TENANT_BOOTSTRAP_ADMIN_SECRET" in source
-    assert "TENANT_OFFBOARD_ADMIN_SECRET" in source
-    assert source.index("secrets.token_hex(") > source.index(
-        'source "${OMNIBASE_OPERATOR_ENV_FILE}"'
-    )
+    assert "TENANT_BOOTSTRAP_ADMIN_SECRET" not in source
+    assert "TENANT_OFFBOARD_ADMIN_SECRET" not in source
 
 
-def test_slot_cloud_migration_uses_its_own_database_and_volume() -> None:
+def test_slot_overlay_carries_no_cloud_api_or_cloud_migration() -> None:
     source = (ROOT / "docker/docker-compose.prepr.yml").read_text()
-    assert 'DB_NAME: "omninode_cloud_${ONEX_DB_SLOT' in source
-    assert 'DB_USER: "role_omninode_${ONEX_DB_SLOT' in source
-    assert "prepr_cloud_migrations:/work" in source
+    document = yaml.safe_load(source.replace("!override", "").replace("!!merge ", ""))
+    assert not {"onex-api", "cloud-migration", "cloud-migration-files"} & set(
+        document["services"]
+    )
+    assert "prepr_cloud_migrations" not in document.get("volumes", {})
 
 
 @pytest.mark.parametrize("after", [401, 403])

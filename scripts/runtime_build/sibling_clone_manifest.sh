@@ -90,8 +90,6 @@ SIBLING_LOCK_UNPINNED_REPOS=("omniintelligence")
 # newest dev-merge tag; non-dev lanes keep the registry install in
 # docker/Dockerfile.runtime. Like omnimarket it comes after the foundation
 # packages, and unlike omnimarket the image installs it.
-# omnibase_compat left every set in this file under OMN-21284: it is being
-# retired, and the image installs it from the lock until no consumer remains.
 # shellcheck disable=SC2034  # consumed by scripts that `source` this file
 SIBLING_VENDORED_REPOS=("omnibase_core" "omnibase_spi" "omnimarket" "omniintelligence")
 

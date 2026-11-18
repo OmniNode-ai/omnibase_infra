@@ -65,8 +65,8 @@ _EXECUTOR = _REPO_ROOT / "scripts" / "deploy-agent" / "deploy_agent" / "executor
 _REQUIRED_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):\?")
 
 # The two variables omnibase_infra#3332 added to the dev-lane overlay -- the two
-# that surfaced one deploy at a time. Named explicitly: this is the concrete
-# regression, and it must pass now that they are declared.
+# that surfaced one deploy at a time. OMN-24476 removed the services that read
+# them, so the test now pins that neither is required or declared any more.
 _OMN_3332_VARS = ("ONEX_API_IMAGE", "ONEX_CLOUD_MIGRATE_IMAGE")
 
 
@@ -172,37 +172,16 @@ def test_union_of_dev_lane_compose_files_is_fully_declared() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize("var_name", _OMN_3332_VARS)
-def test_omn_3332_image_vars_are_declared(var_name: str) -> None:
-    """The GREEN half: the two variables that cost two deploys are declared."""
-    assert var_name in _required_names(_DEV_LANE_COMPOSE), (
-        f"{var_name} is no longer a ${{VAR:?}} in the dev-lane overlay; if it was "
-        "deliberately removed, remove it from the manifest and from this test."
-    )
-    assert var_name in _declared_names(_DEV_LANE_MANIFEST), (
-        f"{var_name} is required by the dev-lane overlay but not declared in "
-        f"{_DEV_LANE_MANIFEST.name}"
-    )
+def test_omn_3332_image_vars_are_retired_with_the_services(var_name: str) -> None:
+    """OMN-24476: the two image pins left with the services that read them.
 
-
-@pytest.mark.unit
-def test_image_vars_carry_provenance_comments() -> None:
-    """Each image tag name is preceded by a provenance comment, not bare.
-
-    An image tag resolved from an operator store, with no compose default and no
-    committed value, is exactly the kind of name a reader will otherwise guess
-    at. The previous lane had to derive ONEX_CLOUD_MIGRATE_IMAGE by hashing the
-    migration corpus against the deployed clone because the intuitive pick — the
-    tag sharing the API image's build stamp — was provably the wrong image.
+    ``ONEX_API_IMAGE`` and ``ONEX_CLOUD_MIGRATE_IMAGE`` were required by the cloud
+    API and its migration one-shots. Both are gone from the dev lane, so neither
+    name may stay required in the overlay or declared in the manifest: a name
+    left in the manifest would make the preflight demand a value nothing reads.
     """
-    lines = _DEV_LANE_MANIFEST.read_text(encoding="utf-8").splitlines()
-    for var_name in _OMN_3332_VARS:
-        index = lines.index(var_name)
-        preceding = [line for line in lines[:index][::-1] if line.strip()]
-        assert preceding and preceding[0].lstrip().startswith("#"), (
-            f"{var_name} in {_DEV_LANE_MANIFEST.name} has no provenance comment "
-            "immediately above it. Image-tag names resolve from a store, not from "
-            "a compose default — say where the value comes from (OMN-17530)."
-        )
+    assert var_name not in _required_names(_DEV_LANE_COMPOSE)
+    assert var_name not in _declared_names(_DEV_LANE_MANIFEST)
 
 
 @pytest.mark.unit

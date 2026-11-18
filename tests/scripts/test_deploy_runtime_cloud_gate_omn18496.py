@@ -21,6 +21,20 @@ SCRIPT = ROOT / "src/omnibase_infra/handlers/handler_runtime_deploy.sh"
 CLOUD_CONSUMERS = ("onex-api",)
 pytestmark = pytest.mark.unit
 
+# Fixture of the arrays as they were before OMN-24476, so the gating logic
+# stays tested while the dev lane declares none.
+FIXTURE_CLOUD_ARRAYS = """readonly DEV_LANE_ONLY_MIGRATION_SERVICES=(
+    cloud-migration-files
+    cloud-migration
+)
+readonly DEV_LANE_ONLY_MIGRATION_ONESHOTS=(
+    cloud-migration-files
+    cloud-migration
+)
+readonly DEV_LANE_CLOUD_DB_SERVICES=(
+    onex-api
+)"""
+
 
 def _function(source: str, name: str) -> str:
     match = re.search(rf"^{name}\(\) \{{.*?^\}}", source, re.M | re.S)
@@ -60,8 +74,6 @@ def _invoke(
         "STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES",
         "RUNTIME_MIGRATION_SERVICES",
         "RUNTIME_MIGRATION_ONESHOTS",
-        "DEV_LANE_ONLY_MIGRATION_SERVICES",
-        "DEV_LANE_ONLY_MIGRATION_ONESHOTS",
         "REQUIRED_PROJECTION_TABLES",
     )
     functions = (
@@ -76,8 +88,7 @@ def _invoke(
     # old failure path, rather than failing merely because a symbol is absent.
     extras = ""
     if "exclude_cloud_database_services() {" in source:
-        extras = _array(source, "DEV_LANE_CLOUD_DB_SERVICES") + "\n"
-        extras += _function(source, "exclude_cloud_database_services")
+        extras = _function(source, "exclude_cloud_database_services")
     if "report_cloud_migration_failure() {" in source:
         extras += "\n" + _readonly(source, "CLOUD_MIGRATION_FAILED_EXIT_CODE")
         extras += "\n" + _function(source, "report_cloud_migration_failure")
@@ -91,6 +102,7 @@ def _invoke(
             "log_info() { :; }; log_step() { :; }; log_cmd() { :; }",
             'source "$COMPOSE_HELPER"',
             *(_array(source, name) for name in arrays),
+            FIXTURE_CLOUD_ARRAYS,
             'RUNTIME_BUILD_SERVICES=("${RUNTIME_SERVICES[@]}")',
             'if [[ -n "$RUNTIME_BUILD_SERVICES_OVERRIDE" ]]; then read -ra RUNTIME_BUILD_SERVICES <<< "$RUNTIME_BUILD_SERVICES_OVERRIDE"; fi',
             extras,
@@ -163,11 +175,11 @@ def test_cloud_failure_starts_effects_and_stops_only_cloud_consumers(
         assert ": wait: omnibase-infra-cloud-migration\n" not in result.stderr
 
 
-def test_successful_cloud_migration_restores_api_to_refresh_set() -> None:
+def test_successful_cloud_migration_does_not_gate_the_refresh_set() -> None:
     result = _invoke()
     assert result.returncode == 0, result.stdout + result.stderr
     assert ": runtime-effects" in result.stderr
-    assert ": onex-api" in result.stderr
+    assert ": onex-api" not in result.stderr
     assert ": stop:" not in result.stderr
 
 
@@ -242,22 +254,24 @@ def test_other_lanes_never_attempt_cloud_migrations(project: str) -> None:
     assert ": runtime-effects" in result.stderr
 
 
-def test_declared_cloud_consumer_set_excludes_companion_runtime() -> None:
+def test_dev_lane_declares_no_cloud_consumer() -> None:
     compose = yaml.safe_load(
         (ROOT / "docker/docker-compose.dev-lane.yml")
         .read_text()
         .replace("!override", "")
     )
-    consumers = tuple(
-        name
-        for name, service in compose["services"].items()
-        if "cloud-migration" in service.get("depends_on", {})
+    assert all(
+        "cloud-migration" not in service.get("depends_on", {})
+        for service in compose["services"].values()
     )
-    assert consumers == CLOUD_CONSUMERS
-    api_dependency = compose["services"]["onex-api"]["depends_on"]["cloud-migration"]
-    assert api_dependency["condition"] == "service_completed_successfully"
-    gate = _array(SCRIPT.read_text(), "DEV_LANE_CLOUD_DB_SERVICES")
-    assert tuple(re.findall(r"^    ([a-z][a-z0-9-]*)$", gate, re.M)) == CLOUD_CONSUMERS
+    assert "onex-api" not in compose["services"]
+    for name in (
+        "DEV_LANE_ONLY_MIGRATION_SERVICES",
+        "DEV_LANE_ONLY_MIGRATION_ONESHOTS",
+        "DEV_LANE_CLOUD_DB_SERVICES",
+    ):
+        gate = _array(SCRIPT.read_text(), name)
+        assert re.findall(r"^    ([a-z][a-z0-9-]*)$", gate, re.M) == []
 
 
 def test_degraded_readback_uses_the_same_cloud_scope_as_restart() -> None:

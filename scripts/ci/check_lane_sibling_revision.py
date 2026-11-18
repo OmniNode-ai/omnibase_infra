@@ -11,7 +11,7 @@ commit, read from ``org.opencontainers.image.revision`` on the running container
 That label answers the question the omnibase_infra trigger asks and nothing else.
 
 The runtime image VENDORS its siblings: ``stage_workspace.sh`` stages
-``omnibase_core``, ``omnibase_compat`` and ``omnimarket`` from the host clones
+``omnibase_core`` and ``omnimarket`` from the host clones
 into the build context, resolving each one's ref at staging time
 (``DEPLOY_SIBLING_FALLBACK_REF``, default ``origin/dev`` -- OMN-17135). So an
 omnimarket merge changes what the lane RUNS while changing nothing the infra

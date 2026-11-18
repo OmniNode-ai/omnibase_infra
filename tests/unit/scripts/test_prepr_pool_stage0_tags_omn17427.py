@@ -316,12 +316,13 @@ def test_pool_staging_defaults_to_dev_tags_for_an_omnimarket_only_proof(
         assert (staged / ".build-sha").read_text().strip() == commits[repo]
 
 
-def test_pool_staging_keeps_sha_pins_when_the_proof_names_an_infra_ref(
+def test_pool_staging_defaults_to_dev_tags_when_the_proof_names_an_infra_ref(
     tmp_path: Path,
 ) -> None:
-    # OMN-21968: the dev-tag default is only for a proof with no infra pull request,
-    # group or ref; a proof of an infra ref still stages the siblings it cloned.
-    env, _, commits = _origins(tmp_path)
+    # OMN-19998: the image audit refuses a sha-pinned sibling in every build
+    # context, so a proof of an infra ref stages dev-merge tags like any other
+    # proof; only a params file that names STAGE_DEV_TAGS (even empty) keeps pins.
+    env, tags, commits = _origins(tmp_path)
     infra_dev = _git(env, tmp_path / "origins/omnibase_infra.git", "rev-parse", "dev")
     params = _params(tmp_path, INFRA_REF_SHA=infra_dev)
     params.write_text(
@@ -334,12 +335,11 @@ def test_pool_staging_keeps_sha_pins_when_the_proof_names_an_infra_ref(
     )
     cloned = _run(env, "bash", str(PROVE), str(params), "clone")
     assert cloned.returncode == 0, cloned.stdout + cloned.stderr
-    root = tmp_path / "work/root"
-    before = {repo: _git(env, root / repo, "rev-parse", "HEAD") for repo in SIBLINGS}
     done = _run(env, "bash", str(PROVE), str(params), "build")
     assert "stage rc=0" in done.stdout, done.stdout + done.stderr
     refs = json.loads((tmp_path / "work/refs.json").read_text())
     for repo in SIBLINGS:
-        assert refs["repos"][repo]["ref"] == before[repo]
-        assert refs["repos"][repo]["dev_tag_from"] == ""
-        assert before[repo] != commits[repo]
+        assert refs["repos"][repo]["ref"] == tags[repo]
+        assert refs["repos"][repo]["dev_tag_from"] == "origin/dev"
+        staged = tmp_path / "work/root/omnibase_infra/workspace/sibling-repos" / repo
+        assert (staged / ".build-sha").read_text().strip() == commits[repo]

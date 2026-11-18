@@ -208,10 +208,10 @@ class TestRuntimePhaseUnchangedNotRecreated:
         lane = _fixture_lane()
         lane.current_image = NEW_IMAGE
         for service, state in lane.running.items():
-            if service != "onex-api":
+            if service != "cost-estimator-web":
                 state["image"] = NEW_IMAGE
         _run_runtime_phase(lane)
-        assert lane.recreated == ["onex-api"]
+        assert lane.recreated == ["cost-estimator-web"]
 
 
 class TestRuntimePhaseRolling:
@@ -224,7 +224,9 @@ class TestRuntimePhaseRolling:
         # 19 containers in the recorded job; the hook-events writer (OMN-21288), the
         # infra-routing-decisions consumer (OMN-23072) and the intelligence API
         # (OMN-22391) are among them, and the runtime scope no longer names any.
-        assert len(lane.recreated) == 16
+        # OMN-24476: onex-api is retired from the dev lane too, so 15 remain.
+        assert len(lane.recreated) == 15
+        assert "onex-api" not in lane.recreated
         assert "infra-routing-decisions-consumer" not in lane.recreated
         assert "intelligence-api" not in lane.recreated
         assert "projection-claude-hook-events-writer" not in lane.recreated
@@ -269,30 +271,18 @@ class TestRuntimePhaseRolling:
         assert len(issued) < 19
         assert (Phase.RUNTIME, PhaseStatus.SUCCESS) not in lane.phases
 
-    def test_runtime_phase_onex_api_failure_raises_typed_and_starts_nothing_after_it(
-        self,
-    ) -> None:
-        """OMN-24471: the 2026-11-14 incident, an onex-api that cannot become healthy.
+    def test_runtime_phase_rolls_no_onex_api_step(self) -> None:
+        """OMN-24476: onex-api is removed from the dev lane, so the roll issues no onex-api step.
 
-        onex-api is one of the nineteen services of the live fixture. Its health wait
-        fails and it crash-loops, so a census of the whole list also fails. The roll
-        stops with the onex-api step's own typed error (not the census's plain one),
-        and nothing is started or recreated after it.
+        The 2026-11-14 incident (OMN-24471) was an onex-api step that could not become
+        healthy and recreated the runtime around it. The fixture's service list no longer
+        holds onex-api, so no step names it and an unhealthy one cannot stop the roll.
         """
         lane = _fixture_lane()
         lane.current_image = NEW_IMAGE
-        lane.not_healthy = "onex-api"
-        lane.crash_looping = "onex-api"
-        typed = executor_mod.load_dev_boot_guard().DevOnexApiStepFailedError
-        with pytest.raises(typed, match="onex-api"):
-            _run_runtime_phase(lane)
-        issued = [a[-1] for a in lane.ups]
-        # The order of the services is the compose model's, not this test's: the
-        # roll stops at onex-api wherever it falls, and issues nothing after it.
-        assert issued[-1] == "onex-api"
-        assert issued.count("onex-api") == 1
-        assert not any("--no-recreate" in a for a in lane.ups)
-        assert (Phase.RUNTIME, PhaseStatus.SUCCESS) not in lane.phases
+        _run_runtime_phase(lane)
+        assert "onex-api" not in [a[-1] for a in lane.ups]
+        assert (Phase.RUNTIME, PhaseStatus.SUCCESS) in lane.phases
 
     def test_runtime_phase_rolling_does_not_replace_a_peer_while_boot_is_unhealthy(
         self,

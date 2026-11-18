@@ -41,14 +41,15 @@
 # omnimarket PR until its infra counterpart exists). The two are complementary:
 # OMN-17156 keeps the two repos ordered; this keeps infra's CI verdict
 # deterministic when that ordering is not perfect.
+#
+# OMN-24206: RULING 2026-11-09T21:54:25Z lane=orchestrator-31d9: a downstream
+# repository moves its pin on a sibling only when it needs something new from
+# it. The six-hourly schedule is removed; the advance runs only by
+# workflow_dispatch, when a change needs a newer omnimarket contract.
 
 name: Omnimarket contract pin refresh
 
 on:
-  schedule:
-    # Every 6 hours. Bounds how far the pin can lag omnimarket dev, which is
-    # the OMN-15701 staleness budget being deliberately chosen here.
-    - cron: "23 */6 * * *"
   workflow_dispatch:
     inputs:
       target_ref:
