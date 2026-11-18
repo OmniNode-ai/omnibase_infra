@@ -244,15 +244,34 @@ class TestAC3NoShadowState:
         raw = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
         assert set(raw) == {"sources"}
 
-    def test_ci_summary_asserts_the_context_and_excludes_nothing(self) -> None:
+    def test_no_required_list_names_the_context(self) -> None:
+        """OMN-25514: the check is a dev signal, not a required context.
+
+        Only the dated sweep exclusion names it, for the row a head that ran
+        the old pull_request caller still carries.
+        """
+        import yaml
+
         from scripts.ci.ci_summary_gate import (
             EXPECTED_EXTERNAL_CONTEXTS,
             EXTERNAL_SWEEP_EXCLUSIONS,
+            POST_FIXTURE_WINDOW_CONTEXTS,
         )
 
-        assert CONTEXT in EXPECTED_EXTERNAL_CONTEXTS
-        assert not any(
-            "Delegation Health" in name for name in EXTERNAL_SWEEP_EXCLUSIONS
+        assert CONTEXT not in EXPECTED_EXTERNAL_CONTEXTS
+        assert CONTEXT not in POST_FIXTURE_WINDOW_CONTEXTS
+        policy = yaml.safe_load(
+            Path("config/runner_routing_policy.yaml").read_text(encoding="utf-8")
+        )
+        umbrella = policy["route"]["nonrequired_check_alert"][
+            "umbrella_enforced_contexts"
+        ]
+        assert all(CONTEXT not in names for names in umbrella.values())
+        entry = EXTERNAL_SWEEP_EXCLUSIONS[CONTEXT]
+        assert (entry.ticket, entry.added, entry.expires) == (
+            "OMN-25514",
+            "2026-11-17",
+            "2026-12-17",
         )
 
 
@@ -272,12 +291,13 @@ class TestWorkflowWiring:
         assert "scripts/ci/delegation_health_check.py" in text
         assert doc["jobs"]["delegation-health"]["name"] == dh.CHECK_JOB_NAME
 
-    def test_the_caller_reports_on_pull_requests_and_queue_heads(self) -> None:
+    def test_the_caller_runs_on_a_schedule_and_push_to_dev_only(self) -> None:
+        """OMN-25514: no pull_request or merge_group run, so no PR head waits."""
         doc, _ = _workflow("delegation-health-check.yml")
         triggers = doc[True]
-        assert {"labeled", "unlabeled"} <= set(triggers["pull_request"]["types"])
-        assert "merge_group" in triggers
-        assert "paths" not in (triggers["pull_request"] or {})
+        assert set(triggers) == {"schedule", "push"}
+        assert triggers["push"] == {"branches": ["dev"]}
+        assert triggers["schedule"] and all("cron" in s for s in triggers["schedule"])
 
     def test_the_caller_job_cannot_skip_as_passed(self) -> None:
         doc, _ = _workflow("delegation-health-check.yml")
@@ -287,11 +307,11 @@ class TestWorkflowWiring:
         for key in ("needs", "if", "continue-on-error"):
             assert key not in job, key
 
-    def test_the_check_run_is_the_registered_context(self) -> None:
+    def test_the_check_run_is_the_excluded_context(self) -> None:
         """`<caller job id> / <called job name>`, with no caller `name:`.
 
-        That is the spelling EXPECTED_EXTERNAL_CONTEXTS asserts and the prefix
-        the omniclaude advisory-job gate matches a called workflow's job by.
+        That is the spelling the sweep exclusion admits and the prefix the
+        omniclaude advisory-job gate matches a called workflow's job by.
         """
         caller, _ = _workflow("delegation-health-check.yml")
         reusable, _ = _workflow("delegation-health-reusable.yml")
@@ -300,7 +320,7 @@ class TestWorkflowWiring:
         inner = reusable["jobs"]["delegation-health"]["name"]
         assert f"{job_id} / {inner}" == CONTEXT
 
-    def test_queue_heads_never_share_a_concurrency_group(self) -> None:
+    def test_runs_share_a_concurrency_group_per_ref(self) -> None:
         doc, _ = _workflow("delegation-health-check.yml")
         assert "github.ref" in doc["concurrency"]["group"]
 
@@ -309,6 +329,9 @@ class TestWorkflowWiring:
         assert set(doc[True]["workflow_call"]["inputs"]) == {"repo_key"}
         assert "pull_request)" in text and "merge_group)" in text
         assert "github.event.merge_group.head_ref" in text
+        # OMN-25514: the dev signal events read every verdict by label.
+        assert "push|schedule)" in text
+        assert 'labels="runtime_change"' in text
         assert "steps.event.outputs.files" in text
         assert "steps.event.outputs.labels" in text
         steps = doc["jobs"]["delegation-health"]["steps"]
