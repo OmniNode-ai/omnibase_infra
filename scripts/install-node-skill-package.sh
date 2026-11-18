@@ -110,7 +110,7 @@ OMNIMARKET_GIT="https://github.com/OmniNode-ai/omnimarket.git"
 # are installed --no-deps so their internal metadata does not re-resolve (or
 # downgrade) the infra layer beneath. The NAMES are fixed here; the VERSIONS
 # are resolved from the ref being installed (OMN-18675) — never literals.
-OMNI_INTERNAL_NO_DEPS_PKGS=(omnibase-compat omninode-memory)
+OMNI_INTERNAL_NO_DEPS_PKGS=(omninode-memory)
 # Pure-PyPI leaf deps (safe to resolve normally; no omni-internal metadata).
 PYPI_LEAF_DEPS=(anthropic radon "docker>=7.0.0" python-dateutil)
 

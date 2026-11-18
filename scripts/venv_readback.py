@@ -686,7 +686,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="REQUIREMENT",
         help=(
             "a co-installed sibling requirement the ref declares, e.g. "
-            "'omnibase-compat>=0.5.7,<0.6.0'; repeatable"
+            "'omninode-memory>=0.18.0,<0.19.0'; repeatable"
         ),
     )
     parser.add_argument(

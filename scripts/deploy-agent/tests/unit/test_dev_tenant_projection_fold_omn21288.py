@@ -64,6 +64,9 @@ AGENT_ACTIONS_CONSUMER = "agent-actions-consumer"
 # OMN-23525: the infra routing decisions projection runs in main as a node
 # (OMN-23072 dropped the consumer from compose), so its container is retired by name.
 ROUTING_DECISIONS_CONSUMER = "infra-routing-decisions-consumer"
+# OMN-24476: the onex-api container and its two cloud migration one-shots are retired by
+# name, so the previous revision's containers are removed.
+REMOVED_ONEX_API = ("onex-api", "cloud-migration-files", "cloud-migration")
 
 
 def test_primary_dev_disables_the_tenant_carrier_only(
@@ -117,6 +120,7 @@ def test_committed_policy_disables_every_folded_writer() -> None:
             SKILL_LIFECYCLE_CONSUMER,
             AGENT_ACTIONS_CONSUMER,
             ROUTING_DECISIONS_CONSUMER,
+            *REMOVED_ONEX_API,
             # OMN-21288 (T17): the projection API is served by main as a mounted node.
             "projection-api",
             *DEV_LANE_GATEWAY_SERVICES,
@@ -183,10 +187,13 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
     censused = [c[-1] for c in calls if c[1] == "ps"]
     assert censused == [
         f"label=com.docker.compose.service={AGENT_ACTIONS_CONSUMER}",
+        "label=com.docker.compose.service=cloud-migration",
+        "label=com.docker.compose.service=cloud-migration-files",
         f"label=com.docker.compose.service={CONTEXT_AUDIT_CONSUMER}",
         f"label=com.docker.compose.service={ROUTING_DECISIONS_CONSUMER}",
         f"label=com.docker.compose.service={INTELLIGENCE_API}",
         "label=com.docker.compose.service=omninode-contract-resolver",
+        "label=com.docker.compose.service=onex-api",
         f"label=com.docker.compose.service={HOOK_EVENTS_WRITER}",
         "label=com.docker.compose.service=projection-savings-writer",
         f"label=com.docker.compose.service={SKILL_LIFECYCLE_CONSUMER}",
@@ -196,6 +203,10 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
         ids = [
             f"{AGENT_ACTIONS_CONSUMER}-a",
             f"{AGENT_ACTIONS_CONSUMER}-b",
+            "cloud-migration-a",
+            "cloud-migration-b",
+            "cloud-migration-files-a",
+            "cloud-migration-files-b",
             f"{CONTEXT_AUDIT_CONSUMER}-a",
             f"{CONTEXT_AUDIT_CONSUMER}-b",
             f"{ROUTING_DECISIONS_CONSUMER}-a",
@@ -204,6 +215,8 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
             f"{INTELLIGENCE_API}-b",
             "omninode-contract-resolver-a",
             "omninode-contract-resolver-b",
+            "onex-api-a",
+            "onex-api-b",
             f"{HOOK_EVENTS_WRITER}-a",
             f"{HOOK_EVENTS_WRITER}-b",
             "projection-savings-writer-a",
@@ -218,13 +231,11 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
         assert calls[len(censused) + 1] == ["docker", "rm", *ids]
 
 
-def test_retirement_is_inert_on_other_lanes() -> None:
+def test_retirement_is_inert_on_prod() -> None:
     with patch("deploy_agent.executor._run") as run:
-        DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.STABILITY_TEST)
+        DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.PROD)
     run.assert_not_called()
-    assert HOOK_EVENTS_WRITER not in (
-        lane_config_for(EnumRuntimeLane.STABILITY_TEST).disabled_services
-    )
+    assert not lane_config_for(EnumRuntimeLane.PROD).disabled_services
 
 
 def test_other_dev_instance_does_not_retire_the_hook_events_writer(
@@ -319,6 +330,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
         SKILL_LIFECYCLE_CONSUMER,
         AGENT_ACTIONS_CONSUMER,
         ROUTING_DECISIONS_CONSUMER,  # OMN-23525
+        *REMOVED_ONEX_API,  # OMN-24476
         "projection-api",  # OMN-21288 (T17)
         "omninode-contract-resolver",  # OMN-23324
     }

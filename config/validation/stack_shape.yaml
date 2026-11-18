@@ -555,7 +555,6 @@ console_scripts:
       status: developer_only
       reason: Developer or CI tooling; not a permitted runtime-image service command.
   omnibase_spi: {}
-  omnibase_compat: {}
   omnibase_infra:
     omni-infra:
       target: omnibase_infra.cli.commands:cli
@@ -700,7 +699,6 @@ console_scripts:
 console_script_sources:
   omnibase_core: installed 0.47.66
   omnibase_spi: installed 0.23.7
-  omnibase_compat: installed 0.5.7
   omnibase_infra: installed 0.38.77
   omninode-claude: declared 0.27.0
   omninode-memory: wheel 0.18.9 sha256:16563f5a39814f4c9c4d11b2ca4faa7ea15f348db9600931a28f645ed2cf5414
@@ -735,7 +733,7 @@ baseline:
     files: 7
     ticket: OMN-21288
   - service: onex-api
-    files: 5
+    files: 1
     ticket: OMN-21288
   - service: projection-api
     files: 11
