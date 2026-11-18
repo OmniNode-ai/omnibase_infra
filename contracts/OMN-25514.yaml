@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-25514
+title: Delegation Health Check leaves every required list in omnibase_infra (plan step S1)
+summary: >-
+  The required context delegation-health-check / Delegation Health Check reads delegation verdicts from lab and stability runs, so a broken lab held runtime pull requests on dev. In omnibase_infra it leaves EXPECTED_EXTERNAL_CONTEXTS and POST_FIXTURE_WINDOW_CONTEXTS in scripts/ci/ci_summary_gate.py and umbrella_enforced_contexts.omnibase_infra in config/runner_routing_policy.yaml. Its caller .github/workflows/delegation-health-check.yml runs on a schedule and on push to dev instead of pull_request and merge_group, and the reusable reads every verdict for those events and writes it to the job summary. One dated entry in scripts/ci/ci_summary_sweep_exclusions.json (expires 2026-12-17) admits the red row a head that ran the old caller still carries. omnimarket's half (S1-A, S1-B) is a separate pull request under the same ticket.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25514-infra-not-required
+    statement: No omnibase_infra pull request head or merge-queue head waits on the delegation-health signal.
+    acceptance:
+      - id: AC1
+        statement: "AC1: in omnibase_infra a pull_request head and a merge_group head carrying no Delegation Health Check row read CI Summary green, and a head carrying a red row reads green with the context listed as excluded, each by a test that fails on today's origin/dev and passes on the fix -- falsifier: uv run pytest tests/ci/test_ci_summary_gate.py -q run at the unfixed base commit passes"
+      - id: AC3
+        statement: "AC3: no required list names the context after S1 and S1-A -- falsifier: git grep -n -F \"delegation-health-check / Delegation Health Check\" origin/dev -- scripts/ci/ci_summary_gate.py scripts/ci/ci_summary_external_producers.json config/runner_routing_policy.yaml prints a line"
+evidence_requirements:
+  - kind: tests
+    description: The CI Summary gate cases and the caller wiring pins.
+    command: uv run --frozen pytest tests/ci/test_ci_summary_gate.py tests/ci/test_delegation_health_check_omn19451.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25514-ac1-ci-summary-cases
+    description: >-
+      The gate run through main() reads green on a pull_request head and a merge_group head with no Delegation Health Check row, and green with the context listed under the applied sweep exclusions on a head with a red row; a positive control shows another red external row still fails.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_ci_summary_gate.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25514-ac3-no-required-list
+    description: >-
+      The context is in neither gate list nor the umbrella list, the dated exclusion carries OMN-25514 and expires 2026-12-17, and the caller runs on schedule and push to dev only.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_delegation_health_check_omn19451.py tests/ci/test_nonrequired_check_failure_rate_omn18254.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
