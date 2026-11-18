@@ -12,10 +12,14 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from omnibase_core.models.contracts.model_topic_schema_binding import (
+    build_versioned_topic,
+)
 from scripts.runtime_build import scoped_image_probe as probe
 from scripts.runtime_build.scoped_effects_plan import ModelEffectsDeployPlan
 
 pytestmark = pytest.mark.unit
+EXPECTED_SIBLINGS = ("omnibase_core", "omnimarket")
 
 
 def plan_data(tmp_path: Path) -> dict[str, Any]:
@@ -31,7 +35,7 @@ def plan_data(tmp_path: Path) -> dict[str, Any]:
         "compose_files": [str(tmp_path / "compose.yaml")],
         "compose_working_dir": str(tmp_path),
         "expected_compose_sha256": "d" * 64,
-        "source_pins": dict.fromkeys(probe.SIBLINGS, "e" * 40),
+        "source_pins": dict.fromkeys(EXPECTED_SIBLINGS, "e" * 40),
         "infra_source_sha": "f" * 40,
         "source_clones_root": str(tmp_path / "sources"),
         "hotpatch_ledger": str(tmp_path / "hotpatch.yaml"),
@@ -45,6 +49,7 @@ def test_plan_roundtrip(tmp_path: Path) -> None:
     assert plan.service == "runtime-effects"
     assert plan.compose_files == (tmp_path / "compose.yaml",)
     assert plan.health_timeout_seconds == 1800
+    assert plan.source_pins == dict.fromkeys(EXPECTED_SIBLINGS, "e" * 40)
     with pytest.raises(ValidationError):
         plan.reason = "changed after validation"  # type: ignore[misc]
 
@@ -81,8 +86,9 @@ def test_invalid_plan_refuses(tmp_path: Path, field: str, value: object) -> None
     [
         {},
         {"omnimarket": "a" * 40},
-        {**dict.fromkeys(probe.SIBLINGS, "a" * 40), "other": "b" * 40},
-        {**dict.fromkeys(probe.SIBLINGS, "a" * 40), "omnimarket": "dev"},
+        {"omnibase_core": "a" * 40},
+        {**dict.fromkeys(EXPECTED_SIBLINGS, "a" * 40), "other": "b" * 40},
+        {**dict.fromkeys(EXPECTED_SIBLINGS, "a" * 40), "omnimarket": "dev"},
     ],
 )
 def test_incomplete_or_mutable_source_pins_refuse(tmp_path: Path, pins: object) -> None:
@@ -151,9 +157,9 @@ def test_market_payload_is_the_allowed_dependency_delta(tmp_path: Path) -> None:
 def test_workspace_proof_rechecks_actual_installed_content(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    dists = {name: distribution(tmp_path, name) for name in probe.SIBLINGS}
+    dists = {name: distribution(tmp_path, name) for name in EXPECTED_SIBLINGS}
     monkeypatch.setattr(probe.importlib.metadata, "distribution", dists.__getitem__)
-    pins = dict.fromkeys(probe.SIBLINGS, "a" * 40)
+    pins = dict.fromkeys(EXPECTED_SIBLINGS, "a" * 40)
     manifest = {
         "build_source": "workspace",
         "per_repo_vcs_provenance": {
@@ -168,14 +174,14 @@ def test_workspace_proof_rechecks_actual_installed_content(
                 "installed_package_digest": probe.tree_digest(tmp_path / name),
                 "staged_package_digest": probe.tree_digest(tmp_path / name),
             }
-            for name in probe.SIBLINGS
+            for name in EXPECTED_SIBLINGS
         ],
     }
     (tmp_path / "build-provenance.json").write_text(json.dumps(manifest))
-    assert probe.source_pins(tmp_path) == pins
+    assert probe.source_pins(tmp_path, EXPECTED_SIBLINGS) == pins
     (tmp_path / "omnimarket" / "__init__.py").write_text("STALE = True\n")
     with pytest.raises(ValueError, match="differs from source proof"):
-        probe.source_pins(tmp_path)
+        probe.source_pins(tmp_path, EXPECTED_SIBLINGS)
 
 
 def test_shared_contract_activation_change_refuses_equivalence(
@@ -186,22 +192,26 @@ def test_shared_contract_activation_change_refuses_equivalence(
     (tmp_path / "entrypoint-runtime.sh").write_text("#!/bin/sh\nexec runtime\n")
     dists = {
         name: distribution(tmp_path, name)
-        for name in (*probe.SIBLINGS, "omnibase_infra")
+        for name in (*EXPECTED_SIBLINGS, "omnibase_infra")
     }
     monkeypatch.setattr(probe.importlib.metadata, "distribution", dists.__getitem__)
     contract = tmp_path / "omnimarket" / "contract.yaml"
-    content = "name: demo\ndescription: first\ndescriptor:\n  runtime_profiles: [effects]\nevent_bus:\n  subscribe_topics: [onex.evt.omnimarket.sample.v1]\n"
+    topic = build_versioned_topic("omnimarket", "sample", 1)
+    content = (
+        "name: demo\ndescription: first\ndescriptor:\n  runtime_profiles: [effects]\n"
+        f"event_bus:\n  subscribe_topics: [{topic}]\n"
+    )
     contract.write_text(content)
-    baseline, topics = probe.shared_evidence(tmp_path)
-    assert topics == ["onex.evt.omnimarket.sample.v1"]
+    baseline, topics = probe.shared_evidence(tmp_path, EXPECTED_SIBLINGS)
+    assert topics == [topic]
     contract.write_text(content.replace("description: first", "description: second"))
-    assert probe.shared_evidence(tmp_path)[0] == baseline
+    assert probe.shared_evidence(tmp_path, EXPECTED_SIBLINGS)[0] == baseline
     contract.write_text(content + "metadata:\n  related_tickets: [OMN-17991]\n")
-    with_ticket = probe.shared_evidence(tmp_path)[0]
+    with_ticket = probe.shared_evidence(tmp_path, EXPECTED_SIBLINGS)[0]
     contract.write_text(content + "metadata:\n  related_tickets: [OMN-17974]\n")
-    assert probe.shared_evidence(tmp_path)[0] == with_ticket
+    assert probe.shared_evidence(tmp_path, EXPECTED_SIBLINGS)[0] == with_ticket
     contract.write_text(content.replace("[effects]", "[default]"))
-    after, same_topics = probe.shared_evidence(tmp_path)
+    after, same_topics = probe.shared_evidence(tmp_path, EXPECTED_SIBLINGS)
     assert same_topics == topics
     assert after != baseline
     for requirement in (
@@ -210,11 +220,11 @@ def test_shared_contract_activation_change_refuses_equivalence(
         "configuration:\n  auto_create_schema: true\n",
     ):
         contract.write_text(content + requirement)
-        assert probe.shared_evidence(tmp_path)[0] != baseline
+        assert probe.shared_evidence(tmp_path, EXPECTED_SIBLINGS)[0] != baseline
     contract.write_text(content + "effective_on: 2026-09-06\n")
-    dated = probe.shared_evidence(tmp_path)[0]
+    dated = probe.shared_evidence(tmp_path, EXPECTED_SIBLINGS)[0]
     contract.write_text(content + "effective_on: 2026-09-07\n")
-    assert probe.shared_evidence(tmp_path)[0] != dated
+    assert probe.shared_evidence(tmp_path, EXPECTED_SIBLINGS)[0] != dated
 
 
 def image_project(
@@ -289,13 +299,13 @@ def test_shared_evidence_reads_the_editable_project_contracts(
     dists: dict[str, importlib.metadata.Distribution] = {
         "omnibase_infra": image_project(tmp_path, monkeypatch)
     }
-    for name in probe.SIBLINGS:
+    for name in EXPECTED_SIBLINGS:
         dists[name] = distribution(tmp_path / "site", name)
     monkeypatch.setattr(probe.importlib.metadata, "distribution", dists.__getitem__)
     (app / "contracts").mkdir()
     (app / "config").mkdir()
     (app / "entrypoint-runtime.sh").write_text("#!/bin/sh\nexec runtime\n")
-    _, topics = probe.shared_evidence(app)
+    _, topics = probe.shared_evidence(app, EXPECTED_SIBLINGS)
     assert topics == ["onex.evt.platform.infra-sample.v1"]
 
 
