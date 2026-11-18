@@ -151,6 +151,7 @@ def test_dod_verify_mapping_declares_the_dev_lane_and_no_other_skill_does() -> N
     assert dod is not None
     assert dod.publish_terminal_to_lane == "dev"
     assert dod.event_bus == "inmemory", "the dispatch itself stays in-memory"
+    assert dod.result_model is None, "OMN-23143: the mapping names no market model"
     others = [
         s.skill_name
         for s in registry.skills
@@ -464,3 +465,21 @@ def test_a_new_attempt_does_not_replace_the_failed_attempt(tmp_path: Path) -> No
     assert passed.artifact_ref != failed.artifact_ref
     assert ArtifactStore().read(failed.artifact_ref) == first_bytes
     assert json.loads(ArtifactStore().read(passed.artifact_ref))["payload"] == verdict
+
+
+def test_a_mapping_that_names_no_result_model_publishes_the_receipts_own_result(
+    tmp_path: Path,
+) -> None:
+    """OMN-23143: with no mapped model the receipt's own stamp is the identity."""
+    verdict = _verdict("verified")
+    publisher = _RecordingPublisher()
+    report = publish_skill_terminal_event(
+        receipt=_success_receipt(verdict),
+        result_model=None,
+        contract_path=_contract(tmp_path),
+        lane="dev",
+        resolve_target=_target,
+        publisher=publisher,
+    )
+    assert report.outcome is EnumSkillTerminalPublishOutcome.PUBLISHED
+    assert len(publisher.calls) == 1

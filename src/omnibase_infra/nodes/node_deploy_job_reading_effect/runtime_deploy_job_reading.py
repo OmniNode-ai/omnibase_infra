@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
@@ -65,7 +66,11 @@ def contract_path(execution: ModuleType) -> Path:
 
 def load_settings(execution: ModuleType) -> dict[str, JsonValue]:
     """The node contract's ``settings`` block: names, bounds and the append route variables."""
-    contract = yaml.safe_load(contract_path(execution).read_text(encoding="utf-8"))
+    return _contract_settings(contract_path(execution))
+
+
+def _contract_settings(path: Path) -> dict[str, JsonValue]:
+    contract = yaml.safe_load(path.read_text(encoding="utf-8"))
     settings = contract["settings"]
     if not isinstance(settings, dict):
         raise RuntimeError("the deploy job reading contract declares no settings")
@@ -100,4 +105,68 @@ def publish(job: BaseModel, execution: ModuleType) -> BaseModel | None:
         return result
     except (KeyError, TypeError, ValueError, ValidationError, RuntimeError, OSError):
         logger.exception("job reading skipped: the job record could not be read")
+        return None
+
+
+_pin_last_check: list[float] = []
+_pin_settings: list[dict[str, JsonValue]] = []
+_PIN_HANDLER = "omnibase_infra.handlers.handler_dev_lane_code_ref_pin"
+#: Until the contract has been read once, the throttle holds the check this long between tries.
+_PIN_RETRY_SECONDS = 300.0
+
+
+def check_pin(*, force: bool = False) -> BaseModel | None:
+    """Alarm when the agent's live code-ref pin is inside the window before its expiry; never raises.
+
+    Called from the agent's idle tick, so it runs on a schedule with no job. The pin record is
+    read from the agent's own state directory (the pin handler's ``DEPLOY_AGENT_STATE_DIR``),
+    through the pin handler the agent loaded before this module. The contract is read and
+    parsed once per process; the check is throttled to its
+    ``pin_alarm_check_interval_seconds`` (``force`` skips the throttle), and the throttle is
+    stamped before any read, so a failing read logs once per interval, not once per tick.
+    Returns the handler's result, or ``None`` when throttled, when no pin is live or on an
+    unreadable record.
+    """
+    try:
+        tick = time.monotonic()
+        interval = (
+            _pin_settings[0]["pin_alarm_check_interval_seconds"]
+            if _pin_settings
+            else _PIN_RETRY_SECONDS
+        )
+        if (
+            not force
+            and _pin_last_check
+            and isinstance(interval, int | float)
+            and tick - _pin_last_check[0] < interval
+        ):
+            return None
+        _pin_last_check[:] = [tick]
+        if not _pin_settings:
+            _pin_settings[:] = [
+                _contract_settings(_PACKAGE_ROOT.parents[1] / NODE / "contract.yaml")
+            ]
+        settings = _pin_settings[0]
+        pin_handler = sys.modules[_PIN_HANDLER]
+        handler = handler_module.HandlerDeployJobReading(
+            settings=settings, environ=os.environ
+        )
+        state_dir = handler.pin_state_dir()
+        now = datetime.now(UTC)
+        pin = pin_handler.read_active_pin(state_dir, now) if state_dir else None
+        if pin is None:
+            return None
+        result: BaseModel = handler.handle_pin(
+            branch=pin.branch,
+            pr=pin.pr,
+            ticket=pin.ticket,
+            registered_by=pin.registered_by,
+            expires_at=pin.expires_at,
+            now=now,
+        )
+        return result
+    except (KeyError, TypeError, ValueError, ValidationError, RuntimeError, OSError):
+        logger.exception(
+            "pin alarm check skipped: the pin or contract could not be read"
+        )
         return None
