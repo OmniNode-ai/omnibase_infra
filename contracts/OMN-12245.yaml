@@ -13,7 +13,7 @@ emergency_bypass:
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-release-omnibase-compat-pr-112"
-    description: "omnibase_compat release PR #112 is mergeable release evidence for OMN-12245."
+    description: "Release PR #112 for the retired package is the recorded release evidence."
     source: "manual"
     status: "verified"
     checks:

@@ -110,13 +110,13 @@ def test_version_mismatch_is_drift_even_when_the_commit_matches() -> None:
 
 
 def test_sibling_inside_its_declared_range_matches() -> None:
-    row = classify_sibling("omnibase-compat>=0.5.7,<0.6.0", "0.5.7")
+    row = classify_sibling("omnibase-example>=0.5.7,<0.6.0", "0.5.7")
     assert row.verdict is ReadbackVerdict.MATCH
 
 
 def test_sibling_below_its_declared_range_is_a_mismatch() -> None:
     """The 2026-09-18 downgrade shape: 0.5.5 installed under a >=0.5.7 pin."""
-    row = classify_sibling("omnibase-compat>=0.5.7,<0.6.0", "0.5.5")
+    row = classify_sibling("omnibase-example>=0.5.7,<0.6.0", "0.5.5")
     assert row.verdict is ReadbackVerdict.MISMATCH
 
 
@@ -178,7 +178,7 @@ def _make_clone(root: Path, *, version: str) -> tuple[Path, str]:
     run("git", "config", "user.name", "Test")
     (clone / "pyproject.toml").write_text(
         f'[project]\nname = "omnimarket"\nversion = "{version}"\n'
-        'dependencies = ["omnibase-compat>=0.5.7,<0.6.0"]\n',
+        'dependencies = ["omnibase-example>=0.5.7,<0.6.0"]\n',
         encoding="utf-8",
     )
     run("git", "add", "pyproject.toml")
@@ -230,10 +230,10 @@ def test_venv_carrying_the_ref_reads_back_in_sync(tmp_path: Path) -> None:
         tmp_path,
         {
             "omnimarket": {"version": "0.4.119", "commit": head},
-            "omnibase-compat": {"version": "0.5.7", "commit": None},
+            "omnibase-example": {"version": "0.5.7", "commit": None},
         },
     )
-    result = _run(clone, python_bin, "--sibling", "omnibase-compat>=0.5.7,<0.6.0")
+    result = _run(clone, python_bin, "--sibling", "omnibase-example>=0.5.7,<0.6.0")
     assert result.returncode == EXIT_IN_SYNC, result.stdout + result.stderr
     assert "IN_SYNC" in result.stdout
 
@@ -267,12 +267,12 @@ def test_downgraded_sibling_reads_back_drifted(tmp_path: Path) -> None:
         tmp_path,
         {
             "omnimarket": {"version": "0.4.119", "commit": head},
-            "omnibase-compat": {"version": "0.5.5", "commit": None},
+            "omnibase-example": {"version": "0.5.5", "commit": None},
         },
     )
-    result = _run(clone, python_bin, "--sibling", "omnibase-compat>=0.5.7,<0.6.0")
+    result = _run(clone, python_bin, "--sibling", "omnibase-example>=0.5.7,<0.6.0")
     assert result.returncode == EXIT_DRIFTED
-    assert "omnibase-compat" in result.stderr
+    assert "omnibase-example" in result.stderr
 
 
 def test_unprobeable_interpreter_is_indeterminate_not_in_sync(tmp_path: Path) -> None:

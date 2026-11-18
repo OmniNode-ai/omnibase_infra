@@ -27,7 +27,7 @@
 #                             scripts/install-node-skill-package.sh
 #
 # `omnimarket` is DELIBERATELY absent from omnibase_infra's pyproject.toml and
-# uv.lock. The layer graph is compat -> core -> spi -> infra and omnimarket sits
+# uv.lock. The layer graph is core -> spi -> infra and omnimarket sits
 # ABOVE infra (it depends on omnibase-infra >=0.38.3,<0.39.0); declaring it
 # would invert the graph and publish a cycle in the omnibase-infra wheel. It is
 # composed at runtime through `onex.nodes` entry points instead.
@@ -47,14 +47,9 @@
 #
 # The order is then chosen for a different reason -- PROVIDER FIRST, LOCK
 # SECOND -- because the provider co-install is itself capable of moving
-# lock-governed pins. It carries a hardcoded `COMPAT_PIN="omnibase-compat==0.5.5"`
-# and installs it `--no-deps`, silently downgrading the locked 0.5.6. That is
-# OMN-16262, and it is not theoretical: it was reproduced on this Mac on
-# 2026-08-30 by this very script, and the downgrade broke the `occ` CLI
-# extension so completely that the `onex` binary would not start at all
-# ("No module named 'omnibase_compat.contracts.pr_occ_stamp'"). Ending on the
-# lock pass repairs that downgrade structurally, rather than leaving the
-# reconciler to inherit the bug.
+# lock-governed pins. In OMN-16262, a hardcoded co-install pin downgraded a
+# dependency with `--no-deps` and broke the `onex` CLI at startup. Applying
+# the lock last restores the governed pins after the provider install.
 #
 # ============================================================================
 # ...AND WHY THAT COMPOSED VENV IS NOT THE CLONE'S OWN .venv (OMN-17819)
@@ -257,9 +252,8 @@
 # `install-node-skill-package.sh` and `uv sync --frozen --inexact` return, it
 # exits 0 on their exit STATUS. It never re-reads the venv to confirm the pins
 # actually landed. That is not a small gap -- the provider co-install is known
-# to move pins nobody asked it to move (OMN-16262: a hardcoded COMPAT_PIN
-# downgrading omnibase-compat 0.5.6 -> 0.5.5, which broke the `occ` CLI
-# extension badly enough that the `onex` binary would not start), and no exit
+# to move pins nobody asked it to move (OMN-16262: a dependency downgrade
+# made the `onex` binary fail at startup), and no exit
 # code can see a content change like that.
 #
 # The readback lives one layer up, in `scripts/reconcile-host.sh`, which
@@ -1986,10 +1980,8 @@ run_repair() {
   if [[ "$need_lock" -eq 0 && "$need_provider" -eq 0 ]]; then
     say "dispatch venv: already in sync (omnimarket ${head:0:12})"
   else
-    # PROVIDER FIRST. The co-install can move lock-governed pins (OMN-16262:
-    # its hardcoded COMPAT_PIN downgrades omnibase-compat 0.5.6 -> 0.5.5 and
-    # breaks the `occ` CLI extension badly enough that `onex` will not start),
-    # so the lock pass has to come after it to undo that.
+    # PROVIDER FIRST. The co-install can downgrade lock-governed pins
+    # (OMN-16262), so apply the lock after it.
     #
     # ...EXCEPT that a lock layer already BEHIND is applied before it as well
     # (OMN-20154). The co-install's own readback (OMN-18752) refuses when the

@@ -1,9 +1,8 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Integration proof: the retired omnibase_compat package is gone from the
-runtime identity stamp and the contract-topic-graph package list (OMN-19998).
+"""Guard the runtime identity stamp and topic graph against the retired package.
 
-Imports the real modules and reads the real values the runtime uses.
+Imports the real modules and reads the values the runtime uses.
 """
 
 from __future__ import annotations
