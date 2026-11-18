@@ -68,9 +68,10 @@ import asyncio
 import inspect
 import logging
 import os
-from collections.abc import AsyncGenerator
+import subprocess
+from collections.abc import AsyncGenerator, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -151,6 +152,7 @@ def pytest_configure(config: pytest.Config) -> None:
     """
     del config
     _strip_inherited_git_environment()
+    _install_children_inherit_ld_library_path()
 
     from omnibase_infra.runtime.venv_purity import (
         VENV_PURITY_OVERRIDE_ENV,
@@ -250,6 +252,94 @@ def _strip_test_local_git_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_EDITOR", "true")
+
+
+_LD_LIBRARY_PATH_KEY = "LD_LIBRARY_PATH"
+
+#: The ``LD_LIBRARY_PATH`` the session started with, captured once when this
+#: conftest is imported, before collection (OMN-23967). A test that later clears
+#: ``os.environ`` does not change what its children are given.
+SESSION_LD_LIBRARY_PATH = os.environ.get(_LD_LIBRARY_PATH_KEY, "")
+
+#: ``Popen.__init__`` as it was before the wrapper, held while it is installed.
+_popen_state: dict[str, Any] = {}
+
+
+def _with_session_ld_library_path(env: object, session_value: str) -> object:
+    """Return ``env`` plus the session ``LD_LIBRARY_PATH``, or ``env`` itself.
+
+    Only an explicit mapping that does not name the variable (as ``str`` or as
+    ``bytes``) gains it; ``env=None``, an explicit value (even empty) and an
+    empty session value leave the argument untouched. The caller's mapping is
+    never mutated: a copy is returned.
+    """
+    if not isinstance(env, Mapping) or not session_value:
+        return env
+    if _LD_LIBRARY_PATH_KEY in env or _LD_LIBRARY_PATH_KEY.encode() in env:
+        return env
+    if any(isinstance(key, bytes) for key in env):
+        return {**env, _LD_LIBRARY_PATH_KEY.encode(): os.fsencode(session_value)}
+    return {**env, _LD_LIBRARY_PATH_KEY: session_value}
+
+
+def _install_children_inherit_ld_library_path() -> None:
+    """Give every child a test spawns the session's LD_LIBRARY_PATH (OMN-23967).
+
+    Many tests build a child environment from scratch (``env={"PATH": ...}``)
+    and so drop ``LD_LIBRARY_PATH``. On runners whose venv python is a
+    shared-libpython CPython the library is found only through that variable,
+    so such a child dies with exit 127. This wraps ``subprocess.Popen.__init__``
+    (also the base of ``subprocess.run`` and of asyncio's subprocess transport
+    on the default loop) for the whole pytest process, from ``pytest_configure``
+    to ``pytest_unconfigure``. Because it is not a function-scoped fixture it
+    covers children spawned at collection time and by session-, module- and
+    class-scoped fixtures, as well as by test functions.
+
+    Scope and known limits:
+
+    * Every ``Popen`` in the process is wrapped, including one built by product
+      code under test. A product path that scrubs its child's env therefore
+      gains the session ``LD_LIBRARY_PATH`` here, and a test asserting a child's
+      exact env sees the variable whenever the session holds it. Hosted CI holds
+      it on every runner, so the suite already runs that way (OMN-23967).
+    * Not covered: ``os.posix_spawn``, ``os.exec*e`` and ``os.spawn*e`` with an
+      explicit env, and asyncio on a loop that does not use ``Popen`` (uvloop).
+      ``tests/ci/test_child_env_ld_library_path_omn23967.py`` fails when a test
+      adds such a spawn, so the exclusion cannot grow silently.
+    """
+    if "original_init" in _popen_state:
+        return
+    original_init = subprocess.Popen.__init__
+    _popen_state["original_init"] = original_init
+    # Position of ``env`` among the arguments after ``self``.
+    env_index = list(inspect.signature(original_init).parameters).index("env") - 1
+
+    def _patched_init(
+        self: subprocess.Popen[Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        if "env" in kwargs:
+            kwargs["env"] = _with_session_ld_library_path(
+                kwargs["env"], SESSION_LD_LIBRARY_PATH
+            )
+        elif env_index < len(args):
+            args = (
+                *args[:env_index],
+                _with_session_ld_library_path(args[env_index], SESSION_LD_LIBRARY_PATH),
+                *args[env_index + 1 :],
+            )
+        original_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = _patched_init
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Remove the ``Popen`` wrapper that ``pytest_configure`` installed."""
+    del config
+    original_init = _popen_state.pop("original_init", None)
+    if original_init is not None:
+        subprocess.Popen.__init__ = original_init
 
 
 # Load environment variables from .env file at test session start

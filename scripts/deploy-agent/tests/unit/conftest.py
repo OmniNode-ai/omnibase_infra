@@ -168,7 +168,7 @@ def _stub_dev_boot_guard(
 
 @pytest.fixture(autouse=True)
 def _isolate_unit_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep manifests and lane locks inside this test's temporary directory."""
+    """Keep manifests, lane locks and the single-flight lock inside this test's temporary directory."""
     real_home = Path.home
     ambient_home = os.environ.get("HOME")
 
@@ -183,6 +183,11 @@ def _isolate_unit_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     # Image-build tests take the real reconcile lock; never lock the host's
     # canonical workspace. Lock-root tests override this with their own trees.
     monkeypatch.setenv("OMNI_HOME", str(tmp_path))
+    # The single-flight lock defaults to one file under /tmp shared by every
+    # xdist worker, so two tests running jobs at once rejected each other with
+    # in_progress (OMN-24780). Each test takes its own file; a test that patches
+    # the path itself overrides this.
+    monkeypatch.setattr("deploy_agent.lock._LOCK_PATH", tmp_path / "single-flight.lock")
 
 
 class _NoopPromotionGuard:
