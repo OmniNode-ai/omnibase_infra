@@ -1,0 +1,55 @@
+schema_version: 1.0.0
+ticket_id: OMN-25692
+title: Unblock the CI Summary check on omnibase_infra PR 6065
+summary: >-
+  Repair the pull request's evidence ID and receipt criterion labels so the
+  existing contract validator and the split 1 receipt test accept the contract.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25692-unblock-ci-summary
+    statement: Resolve the pull request's CI blockers or record the evidence for a shared cause.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: omnibase_infra PR 6065 reads a clean merge state against its base and the required check CI Summary reads success at its new head, with the new head named in a PR comment that starts `Lab: head=<full head sha>` -- falsifier: `onex scm pr-checks OmniNode-ai/omnibase_infra#6065` shows a required context not success at the head, or `onex scm pr-view OmniNode-ai/omnibase_infra#6065` shows a merge state other than clean, or no Lab comment names that head
+      - id: AC2
+        statement: >-
+          AC2: when the cause lies outside the PR, a STATUS row reads cause=<one line> shared=yes with the evidence and the lane pushes nothing that widens or skips a check -- falsifier: `grep -F 'omnibase_infra#6065' "$ONEX_LEDGER_PATH" | grep -F 'shared=yes'` finds no STATUS row while the PR head is unchanged and still red or conflicting
+evidence_requirements:
+  - kind: tests
+    description: Run the bindable-receipt test from CI split 1, including its refusal control.
+    command: uv run --frozen pytest tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25692-contract-and-receipt
+    description: >-
+      The hosted checks validate the branch ticket contract with the locked
+      ModelTicketContract and verify that its acceptance labels bind a receipt.
+      Read CI Summary, merge state and the Lab comment at the published PR head
+      to verify the remaining live evidence for this criterion.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run --frozen python -c 'from pathlib import Path; from omnibase_core.models.ticket.model_ticket_contract import ModelTicketContract; ModelTicketContract.from_yaml(Path("contracts/OMN-18960.yaml").read_text(encoding="utf-8"))'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py -q --no-cov
+        cwd: .
+  - id: dod-omn25692-shared-cause-control
+    description: >-
+      The split 1 test rejects repeated criterion labels as its refusal
+      control. A cause outside the PR requires a STATUS row with shared=yes
+      and the observed failure evidence.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py::test_a_repeated_label_is_refused -q --no-cov
+        cwd: .
