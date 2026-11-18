@@ -30,7 +30,7 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn25201-ac1-start-check-refuses-every-other-line
+  - id: dod-omn25201-ac1-start-check-refuses-others
     description: The unit's start check refuses every line that is not the one key line; the three new key files fail on the check of the reviewed head and pass on the new one.
     source: manual
     binds_ac:
@@ -66,7 +66,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_contract_omn25179_ac6_deselect_omn25201.py -q -n 0
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn25201-ac5-rollout-order-and-old-check-control
+  - id: dod-omn25201-ac5-rollout-order-old-check
     description: The rollout order is in the unit header and the contract summary, and the old environment check is a control over the garbage line and the three new cases.
     source: manual
     binds_ac:

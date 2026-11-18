@@ -70,7 +70,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "rollout" -q
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn25253-ac5-env-file-claim-pinned-and-narrowed
+  - id: dod-omn25253-ac5-env-file-claim-narrowed
     description: The scan covers the three roots and the single scripts the agent names (a test derives them), reads extensionless files, pins each --env-file line by its text, traces handler_standalone_compose_recreate.py and the runtime policy render, pins that docker-compose.infra.yml interpolates the name, and the unit header states that overlays and onex-runtime-deploy are not scanned.
     source: manual
     binds_ac:
@@ -79,7 +79,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "env_file or argv or standalone or interpolates or inside_the_scan or runtime_policy" -q
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn25253-ac6-second-old-check-control-and-count
+  - id: dod-omn25253-ac6-second-old-check-count
     description: The line check of the second reviewed head passes the three broken key files (exit 0) and refuses garbage, and the count in contracts/OMN-24611.yaml is the collected count of the key test file.
     source: manual
     binds_ac:
