@@ -193,3 +193,6 @@ dod_evidence:
       - check_type: command
         check_value: grep -F After=sysinit.target deploy/systemd/cpu-boost-off.service
         cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_cpu_boost_off_unit_omn24562.py -q -p no:randomly --no-cov
+        cwd: .
