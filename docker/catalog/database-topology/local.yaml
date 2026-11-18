@@ -75,6 +75,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - floor_integration_rows
               - gate_store_reservations
             privileges:
               - DELETE
@@ -491,5 +492,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 1ec17af9d292d1456321b695ac904ef594ba785a4a6c093805f990ecbc7721ab
+  sha256: 2ac4155d19bcdd2c72b9e1ec25bf004a67500c5a13e6f4475b6d0a511d2f6377
 topology_instance: local

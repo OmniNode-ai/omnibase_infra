@@ -91,11 +91,30 @@ def _declared_from(grants: list[tuple[str, str, str]], table: str) -> set[str]:
 def test_the_runtime_role_may_read_and_write_the_floor_integration_rows_table(
     profile: str,
 ) -> None:
+    """The writer upserts each pass and deletes the rows of an older one, so it needs DELETE."""
     for table in _TABLES:
-        assert _declared(profile, table) == {"SELECT", "INSERT", "UPDATE"}, (
+        assert _declared(profile, table) == {"SELECT", "INSERT", "UPDATE", "DELETE"}, (
             profile,
             table,
         )
+
+
+def _migration_table_privileges() -> set[str]:
+    sql = (
+        _VENDORED / "0001_grant_omninode_runtime_floor_integration_rows.sql"
+    ).read_text(encoding="utf-8")
+    statement = sql[sql.index("GRANT SELECT") :]
+    granted = statement[len("GRANT ") : statement.index(" ON ")]
+    return {privilege.strip() for privilege in granted.replace("\n", " ").split(",")}
+
+
+@pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
+def test_declared_privileges_equal_what_the_vendored_migration_grants(
+    profile: str,
+) -> None:
+    """The live ACL gate fails a grant the topology does not declare (OMN-17886)."""
+    assert _migration_table_privileges() == {"SELECT", "INSERT", "UPDATE", "DELETE"}
+    assert _declared(profile, "floor_integration_rows") == _migration_table_privileges()
 
 
 def test_control_removing_the_grant_is_reported_as_missing() -> None:
