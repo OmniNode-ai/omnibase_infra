@@ -1,0 +1,125 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25101
+title: "Review findings 1 to 9 on the lane_sync unpublished-drift fix are fixed or argued: the fixture carries the candidates' census exit, the guard tests run unskipped, and the red half is proven at the merge base"
+summary: >-
+  The review of the check_lane_sync fix found evidence and test gaps, not a code defect. The fixture now carries the original lane_sync checks of both skipped candidates (census exit 8), the replay tests consume them through the recorded_response helper, the broker variable is blanked in the runner environment and asserted on what the runner receives, the every-other-exit test lists 1, 2, 124, 127 and a negative code, and a FAIL-then-PASS pair covers the train reader.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25101-review-findings-answered
+    statement: >-
+      Each review finding on the unpublished-drift fix is fixed in the tests and fixture, or answered with evidence in a pull request comment.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the fixture carries the census exit 8 lines of the skipped candidates' receipts and the two regression tests load through the recorded-data helper and run unskipped."
+      - id: AC2
+        statement: "AC2: the red half is proven at the merge base: the focused test file run against the merge base 75969ce9 version of scripts/ci/lab_pass_receipt.py fails in four test families (the broker-variable test, the two recorded replay tests and the supersession test), each because exit 8 reads lane_sync INDETERMINATE and not FAIL."
+      - id: AC3
+        statement: "AC3: no other test pins exit 8 as indeterminate for check_lane_sync, the full tests/ci suite is green at the head, and a FAIL-then-PASS control covers the train reader's receipt supersession."
+      - id: AC4
+        statement: "AC4: the broker variable is blanked and asserted on the runner's environment with an ambient value set, the real census script exits 8 when the variable is named but empty, and the every-other-exit test lists 1, 2, 124, 127 and a negative code."
+      - id: AC5
+        statement: "AC5: the train still reports lab_receipt_fail while the lane drift persists, so this change alone does not cut the two releases; the ticket of the fix is not closed by the merge."
+      - id: AC6
+        statement: "AC6: a pull request comment starting Lab: head= names the pushed sha, the command and exit 0 for the suites run on the lab."
+evidence_requirements:
+  - kind: tests
+    description: The recorded-receipt replay through check_lane_sync and the train's receipt reader, with the ambient broker variable set.
+    command: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25101-ac1-fixture-exit-and-unskipped
+    description: >-
+      The fixture holds the census exit 8 evidence line of both candidates' original receipts (exactly two lines), and the focused file reports every test passed with no skipped test: the summary line is exactly "23 passed in", so a skip changes it.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c 'test "$(grep -c "census exit=8: " tests/ci/fixtures/omn24976_lane_sync_unpublished_drift.json)" = 2'
+        cwd: .
+      - check_type: command
+        check_value: bash -o pipefail -c 'out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider 2>&1) && printf "%s\n" "$out" | tail -5 && printf "%s\n" "$out" | grep -Eq "^23 passed in "'
+        cwd: .
+  - id: dod-omn25101-ac2-red-at-merge-base
+    description: >-
+      The focused test file, run in a scratch worktree of this head whose scripts/ci/lab_pass_receipt.py is the merge base 75969ce9 version, exits non-zero with nine failed tests (the broker-variable test, two recorded-drift tests, two train tests, four supersession cases); the same file passes at the head (AC1 check).
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          d=$(mktemp -d) || exit 1
+          trap "git worktree remove --force $d" EXIT
+          git worktree add -q --detach "$d" HEAD || exit 1
+          cd "$d" || exit 1
+          git show 75969ce9e:scripts/ci/lab_pass_receipt.py > scripts/ci/lab_pass_receipt.py || exit 1
+          rc=0
+          out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider 2>&1) || rc=$?
+          printf "%s\n" "$out" | grep -E "^(FAILED|[0-9]+ failed)"
+          test "$rc" -eq 1 && printf "%s\n" "$out" | grep -Eq "^9 failed, 14 passed in "'
+        cwd: .
+  - id: dod-omn25101-ac3-no-other-pin-and-full-suite
+    description: >-
+      The tests-wide scan reads the PR head before landing and the commit that introduced this fix once it is on dev. No file outside tests/ci at that revision names check_lane_sync; the tests/ci files that do name it are run by the AC6 check; the supersession test covers the train reader's FAIL-then-PASS and PASS-then-FAIL orders; the whole tests/ci suite passes at the head.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          end=HEAD &&
+          added=$(git log --first-parent -1 --diff-filter=A --format=%H HEAD -- contracts/OMN-24976.yaml) &&
+          if test -n "$added"; then
+            landed=$(git for-each-ref --contains "$added" --format="%(refname)" refs/remotes/origin/dev) &&
+            if test "$landed" = refs/remotes/origin/dev; then end="$added"; fi
+          fi &&
+          out=$(git grep -l "check_lane_sync" "$end" -- tests/ | cut -d: -f2- | sort) &&
+          printf "%s\n" "$out" &&
+          test -n "$out" &&
+          test "$(printf "%s\n" "$out" | grep -vc "^tests/ci/")" = 0'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider -k "superseded_by_a_newer_pass"
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci -q --no-cov -n auto -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25101-ac4-ambient-broker-empty-var-exits
+    description: >-
+      The broker-variable test sets an ambient value and asserts the runner's environment carries "" for it; the real census script with both variables empty exits 8; the every-other-exit test lists the exit 124 case.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider -k "check_names_no_broker"
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_lane_census_unpublishable_drift_omn20798.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+      - check_type: command
+        check_value: grep -qE '"census_rc", \[[^]]*\b124\b' tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py
+        cwd: .
+  - id: dod-omn25101-ac5-train-still-reports-fail
+    description: >-
+      The train reader names lab_receipt_fail with lane_sync among the failing checks for the recorded drift, which is the reading AC5 describes; the pull request comment states the consequence for the two releases.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider -k "train_names_lane_sync_as_a_failed_check"
+        cwd: .
+  - id: dod-omn25101-ac6-lab-suites
+    description: >-
+      The suites the pull request requires run green on the lab; the head-bound result is recorded in the pull request's Lab comment.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py tests/ci/test_lab_pass_census_overlay_omn20934.py tests/ci/test_direct_lab_census_omn20008.py tests/ci/test_lab_pass_receipt_integration_probes_omn18866.py tests/ci/test_declined_measurement_omn18144.py tests/unit/scripts/test_lane_census_unpublishable_drift_omn20798.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .

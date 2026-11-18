@@ -789,14 +789,6 @@ repositories:
   # of those shadows, so the scoped-variable pass now asserts their ABSENCE here
   # too.
   - omnistream
-# OMN-20074: the single named exception to the OMN-15699 ban on the base-branch
-# pull request trigger. Exactly one workflow, by exact path (a pattern or a list
-# is refused by scripts/audit-runner-routing.py). The audit also holds that file
-# to a pinned read-only reusable call with no inline steps and no secrets.
-pull_request_target_exception:
-  path: .github/workflows/call-repo-evidence-gate.yml
-  ruling: "RULING 2026-10-08T22:41:24Z lane=orchestrator-9f8a (OMN-20074), operator words \"1 yes\""
-  reason: "GitHub reads the Repo Evidence Gate caller from dev, so a pull request cannot edit the workflow that judges it, which is what lets repo-evidence / dod-verify later be required on dev, as omnimarket and omnibase_core already do. Same-repository heads run on the trusted runners as they do under pull_request, and the pinned reusable refuses fork heads before any checkout."
 # OMN-22478: the single named exception to the refusal of hosted runners in
 # private repositories (operator ruling 2026-09-14, audit_private_repo_hosted_placement).
 # Exactly one repository, one workflow path and one job, each exact (a pattern or
@@ -1258,9 +1250,6 @@ route:
         - Contract Sync Gate (Wave C) [OMN-8915]
         - contract-validation
         - Customer Path Boundary (OMN-18012)
-        # OMN-19451: the delegation-health check, registered in
-        # EXPECTED_EXTERNAL_CONTEXTS when its shadow mode was removed (OMN-19998).
-        - delegation-health-check / Delegation Health Check
         # OMN-20183: unconditional local FSM seam job, enforced by the CI Summary poller
         - delegation-seam-gate
         - Demo Loop Gate
