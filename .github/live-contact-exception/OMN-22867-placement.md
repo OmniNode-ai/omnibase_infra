@@ -1,0 +1,1 @@
+Live-contact exception: this change restores ci.yml, which runs the Public Runner Placement job through the handler CLI at the hook rev recorded in .pre-commit-config.yaml; it reads workflow files only and contacts no service, and the job's own run on this pull request is the contact record (OMN-22867).
