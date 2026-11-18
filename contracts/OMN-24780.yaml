@@ -16,6 +16,11 @@ requirements:
         statement: "AC2: the disjointness test takes the up list the deploy agent builds for the lane (_requested_services_for_up) as well as RUNTIME_SERVICES, so a runtime-scope service that a lane overlay leaves on a bare shared name fails it -- falsifier: the same command with the disabled_services line removed from executor.py fails"
       - id: AC3
         statement: "AC3: a render test shows no service in the stability lane's up list renders the dev lane's container name -- falsifier: uv run pytest tests/integration/infra/test_agent_named_services_overlay_lane.py -q --no-cov -n 0 on a host with docker compose 2.24.4 or newer fails on the previous lane config"
+  - id: req-omn24780-unit-lock-isolation
+    statement: The deploy-agent unit suite never takes the host-global single-flight lock, so parallel workers cannot reject each other's jobs.
+    acceptance:
+      - id: AC5
+        statement: "AC5: a unit test that runs a job through the agent takes a lock file in its own temporary directory, so a peer holding /tmp/deploy-agent.lock does not fail it and the deploy-agent CI job no longer fails CI Summary on the dev head 486003667c -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_lock_path_isolated_omn24780.py -q -n 0 fails on the previous conftest and passes on this one"
 evidence_requirements:
   - kind: tests
     description: The disjointness ratchet, the lane-config test and the render test.
@@ -60,4 +65,14 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/infra/test_agent_named_services_overlay_lane.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24780-ac5-unit-lock-isolation
+    description: >-
+      The unit-state fixture points the single-flight lock at the test's own directory. With a peer holding the host-global lock file, the lock still opens, and the lock path lies under the test's tmp dir; both fail on the merge base conftest.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_lock_path_isolated_omn24780.py -q -n 0 -p no:cacheprovider
         cwd: .
