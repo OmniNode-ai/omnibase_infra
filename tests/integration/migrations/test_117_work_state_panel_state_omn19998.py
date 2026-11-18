@@ -235,9 +235,9 @@ def test_ac1_the_migration_creates_the_table_keyed_on_projector(
     assert catalog.columns == EXPECTED_COLUMNS
     assert catalog.primary_key == [KEY]
     assert catalog.index_names == [
-        "work_state_panel_state_pkey",
         "ix_work_state_panel_state_recoverable_batches",
         "ix_work_state_panel_state_stale_sweep",
+        "work_state_panel_state_pkey",
     ]
     assert catalog.triggers == ["trg_work_state_panel_state_updated_at"]
 
