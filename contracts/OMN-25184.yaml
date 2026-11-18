@@ -1,0 +1,141 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25184
+title: "Review findings on omnibase_infra PR 6044 at head 82021eec0be1 are fixed or argued: the Lab comment is at the head, the recorded-data tests run unskipped, the contract checks run in the PR checkout, and the census test helper defaults are None"
+summary: >-
+  The review of the check_lane_sync unpublished-drift fix at head 82021eec0be1 left six blocking findings. This change sets cwd to . on every check of the OMN-25101 contract, pins the AC2 count to nine failed, widens the AC3 grep from tests/ci to all of tests/, makes the broker_container default of the lane census test helper None, and states the skip, closure and Lab evidence in pull request comments.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25184-review-findings-answered
+    statement: >-
+      Each blocking review finding on omnibase_infra PR 6044 at head 82021eec0be1 is fixed with a check that can fail, or answered with evidence in a pull request comment.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a PR comment starting `Lab: head=82021eec0be1` (or the newer full head after the fixes) names the command with exit 0 and `23 passed` for the guard test file, and the merge-base run with `9 failed, 14 passed` and its FAILED list"
+      - id: AC2
+        statement: "AC2: the four recorded-data cases (live_contact and recorded_response) are shown passed and not skipped in the lab output, or load through the recorded-data helper, and CI is shown not to deselect live_contact"
+      - id: AC3
+        statement: "AC3: every dod check in contracts/OMN-25101.yaml and the AC2 check of contracts/OMN-24976.yaml runs from the PR checkout with `cwd: .`, and the AC2 count check pins `^9 failed`"
+      - id: AC4
+        statement: "AC4: the AC3 claim that no other test pins exit 8 is checked across tests/ and not only tests/ci, with `check_lane_sync` grepped over tests/, any file found outside tests/ci run on the lab, and the result recorded in a PR comment"
+      - id: AC5
+        statement: "AC5: the PR comment states whether the tracker closes OMN-24976 on the commit subject `fix(OMN-24976)` or on the PR title, and the reference is made non-closing if it would close, with OMN-24976 read back after the push as Backlog or In Progress"
+      - id: AC6
+        statement: "AC6: the `_run` helper in tests/unit/scripts/test_lane_census_unpublishable_drift_omn20798.py defaults `bootstrap` and `broker_container` to None, so a caller that passes neither sends neither"
+evidence_requirements:
+  - kind: tests
+    description: The guard test file and the census unit file at the head.
+    command: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py tests/unit/scripts/test_lane_census_unpublishable_drift_omn20798.py -q -rs --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25184-ac1-guard-file-23-passed
+    description: >-
+      The guard test file passes with exactly 23 tests and the summary line reads "23 passed in"; the head-bound Lab comment on the pull request carries the same command and exit 0.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider 2>&1) && printf "%s\n" "$out" | tail -5 && printf "%s\n" "$out" | grep -Eq "^23 passed in "'
+        cwd: .
+  - id: dod-omn25184-ac2-unskipped-not-deselected
+    description: >-
+      The -rs run of the guard file prints no SKIPPED line and no skipped or deselected count, so the two live_contact tests with their recorded_response fixture ran; no workflow marker expression and no pytest option deselects live_contact.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider 2>&1)
+          printf "%s\n" "$out" | tail -3
+          printf "%s\n" "$out" | grep -Eq "^23 passed in " &&
+          test "$(printf "%s\n" "$out" | grep -Eci "skipped|deselected")" = 0'
+        cwd: .
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          grep -rnE "(not|deselect|ignore)[^#]*live_contact" .github/workflows pyproject.toml tests/conftest.py tests/ci/conftest.py conftest.py
+          test $? -eq 1'
+        cwd: .
+  - id: dod-omn25184-ac3-cwd-dot-and-nine-failed
+    description: >-
+      No check of the review contracts names OMNI_HOME in a cwd line, every check of each carries `cwd: .` (the count of cwd lines equals the count of checks), and the AC2 count check of the OMN-25101 contract matches "^9 failed".
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          grep -nE "^ +cwd:.*OMNI_HOM[E]" contracts/OMN-25101.yaml contracts/OMN-24976.yaml contracts/OMN-25184.yaml contracts/OMN-25199.yaml
+          test $? -eq 1'
+        cwd: .
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          for f in contracts/OMN-25101.yaml contracts/OMN-24976.yaml contracts/OMN-25184.yaml contracts/OMN-25199.yaml; do
+          c=$(grep -cE "^ +cwd: \.$" "$f") && t=$(grep -cE "^ +- check_type:" "$f") &&
+          test "$c" -gt 0 && test "$c" = "$t" || exit 1
+          done'
+        cwd: .
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          grep -n "failed, 14 passed" contracts/OMN-25101.yaml &&
+          test "$(grep -c "grep -Eq \"^9 failed, 14 passed in \"" contracts/OMN-25101.yaml)" = 1 &&
+          test "$(grep -cE "\^\[0-9\]\+ failed" contracts/OMN-25101.yaml)" = 0'
+        cwd: .
+  - id: dod-omn25184-ac4-tests-wide-grep
+    description: >-
+      The grep for check_lane_sync covers all of tests/ at the PR head, or at the commit that introduced this fix once it is on dev, and lists no file outside tests/ci; the tests/ci files it lists are run in the head-bound Lab comment.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          end=HEAD &&
+          added=$(git log --first-parent -1 --diff-filter=A --format=%H HEAD -- contracts/OMN-24976.yaml) &&
+          if test -n "$added"; then
+            landed=$(git for-each-ref --contains "$added" --format="%(refname)" refs/remotes/origin/dev) &&
+            if test "$landed" = refs/remotes/origin/dev; then end="$added"; fi
+          fi &&
+          out=$(git grep -l "check_lane_sync" "$end" -- tests/ | cut -d: -f2- | sort) &&
+          printf "%s\n" "$out" &&
+          test -n "$out" &&
+          test "$(printf "%s\n" "$out" | grep -vc "^tests/ci/")" = 0'
+        cwd: .
+  - id: dod-omn25184-ac5-no-git-closure-path
+    description: >-
+      The check reads the commit messages from 75969ce9e through the PR head, or through the commit that introduced this fix once it is on dev, and finds no closing keyword before OMN-24976, an id list or a bracket included. It does not read the pull request body, the title or the branch name, which a check run from the checkout cannot see; the OMN-25205 pull request comment gives the body readback and the OMN-24976 state.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          end=HEAD &&
+          added=$(git log --first-parent -1 --diff-filter=A --format=%H HEAD -- contracts/OMN-24976.yaml) &&
+          if test -n "$added"; then
+            landed=$(git for-each-ref --contains "$added" --format="%(refname)" refs/remotes/origin/dev) &&
+            if test "$landed" = refs/remotes/origin/dev; then end="$added"; fi
+          fi &&
+          msgs=$(git log --format="%H %s%n%b" 75969ce9e.."$end") &&
+          test -n "$msgs" &&
+          test "$(printf "%s\n" "$msgs" | grep -ciE "(clos(e|es|ed|ing)|fix(es|ed|ing)?|resolv(e|es|ed|ing)|complet(e|es|ed|ing))[: ]+((\[?(https://[^ ]*/)?OMN-[0-9]+\]?(\([^)]*\))?)[ ,]+(and +)?)*\[?(https://[^ ]*/)?OMN-24976")" = 0'
+        cwd: .
+  - id: dod-omn25184-ac6-run-defaults-none
+    description: >-
+      The _run helper of the census unit file defaults broker_container and bootstrap to None, the new signature test fails when either default is an empty string, and the file passes.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'grep -nE "^    (bootstrap|broker_container)[:] str \| None = None,$" tests/unit/scripts/test_lane_census_unpublishable_drift_omn20798.py | tee /dev/stderr | test "$(wc -l)" = 2'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_lane_census_unpublishable_drift_omn20798.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
