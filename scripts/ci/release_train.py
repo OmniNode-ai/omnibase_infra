@@ -273,6 +273,9 @@ class EnumLabEvidence(StrEnum):
     #: The repo has no lab lane of its own. A declaration, with its reason, not
     #: a way around the bar -- the reason is printed on every decision it makes.
     NONE = "none"
+    #: The premise is ``classify_ci_green`` alone (OMN-25646, decision 2 of the
+    #: 2026-11-18T16:26:04Z ruling). The receipt is read and printed, never gated on.
+    DEV_REQUIRED_GREEN = "dev-required-green"
 
 
 def lab_evidence_lanes(evidence: EnumLabEvidence, repo: str) -> tuple[Any, ...]:
@@ -283,7 +286,10 @@ def lab_evidence_lanes(evidence: EnumLabEvidence, repo: str) -> tuple[Any, ...]:
     configuration error, never a lane silently dropped.
     """
     lanes = lab_pass_receipt.EnumLabLane
-    if evidence is EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE:
+    if evidence in (
+        EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE,
+        EnumLabEvidence.DEV_REQUIRED_GREEN,
+    ):
         declared = instance_receipt_lanes.receipt_lanes_for(repo)
         try:
             instance = tuple(lanes(lane) for lane in declared)
@@ -349,6 +355,7 @@ class EnumTrainReason(StrEnum):
 
     UNRELEASED_WORK_LAB_PROVEN = "unreleased_work_lab_proven"
     UNRELEASED_WORK_NO_LAB_SURFACE_DECLARED = "unreleased_work_no_lab_surface_declared"
+    UNRELEASED_WORK_DEV_REQUIRED_GREEN = "unreleased_work_dev_required_green"
     NO_UNRELEASED_RELEASE_RELEVANT_WORK = "no_unreleased_release_relevant_work"
     MODE_REPORT_ONLY = "mode_report_only"
     LAB_RECEIPT_ABSENT = "lab_receipt_absent"
@@ -1688,6 +1695,22 @@ def decide(
         rebuild_pending=rebuild_pending,
         lanes=lab_evidence_lanes(policy.lab_evidence, policy.repo),
     )
+    if policy.lab_evidence is EnumLabEvidence.DEV_REQUIRED_GREEN:
+        signal = (
+            "found"
+            if reason is None
+            else "failed"
+            if reason is EnumTrainReason.LAB_RECEIPT_FAIL
+            else reason.value.removeprefix("lab_receipt_")
+        )
+        return _build(
+            EnumTrainVerdict.CUT,
+            EnumTrainReason.UNRELEASED_WORK_DEV_REQUIRED_GREEN,
+            f"{facts.unreleased_count} unreleased release-relevant commit(s); "
+            f"{ci_detail}; lab-pass receipt signal: {signal} (printed, not a gate)",
+            candidate_version=candidate_version,
+            needs_bump=needs_bump,
+        )
     if reason is not None:
         if not candidate.sha and candidate.unresolved_reason:
             detail = f"{detail}. The ancestor premise did not run: {candidate.unresolved_reason}"

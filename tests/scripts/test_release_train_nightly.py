@@ -456,7 +456,7 @@ class TestOmnimarketIsArmedOnItsLabPremise:
     def test_the_shipped_row_is_cut_on_its_existing_lab_premise(self) -> None:
         policy = rt.load_policy(_POLICY)["omnimarket"]
         assert policy.mode is rt.EnumTrainMode.CUT
-        assert policy.lab_evidence is rt.EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE
+        assert policy.lab_evidence is rt.EnumLabEvidence.DEV_REQUIRED_GREEN
         assert policy.release_relevant_paths == ("src", "pyproject.toml")
 
     def test_the_note_no_longer_claims_release_on_merge_races_the_train(
@@ -497,7 +497,10 @@ class TestOmnimarketIsArmedOnItsLabPremise:
     ) -> None:
         """A dev version level with the tag needs the next patch, and a bump."""
         decision = rt.decide(
-            policy=rt.load_policy(_POLICY)["omnimarket"],
+            policy=replace(
+                rt.load_policy(_POLICY)["omnimarket"],
+                lab_evidence=rt.EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE,
+            ),
             facts=_facts(
                 repo="omnimarket",
                 latest_tag="v0.4.302",
@@ -542,7 +545,10 @@ class TestOmnimarketIsArmedOnItsLabPremise:
 
     def test_the_same_inputs_with_a_failing_receipt_do_not_cut(self) -> None:
         decision = rt.decide(
-            policy=rt.load_policy(_POLICY)["omnimarket"],
+            policy=replace(
+                rt.load_policy(_POLICY)["omnimarket"],
+                lab_evidence=rt.EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE,
+            ),
             facts=_facts(
                 repo="omnimarket",
                 latest_tag="v0.4.302",
@@ -563,7 +569,10 @@ class TestOmnimarketIsArmedOnItsLabPremise:
     def test_the_same_inputs_without_receipt_artifacts_do_not_cut(self) -> None:
         """Green CI alone does not satisfy the shipped row's lab premise."""
         decision = rt.decide(
-            policy=rt.load_policy(_POLICY)["omnimarket"],
+            policy=replace(
+                rt.load_policy(_POLICY)["omnimarket"],
+                lab_evidence=rt.EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE,
+            ),
             facts=_facts(
                 repo="omnimarket",
                 latest_tag="v0.4.302",
@@ -1292,6 +1301,107 @@ class TestTheGreenCIPremiseGuardsEveryCutPath:
         assert gate_asked == [("omnibase_infra", _INFRA_SHA)]
         assert seen == [("omnibase_infra", GATE)]
         assert branches == [("omnibase_infra", "trunk")]
+
+
+class TestDevRequiredGreenSignsOffOnGreenRequiredChecks:
+    """OMN-25646, decision 2 of the 2026-11-18T16:26:04Z ruling.
+
+    Under ``dev-required-green`` the premise is ``classify_ci_green`` alone,
+    already applied before any lab arm. The lab-pass receipt is read and printed
+    as a signal and never refuses. ``compose-dev`` keeps its behaviour, so each
+    "cuts" assertion has a sibling that flips the one input that matters.
+    """
+
+    def test_dev_required_green_cuts_without_a_receipt_and_compose_dev_refuses(
+        self,
+    ) -> None:
+        green = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.DEV_REQUIRED_GREEN),
+            facts=_facts(),
+            **_lab_seam(),
+            **_ci_seam(),
+        )
+        assert green.verdict is rt.EnumTrainVerdict.CUT
+        assert green.reason is rt.EnumTrainReason.UNRELEASED_WORK_DEV_REQUIRED_GREEN
+        assert "required context" in green.detail
+        assert "lab-pass receipt signal: absent" in green.detail
+
+        gated = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.COMPOSE_DEV),
+            facts=_facts(),
+            **_lab_seam(),
+            **_ci_seam(),
+        )
+        assert gated.verdict is rt.EnumTrainVerdict.SKIP
+        assert gated.reason is rt.EnumTrainReason.LAB_RECEIPT_ABSENT
+
+    def test_dev_required_green_prints_a_found_receipt_as_a_signal(self) -> None:
+        decision = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.DEV_REQUIRED_GREEN),
+            facts=_facts(),
+            **_lab_seam(
+                artifacts=[{"id": 1, "created_at": "2026-11-18T14:00:00Z"}],
+                receipt=_receipt(
+                    _INFRA_SHA, rt.lab_pass_receipt.EnumLabPassResult.PASS
+                ),
+            ),
+            **_ci_seam(),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.CUT
+        assert "lab-pass receipt signal: found" in decision.detail
+
+    def test_dev_required_green_prints_a_failed_receipt_and_still_cuts(self) -> None:
+        decision = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.DEV_REQUIRED_GREEN),
+            facts=_facts(),
+            **_lab_seam(
+                artifacts=[{"id": 2, "created_at": "2026-11-18T14:00:00Z"}],
+                receipt=_receipt(
+                    _INFRA_SHA, rt.lab_pass_receipt.EnumLabPassResult.FAIL
+                ),
+            ),
+            **_ci_seam(),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.CUT
+        assert "lab-pass receipt signal: failed" in decision.detail
+
+    def test_dev_required_green_refuses_a_head_whose_required_context_is_not_success(
+        self,
+    ) -> None:
+        decision = rt.decide(
+            policy=_policy(lab_evidence=rt.EnumLabEvidence.DEV_REQUIRED_GREEN),
+            facts=_facts(),
+            **_lab_seam(),
+            **_ci_seam(
+                runs=[
+                    {
+                        "name": "CI Summary",
+                        "status": "completed",
+                        "conclusion": "failure",
+                    }
+                ]
+            ),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.SKIP
+        assert decision.reason is rt.EnumTrainReason.CI_NOT_GREEN
+        assert "'CI Summary'" in decision.detail
+
+    def test_the_shipped_policy_declares_dev_required_green_for_both_repos(
+        self,
+    ) -> None:
+        policies = rt.load_policy(_POLICY)
+        for name in ("omnibase_infra", "omnimarket"):
+            policy = policies[name]
+            assert policy.lab_evidence is rt.EnumLabEvidence.DEV_REQUIRED_GREEN
+            assert policy.mode is rt.EnumTrainMode.CUT
+            assert "decision 2" in policy.lab_evidence_note
+            assert "2026-11-18T16:26:04Z" in policy.lab_evidence_note
+        assert "PASS receipt" not in policies["omnimarket"].mode_note
+        for other in set(policies) - {"omnibase_infra", "omnimarket"}:
+            assert (
+                policies[other].lab_evidence
+                is not rt.EnumLabEvidence.DEV_REQUIRED_GREEN
+            )
 
 
 class TestThereIsNoWayToAssertTheCIFact:

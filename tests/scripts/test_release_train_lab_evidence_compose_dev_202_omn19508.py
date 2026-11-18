@@ -133,8 +133,15 @@ def test_release_train_lab_evidence_compose_dev_202_is_not_read_under_compose_de
 
 def test_release_train_lab_evidence_compose_dev_202_committed_policy() -> None:
     policy = rt.load_policy(_POLICY_PATH)
-    assert policy["omnimarket"].lab_evidence is EITHER
-    assert policy["omnibase_infra"].lab_evidence is rt.EnumLabEvidence.COMPOSE_DEV
+    # OMN-25646: both repos sign off on green required checks; the receipt
+    # lanes this file proves are still read, as a printed signal.
+    assert policy["omnimarket"].lab_evidence is rt.EnumLabEvidence.DEV_REQUIRED_GREEN
+    assert (
+        policy["omnibase_infra"].lab_evidence is rt.EnumLabEvidence.DEV_REQUIRED_GREEN
+    )
+    assert rt.lab_evidence_lanes(
+        rt.EnumLabEvidence.DEV_REQUIRED_GREEN, "omnimarket"
+    ) == rt.lab_evidence_lanes(EITHER, "omnimarket")
 
 
 def test_release_train_lab_evidence_compose_dev_202_refused_for_omnibase_infra(
