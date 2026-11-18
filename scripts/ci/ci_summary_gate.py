@@ -807,15 +807,12 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # OMN-18648: unconditional new admission workflow. Body edits re-evaluate
     # this context without re-running the full CI matrix.
     "CI Live Contact (OMN-18648)",
-    # OMN-20074: require the repo-owned verdict, so ABSENCE cannot silently
-    # pass dev's sole required context, CI Summary. The operator ruling at
-    # 2026-10-08T22:41:24Z admits call-repo-evidence-gate.yml's
-    # pull_request_target producer: GitHub reads the base-branch definition,
-    # and the reusable reports this verdict on the PR head. Caller-mode
-    # "repo-evidence / verify" is a success no-op and is NOT registered.
+    # OMN-20074: require the repo-owned verdict on the PR head, since an absent
+    # verdict must block CI Summary. call-repo-evidence-gate.yml runs on
+    # pull_request. Caller-mode "repo-evidence / verify" is a success no-op.
     # Admission evidence: merged dev heads #4767
     # 28b945ef0e9cbf033f189e41a1dfbdb184c63ad9, run 37928489908
-    # (pull_request_target), check 113813114010 success (app id 15368);
+    # (legacy pull_request_target), check 113813114010 success (app id 15368);
     # #4765 44e1c42234c271f5c38405485ec3083cdcae7fbb, check 113802506448
     # success; #4758 adf88b2586003e68978d10ad798beb6e00d3b650, check
     # 113731199381 success. These postdate both historical fixture windows.
