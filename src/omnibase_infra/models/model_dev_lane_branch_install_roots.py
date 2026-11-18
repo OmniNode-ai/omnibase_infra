@@ -16,33 +16,11 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.models.model_dev_lane_branch_install_root import (
+    ModelDevLaneBranchInstallRoot,
+)
 
 _ROOTS_PATH = Path(__file__).resolve().parent / "dev_lane_branch_install_roots.yaml"
-
-
-class ModelDevLaneBranchInstallRoot(BaseModel):
-    """One directory prefix a branch install may write under."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    path: str
-    overlay_root: bool
-
-    @field_validator("path")
-    @classmethod
-    def _absolute_directory_prefix(cls, value: str) -> str:
-        if (
-            not value.startswith("/")
-            or not value.endswith("/")
-            or len(value) < 2
-            or "\x00" in value
-            or any(part in ("", ".", "..") for part in value[1:-1].split("/"))
-        ):
-            raise ValueError(
-                f"root {value!r} must be an absolute directory ending in '/' "
-                "with no empty, '.' or '..' segment"
-            )
-        return value
 
 
 class ModelDevLaneBranchInstallRoots(BaseModel):
@@ -101,7 +79,6 @@ def load_dev_lane_branch_install_roots() -> ModelDevLaneBranchInstallRoots:
 
 
 __all__: list[str] = [
-    "ModelDevLaneBranchInstallRoot",
     "ModelDevLaneBranchInstallRoots",
     "load_dev_lane_branch_install_roots",
 ]
