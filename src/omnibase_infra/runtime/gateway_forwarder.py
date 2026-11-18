@@ -954,19 +954,30 @@ class TransportGatewayHttpsIngest:
         """POST one real record batch and acknowledge only its whole result."""
         if not records:
             return
+        from omnibase_core.models.contracts.model_ingest_contract import (
+            compute_event_id,
+        )
+
         encoded_records: list[dict[str, object]] = []
         for topic, key, value, headers in records:
-            event_id, envelope_id = self._event_identity(value)
+            encoded_headers = self._encode_headers(headers)
             record: dict[str, object] = {
                 "topic": topic,
                 "key": base64.b64encode(key).decode("ascii")
                 if key is not None
                 else None,
                 "value": base64.b64encode(value).decode("ascii"),
-                "event_id": event_id,
-                "envelope_id": envelope_id,
+                "event_id": compute_event_id(
+                    topic,
+                    key,
+                    value,
+                    {
+                        name: text.encode("utf-8")
+                        for name, text in encoded_headers.items()
+                    },
+                ),
+                "envelope_id": self._envelope_id(value),
             }
-            encoded_headers = self._encode_headers(headers)
             if encoded_headers:
                 record["headers"] = encoded_headers
             encoded_records.append(record)
@@ -1010,33 +1021,21 @@ class TransportGatewayHttpsIngest:
         # publisher that cannot say where the record landed says so.
         return
 
-    def _event_identity(self, value: bytes) -> tuple[str, str]:
-        """Read the content identity and legacy envelope coordinate from wire."""
+    @staticmethod
+    def _envelope_id(value: bytes) -> str:
         try:
             decoded: object = json.loads(value.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError(
-                "gateway https ingest requires a JSON envelope carrying "
-                "event_id; the record could not be decoded"
+                "gateway https ingest requires a JSON envelope_id"
             ) from exc
-        if not isinstance(decoded, dict):
-            raise ValueError(
-                "gateway https ingest requires a JSON object carrying event_id"
-            )
-        envelope_id = decoded.get("envelope_id")
+        envelope_id = decoded.get("envelope_id") if isinstance(decoded, dict) else None
         if not isinstance(envelope_id, str) or not envelope_id.strip():
             raise ValueError(
                 "gateway https ingest record carries no envelope_id; the standard "
                 "envelope coordinate is required for traceability"
             )
-        metadata = decoded.get("metadata")
-        tags = metadata.get("tags") if isinstance(metadata, dict) else None
-        event_id = tags.get("event_id") if isinstance(tags, dict) else None
-        if not isinstance(event_id, str) or len(event_id) != 64:
-            raise ValueError(
-                "gateway https ingest record carries no content-addressed event_id"
-            )
-        return event_id, envelope_id.strip()
+        return envelope_id.strip()
 
     @staticmethod
     def _encode_headers(headers: object | None) -> dict[str, str]:
