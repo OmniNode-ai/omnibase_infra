@@ -70,3 +70,14 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_provision_unattached_declared_topics_omn25650.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25650-integration-proof
+    description: >-
+      Boot provisioning run over every real contract.yaml shipped under omnibase_infra.nodes, read from disk through the auto-wiring parser: each topic declared outside event_bus is requested from the provisioner.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_boot_provisions_declared_topics_omn25650.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
