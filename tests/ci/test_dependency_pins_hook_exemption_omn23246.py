@@ -22,7 +22,9 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
 HELD_BACK_REV_PREFIX = "1c9566e2c249"
-EXEMPTION_TAG = "dev-20261109032923-9f0af2b9bd43"
+EXEMPTION_TAG = "dev-20261118030813-4f0a188ab62c"
+# Cut time of omnibase_core#2333 (dev-20261118030813-4f0a188ab62c): the exemption to 2026-11-24.
+EXTENDED_EXEMPTION_CUT_UTC = "20261118030813"
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -39,6 +41,23 @@ def test_dependency_pins_job_passes_the_core_dev_tag_carrying_the_exemption() ->
     assert inputs == {"omnibase-core-ref": EXEMPTION_TAG}
     # A tag, not a commit sha: the sibling sha-pin ratchet refuses new sha pins.
     assert not FULL_SHA.fullmatch(EXEMPTION_TAG)
+
+
+def test_dependency_pins_ref_is_not_older_than_the_extended_exemption_omn25506() -> (
+    None
+):
+    """The ref must be cut at or after omnibase_core#2333, which moved the date to 2026-11-24.
+
+    dev-merge tags are ``dev-<UTC yyyymmddHHMMSS>-<sha12>``, so a lexicographic compare
+    on the timestamp orders them. The tag this job named before OMN-25506 was cut
+    2026-11-09 and still carries the 2026-11-16 date, which is past.
+    """
+    inputs = _job()["with"]
+    assert isinstance(inputs, dict)
+    ref = str(inputs["omnibase-core-ref"])
+    match = re.fullmatch(r"dev-(\d{14})-[0-9a-f]{12}", ref)
+    assert match is not None, ref
+    assert match.group(1) >= EXTENDED_EXEMPTION_CUT_UTC, ref
 
 
 def test_dependency_pins_job_still_calls_the_core_workflow_unconditionally() -> None:
