@@ -1137,6 +1137,21 @@ services:
       # overlay folder under the workspace config root's config/lab, which the infra
       # compose already requires, so its parent is config/lab. Read-only.
       - ${ONEX_LANE_OVERLAY_DIR}/..:/etc/onex/workspace-config/config/lab:ro
+      # Product clones (OMN-25709): the Done guard's dod_verify finds a ticket's contract only through
+      # a canonical clone at $OMNI_HOME/<name> (OMNI_HOME=/app in the runtime image) and returned
+      # CONTRACT_MISSING with product_clones=[] for every ticket while /app held none. Each product
+      # clone is mounted read-only from the registry-root layout the canonical-clone sync keeps current
+      # (the same layout the overlays store root above is derived from), so the lane host needs no new
+      # operator variable and no credential. onex_change_control is the governance repository the
+      # verifier never reads as a product clone and is not mounted.
+      - ../../omnibase_core:/app/omnibase_core:ro
+      - ../../omnibase_infra:/app/omnibase_infra:ro
+      - ../../omnibase_spi:/app/omnibase_spi:ro
+      - ../../omniclaude:/app/omniclaude:ro
+      - ../../omnidash:/app/omnidash:ro
+      - ../../omniintelligence:/app/omniintelligence:ro
+      - ../../omnimarket:/app/omnimarket:ro
+      - ../../omnimemory:/app/omnimemory:ro
     healthcheck:
       test:
         - CMD
