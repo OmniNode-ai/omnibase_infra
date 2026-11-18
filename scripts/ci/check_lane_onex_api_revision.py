@@ -13,7 +13,7 @@ answers the question omnibase_infra's own trigger asks.
 ``check_lane_sibling_revision.py`` reads ``/app/build-provenance.json`` out of the
 runtime image, whose ``per_repo_vcs_provenance.siblings`` lists the repositories
 ``stage_workspace.sh`` VENDORS into that image -- ``omnibase_core``,
-``omnibase_compat``, ``omnimarket``.
+``omnimarket``.
 
 ``omninode_infra`` is in neither, and not by oversight. ``onex-api`` is not
 vendored into the runtime image at all: ``docker/onex-api`` is a self-contained

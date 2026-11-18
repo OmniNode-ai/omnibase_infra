@@ -43,14 +43,16 @@ jobs:
     # 2026-11-05T03:51Z no runner carrying that label registered, the capacity
     # request job kept reporting success, and every run's job sat queued. A
     # public repository's job runs on a hosted runner (operator ruling
-    # 2026-11-05T17:39:59Z). The fork branch still comes first: a fork pull
-    # request never reaches a self-hosted runner of any kind.
+    # 2026-11-05T17:39:59Z). Preserve the fork and Docker routing seams for
+    # private repos. Every public event selects the hosted runner directly.
     runs-on: >-
       ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
+        github.event.repository.private && (
+          (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name != github.repository)
+          && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+          || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
+        ) || fromJSON('["ubuntu-latest"]')
       }}
     timeout-minutes: 30
 

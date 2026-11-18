@@ -303,16 +303,6 @@ def run_compose_up_steps(
     """
     env = execution._compose_env(extra_env)
     result = ModelSubprocessOutcome(returncode=0, stdout="", stderr="", timed_out=False)
-    if (
-        rolling
-        and lane is execution.EnumRuntimeLane.DEV
-        and any(step[-1] == execution.ONEX_API_SERVICE for step in steps)
-    ):
-        # OMN-23039: a pin that is already a broken image would stop this roll at onex-api.
-        guard = execution.load_dev_boot_guard("handler_onex_api_image_import_check")
-        healed = guard.heal_pin(execution._run, execution.operator_env_file())
-        if healed is not None:
-            logger.warning("onex-api pin heal before the roll: %s", healed)
     for step in steps:
         if rolling and lane is execution.EnumRuntimeLane.DEV:
             try:
@@ -448,12 +438,35 @@ def _all_healthy(
         return False
 
 
-def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> set[str]:
+def retire_lane_services[LaneT: BaseModel](
+    config: LaneT, retired: Collection[str], phase_by_service: Mapping[str, StrEnum]
+) -> LaneT:
+    """``config`` with ``retired`` services disabled and their settle phases off.
+
+    A service the policy retires by name is never recreated, so the phase that
+    only builds or pins its image has nothing to deliver (OMN-24476).
+    """
+    current = config.model_dump(
+        mode="json", include={"disabled_services", "disabled_phases"}
+    )
+    phases = {phase_by_service[s] for s in retired if s in phase_by_service}
+    return config.model_copy(
+        update={
+            "disabled_services": frozenset(current["disabled_services"]).union(retired),
+            "disabled_phases": frozenset(current["disabled_phases"]).union(phases),
+        }
+    )
+
+
+def folded_dev_services(
+    policy: Mapping[str, str], folded: frozenset[str], prefix: str = "DEV"
+) -> set[str]:
     """Retirement uses the same contract mapping as the compose gates.
 
     A lane that folds nothing (any other dev instance) retires nothing. On the
     lane that folds, the services main carries with no profile of its own
-    (``DEV_RUNTIME_MAIN_RETIRED_SERVICES``) are retired with the folded ones.
+    (``<prefix>_RUNTIME_MAIN_RETIRED_SERVICES``) are retired with the folded
+    ones; a lane that declares none (stability) retires only the mapped ones.
     """
     if not folded:
         return set()
@@ -473,7 +486,9 @@ def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> se
         raise RuntimeError(f"fold policy maps no service for {sorted(missing)}")
     retired = {
         service.strip()
-        for service in policy.get("DEV_RUNTIME_MAIN_RETIRED_SERVICES", "").split(",")
+        for service in policy.get(f"{prefix}_RUNTIME_MAIN_RETIRED_SERVICES", "").split(
+            ","
+        )
         if service.strip()
     }
     if any(not re.fullmatch(r"[a-z][a-z0-9-]*", service) for service in retired):

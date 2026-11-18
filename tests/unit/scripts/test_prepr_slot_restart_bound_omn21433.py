@@ -45,7 +45,6 @@ SLOT_SERVICES = (
     "projection-savings-writer",
     "projection-tenant-credentials-writer",
     "projection-live-events-writer",
-    "onex-api",
 )
 
 
@@ -104,8 +103,6 @@ def rendered_services(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any
         (
             "--profile",
             "prepr",
-            "--profile",
-            "prepr-gateway",
             "config",
             "--format",
             "json",
