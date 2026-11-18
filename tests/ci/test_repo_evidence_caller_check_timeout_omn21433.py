@@ -86,7 +86,7 @@ def test_caller_names_a_ceiling_above_the_verifier_default() -> None:
 
 
 def test_caller_sha_pin_is_the_commit_of_the_dev_tag_named_on_the_same_line() -> None:
-    """A pull_request_target caller pins by 40-hex sha; the dev tag is named beside it.
+    """The caller pins by 40-hex sha with the dev tag beside it.
 
     The tag named in the comment is resolved through the GitHub API and must point at
     the pinned sha, so a mispaired tag and sha fail here.
