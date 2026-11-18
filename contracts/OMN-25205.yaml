@@ -1,0 +1,75 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25205
+title: "Review findings on omnibase_infra PR 6044 at head 42c9907635a3 are fixed or argued: the Lab comment is at the head, the tracker closure is read back, and the FAIL verdict is shown not to redden a required check"
+summary: >-
+  The fifth review of the check_lane_sync unpublished-drift fix left three findings that need a pull request comment and six that do not block. This change makes the closure checks read an id list and a bracket after a closing keyword, pins every contract guard (the 25199 contracts' own checks included) in a wrong working directory, decouples the two tests-wide greps from the live tests tree, scans every workflow and both quote forms for a live_contact deselection, shares one offender pattern between the contract scan and its control, joins the pytest-summary checks with `&&`, adds the skipped-output case, and pins what a FAIL receipt does to the job that emits it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25205-review-findings-answered
+    statement: >-
+      Each blocking review finding on omnibase_infra PR 6044 at head 42c9907635a3 is fixed with a check that can fail, or answered with evidence in a pull request comment.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a PR comment starting `Lab: head=` with the full current head names the command, exit 0, `23 passed` and no SKIPPED line for the lane-sync test file, the merge-base run with `9 failed, 14 passed` and its nine FAILED lines, the tests-wide grep result, and the contract-guard test file passing"
+      - id: AC2
+        statement: "AC2: a PR comment gives the PR body readback, the state of OMN-24976 and the rule the evidence-autoclose sweep closes on, and the contract of OMN-24976 is kept from reading complete if the sweep would close it"
+      - id: AC3
+        statement: "AC3: a PR comment states what the verify job exits with when scripts/ci/lab_pass_receipt.py reads FAIL and whether that reddens a required check, and the merge is held until lane-a is clean if it does"
+      - id: AC4
+        statement: "AC4: the non-blocking findings 4 to 9 of the review are each fixed with a test red then green, or named in the PR comment as not done"
+evidence_requirements:
+  - kind: tests
+    description: The contract guard file and the lane-sync file at the head.
+    command: uv run --frozen pytest tests/ci/test_contract_check_guards_omn25199.py tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25205-ac1-lab-23-passed-and-guards
+    description: >-
+      The lane-sync test file passes with exactly 23 tests and the summary line reads "23 passed in" with no skipped count; the contract guard file passes. The head-bound Lab comment on the pull request carries the commands, exit 0, the merge-base run and the tests-wide grep.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider 2>&1) && printf "%s\n" "$out" | tail -5 && printf "%s\n" "$out" | grep -Eq "^23 passed in "'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_check_guards_omn25199.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25205-ac2-closure-and-open-contract
+    description: >-
+      The closure checks of the OMN-25184 and OMN-25199 contracts read an id list and a bracket after a closing keyword, and the OMN-24976 contract still declares exactly one acceptance criterion (AC2), so the sweep's coverage guard reads the three other criteria of the ticket as unbound. The readback of the body, the title and the ticket state is in the pull request comment.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_check_guards_omn25199.py -q --no-cov -n 0 -p no:cacheprovider -k "closing_keyword or only_reference or unreadable_range"
+        cwd: .
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          test "$(grep -cE "^ +- id: AC[0-9]+$" contracts/OMN-24976.yaml)" = 1 &&
+          grep -qE "^ +- id: AC2$" contracts/OMN-24976.yaml'
+        cwd: .
+  - id: dod-omn25205-ac3-fail-receipt-exit
+    description: >-
+      A receipt whose lane_sync check is failed or indeterminate ends the emit step with exit 1 and writes result FAIL, so census exit 8 read as failed does not change the emitting job's exit; the emitting workflow runs on a closed pull request, and CI Summary is a job with no needs that reads its own run only.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_check_guards_omn25199.py -q --no-cov -n 0 -p no:cacheprovider -k "non_passing_lane_sync or post_merge_job"
+        cwd: .
+  - id: dod-omn25205-ac4-non-blocking-findings
+    description: >-
+      Findings 4 to 9: the id list and bracket cases, the every-workflow marker scan with both quote forms, the shared offender pattern with its printf control, the skipped-output case, the 25199 guards in a wrong working directory, and the pytest-summary checks joined with `&&` are each pinned by a case of the guard file.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_check_guards_omn25199.py -q --no-cov -n 0 -p no:cacheprovider -k "closing_keyword or marker or offender or skip or 23_passed or wrong_cwd or tests_wide"
+        cwd: .
