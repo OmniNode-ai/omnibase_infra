@@ -14,12 +14,9 @@ $require_tenant_projection_writer$;
 
 GRANT USAGE ON SCHEMA public TO tenant_projection_writer;
 GRANT SELECT, INSERT, UPDATE
-    ON public.eval_item_scores, public.eval_run_closes, public.eval_run_rates
+    ON public.eval_item_scores, public.eval_item_traces, public.eval_run_closes, public.eval_run_rates
     TO tenant_projection_writer;
-GRANT SELECT, INSERT, DELETE
-    ON public.eval_item_traces
-    TO tenant_projection_writer;
-GRANT DELETE ON public.eval_run_rates TO tenant_projection_writer;
+GRANT DELETE ON public.eval_item_traces, public.eval_run_rates TO tenant_projection_writer;
 SELECT 1 / (CASE WHEN count(*) = 4 THEN 1 ELSE 0 END) AS eval_results_insert_grant_assertion
 FROM information_schema.role_table_grants
 WHERE table_schema = 'public'
