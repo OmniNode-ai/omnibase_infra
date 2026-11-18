@@ -33,12 +33,12 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/handlers/test_done_write_receipt_guard_state_root_omn25667.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn25667-ac2-verdict
-    description: The generic Linear adapters still refuse a Done write whose receipt binds no criterion and still pass one whose receipt binds every criterion.
+    description: A real verifier subprocess in a cwd that cannot hold .onex_state reaches its failed verdict through the guard's own argv, and the verdict comes back parsed instead of a crash.
     source: manual
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/adapters/test_done_write_gate_adapters.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/handlers/test_done_write_receipt_guard_state_root_omn25667.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn25667-ac3-integration-proof
     description: The integrated proof is a real Done write through the ticket node on the dev lane, read back as Done. It needs the dev bus, so it runs only where the lane declaration is present.
