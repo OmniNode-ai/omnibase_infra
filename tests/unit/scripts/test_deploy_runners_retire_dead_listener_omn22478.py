@@ -81,6 +81,7 @@ def script_functions() -> str:
         "relabel_job_log_probe",
         "relabel_container_idle",
         "runner_container_state",
+        "container_is_running",
         "runner_is_idle",
         "surplus_runner_is_idle",
     )
@@ -195,14 +196,14 @@ def test_live_job_worker_reads_busy(
     script_functions: str, fakebin: Path, tmp_path: Path
 ) -> None:
     """Failing control: a Runner.Worker in the process list is never idle, even
-    when GitHub (stubbed) says the runner is offline and not busy."""
+    when GitHub (stubbed) says the runner is online and not busy."""
     result, _ = _run(
         script_functions,
         fakebin,
         tmp_path,
         call="surplus_runner_is_idle",
         top=TOP_WITH_WORKER,
-        github_state="offline false",
+        github_state="online false",
     )
     assert result.returncode != 0, (result.stdout, result.stderr)
 
@@ -219,6 +220,7 @@ def test_unfinished_job_in_listener_log_reads_busy(
         call="surplus_runner_is_idle",
         top=RECORDED_TOP_RUNNER_18,
         logs="2026-11-16 17:00:00Z: Running job: pytest shard 3\n",
+        github_state="online false",
     )
     assert result.returncode != 0, (result.stdout, result.stderr)
 
