@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-25638
+title: The release writer folds the contract item the way the yamlfmt hook does
+summary: >-
+  The release train's writer (HandlerReleaseNotesApply, run as node_release_notes_apply_effect by .github/workflows/release-train-nightly.yml) folded the dod_evidence item's "check_value: >-" command at its "; " boundaries (_fold_statements, width 90). The omnibase_core yamlfmt hook (google/yamlfmt v0.21.0, .yamlfmt max_line_length 100) re-folds a ">-" block by taking the next word while the row already built is at most 90 characters (100 minus the block content indent 10), so every item the writer appended was re-folded and the Pre-commit Suite of the release pull request omnibase_core#2338 at head 88c986ac8332 failed the yamlfmt hook (job 134644048365, "The following formatting differences were found: contracts/OMN-18595.yaml"), leaving 0.47.75 unpublished. _fold_statements is replaced by _fold_command, which reproduces the hook's fold, pinned by a regression test built from that recorded failing output: the 0.47.75 entry's item must come out byte for byte as the hook's own wanted text, and the test fails on the unfixed handler. The lane's conduct criteria (no hand edit of the bot release pull request, branch installed and one writer run read passing the hook, the work-ledger STATUS row) are lane evidence recorded in the rolling work ledger, not checks a hosted runner can bind, so this contract carries no dod_evidence entry for them, per the OMN-24780 precedent; the ticket stays open until the next train cut reads green.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25638-release-writer-yamlfmt-fold
+    statement: >-
+      The contract item the release writer appends is already in the fold the omnibase_core yamlfmt hook wants, so the hook never re-formats the release pull request's generated content.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the writer's fold matches the hook's fold for the 0.47.75 item -- falsifier: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py -q --no-cov -n 0 -p no:cacheprovider -k folds_the_way_the_yamlfmt_hook_does fails at the merge base 75969ce9e2 (the ; -boundary fold) and passes on this branch"
+      - id: AC2
+        statement: "AC2: the regression is built from the recorded failing output of job 134644048365 and covers the whole focused file -- falsifier: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py -q --no-cov -n 0 -p no:cacheprovider fails at the merge base and passes on this branch"
+evidence_requirements:
+  - kind: tests
+    description: The focused regression file for the release notes writer.
+    command: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25638-ac1-fold-matches-hook
+    description: >-
+      The 0.47.75 item's folded check block equals the hook's wanted text, pinned from the recorded diff of job 134644048365.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py -q --no-cov -n 0 -p no:cacheprovider -k folds_the_way_the_yamlfmt_hook_does
+        cwd: .
+  - id: dod-omn25638-ac2-focused-suite
+    description: The whole focused writer suite passes on the branch.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
