@@ -1,0 +1,59 @@
+schema_version: 1.0.0
+ticket_id: OMN-25702
+requirements:
+- id: req-omn25702-pr6021
+  statement: Reconcile the existing rollback-waiver PR with dev while preserving its checks and record exact-head
+    lab and watcher evidence.
+  acceptance:
+  - id: AC1
+    statement: 'AC1: omnibase_infra#6021 reads a merge state other than DIRTY and CI Summary success at its new
+      head, read through the scm path after the push -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6021`
+      shows merge state DIRTY or CI Summary absent or not success at the new head'
+  - id: AC2
+    statement: 'AC2: no check is widened, skipped or bypassed, so the diff from bdef69529bcc to the new head touches
+      no workflow file, no required-contexts list and no baseline file to loosen a gate -- falsifier: `git diff
+      bdef69529bcc <new head> -- .github` or a checker config shows a removed assertion, a new skip or a loosened
+      threshold'
+  - id: AC3
+    statement: 'AC3: the new head is on the PR as a comment starting `Lab: head=<full sha>` with a red-then-green
+      lab run behind it, or a STATUS row names cause=<one line> shared=yes with its evidence when the cause is outside
+      the PR -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6021` shows no comment with `Lab: head=`
+      for the new head and the ledger holds no STATUS row with shared=yes for this ticket'
+dod_evidence:
+- id: dod-omn25702-ac1-watcher
+  description: 'External readback after the runner pushes: the local watcher must name this exact head, a clean
+    merge state, CI Summary success and no red checks. Pending until the launching runner pushes; not a hosted self-check.'
+  source: manual
+  execution_scope: local_done_gate
+  binds_ac:
+  - AC1
+  checks:
+  - check_type: command
+    check_value: python3 "${OMNI_PLUGIN_ROOT:?}/skills/merge-drain/scripts/pr_state_local.py" --pr OmniNode-ai/omnibase_infra#6021
+      --json | python3 -c 'import json,sys; r=json.load(sys.stdin); h=sys.argv[1]; assert r["facts"]["head_sha"]
+      == h; assert r["review"]["merge_state"] != "DIRTY"; assert r["ci"]["sha"] == h; assert any(c[0] == "CI Summary"
+      and c[2] == "success" for c in r["ci"]["runs"]); assert not r["ci"]["red"]' "$(git rev-parse HEAD)"
+    cwd: .
+- id: dod-omn25702-ac2-policy-unchanged
+  description: The replay adds no gate or checker configuration delta to its pinned dev base. The delta from the
+    old PR head also includes upstream dev changes, which remain subject to review.
+  source: manual
+  binds_ac:
+  - AC2
+  checks:
+  - check_type: command
+    check_value: git diff --exit-code 41821105a4a7dc05b8f778d8282829e3212186fa HEAD -- .github config .pre-commit-config.yaml
+      pyproject.toml scripts/ci tests/ci
+    cwd: .
+- id: dod-omn25702-ac3-waiver-regression
+  description: 'Hosted, falsifiable code-side portion of the lab proof: the waiver test exercises the agent path
+    and refusal controls. Posting and reading back the exact-head Lab comment, and installing the exact head, remain
+    external runner obligations; this check alone does not establish those facts.'
+  source: manual
+  binds_ac:
+  - AC3
+  checks:
+  - check_type: test_passes
+    check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py
+      -q -p no:randomly --no-cov -p no:cacheprovider
+    cwd: .
