@@ -769,8 +769,7 @@ def test_an_unresolvable_declaration_refuses_a_converge_bound(tmp_path: Path) ->
 # OMN-18573 above moved the convergence budget off the step's clock and onto the
 # deploy agent's acceptance, in `check_dev_lane_staleness.py`. That guard serves
 # the DIRECT caller: an omnibase_infra merge, proven by the container's
-# `org.opencontainers.image.revision` label. A SIBLING merge (omnimarket,
-# omnibase_core, omnibase_compat) does not move that label at all, so the
+# `org.opencontainers.image.revision` label. A staged sibling merge leaves that label unchanged, so the
 # sibling path runs a second guard -- `check_lane_sibling_revision.py`, reading
 # `/app/build-provenance.json` -- and the port was never made to it. It kept a
 # bare wall clock opened at `main()`.
@@ -1157,8 +1156,8 @@ def test_the_sibling_guard_exits_three_for_indeterminate() -> None:
 # The guard can only start the budget at acceptance if the workflow hands it a
 # correlation id and an agent surface, so the flags are asserted here for the
 # same reason the direct caller's are above: a capability the calling YAML never
-# reaches is detection, not enforcement. This is the file omnimarket,
-# omnibase_core and omnibase_compat all call, at a pinned ref.
+# reaches is detection, not enforcement. Staged siblings call this file
+# at a pinned ref.
 # ---------------------------------------------------------------------------
 SIBLING_WORKFLOW = REPO_ROOT / ".github/workflows/runtime-rebuild-trigger-reusable.yml"
 

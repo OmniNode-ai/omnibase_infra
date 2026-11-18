@@ -110,11 +110,11 @@ requirements:
     statement: The recorder contract test gives each loopback request the handler's default timeout, so a CI worker that stalls one answer for a second no longer turns the capture into capture_failed and reds Tests, CI Tests Gate, Test-Failure Ratchet Gate and CI Summary on the pull request.
   - id: req-omn19998-lane-liveness-folded-effects
     statement: The lane liveness probe does not demand the effects container on a lane whose runtime policy folds the effects role into main, so a serving primary dev lane no longer reads red on runtime_containers; a policy that does not fold effects still requires it.
-  - id: req-omn19998-remove-omnibase-compat
-    statement: 'Operator RULING 2026-11-15T17:59:49Z: omnibase_compat is removed. No workflow checks it out, clones it or installs it, no pin, list, workspace sibling set or install plan names it, and the scan of those files finds no live token.'
+  - id: req-omn19998-remove-retired-shared-package
+    statement: 'Operator RULING 2026-11-15T17:59:49Z: the retired shared package is removed. No workflow checks it out, clones it or installs it, no pin, list, workspace sibling set or install plan names it, and the scan of those files finds no live token.'
     acceptance:
       - id: AC50
-        statement: 'AC50: the scanned workflow, pin, compose, handshake, config and script files carry no omnibase_compat token outside whole-line comments -- falsifier: uv run pytest tests/ci/test_no_omnibase_compat_live_use.py -q -n 0 --no-cov'
+        statement: 'AC50: the scanned workflow, pin, compose, handshake, config and script files carry no retired package token outside whole-line comments -- falsifier: uv run pytest tests/ci/test_no_omnibase_compat_live_use.py -q -n 0 --no-cov'
   - id: req-omn19998-pool-prove-first-party-context
     statement: The pre-merge pool prover's image build for an isolated member passes the pre-PR slot first-party audit context the tree under test declares, so the runtime image audit no longer refuses the unmerged target built from a branch, and the prover stages the siblings at dev-merge tags for an infra proof as for every other, so lab proofs stop reading INCONCLUSIVE at the image audit.
 evidence_requirements:
@@ -212,7 +212,7 @@ evidence_requirements:
     description: The folded-lane case runs the real health gate over a census with no effects container and the shipped policy, and expects green; the control runs it under a policy that does not fold effects and expects red naming the effects container.
     command: uv run pytest tests/ci/test_dev_lane_liveness.py -q -n 0 --no-cov
   - kind: tests
-    description: The live-use scan reads the workflow, pin, compose, handshake, config and script files that used to name omnibase_compat and finds no token outside whole-line comments; the positive control finds a token planted in a code line.
+    description: The live-use scan reads the workflow, pin, compose, handshake, config and script files that used to name the retired package and finds no token outside whole-line comments; the positive control finds a token planted in a code line.
     command: uv run pytest tests/ci/test_no_omnibase_compat_live_use.py -q -n 0 --no-cov
   - kind: tests
     description: The pool prover tests read the isolated member's build command for the FIRST_PARTY_BUILD_CONTEXT build arg, run the context assignment as written against the real policy, and expect the pre-PR slot context that accepts a branch target; they fail on the merge base, whose build passes no such arg.
@@ -1452,8 +1452,8 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC1
-  - id: dod-omn19998-remove-omnibase-compat
-    description: The live-use scan finds no omnibase_compat token outside whole-line comments in the files that used to check out, install, pin or list it.
+  - id: dod-omn19998-remove-retired-shared-package
+    description: The live-use scan finds no retired package token outside whole-line comments in the files that used to check out, install, pin or list it.
     source: manual
     checks:
       - check_type: test_passes
@@ -1462,7 +1462,7 @@ dod_evidence:
     binds_ac:
       - AC50
   - id: dod-omn19998-integration-proof-compat-removed
-    description: The real runtime identity stamp list and contract-topic-graph package list, imported from the source tree, no longer name omnibase_compat and still name core, infra and spi.
+    description: The real runtime identity stamp list and contract-topic-graph package list, imported from the source tree, omit the retired package and still name core, infra and spi.
     source: manual
     checks:
       - check_type: test_passes

@@ -400,7 +400,7 @@ def test_main_fails_closed_on_installed_content_drift(
         mod.WORKSPACE_PACKAGES = packages
         # Isolate this test from the pre-existing (and unrelated, not
         # parametrized by WORKSPACE_PACKAGES) lock-pin comparison subsystem
-        # -- it hardcodes real sibling repo names (omnibase_compat etc.)
+        # -- it hardcodes the staged sibling repository names
         # that this synthetic fixture never stages. Only the OMN-14631
         # content-parity gate is under test here.
         monkeypatch.setattr(mod, "build_comparisons", lambda **_kwargs: [])
@@ -472,7 +472,7 @@ def test_main_passes_when_installed_content_matches_staged_source(
         mod.WORKSPACE_PACKAGES = packages
         # Isolate this test from the pre-existing (and unrelated, not
         # parametrized by WORKSPACE_PACKAGES) lock-pin comparison subsystem
-        # -- it hardcodes real sibling repo names (omnibase_compat etc.)
+        # -- it hardcodes the staged sibling repository names
         # that this synthetic fixture never stages. Only the OMN-14631
         # content-parity gate is under test here.
         monkeypatch.setattr(mod, "build_comparisons", lambda **_kwargs: [])

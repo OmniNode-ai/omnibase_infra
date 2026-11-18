@@ -506,7 +506,7 @@ _CLEAN_DOCKERFILE = """\
 FROM python:3.12-slim AS builder
 # omnimarket named in a comment is history, not an install.
 RUN uv-with-retry pip install --no-deps \\
-    "https://example.invalid/omnibase_compat.tar.gz"
+    "https://example.invalid/example-package.tar.gz"
 """
 
 

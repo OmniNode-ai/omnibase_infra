@@ -6,7 +6,7 @@ GRADUATION NOTE (memory ``feedback_models_in_core_not_market``): this command is
 repo-private to ``omnibase_infra`` today. When Phase E wires the omnimarket
 delegation orchestrator to emit this command at the code_generation ceiling, a
 second repo will import it (>=2 importers) and it must graduate to
-``omnibase_core``. Do NOT bump the ``omnibase_compat`` pin to host it.
+``omnibase_core``.
 """
 
 from __future__ import annotations

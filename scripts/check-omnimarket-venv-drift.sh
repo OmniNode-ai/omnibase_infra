@@ -34,9 +34,8 @@
 # CLI venv that serves `onex` for every lane on the host (omni_home/CLAUDE.md
 # rule 11), so a repair that moves an unrelated package backwards breaks every
 # lane, not just the one that ran it. That is not hypothetical: on 2026-09-18
-# this remedy fixed the omnimarket pin and silently downgraded omnibase-compat
-# 0.5.7 -> 0.5.5 and omninode-memory 0.18.0 -> 0.15.0, which removed
-# `omnibase_compat.contracts.pr_occ_stamp` and took the whole `onex` CLI down
+# this remedy fixed the omnimarket pin and silently downgraded other packages.
+# The downgrade removed a required module and took the `onex` CLI down
 # host-wide. Every install step is now planned first and REFUSED if it would
 # move any installed package backwards, and `--dry-run` prints that plan
 # without touching the venv or the clone. There is no bypass flag.

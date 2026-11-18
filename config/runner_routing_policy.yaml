@@ -92,7 +92,7 @@ trusted_runner_variable:
   # The org variable is not flipped either: it is inherited by omninode_infra --
   # private, carrying a live staging deploy path, and with only five
   # seam-driven job definitions, so almost no yield for a large blast radius --
-  # and by omnimemory, omnidash, omnibase_spi and omnibase_compat, none of
+  # and by omnimemory, omnidash and omnibase_spi, none of
   # which were enumerated for container exposure.
   #
   # Two shadows were flipped at 21:12:33Z. ONE WAS REVERTED 35 MINUTES LATER on
@@ -1116,8 +1116,8 @@ route:
     #
     # Measured 2026-09-20: omnibase_infra 32, omninode_infra 14, omniclaude 7,
     # omnimarket 5, omnibase_core 4, omniweb 4, omni_home 3,
-    # onex_change_control 3, omnibase_compat 2, omniintelligence 2,
-    # omnimemory 2, omnibase_spi 1, omnidash 1. `knowledge_base` declares none
+    # onex_change_control 3, omniintelligence 2, omnimemory 2, omnibase_spi 1,
+    # omnidash 1. The shared knowledge repository declares none
     # and is therefore absent -- absent because it has nothing to watch, not
     # because anybody decided not to watch it.
     #
