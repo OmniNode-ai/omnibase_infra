@@ -1005,7 +1005,7 @@ _ENV_FILE_ARGV_ALLOWED: dict[tuple[str, str], str] = {
     ),
     (
         "scripts/runtime_build/prepr_pool_prove.sh",
-        'docker compose -f docker/docker-compose.generated.yml --env-file docker/runtime-policy.env --env-file "$W/local.env" build --build-arg BUILD_SOURCE=workspace --build-arg EXPECTED_BUILD_SOURCE=workspace --build-arg OMNI_HOME="$R" --build-arg PROMOTION_CLASS=stability-candidate --build-arg NON_MAIN_LINEAGE=true --build-arg GIT_SHA="$(git rev-parse HEAD)" --build-arg VCS_REF="$(git rev-parse HEAD)" --build-arg RUNTIME_VERSION="$RV" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.log" 2>&1',
+        'docker compose -f docker/docker-compose.generated.yml --env-file docker/runtime-policy.env --env-file "$W/local.env" build --build-arg BUILD_SOURCE=workspace --build-arg FIRST_PARTY_BUILD_CONTEXT="$(python3 -c "import importlib.util as u, sys; s = u.spec_from_file_location(\'c\', sys.argv[1]); m = u.module_from_spec(s); sys.modules[\'c\'] = m; s.loader.exec_module(m); print(m.load_contract().pre_pr_slot_context)" src/omnibase_infra/validation/checker_first_party_sources.py)" --build-arg EXPECTED_BUILD_SOURCE=workspace --build-arg OMNI_HOME="$R" --build-arg PROMOTION_CLASS=stability-candidate --build-arg NON_MAIN_LINEAGE=true --build-arg GIT_SHA="$(git rev-parse HEAD)" --build-arg VCS_REF="$(git rev-parse HEAD)" --build-arg RUNTIME_VERSION="$RV" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.log" 2>&1',
     ): (
         "pre-PR slot proof: the slot's own generated local.env, run by a lane, not by the deploy agent"
     ),
