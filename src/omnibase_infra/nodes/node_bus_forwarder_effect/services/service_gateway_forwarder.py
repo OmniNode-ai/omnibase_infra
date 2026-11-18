@@ -10,7 +10,6 @@ must never be required from ordinary runtime producers or consumers.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
@@ -63,52 +62,6 @@ _EVENT_TYPE_HEADER = "event_type"
 _TIMESTAMP_HEADER = "timestamp"
 _IDEMPOTENCY_KEY_HEADER = "idempotency_key"
 _EVENT_ID_TAG = "event_id"
-
-
-def content_addressed_event_id(
-    envelope: ModelEventEnvelope[dict[str, object]],
-    canonical_topic: str,
-) -> str:
-    """Return the stable content identity carried across the HTTPS boundary.
-
-    ``envelope_id`` is a UUID identifying one producer envelope and remains
-    the edge-local delivery marker. ``event_id`` is the SHA-256 of the event
-    canonical topic and redacted payload, so metadata added by a transport hop cannot
-    alter it. The redaction seam runs before this forwarder; hashing that
-    emitted payload preserves its identity through forwarding without ever
-    retaining an unredacted form at the cloud boundary.
-    """
-    canonical_payload = json.dumps(
-        envelope.payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return hashlib.sha256(
-        f"{canonical_topic}\n{canonical_payload}".encode()
-    ).hexdigest()
-
-
-def envelope_with_event_id(
-    envelope: ModelEventEnvelope[dict[str, object]],
-    canonical_topic: str,
-) -> ModelEventEnvelope[dict[str, object]]:
-    """Stamp an absent event identity without rewriting an existing one."""
-    existing = envelope.metadata.tags.get(_EVENT_ID_TAG)
-    expected = content_addressed_event_id(envelope, canonical_topic)
-    if existing is not None and existing != expected:
-        raise GatewayRecordRefusedError(
-            "outbound event_id does not match event content"
-        )
-    if existing == expected:
-        return envelope
-    return envelope.model_copy(
-        update={
-            "metadata": envelope.metadata.model_copy(
-                update={"tags": {**envelope.metadata.tags, _EVENT_ID_TAG: expected}}
-            )
-        }
-    )
 
 
 def _header_text(headers: object, name: str) -> str | None:
@@ -245,6 +198,24 @@ def synthesize_outbound_envelope(
     source_partition = getattr(message, "partition", None)
     source_offset = getattr(message, "offset", None)
     content_event_id = _content_event_id_from_headers(headers)
+    if content_event_id is not None and isinstance(headers, Mapping):
+        # A producer assertion identifies the bytes received on the local bus.
+        # The outbound HTTPS adapter identifies the transformed record separately.
+        from omnibase_core.models.contracts.model_ingest_contract import (
+            compute_event_id,
+        )
+
+        wire_headers = {
+            name: header
+            for name, header in headers.items()
+            if isinstance(name, str) and isinstance(header, bytes)
+        }
+        if not isinstance(source_topic, str) or content_event_id != compute_event_id(
+            source_topic, getattr(message, "key", None), value, wire_headers
+        ):
+            raise GatewayRecordRefusedError(
+                "outbound event_id does not match event content"
+            )
     metadata = ModelEnvelopeMetadata(
         tags={
             # The marker exists so a downstream reader can tell a synthesised
@@ -275,9 +246,8 @@ def synthesize_outbound_envelope(
 def _header_timestamp(headers: object) -> datetime:
     """The producer's own emit time when the wire carries a readable one.
 
-    Falls back to now: the timestamp is provenance, not identity, so an
-    unparseable one must not cost the record its crossing the way a missing
-    ``message_id`` does.
+    Use the epoch when the emit time is unavailable so a redelivery of the
+    same flat record keeps the same serialized value.
     """
     text = _header_text(headers, _TIMESTAMP_HEADER)
     if text is not None:
@@ -285,7 +255,7 @@ def _header_timestamp(headers: object) -> datetime:
             return datetime.fromisoformat(text)
         except ValueError:
             pass
-    return datetime.now(UTC)
+    return datetime.fromtimestamp(0, UTC)
 
 
 def _stamp_local_only(
@@ -519,9 +489,7 @@ class ServiceGatewayForwarder:
         envelope = egress_scrubbed(
             self._config.egress_metadata_scrub, envelope, source_topic
         )
-        transformed, wire_topic = self._prepare_outbound(
-            envelope_with_event_id(envelope, source_topic), source_topic
-        )
+        transformed, wire_topic = self._prepare_outbound(envelope, source_topic)
         await self._publish_with_delivery_retry(
             bus=self._cloud_bus,
             topic=wire_topic,
@@ -558,9 +526,7 @@ class ServiceGatewayForwarder:
             envelope = egress_scrubbed(
                 self._config.egress_metadata_scrub, envelope, source_topic
             )
-            transformed, wire_topic = self._prepare_outbound(
-                envelope_with_event_id(envelope, source_topic), source_topic
-            )
+            transformed, wire_topic = self._prepare_outbound(envelope, source_topic)
             records.append(
                 (
                     wire_topic,
@@ -578,9 +544,7 @@ class ServiceGatewayForwarder:
         envelope = self.decode_outbound_message(message)
         direction = envelope.metadata.tags.get("gateway_direction")
         if direction not in _LOCAL_ONLY_DIRECTIONS:
-            self._prepare_outbound(
-                envelope_with_event_id(envelope, source_topic), source_topic
-            )
+            self._prepare_outbound(envelope, source_topic)
 
     async def _consume_inbound_message(self, message: object) -> None:
         wire_topic = self._message_topic(message)
