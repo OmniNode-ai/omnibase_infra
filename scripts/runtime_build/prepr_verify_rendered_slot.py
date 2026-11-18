@@ -77,10 +77,9 @@ from prepr_slot_policy import (
     resolve_slot,
 )
 
-#: The eleven services a slot always runs, plus the gateway it runs only under
-#: ``--with-gateway``. Their compose keys, which are the dev lane's own service
-#: names -- the slot renames the CONTAINERS, never the services, because the
-#: services are inherited.
+#: The eleven services a slot always runs. Their compose keys, which are the
+#: dev lane's own service names -- the slot renames the CONTAINERS, never the
+#: services, because the services are inherited.
 SLOT_SERVICES: tuple[str, ...] = (
     "omninode-runtime",
     "runtime-effects",
@@ -94,7 +93,6 @@ SLOT_SERVICES: tuple[str, ...] = (
     "projection-tenant-credentials-writer",
     "projection-live-events-writer",
 )
-GATEWAY_SERVICE = "onex-api"
 
 #: Services the slot's profile carries only so compose can resolve a ``service:``
 #: build context (OMN-21279). Each is ``scale: 0``, so ``up`` never creates a
@@ -155,13 +153,11 @@ def carries_slot_marker(container: str, policy: SlotPolicy) -> bool:
     return container.endswith(marker) or f"{marker}-" in container
 
 
-def check(
-    rendered: dict[str, Any], policy: SlotPolicy, expect_gateway: bool
-) -> list[str]:
+def check(rendered: dict[str, Any], policy: SlotPolicy) -> list[str]:
     """Return every mismatch. An empty list is the only passing result."""
     problems: list[str] = []
     services = rendered.get("services") or {}
-    expected = set(SLOT_SERVICES) | ({GATEWAY_SERVICE} if expect_gateway else set())
+    expected = set(SLOT_SERVICES)
 
     missing = sorted(expected - set(services))
     if missing:
@@ -355,11 +351,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--slot", required=True, type=int)
-    parser.add_argument(
-        "--expect-gateway",
-        action="store_true",
-        help="the render should also carry the slot's onex-api container.",
-    )
     return parser
 
 
@@ -389,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return int(EXIT_PROVENANCE_MISMATCH)
 
-    problems = check(rendered, policy, args.expect_gateway)
+    problems = check(rendered, policy)
     if problems:
         sys.stderr.write(
             f"[prepr-verify-rendered] {len(problems)} mismatch(es) between the "

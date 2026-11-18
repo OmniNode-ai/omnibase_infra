@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Tests that install-node-skill-package.sh reads its pins from the ref (OMN-18675).
 
-Before this change the script carried two shell literals —
-``omnibase-compat==0.5.5`` and ``omninode-memory==0.15.0``, written 2026-07-02
+Before this change the script carried shell-literal pins —
+the shell literal ``omninode-memory==0.15.0``, written 2026-07-02
 and never revisited — and installed them with ``--no-deps`` and an exact ``==``.
 That is an instruction, not a floor, so a repair run in September 2026 forced a
 healthy shared plugin CLI venv back to July versions and broke ``onex``
@@ -43,7 +43,6 @@ name = "omnimarket"
 version = "0.4.118"
 dependencies = [
     "omnibase-core>=0.47.14,<0.48.0",
-    "omnibase-compat==0.5.7",
     "omninode-memory==0.18.0",
     "anthropic>=0.25.0",
 ]
@@ -57,8 +56,8 @@ Resolved 3 packages in 120ms
 
 _DOWNGRADE_PLAN = """\
 Resolved 3 packages in 120ms
- - omnibase-compat==0.5.7
- + omnibase-compat==0.5.5
+ - omninode-memory==0.18.0
+ + omninode-memory==0.15.0
 """
 
 
@@ -139,10 +138,8 @@ def test_pins_are_read_from_the_ref_not_from_shell_literals(tmp_path: Path) -> N
     assert result.returncode == 0, result.stdout + result.stderr
 
     invocations = argv_log.read_text(encoding="utf-8")
-    assert "omnibase-compat==0.5.7" in invocations
     assert "omninode-memory==0.18.0" in invocations
     # The stale literals must be gone from the invocation AND from the source.
-    assert "omnibase-compat==0.5.5" not in invocations
     assert "omninode-memory==0.15.0" not in invocations
 
 
@@ -161,7 +158,7 @@ def test_a_repair_that_would_downgrade_a_sibling_is_refused(tmp_path: Path) -> N
     result = _run_script("--execute", omni_home=omni_home, ref=sha, bin_dir=bin_dir)
     assert result.returncode == _EXIT_REFUSED, result.stdout + result.stderr
     assert "REFUSED" in result.stderr
-    assert "omnibase-compat" in result.stderr
+    assert "omninode-memory" in result.stderr
 
     # Refused BEFORE mutating: uv was only ever asked for a plan.
     invocations = argv_log.read_text(encoding="utf-8").splitlines()
