@@ -4311,7 +4311,7 @@ jobs:
           set -u
           placement() {
             uv run --no-project --with "$RUNNER_PLACEMENT_CORE" \
-              python -m omnibase_core.validation.validator_public_runner_placement --repo omnibase_infra "$@"
+              python -m omnibase_core.handlers.handler_public_runner_placement_cli --repo omnibase_infra "$@"
           }
           printf 'on: push\njobs:\n  planted:\n    runs-on: [self-hosted, omnibase-ci]\n    steps:\n      - run: "true"\n' \
             > .github/workflows/zz-canary-planted.yml
@@ -4324,11 +4324,21 @@ jobs:
           git rm -q --cached .github/workflows/zz-canary-planted.yml
           rm .github/workflows/zz-canary-planted.yml
       - name: Refuse new self-hosted jobs in this public repository
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
           args=(--repo omnibase_infra --visibility public)
+          if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            args+=(--base-ref "$(git merge-base "$base" HEAD)")
+          else
+            echo "no base revision on this event; checking the tree against the baseline only"
+          fi
           uv run --no-project --with "$RUNNER_PLACEMENT_CORE" \
-            python -m omnibase_core.validation.validator_public_runner_placement "${args[@]}"
+            python -m omnibase_core.handlers.handler_public_runner_placement_cli "${args[@]}"
       # OMN-19998: the same refusal as the check-public-lab-selection hook, at that
       # hook's rev. The job is registered in the CI Summary sweep, so this is required.
       - name: Read the core pin of the lab selection hook

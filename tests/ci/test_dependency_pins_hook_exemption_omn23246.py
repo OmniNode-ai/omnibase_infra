@@ -21,6 +21,7 @@ import yaml
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
+HELD_BACK_REV_PREFIX = "1c9566e2c249"
 EXEMPTION_TAG = "dev-20261109032923-9f0af2b9bd43"
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 
@@ -49,7 +50,7 @@ def test_dependency_pins_job_still_calls_the_core_workflow_unconditionally() -> 
     assert "needs" not in job
 
 
-def test_runner_placement_hook_is_on_a_dev_merge_tag_and_alone() -> None:
+def test_held_back_hook_rev_is_the_ruled_one_and_alone() -> None:
     config = yaml.safe_load(
         (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     )
@@ -60,5 +61,6 @@ def test_runner_placement_hook_is_on_a_dev_merge_tag_and_alone() -> None:
     ]
     assert len(held) == 1
     rev, hooks = held[0]
-    assert re.fullmatch(r"dev-\d{14}-[0-9a-f]{12}", rev)
+    assert rev.startswith(HELD_BACK_REV_PREFIX)
+    assert FULL_SHA.fullmatch(rev)
     assert hooks == ["check-public-runner-placement"]
