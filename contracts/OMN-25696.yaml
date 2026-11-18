@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25696
+title: Unblock omnibase_infra PR 6026
+summary: Replay the remaining pool prover change on dev and record lab and check results.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25696-rebase
+    statement: Replay the proof log and alarm change on dev with the existing CI gates intact.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: omnibase_infra PR 6026 no longer conflicts with its base and its required contexts read success at its new head, with the new head named in a PR comment that starts `Lab: head=<full head sha>` -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6026` shows a merge state of DIRTY or a required context not success at the head, or shows no Lab comment naming that head
+      - id: AC2
+        statement: >-
+          AC2: when the cause lies outside the PR, a STATUS row reads cause=<one line> shared=yes with the evidence and the lane pushes nothing that widens or skips a check -- falsifier: `grep -F 'omnibase_infra#6026' "$ONEX_LEDGER_PATH" | grep -F 'shared=yes'` finds no STATUS row from the lane while the PR head is unchanged and still conflicting or red
+evidence_requirements:
+  - kind: tests
+    description: The lab exercises proof log retention and the two-proof alarm on the rebased tree.
+    command: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_proof_logs_omn19998.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25696-rebase
+    description: The candidate contains the refreshed dev tip and the proof log tests pass. The required checks and the head-bound lab comment are verified on the PR after the push.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: git merge-base --is-ancestor 847cb5b9b381a04bc587a2c7ae004fedac01cb3f HEAD
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_proof_logs_omn19998.py -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25696-guard-unchanged
+    description: The replay keeps the failing guard identical to dev. If the cause is shared, the ledger STATUS row and the unchanged PR head are the operational evidence for AC2.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: git diff --exit-code 847cb5b9b381a04bc587a2c7ae004fedac01cb3f HEAD -- .github/workflows/non-dev-base-guard.yml
+        cwd: .
