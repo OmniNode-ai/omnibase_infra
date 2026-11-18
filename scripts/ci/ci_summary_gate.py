@@ -770,33 +770,6 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # Admitted under POST_FIXTURE_WINDOW_CONTEXTS, which carries the admission
     # argument, and placed at the tail for the reason the entry above states.
     "pypi-pin-resolvability",
-    # OMN-19451 / OMN-19998: the delegation-health check. It fails a runtime
-    # change while a delegation verdict it reads (config/
-    # delegation_health_check.yaml) is red, stale or unreadable. It ran as a
-    # "(shadow)" job and then under a sweep exclusion (#4312), which is the
-    # observe-only mode the 2026-09-29T12:02:35Z operator ruling removed: every
-    # check acts or blocks. Registered here for the OMN-16878 reason the
-    # kb-doc-gate note above gives -- `dev` requires exactly ONE context, so
-    # this tuple IS the external enforcement surface on this repo.
-    #
-    # ADMISSION IS BY CONSTRUCTION, on the argument recorded for
-    # `exposure-reader-coverage`:
-    #   * The caller (.github/workflows/delegation-health-check.yml) declares
-    #     `pull_request` AND `merge_group`, and its one job carries no `needs:`,
-    #     no job-level `if:` and no path filter, so it cannot skip-as-passed and
-    #     cannot leave a queue head waiting. The reusable derives the changed
-    #     files and labels for both events itself and fails on an unresolved
-    #     input.
-    #   * It is proven able to FAIL on real input: on 2026-09-29 it failed
-    #     omnibase_infra#4303, #4265 and #3991 naming omninode_infra
-    #     m4-customer-pass-verdict runs 36615744209 and 36572408773.
-    #   * It is proven able to PASS: the same reader passed the
-    #     delegation-regression-nightly (run 36538536307) and
-    #     m4-c17-customer-surface-verdict (run 36576684190) sources in those
-    #     same runs.
-    # Admitted under POST_FIXTURE_WINDOW_CONTEXTS and placed at the tail for
-    # the reason the `Governed helper primitive gate` entry states.
-    "delegation-health-check / Delegation Health Check",
     # OMN-20295: direct-model-call.yml reports on every pull request to main or
     # dev; registered so a red run blocks a merge. Admitted under
     # POST_FIXTURE_WINDOW_CONTEXTS and placed at the tail for the same reason.
@@ -808,15 +781,12 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # OMN-18648: unconditional new admission workflow. Body edits re-evaluate
     # this context without re-running the full CI matrix.
     "CI Live Contact (OMN-18648)",
-    # OMN-20074: require the repo-owned verdict, so ABSENCE cannot silently
-    # pass dev's sole required context, CI Summary. The operator ruling at
-    # 2026-10-08T22:41:24Z admits call-repo-evidence-gate.yml's
-    # pull_request_target producer: GitHub reads the base-branch definition,
-    # and the reusable reports this verdict on the PR head. Caller-mode
-    # "repo-evidence / verify" is a success no-op and is NOT registered.
+    # OMN-20074: require the repo-owned verdict on the PR head, since an absent
+    # verdict must block CI Summary. call-repo-evidence-gate.yml runs on
+    # pull_request. Caller-mode "repo-evidence / verify" is a success no-op.
     # Admission evidence: merged dev heads #4767
     # 28b945ef0e9cbf033f189e41a1dfbdb184c63ad9, run 37928489908
-    # (pull_request_target), check 113813114010 success (app id 15368);
+    # (legacy pull_request_target), check 113813114010 success (app id 15368);
     # #4765 44e1c42234c271f5c38405485ec3083cdcae7fbb, check 113802506448
     # success; #4758 adf88b2586003e68978d10ad798beb6e00d3b650, check
     # 113731199381 success. These postdate both historical fixture windows.
@@ -895,9 +865,6 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         # OMN-18648: the producer first exists in this PR. This is historical
         # recording metadata only; live missing/red admission always blocks.
         "CI Live Contact (OMN-18648)",
-        # OMN-19451: registered 2026-09-29, after both fixture windows closed.
-        # Comes out at the next fixture re-capture.
-        "delegation-health-check / Delegation Health Check",
         # OMN-20295: the workflow lands in this same PR, so no merged PR in
         # either fixture window could have produced this check-run.
         "Direct Model Call Gate",

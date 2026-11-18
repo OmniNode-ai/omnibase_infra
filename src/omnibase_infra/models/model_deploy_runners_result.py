@@ -11,3 +11,6 @@ class ModelDeployRunnersResult(BaseModel):
     success: bool
     prepared: tuple[str, ...] = ()
     error_message: str | None = None
+    # OMN-24299: the action-archive cache fill and sync never fail the deploy (an
+    # absent archive only means a download from GitHub); each problem is named here.
+    warnings: tuple[str, ...] = ()

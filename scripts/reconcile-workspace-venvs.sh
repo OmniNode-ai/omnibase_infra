@@ -828,43 +828,14 @@ release_staging_lock() {
   STAGING_LOCK=""
 }
 
-staging_lock_field() {
-  # $1 = holder record, $2 = key. Records are `pid=N;host=H;at=T`.
-  local part
-  local -a parts
-  IFS=';' read -r -a parts < <(printf '%s\n' "$1")
-  for part in "${parts[@]}"; do
-    [[ "$part" == "$2="* ]] && { printf '%s' "${part#"$2="}"; return 0; }
-  done
-  return 0
-}
-
+# The holder record, the live-or-dead judgement and the decline are the node's
+# (node_venv_atomic_install, OMN-16932): it exits 4 when a live peer holds the lock,
+# which this run reports as a skip and not a failure.
 acquire_staging_lock() {
-  local path="$1.lock" record holder holder_host attempt
-  record="pid=$$;host=$(hostname);at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  for attempt in 1 2; do
-    if ln -s "$record" "$path" 2>/dev/null; then
-      STAGING_LOCK="$path"
-      trap release_staging_lock EXIT
-      return 0
-    fi
-    local seen
-    seen="$(readlink "$path" 2>/dev/null || true)"
-    holder="$(staging_lock_field "$seen" pid)"
-    holder_host="$(staging_lock_field "$seen" host)"
-    if [[ -n "$holder" ]] \
-       && { [[ "$holder_host" != "$(hostname)" ]] || kill -0 "$holder" 2>/dev/null; }; then
-      fail "another run of this script (pid $holder on ${holder_host:-unknown host}, since $(staging_lock_field "$seen" at)) is staging $1;" \
-        "two runs on one staging directory delete each other's venv." \
-        "Wait for it to finish, or stop it if it is orphaned:" \
-        "  ps -p $holder -o pid,etime,command"
-    fi
-    # A dead or unreadable holder. Remove it only if it is still the record just
-    # read, so a run that reclaimed it first is not displaced.
-    [[ "$(readlink "$path" 2>/dev/null || true)" == "$seen" ]] && rm -f "$path"
-  done
-  fail "could not take the staging lock $path" \
-    "Remove it if no run of this script is live, then retry."
+  local path="$1.lock"
+  python3 "$_ATOMIC_TOOL" staging-lock-acquire --path "$path" --pid "$$" || exit $?
+  STAGING_LOCK="$path"
+  trap release_staging_lock EXIT
 }
 
 INSTALL_SCRIPT="${ONEX_RECONCILE_INSTALL_SCRIPT:-$INFRA_DIR/scripts/install-node-skill-package.sh}"
@@ -2149,6 +2120,15 @@ run_repair() {
     fi
     say "dispatch venv: swapping the proven rebuild into $DISPATCH_VENV"
     swap_dispatch_venv "$staging" "$DISPATCH_VENV"
+  fi
+
+  # OMN-16932: the floor follows the venv under the same staging lock, after a staged
+  # swap, an in-place exchange or a pass with nothing to do (an earlier run's lag heals).
+  if [[ "$MODE" == "repair" && "$PROVEN" -eq 0 ]]; then
+    local changed_flag=""
+    [[ "$rebuild" -eq 1 || "$need_lock" -eq 1 || "$need_provider" -eq 1 ]] && changed_flag="--changed"
+    as_owner python3 "$_ATOMIC_TOOL" promote-floor --venv "$DISPATCH_VENV" --uv-lock "$INFRA_DIR/uv.lock" \
+      --workspace-root "$OMNI_HOME" --floor "$OMNI_HOME/.onex-workspace-floor.json" $changed_flag || exit $?
   fi
 
   # ---- surface 2: the GATE venv, lock-governed ONLY (OMN-17819) ------------ #

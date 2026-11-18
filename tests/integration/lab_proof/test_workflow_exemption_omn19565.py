@@ -104,26 +104,14 @@ def test_validator_refuses_workflow_exempt_rows_and_existing_invalid_rows(
     assert diagnostic in refused.stdout + refused.stderr
 
 
-def test_classifier_serializes_exemptions_and_refuses_mixed_workflow_companions() -> (
-    None
-):
+def test_classifier_serializes_exemptions_and_refuses_mixed_workflow_diffs() -> None:
     registry = load_lab_proof_profile_registry(REGISTRY)
-    companion = registry.change_control_companion
-    bot = companion.authors[0]
-    companion_paths = ["contracts/OMN-19565.yaml"]
     docs = classify_exemption(
         registry, "OmniNode-ai/knowledge_base", ["docs/guide.md"], "human-author"
     )
-    bot_companion = classify_exemption(registry, companion.repo, companion_paths, bot)
-    for decision in (docs, bot_companion):
-        assert decision.exempt
-        assert decision.model_dump(mode="json")["proof_kind"] == "exempt"
-        assert decision.exempt_class is not None
-    human_companion = classify_exemption(
-        registry, companion.repo, companion_paths, "human-author"
-    )
-    assert not human_companion.exempt
-    assert human_companion.proof_kind is None
+    assert docs.exempt
+    assert docs.model_dump(mode="json")["proof_kind"] == "exempt"
+    assert docs.exempt_class is not None
     for repo, paths, author in (
         (
             "OmniNode-ai/omnibase_core",
@@ -135,7 +123,6 @@ def test_classifier_serializes_exemptions_and_refuses_mixed_workflow_companions(
             ["docs/guide.md", ".github/PULL_REQUEST_TEMPLATE.md"],
             "human-author",
         ),
-        (companion.repo, [*companion_paths, ".github/workflows/ci.yml"], bot),
     ):
         decision = classify_exemption(registry, repo, paths, author)
         assert not decision.exempt

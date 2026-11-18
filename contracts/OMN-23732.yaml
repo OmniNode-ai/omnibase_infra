@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-23732
+title: "TLA+ model of the hourly check's send decisions and dedupe, with a design-review verdict"
+summary: >-
+  Adds formal/hourly_send, a TLA+ model of the hourly check's send decisions and the dedupe over the shared sent record, with a design configuration, a literal no-key-sent-twice configuration, one mutant configuration per design point (one of them the code today), two witness configurations, committed TLC output bound to the spec and cfg digest, a design-review verdict in results/ and a mapping of the model's keys to the keys the throughput tick writes. No send step is built here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23732-transcribed-acceptance-criteria
+    statement: The acceptance criteria this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the model checker passes the invariant that no send key is sent twice -- falsifier: TLC over the model''s config prints no violated invariant'
+      - id: AC2
+        statement: 'AC2: a planted second send for one key makes the checker report a violated invariant, and a design-review verdict is cited -- falsifier: the planted-mutant TLC run naming the invariant, and the verdict''s ledger row or review link'
+      - id: AC3
+        statement: 'AC3: integrated: done only when running and observed in the runtime: the model''s send keys map to the keys the running throughput tick writes today (lab-fill.sent.json and its lane-send records), the mapping read from one live tick -- falsifier: one live tick''s send records with the mapping table in the ticket'
+evidence_requirements:
+  - kind: tests
+    description: The TLC output of the design, the literal form, every mutant and every witness configuration matches the current spec and cfg digest, and results/ holds a verdict.
+    command: uv run pytest tests/formal/test_hourly_send_model.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23732-ac1-model-passes
+    description: formal/hourly_send/results/Model.out and once.out, bound to results/model.sha256, report no error with 0 states left on queue.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/formal/test_hourly_send_model.py -q -k "digest or passing"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn23732-ac2-mutants-and-verdict
+    description: Every mut_*.out reports NoKeyDoubleSend violated (mut_as_built is the code today, mut_record_after_send the planted second send after a crash), and results/design_review_verdict.txt is headed "# Design-review verdict" and names OMN-23732.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/formal/test_hourly_send_model.py -q -k "mutant or verdict"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn23732-ac3-key-mapping
+    description: formal/hourly_send/README.txt maps the model's keys to the keys of lab-fill.sent.json and the tick's lane-send STATUS rows and quotes one live tick row, the STATUS row of 2026-11-14T05:24:00Z for key ticket:OMN-23732. The sent record file itself is read on the orchestrator host and is not read by this change.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: grep -q 'ticket:OMN-23732' formal/hourly_send/README.txt
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

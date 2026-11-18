@@ -19,8 +19,7 @@ class ModelRunnerFleetHost(BaseModel):
 
     The fleet was single-host by construction until this model existed: the
     config carried scalar ``runner_host`` / ``runner_name_prefix`` /
-    ``expected_count`` fields, so a second host was not unconfigured, it was
-    unrepresentable.
+    ``expected_count`` fields, so a second host was unrepresentable.
 
     Three of these fields exist because a second host needs something a scalar
     cannot express:
@@ -93,6 +92,7 @@ class ModelRunnerFleetHost(BaseModel):
             "class of runner, which is every host row written before this field."
         ),
     )
+    action_archive_host_root: str | None = Field(default=None, pattern=r"^/")
 
     def all_prefixes(self) -> tuple[str, ...]:
         """This host's own prefix followed by each pool's."""

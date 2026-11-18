@@ -396,7 +396,9 @@ _floor_verdict() {
 }
 
 # The lock a running peer reconcile holds, or nothing.
-_peer_reconcile_lock() { local d; for d in "${RECONCILE_LOCK_DIRS[@]}"; do [[ -d "$d" ]] && { printf '%s' "$d"; return; }; done; }
+# The dispatch-venv staging lock (OMN-16932) is a symlink beside the venv naming its holder; the
+# node (node_venv_atomic_install) judges it live or dead, read-only, so a corpse is not waited on.
+_peer_reconcile_lock() { local d s="$DISPATCH_VENV.rebuilding.lock"; for d in "${RECONCILE_LOCK_DIRS[@]}"; do [[ -d "$d" ]] && { printf '%s' "$d"; return; }; done; python3 "$INFRA_DIR/src/omnibase_infra/nodes/node_venv_atomic_install/runtime_venv_atomic_install.py" staging-lock-held --path "$s" 2>/dev/null && printf '%s' "$s"; return 0; }
 
 # A peer reconcile holds the host lock (OMN-20111). Several hook ticks and
 # several lanes' wrappers fire at once, so this is the ordinary case, and the

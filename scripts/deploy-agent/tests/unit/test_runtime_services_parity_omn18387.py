@@ -13,7 +13,7 @@ this ticket found was that shared source itself never carried
 ``projection-api``, while the bash array always has.
 
 Measured 2026-09-15: a re-publish through
-``scripts/deploy-agent/deploy-agent-trigger.sh`` (correlation ``79427973``)
+the hand-run trigger script, since retired (correlation ``79427973``)
 ran the runtime phase to SUCCESS and built a fresh ``projection-api`` image
 (distinct sha ``647f0663418d`` from the running container's), but the
 container was never recreated -- silent because nothing in the up-target or

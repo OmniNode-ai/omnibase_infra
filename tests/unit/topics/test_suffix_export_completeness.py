@@ -4,6 +4,9 @@
 """CI guard: every SUFFIX_* constant in platform_topic_suffixes.py must be
 exported from topics/__init__.py.
 
+The package resolves its exports on first read (OMN-23562), so "exported" means
+listed in ``__all__`` and readable from the package with the module's own value.
+
 This is the third time a SUFFIX_* was defined but not re-exported, causing
 ImportError at runtime in downstream repos. This test prevents recurrence.
 
@@ -34,22 +37,6 @@ def _extract_suffix_names(path: Path) -> set[str]:
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             if node.target.id.startswith("SUFFIX_"):
                 names.add(node.target.id)
-    return names
-
-
-def _extract_init_imports(path: Path) -> set[str]:
-    """Return all names imported from platform_topic_suffixes in __init__.py."""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.ImportFrom)
-            and node.module
-            and "platform_topic_suffixes" in node.module
-        ):
-            for alias in node.names:
-                if alias.name.startswith("SUFFIX_"):
-                    names.add(alias.name)
     return names
 
 
@@ -86,27 +73,31 @@ def _extract_init_all(path: Path) -> set[str]:
 class TestSuffixExportCompleteness:
     """Verify that all SUFFIX_* constants are fully exported."""
 
-    def test_all_suffixes_imported_in_init(self) -> None:
-        """Every SUFFIX_* in platform_topic_suffixes.py must be imported in __init__.py."""
+    def test_all_suffixes_listed_in_all(self) -> None:
+        """Every SUFFIX_* in platform_topic_suffixes.py must be listed in __all__."""
         defined = _extract_suffix_names(_SUFFIXES_MODULE)
-        imported = _extract_init_imports(_INIT_MODULE)
-        missing = defined - imported
+        in_all = _extract_init_all(_INIT_MODULE)
+        missing = defined - in_all
         assert not missing, (
-            f"SUFFIX_* constants defined in platform_topic_suffixes.py but NOT imported "
-            f"in topics/__init__.py ({len(missing)} missing):\n"
+            f"SUFFIX_* constants defined in platform_topic_suffixes.py but NOT listed "
+            f"in topics/__init__.py __all__ ({len(missing)} missing):\n"
             + "\n".join(f"  - {n}" for n in sorted(missing))
         )
 
-    def test_all_suffixes_in_all_list(self) -> None:
-        """Every SUFFIX_* imported in __init__.py must appear in __all__."""
-        imported = _extract_init_imports(_INIT_MODULE)
-        in_all = _extract_init_all(_INIT_MODULE)
-        missing = imported - in_all
-        assert not missing, (
-            f"SUFFIX_* constants imported in topics/__init__.py but NOT listed "
-            f"in __all__ ({len(missing)} missing):\n"
-            + "\n".join(f"  - {n}" for n in sorted(missing))
+    def test_all_suffixes_resolve_from_package(self) -> None:
+        """Every SUFFIX_* in __all__ must read from the package as the module's value."""
+        import importlib
+
+        package = importlib.import_module("omnibase_infra.topics")
+        suffixes = importlib.import_module(
+            "omnibase_infra.topics.platform_topic_suffixes"
         )
+        unresolved = [
+            n
+            for n in sorted(_extract_init_all(_INIT_MODULE))
+            if getattr(package, n, None) is not getattr(suffixes, n)
+        ]
+        assert not unresolved, f"SUFFIX_* not readable from topics: {unresolved}"
 
     def test_no_stale_suffix_in_all(self) -> None:
         """No SUFFIX_* in __all__ that doesn't exist in platform_topic_suffixes.py."""

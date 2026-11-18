@@ -273,30 +273,33 @@ class EnumLabEvidence(StrEnum):
     #: The repo has no lab lane of its own. A declaration, with its reason, not
     #: a way around the bar -- the reason is printed on every decision it makes.
     NONE = "none"
+    #: The premise is ``classify_ci_green`` alone (OMN-25646, decision 2 of the
+    #: 2026-11-18T16:26:04Z ruling). The receipt is read and printed, never gated on.
+    DEV_REQUIRED_GREEN = "dev-required-green"
+
+
+@functools.cache
+def lab_evidence_row(evidence: EnumLabEvidence) -> dict[str, Any]:
+    """The shipped policy's ``lab_evidence_modes`` row for ``evidence``; a table that drifts from the enum refuses."""
+    raw = yaml.safe_load(DEFAULT_POLICY_PATH.read_text(encoding="utf-8"))
+    modes = raw.get("lab_evidence_modes") or {}
+    if drift := set(modes) ^ {e.name for e in EnumLabEvidence}:
+        msg = f"lab_evidence_modes needs one row per EnumLabEvidence value; differs by {sorted(drift)}"
+        raise ReleaseTrainConfigError(msg)
+    return dict(modes[evidence.name])
 
 
 def lab_evidence_lanes(evidence: EnumLabEvidence, repo: str) -> tuple[Any, ...]:
-    """The receipt lanes, in reading order, whose PASS satisfies ``evidence``.
-
-    ``compose-dev`` first, then each instance lane that proves ``repo`` in
-    routing-table order. A table lane the receipt enum does not know is a
-    configuration error, never a lane silently dropped.
-    """
-    lanes = lab_pass_receipt.EnumLabLane
-    if evidence is EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE:
-        declared = instance_receipt_lanes.receipt_lanes_for(repo)
-        try:
-            instance = tuple(lanes(lane) for lane in declared)
-        except ValueError as exc:
-            msg = (
-                f"config/deploy_lane_routing.yaml names a receipt lane that "
-                f"lab_pass_receipt.EnumLabLane does not declare: {exc}"
-            )
-            raise ReleaseTrainConfigError(msg) from exc
-        return (lanes.COMPOSE_DEV, *instance)
-    if evidence is EnumLabEvidence.COMPOSE_DEV:
-        return (lanes.COMPOSE_DEV,)
-    return ()
+    """The receipt lanes ``evidence``'s row reads: the dev lane, then ``repo``'s instance lanes."""
+    row, lanes = lab_evidence_row(evidence), lab_pass_receipt.EnumLabLane
+    declared = (
+        row["read_instance_lanes"] and instance_receipt_lanes.receipt_lanes_for(repo)
+    ) or ()
+    try:
+        return (*(lanes.COMPOSE_DEV,) * row["read_compose_dev"], *map(lanes, declared))
+    except ValueError as exc:
+        msg = f"config/deploy_lane_routing.yaml names a receipt lane the receipt enum does not declare: {exc}"
+        raise ReleaseTrainConfigError(msg) from exc
 
 
 class EnumTrainMode(StrEnum):
@@ -349,6 +352,7 @@ class EnumTrainReason(StrEnum):
 
     UNRELEASED_WORK_LAB_PROVEN = "unreleased_work_lab_proven"
     UNRELEASED_WORK_NO_LAB_SURFACE_DECLARED = "unreleased_work_no_lab_surface_declared"
+    UNRELEASED_WORK_DEV_REQUIRED_GREEN = "unreleased_work_dev_required_green"
     NO_UNRELEASED_RELEASE_RELEVANT_WORK = "no_unreleased_release_relevant_work"
     MODE_REPORT_ONLY = "mode_report_only"
     LAB_RECEIPT_ABSENT = "lab_receipt_absent"
@@ -445,6 +449,10 @@ class ModelRepoFacts:
     dev_head_sha: str
     unreleased_count: int
     unreleased_subjects: tuple[str, ...]
+    # True when the manifest declares ``dynamic = ["version"]`` and carries no
+    # version line (OMN-23841): the version is the newest release tag, and the
+    # cut writes no version line.
+    version_from_git: bool = False
 
 
 @dataclass(frozen=True)
@@ -618,26 +626,19 @@ def _parse_entry(
         else str(entry.get("dependency_refresh_note", "") or "").strip()
     )
 
-    if (
-        lab_evidence is EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE
-        and not instance_receipt_lanes.receipt_lanes_for(repo)
-    ):
-        msg = (
-            f"{path}: repo {repo} declares lab_evidence "
-            f"'{EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE.value}', but no instance in "
-            "config/deploy_lane_routing.yaml proves it. The instance lanes prove "
-            "omnimarket changes only (operator rulings 2026-09-25T00:56:45Z and "
-            "2026-09-25T10:22:22Z); omnibase_infra stays proven on .201."
-        )
-        raise ReleaseTrainConfigError(msg)
-
+    row = lab_evidence_row(lab_evidence)
     lab_note = str(entry.get("lab_evidence_note", "") or "").strip()
-    if lab_evidence is EnumLabEvidence.NONE and not lab_note:
-        msg = (
-            f"{path}: repo {repo} declares lab_evidence 'none' with no "
-            "'lab_evidence_note'. The declaration IS the record of the gap, so "
-            "an empty one records nothing."
-        )
+    refusal = (
+        "no instance in config/deploy_lane_routing.yaml proves it (operator rulings "
+        "2026-09-25T00:56:45Z and 2026-09-25T10:22:22Z: the instance lanes prove omnimarket)"
+        if row["instance_proof_required"]
+        and not instance_receipt_lanes.receipt_lanes_for(repo)
+        else "it has no 'lab_evidence_note', and the declaration IS the record of the gap"
+        if row["note_required"] and not lab_note
+        else ""
+    )
+    if refusal:
+        msg = f"{path}: repo {repo} declares lab_evidence '{lab_evidence.value}', but {refusal}"
         raise ReleaseTrainConfigError(msg)
 
     mode_note = str(entry.get("mode_note", "") or "").strip()
@@ -779,6 +780,8 @@ def _read_pyproject_version(raw: str, repo: str, ref: str) -> str | None:
     except tomllib.TOMLDecodeError as exc:
         msg = f"{repo}: pyproject.toml at {ref} does not parse: {exc}"
         raise ReleaseTrainConfigError(msg) from exc
+    if "version" in parsed.get("project", {}).get("dynamic", []):
+        return None  # OMN-23841: the version comes from git, not this file
     version = parsed.get("project", {}).get("version")
     if not isinstance(version, str) or not version.strip():
         msg = f"{repo}: pyproject.toml at {ref} declares no [project].version"
@@ -799,8 +802,10 @@ def _read_package_json_version(raw: str, repo: str, ref: str) -> str | None:
     return version.strip()
 
 
-def resolve_declared_version(repo: str, clone: Path, ref: str) -> str:
+def resolve_declared_version(repo: str, clone: Path, ref: str) -> str | None:
     """The version this repo declares at ``ref``, from whichever manifest it has.
+
+    None means the manifest declares it dynamic and git is the source (OMN-23841).
 
     Refuses when NEITHER manifest is present: a repo whose version cannot be
     read is a repo whose next release is already broken, and reporting that as
@@ -833,7 +838,6 @@ def resolve_declared_version(repo: str, clone: Path, ref: str) -> str:
         )
         raise ReleaseTrainConfigError(msg)
 
-    assert resolved is not None
     return resolved
 
 
@@ -900,10 +904,11 @@ def collect_repo_facts(policy: ModelRepoReleasePolicy, clone: Path) -> ModelRepo
     return ModelRepoFacts(
         repo=policy.repo,
         latest_tag=latest_tag,
-        dev_version=version.strip(),
+        dev_version=(version or latest_tag).strip(),
         dev_head_sha=head_sha,
         unreleased_count=len(subjects),
         unreleased_subjects=subjects,
+        version_from_git=version is None,
     )
 
 
@@ -1588,29 +1593,21 @@ def decide(
         )
 
     try:
-        dev_tuple = parse_final_version(facts.dev_version, label="[project].version")
+        dev_tuple = parse_final_version(facts.dev_version, label="version")
+        latest_tuple = (
+            parse_final_version(facts.latest_tag, label="latest published tag")
+            if facts.latest_tag
+            else None
+        )
     except ReleaseTrainConfigError as exc:
         return _build(
             EnumTrainVerdict.REFUSE, EnumTrainReason.VERSION_UNREADABLE, str(exc)
         )
 
     dev_normalized = ".".join(str(part) for part in dev_tuple)
-    if facts.latest_tag:
-        try:
-            latest_tuple = parse_final_version(
-                facts.latest_tag, label="latest published tag"
-            )
-        except ReleaseTrainConfigError as exc:
-            return _build(
-                EnumTrainVerdict.REFUSE, EnumTrainReason.VERSION_UNREADABLE, str(exc)
-            )
-        needs_bump = dev_tuple <= latest_tuple
-        candidate_version = (
-            next_patch(facts.latest_tag) if needs_bump else dev_normalized
-        )
-    else:
-        needs_bump = False
-        candidate_version = dev_normalized
+    behind = latest_tuple is not None and dev_tuple <= latest_tuple
+    needs_bump = behind and not facts.version_from_git
+    candidate_version = next_patch(facts.latest_tag) if behind else dev_normalized
 
     if facts.unreleased_count == 0:
         return _build(
@@ -1654,16 +1651,10 @@ def decide(
             needs_bump=needs_bump,
         )
 
-    if policy.lab_evidence is EnumLabEvidence.NONE:
-        return _build(
-            EnumTrainVerdict.CUT,
-            EnumTrainReason.UNRELEASED_WORK_NO_LAB_SURFACE_DECLARED,
-            f"{facts.unreleased_count} unreleased release-relevant commit(s); "
-            f"{ci_detail}; this repo declares no lab-evidence surface: "
-            f"{policy.lab_evidence_note}",
-            candidate_version=candidate_version,
-            needs_bump=needs_bump,
-        )
+    row = lab_evidence_row(policy.lab_evidence)
+    lanes = lab_evidence_lanes(policy.lab_evidence, policy.repo)
+    reason = None
+    detail = f"{ci_detail}; this repo declares no lab-evidence surface: {policy.lab_evidence_note}"
 
     # WHICH sha the receipt is asked for (OMN-18664). The head when the head is
     # runtime-affecting; otherwise the newest runtime-affecting commit below it,
@@ -1672,7 +1663,7 @@ def decide(
     # candidate is the head, which is the pre-OMN-18664 premise and refuses
     # rather than inherits.
     candidate = ModelLabCandidate("", (), "no runtime-change classifier available")
-    if branch_commits is not None and runtime_affecting is not None:
+    if lanes and branch_commits is not None and runtime_affecting is not None:
         candidate = resolve_lab_candidate(
             facts.dev_head_sha,
             branch_commits=branch_commits,
@@ -1680,14 +1671,21 @@ def decide(
         )
     lab_sha = candidate.sha or facts.dev_head_sha
 
-    reason, detail = classify_lab_receipt(
-        policy.repo,
-        lab_sha,
-        list_artifacts=list_artifacts,
-        download_receipt=download_receipt,
-        rebuild_pending=rebuild_pending,
-        lanes=lab_evidence_lanes(policy.lab_evidence, policy.repo),
-    )
+    if lanes:
+        reason, detail = classify_lab_receipt(
+            policy.repo,
+            lab_sha,
+            list_artifacts=list_artifacts,
+            download_receipt=download_receipt,
+            rebuild_pending=rebuild_pending,
+            lanes=lanes,
+        )
+    if lanes and not row["receipt_required"]:
+        signal = {None: "found", EnumTrainReason.LAB_RECEIPT_FAIL: "failed"}.get(
+            reason, "absent"
+        )
+        reason = None
+        detail = f"{ci_detail}; lab-pass receipt signal: {signal} (printed, not a gate)"
     if reason is not None:
         if not candidate.sha and candidate.unresolved_reason:
             detail = f"{detail}. The ancestor premise did not run: {candidate.unresolved_reason}"
@@ -1699,7 +1697,7 @@ def decide(
             needs_bump=needs_bump,
         )
 
-    if candidate.inherited:
+    if candidate.inherited and row["receipt_required"]:
         # Both shas and the count, because a reader of a CUT row has to be able
         # to re-derive the inheritance rather than take it on trust.
         detail = (
@@ -1711,7 +1709,7 @@ def decide(
 
     return _build(
         EnumTrainVerdict.CUT,
-        EnumTrainReason.UNRELEASED_WORK_LAB_PROVEN,
+        EnumTrainReason(row["cut_reason"]),
         f"{facts.unreleased_count} unreleased release-relevant commit(s); {detail}",
         candidate_version=candidate_version,
         needs_bump=needs_bump,

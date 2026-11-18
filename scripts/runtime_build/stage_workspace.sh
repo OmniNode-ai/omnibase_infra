@@ -12,7 +12,6 @@
 #   Or pin each staged sibling independently using owned, clean disposable clones:
 #   OMNI_HOME=<disposable-clone-root> bash scripts/runtime_build/stage_workspace.sh \
 #     --repo-ref omnibase_core=<40-character-SHA> \
-#     --repo-ref omnibase_compat=<40-character-SHA> \
 #     --repo-ref omnimarket=<40-character-SHA>
 #   This mode requires every staged sibling and forbids global-ref/hotpatch/
 #   unpinned selectors. It resolves all pins before any non-forcing checkout.

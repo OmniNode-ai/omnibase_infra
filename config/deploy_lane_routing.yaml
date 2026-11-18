@@ -88,7 +88,7 @@
 # unknown key refuses the table. `freeze: {until, reason}` refuses every command
 # routed to the instance as `frozen`, and stops idle converge, until `until`
 # (it expires by itself); a command with requested_by `promotion/<who>` is the
-# one way through (python -m deploy_agent.trigger --requested-by promotion/...).
+# one way through (published by node_branch_deploy_command_effect with that requested_by).
 #
 # LAG BOUND (OMN-21146). `flags.max_dev_lag_minutes` is how long an instance's
 # lane may run behind the dev head of a repository it follows (one whose

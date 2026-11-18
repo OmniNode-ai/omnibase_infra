@@ -28,6 +28,14 @@ from omnibase_infra.models.model_venv_atomic_install_result import (
 
 _HERE = Path(__file__).resolve().parent
 _REFUSED = 3
+# Exit 4 means "a live peer holds the staging lock" only for these commands; for the engine
+# commands it keeps its own meaning (uv could not resolve the plan) and stays a failure.
+_PROMOTION_COMMANDS = (
+    "staging_lock_acquire",
+    "staging_lock_release",
+    "staging_lock_held",
+    "promote_floor",
+)
 
 
 def _load(name: str) -> ModuleType:
@@ -65,7 +73,15 @@ class HandlerVenvAtomicInstall:
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = self._run(request)
-        status = "ok" if code == 0 else "refused" if code == _REFUSED else "failed"
+        status = (
+            "ok"
+            if code == 0
+            else "refused"
+            if code == _REFUSED
+            else "declined"
+            if code == 4 and request.command in _PROMOTION_COMMANDS
+            else "failed"
+        )
         return ModelVenvAtomicInstallResult(
             status=status, exit_code=code, output=out.getvalue() + err.getvalue()
         )
@@ -77,6 +93,19 @@ class HandlerVenvAtomicInstall:
             return int(verify.verify_nodes() or verify.verify_cli())
         if request.command == "installed_commit":
             return int(_load("skill_install_verify").installed_market_commit())
+        if request.command in _PROMOTION_COMMANDS:
+            return int(
+                _load("dispatch_venv_promotion").run_promotion_command(
+                    request.command,
+                    path=request.lock_path,
+                    pid=request.holder_pid,
+                    venv=request.venv,
+                    uv_lock=request.uv_lock,
+                    workspace_root=request.workspace_root,
+                    floor=request.floor_path,
+                    changed=request.changed,
+                )
+            )
         engine = _load("atomic_venv_install")
         return int(
             engine.run_command(

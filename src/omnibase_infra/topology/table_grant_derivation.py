@@ -73,11 +73,7 @@ __all__ = [
 # ``INSERT ... ON CONFLICT DO UPDATE``.
 READ_PRIVILEGES = frozenset({EnumDatabasePrivilege.SELECT})
 WRITE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
-    {
-        EnumDatabasePrivilege.SELECT,
-        EnumDatabasePrivilege.INSERT,
-        EnumDatabasePrivilege.UPDATE,
-    }
+    {*READ_PRIVILEGES, EnumDatabasePrivilege.INSERT, EnumDatabasePrivilege.UPDATE}
 )
 # A retention prune's ``DELETE ... WHERE <column> < ...`` reads the rows it
 # removes, so DELETE rides with SELECT and nothing else: no INSERT or UPDATE,
@@ -167,6 +163,7 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = tuple(
         ("pr_landing_workflow_state", "108_create_pr_landing_workflow_state.sql"),
         ("floor_fill_state", "113_create_floor_fill_state.sql"),
         ("code_eval_trial_state", "114_create_code_eval_trial_state.sql"),
+        ("branch_deploy_state", "116_create_branch_deploy_state.sql"),
         ("infra_routing_decisions", "080_create_infra_routing_decisions.sql"),
     )
 )
@@ -321,9 +318,9 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "0000_create_demo_readiness_latest.sql",
         role="demo_readiness",
     ),
-    # OMN-23055, OMN-23341, OMN-23858: vendored_table_bridges.yaml.
+    # OMN-23055, OMN-23341, OMN-23858, OMN-24323: vendored_table_bridges.yaml.
     *(
-        _vendored_read_write(f"{b['prefix']}{t}", b["node"], b["create"])
+        _vendored_read_write(f"{b['prefix']}{t}", b["node"], b["create"], **b["opts"])
         for b in yaml.safe_load(_BRIDGES.read_text(encoding="utf-8"))
         for t in b["tables"]
     ),
@@ -456,21 +453,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         "node_gateway_link_health_write_effect",
         "0001_create_gateway_link_health.sql",
         node="infra_direct_sql:node_gateway_link_health_write_effect",
-    ),
-    # OMN-21933: infra vendors skill_executions (node_projection_skill_lifecycle
-    # 0001-0002) ahead of the omnimarket node contract that declares it. The
-    # omnimarket node writes through the tenant_projection binding and its
-    # auto-wiring refuses a principal with no declared privilege, so this grant
-    # must exist before the source contract can merge. 0002 grants
-    # tenant_projection_writer SELECT, INSERT, UPDATE. Retired when the
-    # node_projection_skill_lifecycle contract merges and the omnimarket pin
-    # advances past it; the OMN-18863 expiry module names this bridge.
-    _vendored_read_write(
-        "skill_executions",
-        "node_projection_skill_lifecycle",
-        "0001_create_skill_executions.sql",
-        schema="public",
-        access="write",
     ),
     # OMN-21947: infra vendors the work-ledger history-import migrations (0007
     # creates ledger_line_citation, 0008 grants the runtime SELECT, INSERT,

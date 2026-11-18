@@ -44,6 +44,8 @@ EXIT_REFUSED = 3
 EXIT_UV_ERROR = 4
 EXIT_COMMIT_FAILED = 5
 
+STAGE_DIR_PREFIX = ".atomic-stage."
+
 # Any failure of the commit must restore the venv: the file system, the probe
 # of the live footprint, a malformed journal or plan file.
 _RESTORE_ERRORS = (
@@ -56,6 +58,9 @@ _RESTORE_ERRORS = (
 
 _PLAN_FILE = "plan.json"
 _JOURNAL_FILE = "journal.json"
+_GIT_REVISIONS_FILE = "git-revisions.txt"
+_GIT_REVISION_REQUIREMENT = re.compile(r"git\+\S+?@([0-9a-fA-F]{7,40})(?=$|[\s#])")
+_MIN_REVISION_FOLDER = 7
 _STAGE_SITE = "site"
 _STAGE_BIN = "bin"
 _STAGE_BACKUP = "removed"
@@ -199,6 +204,97 @@ def write_wrapper(python_bin: str, stage_dir: Path) -> Path:
     return wrapper
 
 
+def record_git_revisions(stage_dir: Path, requirements: list[str]) -> list[str]:
+    """Record the git shas the requirements name, for the finalize prune."""
+    shas: list[str] = []
+    for requirement in requirements:
+        match = _GIT_REVISION_REQUIREMENT.search(requirement)
+        if match is None:
+            continue
+        sha = match.group(1).lower()
+        if sha not in shas:
+            shas.append(sha)
+    if shas:
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        (stage_dir / _GIT_REVISIONS_FILE).write_text(
+            "\n".join(shas) + "\n", encoding="utf-8"
+        )
+    return shas
+
+
+def prune_git_checkouts(stage_dir: Path) -> list[Path]:
+    """Remove the uv git checkouts the recorded revisions resolved to, and only those."""
+    revisions_file = stage_dir / _GIT_REVISIONS_FILE
+    if not revisions_file.is_file():
+        return []
+    try:
+        shas = [
+            line.strip().lower()
+            for line in revisions_file.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except OSError as exc:
+        _say(f"  cannot read the recorded git revisions: {exc}", file=sys.stderr)
+        return []
+    if not shas:
+        return []
+    try:
+        out = subprocess.run(
+            ["uv", "cache", "dir"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        _say(f"  cannot ask uv for its cache dir: {exc}", file=sys.stderr)
+        return []
+    if out.returncode != 0 or not out.stdout.strip():
+        _say(f"  uv cache dir failed: {out.stderr.strip()}", file=sys.stderr)
+        return []
+    cache = Path(out.stdout.strip())
+    removed: list[Path] = []
+    for path in sorted(cache.glob("git-v*/checkouts/*/*")):
+        if path.is_symlink() or not path.is_dir():
+            continue
+        if len(path.name) < _MIN_REVISION_FOLDER:
+            continue
+        if not any(sha.startswith(path.name) for sha in shas):
+            continue
+        try:
+            shutil.rmtree(path)
+            path.with_name(path.name + ".ok").unlink(missing_ok=True)
+            removed.append(path)
+            _say(f"  pruned uv git checkout {path}")
+        except OSError as exc:
+            _say(f"  cannot prune {path}: {exc}", file=sys.stderr)
+    return removed
+
+
+def sweep_stale_stages(venv_root: Path, *, keep: Path | None = None) -> list[Path]:
+    """Remove the earlier installs' `.atomic-stage.*` side folders (OMN-24508).
+
+    Must only run on the success path, under the venv's reconcile lock: the
+    sweep assumes no other install of this venv is using a stage. A symlink or
+    a non-directory is skipped, never followed; ``keep`` is never removed. A stage
+    that holds a journal is removed too: the run that follows it has already
+    verified and read back the live venv, so its previous packages are obsolete.
+    """
+    removed: list[Path] = []
+    if not venv_root.is_dir():
+        return removed
+    for child in sorted(venv_root.iterdir()):
+        if not child.name.startswith(STAGE_DIR_PREFIX):
+            continue
+        if keep is not None and child.name == keep.name:
+            continue
+        if child.is_symlink() or not child.is_dir():
+            continue
+        shutil.rmtree(child, ignore_errors=True)
+        removed.append(child)
+        _say(f"  swept stale stage {child}")
+    return removed
+
+
 def stage(
     python_bin: str,
     stage_dir: Path,
@@ -210,6 +306,7 @@ def stage(
     """Plan (refusing a downgrade or removal), then install only the moved packages."""
     plan = _load_plan_tool()
     write_wrapper(python_bin, stage_dir)
+    record_git_revisions(stage_dir, requirements)
     _say(f"== {label}: staging only the moved packages (atomic in-place) ==")
     dry = plan._run_uv(python_bin, requirements, no_deps=no_deps, dry_run=True)
     combined = f"{dry.stdout}\n{dry.stderr}"
@@ -416,7 +513,10 @@ def run_command(
         _say(f"ERROR: {command} needs a stage dir.", file=sys.stderr)
         return EXIT_USAGE
     if command == "finalize":
+        prune_git_checkouts(stage_dir)
         shutil.rmtree(stage_dir, ignore_errors=True)
+        swept = sweep_stale_stages(stage_dir.parent)
+        _say(f"  swept {len(swept)} stale stage dir(s)")
         return EXIT_OK
     if command == "rollback":
         return rollback_stage(stage_dir)

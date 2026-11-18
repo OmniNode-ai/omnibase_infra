@@ -41,19 +41,6 @@ def _extract_suffix_names(source: str) -> set[str]:
     return names
 
 
-def _extract_imported_names(source: str) -> set[str]:
-    """Extract all names imported in ``from ... import (...)`` statements."""
-    tree = ast.parse(source)
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                real = alias.asname if alias.asname else alias.name
-                if real.startswith("SUFFIX_"):
-                    names.add(real)
-    return names
-
-
 def _extract_all_list(source: str) -> set[str]:
     """Extract SUFFIX_* names from the ``__all__`` list.
 
@@ -102,24 +89,15 @@ def main() -> int:
     # Get all SUFFIX_* defined in platform_topic_suffixes.py
     defined = _extract_suffix_names(suffixes_file.read_text(encoding="utf-8"))
 
-    # Get all SUFFIX_* imported + listed in __all__ in __init__.py
-    init_source = init_file.read_text(encoding="utf-8")
-    imported = _extract_imported_names(init_source)
-    in_all = _extract_all_list(init_source)
-
-    # A constant is properly exported if it is both imported AND in __all__
-    missing_import = defined - imported
-    missing_all = (defined & imported) - in_all
+    # The package resolves its exports on first read (OMN-23562), so there is no
+    # import block to read: a constant is exported when it is listed in __all__.
+    in_all = _extract_all_list(init_file.read_text(encoding="utf-8"))
+    missing_all = defined - in_all
 
     errors: list[str] = []
-    if missing_import:
-        errors.append(
-            f"{len(missing_import)} SUFFIX_* constant(s) not imported in __init__.py:\n"
-            + "\n".join(f"  - {s}" for s in sorted(missing_import))
-        )
     if missing_all:
         errors.append(
-            f"{len(missing_all)} SUFFIX_* constant(s) imported but missing from __all__:\n"
+            f"{len(missing_all)} SUFFIX_* constant(s) missing from __all__:\n"
             + "\n".join(f"  - {s}" for s in sorted(missing_all))
         )
 
@@ -128,7 +106,7 @@ def main() -> int:
         for err in errors:
             print(err)
         print(
-            "\nFix: Add missing SUFFIX_* constants to the import block and __all__ "
+            "\nFix: Add missing SUFFIX_* constants to the __all__ "
             "list in src/omnibase_infra/topics/__init__.py"
         )
         return 1

@@ -1,0 +1,178 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24562
+title: "A failed deploy-agent job, or a code-ref pin within six hours of expiry, writes an alarm row with an owner line"
+summary: "Stacked on the job reading of OMN-24617 (omnibase_infra#6012, related, not superseded). The node_deploy_job_reading_effect handler now also writes one ledger STATUS row with src=alarm and an owner line for a failed dev or stability job (alarm=deploy-job-failed), and the agent's idle tick writes one for a live code-ref pin inside the contract's six-hour window before its expiry (alarm=pin-near-expiry). Prod writes nothing."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24562-job-alarm
+    statement: A failed dev or stability deploy job, and a live code-ref pin within six hours of its expiry, each write an alarm row that names an owner and the owner's action.
+    acceptance:
+      - id: AC8
+        statement: "AC8: a fixture failed job on the dev lane and one on the stability lane each yield an alarm row with src=alarm, alarm=deploy-job-failed, the failing step, owner and owner_line, and a prod job, a successful job and a running job yield none -- falsifier: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q fails at the pushed head's parent"
+      - id: AC9
+        statement: "AC9: a live pin 6 hours or less from its expiry yields an alarm row with alarm=pin-near-expiry, the pin's owner and branch and the hours left, a pin further out yields none, and the agent's idle tick calls the check on a schedule -- falsifier: the pin cases of test_job_alarm_row.py fail with the idle-tick call or the window removed"
+  - id: req-omn24562-review-fixes
+    statement: The pin-expiry check and the terminal reading publish are contained and gated, and the pin alarm appends are never refused.
+    acceptance:
+      - id: AC10
+        statement: "AC10: a prod agent never runs the pin check: an agent whose allowed lanes lack DEV never loads the job reading or calls check_pin -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
+      - id: AC11
+        statement: "AC11: a load or call error in the pin check or the terminal publish is logged and never raised, so the agent's loop and the job's clear_settling continue -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
+      - id: AC12
+        statement: "AC12: across a simulated pin hour of twelve 300 s ticks an append that refuses a different row under a reused request id refuses nothing and holds one row per pin, and the next clock hour writes a new row -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
+      - id: AC13
+        statement: "AC13: the contract is read and parsed once per process and a failing read logs once per interval -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
+      - id: AC14
+        statement: "AC14: the alarm owner is the item lane OMN-24562 and no owner line names one host -- falsifier: the named test in test_job_alarm_row.py fails at the parent head"
+  - id: req-omn24562-stability-job-renders-overlay-address
+    statement: A stability job of a dev-fenced deploy agent takes LLM_EMBEDDING_URL, BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL and the rewritten lane overlay directory from the llm_endpoints overlay, in its compose environment and in its env contract guard, and a prod job takes nothing from the render.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the compose environment of a stability job of a dev-fenced agent carries the overlay address over the settings store''s -- falsifier: python -m pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -k "stability_job" -q fails at the merge base'
+      - id: AC2
+        statement: 'AC2: the env contract guard of a stability job checks the rendered environment and skips the store''s value for the rendered names -- falsifier: the guard test for a stability job passes with the render fence unchanged'
+      - id: AC3
+        statement: 'AC3: a prod job of a dev-fenced agent keeps the store''s address -- falsifier: the prod control test fails at the head'
+  - id: req-omn24562-stability-retire-folded
+    statement: The stability lane retires the container of every role its main runtime folds, keeps volumes, and leaves prod and the other stability containers alone. The old runtime-effects container an older compose file left behind is removed before main publishes port 18086, and compose is no longer asked to start that service.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: for the stability lane the agent''s lane configuration disables the runtime-effects service, the runtime phase retires its old container with a stop and a remove that carry no volume flag, removes nothing when none exists, and prod retires nothing -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_retires_folded_effects_omn24562.py -q fails when the retirement call in the runtime phase or the census branch of _retire_folded_dev_services is deleted'
+      - id: AC5
+        statement: 'AC5: the pull request branch''s executor.py carries the guard line `if "runtime-effects" in retired:` (in lane_config_for, where a lane that retires the effects role reads the effects health target from main), a line the merge base does not carry -- falsifier: that line is absent from the branch''s executor.py, or present at the merge base 6deccc76f9768b2be6b4ba8939eb0a9d52cd1082'
+evidence_requirements:
+  - kind: tests
+    description: The alarm row tests and the job reading tests.
+    command: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py scripts/deploy-agent/tests/unit/test_job_reading_row.py -q -p no:cacheprovider
+  - kind: tests
+    description: The stability compose-environment and guard tests pass at the pushed head and fail at the merge base, where the render is fenced to the dev lane.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:randomly --no-cov
+  - kind: tests
+    description: Stability lane retirement of the folded effects container and its runtime-phase call site, with a positive control that the services the lane still runs stay requested.
+    command: cd scripts/deploy-agent && uv run --frozen --extra dev python -m pytest tests/unit/test_stability_retires_folded_effects_omn24562.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24562-alarm-job-failed
+    description: The failed-job alarm row is built for dev and stability, appended after the reading row, and absent for prod, a successful job and a running job.
+    source: manual
+    binds_ac:
+      - AC8
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-alarm-pin-expiry
+    description: The pin alarm row appears inside the six-hour window and not outside it, is deduplicated within the clock hour, and the idle tick calls the check.
+    source: manual
+    binds_ac:
+      - AC9
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -q 'self._job_reading, "check_pin"' scripts/deploy-agent/deploy_agent/agent.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-fix-lane-gate
+    description: The pin-expiry check is gated to a dev agent; a prod agent never loads the job reading module for it.
+    source: manual
+    binds_ac:
+      - AC10
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider -k "test_a_prod_agent_never_runs_the_pin_check or test_a_dev_agent_runs_the_pin_check_off_the_event_loop"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-fix-load-error
+    description: A job reading load error is contained in the agent's one guarded entry.
+    source: manual
+    binds_ac:
+      - AC11
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider -k "test_a_pin_check_load_error_does_not_stop_the_agent or test_a_terminal_publish_error_does_not_skip_the_rest or test_the_terminal_publish_goes_through_the_guard_before_clear_settling"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-fix-request-ids
+    description: Each distinct pin alarm row has its own request id and the hour's rows are identical.
+    source: manual
+    binds_ac:
+      - AC12
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider -k "test_a_simulated_pin_hour_has_no_refused_append_and_one_row_per_pin or test_the_next_clock_hour_writes_a_new_row"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-fix-parse-once
+    description: The pin check parses the contract once and stamps its throttle before the read.
+    source: manual
+    binds_ac:
+      - AC13
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider -k "test_the_contract_is_parsed_once_and_a_failed_read_logs_once_per_interval"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-fix-owner-line
+    description: The alarm owner names the item lane and no single host.
+    source: manual
+    binds_ac:
+      - AC14
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_job_alarm_row.py -q -p no:cacheprovider -k "test_the_alarm_owner_is_the_item_lane_and_names_no_host"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac4-stability-retirement
+    description: The stability lane disables runtime-effects, retires its old container with a stop and a remove that carry no volume flag, removes nothing when none exists, makes the retirement call in the runtime phase, fails loudly when the census or the stop fails, retires nothing on prod, and the primary-dev tests still pass.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_retires_folded_effects_omn24562.py tests/unit/test_dev_tenant_projection_fold_omn21288.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac5-guard-line-absent-at-merge-base
+    description: 'AC5: greps the executor file in the checked-out tree for the guard line `if "runtime-effects" in retired:`. That line is absent at the merge base 6deccc76f and present at the head (executor.py line 1032), so the grep fails at the merge base and passes at the head.'
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: command
+        check_value: grep -qF 'if "runtime-effects" in retired:' scripts/deploy-agent/deploy_agent/executor.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac6-h201-job-record-runtime-phase
+    description: 'Unbound local Done gate (not a hosted criterion): reads the stability-follow job record on h201 (the deploy agent state file /data/omninode/deploy-agent/state/jobs-dev/<job id>*.json, field phase_results.runtime) and exits 0 only when exactly one record matches the job id prefix in STABILITY_FOLLOW_JOB_ID and its phase_results.runtime is success. It is read-only, prints no secret, needs no agent pin change, and exits non-zero when the variable is unset, no record matches, or the runtime phase is anything other than success. The hosted runner cannot reach h201, so the item is local_done_gate and runs on h201 after the agent is installed from this branch.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "ssh h201 \"python3 -c 'import glob, json, sys; hits = glob.glob(\\\"/data/omninode/deploy-agent/state/jobs-dev/\\\" + sys.argv[1] + \\\"*.json\\\"); sys.exit(0 if len(hits) == 1 and json.load(open(hits[0]))[\\\"phase_results\\\"][\\\"runtime\\\"] == \\\"success\\\" else 1)' ${STABILITY_FOLLOW_JOB_ID:?set STABILITY_FOLLOW_JOB_ID to the stability-follow job id}\""
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-integration-proof-fold-policy
+    description: The committed runtime policy, read through the handler's own folded-service computation, retires runtime-effects for the stability lane and nothing for a lane that folds nothing.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/handlers/test_handler_dev_boot_guard_stability_fold_omn24562.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac1
+    description: 'AC1 and AC2 and AC3: the stability job compose environment, the stability guard and the prod control pass'
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+      - AC3
+    checks:
+      - check_type: command
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:randomly --no-cov
+        cwd: .
+  - id: dod-omn24562-integration-proof
+    description: 'The real renderer reads the real contracts and a real git overlay: a stability job takes the overlay address and a prod job takes nothing. It binds no criterion; the hosted proof is dod-omn24562-ac1, this one is the local Done gate'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/ci/test_stability_job_overlay_render_integration_omn24562.py -q -p no:randomly --no-cov
+        cwd: .

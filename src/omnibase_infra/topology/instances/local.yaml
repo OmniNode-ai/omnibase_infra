@@ -275,6 +275,7 @@ databases:
               - delegation_routing_tenant_overlay
               - delegation_shadow_comparisons
               - dep_health_findings
+              - experiment_arm_results
               - hook_events
               - instruction_eval_aggregate_snapshots
               - llm_cost_aggregates
@@ -367,6 +368,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - branch_deploy_state
               - code_eval_trial_state
               - delegation_workflow_state
               - floor_fill_state

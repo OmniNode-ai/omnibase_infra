@@ -5,12 +5,24 @@ summary: "On the lab dev lane the COMPUTE node rejected an out-of-root workspace
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn21052-ac2-accepted-20261116t0145z:
+      - label: AC2
+        criterion_hash: 3f032f3e681f0dd48ec839e0781afc493ef83533c9262f5028ba079c818630bc
+        proposed_by: lane=dod-closeout-bind-2026-11-16T0145Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-16T0145Z-c3
 requirements:
   - id: "req-rejected-workspace-reaches-terminal"
     statement: "An invoke command naming a workspace outside the allowed roots ends in exactly one terminal event on the failed terminal topic, status REJECTED, with no completed event and no subprocess."
     acceptance:
       - id: "AC1"
         statement: "AC1: the COMPUTE verdict the orchestrator consumes is the verdict the COMPUTE node publishes, and a rejected verdict yields one FSM advance the reducer folds to REJECTED plus one REJECTED result on the failed terminal topic and nothing on the effect-invoke or completed topics -- falsifier: uv run pytest tests/unit/nodes/node_coding_agent/test_rejection_path_real_dispatch.py fails at the merge base and passes at the head"
+  - id: "req-omn-21052-criteria"
+    statement: "The ticket's labelled acceptance criteria."
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance."
 evidence_requirements:
   - kind: "tests"
     description: "The rejection chain drives compute and orchestrator through the real dispatch engine and applier, each hop fed the previous hop's published payload."
@@ -36,3 +48,11 @@ dod_evidence:
         check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_coding_agent_orchestrator/handlers/handler_coding_agent_orchestrator.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'command = verdict.invoke_command'"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
+  - id: "dod-omn21052-ac2-accepted-20261116t0145z"
+    description: "AC2: the three seams that dropped the command on the lab (the verdict carried no invoke command, the FSM advance carried no state, no node published the rejected terminal) are driven through the real dispatch engine and applier, each hop fed the previous hop's published payload; an out-of-root workspace ends in one REJECTED terminal with no subprocess. Fails with the src/ changes of omnibase_infra#4895 reverted."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: 'uv run pytest -q "tests/unit/nodes/node_coding_agent/test_rejection_path_real_dispatch.py::TestRejectedWorkspaceReachesOneFailedTerminal::test_out_of_root_workspace_ends_in_one_rejected_terminal_no_subprocess"'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]

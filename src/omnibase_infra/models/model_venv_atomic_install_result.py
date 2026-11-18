@@ -11,6 +11,6 @@ class ModelVenvAtomicInstallResult(BaseModel):
     """The step's exit code, its verdict and the output the tool wrote."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
-    status: Literal["ok", "refused", "failed"]
+    status: Literal["ok", "refused", "declined", "failed"]
     exit_code: int
     output: str = ""

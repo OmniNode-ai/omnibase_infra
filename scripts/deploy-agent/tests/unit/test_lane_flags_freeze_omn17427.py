@@ -170,7 +170,7 @@ def _inputs(**overrides: Any) -> ModelIdleConvergeInputs:
     [
         pytest.param("gha/omnibase_infra/pr-4570", id="runtime-rebuild-trigger"),
         pytest.param("gha/omninode_infra/push-12", id="onex-api-lab-delivery"),
-        pytest.param("operator/deploy-agent-trigger", id="hand-trigger"),
+        pytest.param("operator/manual-rebuild", id="hand-trigger"),
     ],
 )
 def test_frozen_consumer_refuses_each_recreate_source(requested_by: str) -> None:

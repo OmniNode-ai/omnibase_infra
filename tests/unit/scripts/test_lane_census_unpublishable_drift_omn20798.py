@@ -29,6 +29,8 @@ shim:
 
 from __future__ import annotations
 
+import inspect
+import json
 import os
 import stat
 import subprocess
@@ -69,7 +71,7 @@ def _run(
     args: list[str],
     tmp_path: Path,
     *,
-    broker_container: str | None,
+    broker_container: str | None = None,
     produce_rc: int = 0,
     bootstrap: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], str, str]:
@@ -109,9 +111,9 @@ def _run(
     env.pop("LANE_MANIFEST", None)
     for name in ("KAFKA_BOOTSTRAP_SERVERS", "LANE_MEMORY_BROKER_CONTAINER"):
         env.pop(name, None)
-    if bootstrap:
+    if bootstrap is not None:
         env["KAFKA_BOOTSTRAP_SERVERS"] = bootstrap
-    if broker_container:
+    if broker_container is not None:
         env["LANE_MEMORY_BROKER_CONTAINER"] = broker_container
 
     proc = subprocess.run(
@@ -126,13 +128,43 @@ def _run(
     return proc, calllog.read_text(), sent
 
 
+def test_run_helper_sends_neither_broker_variable_by_default() -> None:
+    """OMN-25184: a caller that passes neither variable sends neither.
+
+    ``""`` as a default would make every existing caller send both variables
+    named-but-empty and drop the unset-variable path's coverage.
+    """
+    params = inspect.signature(_run).parameters
+    assert params["bootstrap"].default is None
+    assert params["broker_container"].default is None
+
+
 def test_lane_census_unpublishable_drift_fails_without_a_broker_container(
     tmp_path: Path,
 ) -> None:
-    proc, calls, sent = _run(["--lane", _LANE], tmp_path, broker_container=None)
+    proc, calls, sent = _run(["--lane", _LANE], tmp_path)
     assert proc.returncode == 8, proc.stderr
     assert "produce" not in calls and not sent, calls
     assert "NOT published" in proc.stderr
+
+
+def test_lane_census_empty_broker_variable_is_unset_not_indeterminate(
+    tmp_path: Path,
+) -> None:
+    """OMN-25101: the receipt job sends both variables as "" (OMN-24976).
+
+    The script tests the broker with ``-z "${VAR:-}"``, so a variable that is
+    named but empty publishes nothing and exits 8, exactly as an unset one does.
+    """
+    proc, calls, sent = _run(
+        ["--lane", _LANE, "--json"], tmp_path, broker_container="", bootstrap=""
+    )
+    assert proc.returncode == 8, proc.stderr
+    assert "produce" not in calls and not sent, calls
+    assert "LANE_MEMORY_BROKER_CONTAINER is unset" in proc.stderr
+    plan = json.loads(proc.stdout)
+    assert plan["has_drift"] is True
+    assert plan["findings"]
 
 
 def test_lane_census_unpublishable_drift_fails_when_the_produce_fails(
