@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-25646
+title: The release train signs off omnibase_infra and omnimarket cuts on green required checks, with the lab-pass receipt printed as a signal
+summary: >-
+  Step S7a of the decouple plan, decision 2 (operator ruling 2026-11-18T16:26:04Z). scripts/ci/release_train.py gains the lab_evidence value dev-required-green. Its premise is classify_ci_green, already applied before any lab arm; under it the decision reads the lab-pass receipt and prints it in the decision detail as a signal (found, absent or failed) and never refuses on it. A head whose required context is not success still refuses with the classify_ci_green reason naming the context. The three existing values keep their behaviour. config/release_train_policy.yaml sets the new value for omnibase_infra and omnimarket with a lab_evidence_note citing decision 2, and the header text and omnimarket's mode_note no longer say a PASS receipt is the cut premise. The lab-evidence behaviour of each value is a row of the lab_evidence_modes table in config/release_train_policy.yaml, so the next value is a yaml row and not a code path; release_train.py ends below its baselined code-line count. The change is a CI script and a data overlay and does not touch the runtime. The ticket's fourth criterion, the train's decision read after the merge, is a post-merge read that no check here can bind, so this contract carries no entry for it and the ticket stays open until that read is posted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25646-dev-required-green
+    statement: The release train cuts omnibase_infra and omnimarket on green required checks and prints the lab-pass receipt as a signal.
+    acceptance:
+      - id: AC1
+        statement: "AC1: tests/scripts/test_release_train_nightly.py asserts that a head with green required checks and no lab-pass receipt is cut under dev-required-green and refused where the receipt is required, and the first assertion fails before the enum value exists -- falsifier: uv run pytest tests/scripts/test_release_train_nightly.py -k dev_required_green"
+      - id: AC2
+        statement: "AC2: a head with a required context that is not success and no receipt is refused under dev-required-green with the classify_ci_green reason, and the refusal names the context -- falsifier: uv run pytest tests/scripts/test_release_train_nightly.py -k dev_required_green_refuses"
+      - id: AC3
+        statement: "AC3: config/release_train_policy.yaml sets lab_evidence dev-required-green for omnibase_infra and omnimarket with a lab_evidence_note citing decision 2, and the loader accepts it -- falsifier: uv run pytest tests/scripts/test_release_train_nightly.py -k policy"
+evidence_requirements:
+  - kind: tests
+    description: The release-train decision tests, including the armed-set assertion.
+    command: uv run pytest tests/scripts/test_release_train_nightly.py -n 0 -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25646-ac1-cut-without-receipt
+    description: >-
+      A head with green required checks and no receipt is cut under dev-required-green and refused where the receipt is required. The test fails with an AttributeError on the merge base, where the enum value does not exist.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_release_train_nightly.py -k dev_required_green -n 0 -q -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25646-ac2-refuses-non-success
+    description: >-
+      A head whose required context concluded failure is skipped with the ci_not_green reason, and the detail names the context.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_release_train_nightly.py -k dev_required_green_refuses -n 0 -q -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25646-ac3-policy
+    description: >-
+      The shipped policy loads with dev-required-green for omnibase_infra and omnimarket, both notes cite decision 2 and the ruling timestamp, and no other repository carries the value.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_release_train_nightly.py -k policy -n 0 -q -p no:cacheprovider
+        cwd: .
