@@ -5,9 +5,8 @@
 The sibling-pin train moves the omnibase_core hook revs of ``.pre-commit-config.yaml``
 together with the source pin. The receipt-gate reusable only treats that as a
 pin-only change from the omnibase_core dev-merge tag that carries the hook rev
-swap exemption (omnibase_core#2284). ``pull_request_target`` reads the caller from
-the base branch, so until the caller on ``dev`` pins that tag or a later one, every
-train pull request falls to the evidence steps and fails repo-evidence / dod-verify.
+swap exemption (omnibase_core#2284). With an older pin, a train pull request
+falls to the evidence steps and fails repo-evidence / dod-verify.
 
 The floor is read from the caller workflow, from required-checks.yaml and from the
 test-side pin constants, so the three copies cannot drift below it separately.

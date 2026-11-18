@@ -487,16 +487,11 @@ jobs:
 
 _CALLER = ".github/workflows/call-repo-evidence-gate.yml"
 _PINNED = "OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@" + "a" * 40
-_EXCEPTION = {
-    "path": _CALLER,
-    "ruling": "RULING 2026-10-08T22:41:24Z lane=orchestrator-9f8a (OMN-20074)",
-    "reason": "test",
-}
 
 
 def _caller_text(
     *,
-    trigger: str = "pull_request_target",
+    trigger: str = "pull_request",
     permissions: str = "  contents: read\n  pull-requests: read\n",
     job: str | None = None,
 ) -> str:
@@ -507,76 +502,40 @@ def _caller_text(
     )
 
 
-def _audit_with_caller(tmp_path: Path, text: str, exception: object) -> list:
-    module = _load_script()
-    workflow_dir = tmp_path / ".github" / "workflows"
-    workflow_dir.mkdir(parents=True)
-    (tmp_path / _CALLER).write_text(text, encoding="utf-8")
-    policy: dict[str, object] = {"hosted_runner_allowlist": []}
-    if exception is not None:
-        policy["pull_request_target_exception"] = exception
-    return module.audit_local_workflows(policy, tmp_path)
+def _write_caller(tmp_path: Path, text: str) -> None:
+    caller = tmp_path / _CALLER
+    caller.parent.mkdir(parents=True)
+    caller.write_text(text, encoding="utf-8")
 
 
-def test_pull_request_target_exception_admits_the_named_caller(tmp_path: Path) -> None:
-    assert _audit_with_caller(tmp_path, _caller_text(), _EXCEPTION) == []
-
-
-def test_pull_request_target_exception_admits_no_other_workflow(
+def test_pull_request_target_is_prohibited_even_with_a_stale_exception(
     tmp_path: Path,
 ) -> None:
     module = _load_script()
-    workflow_dir = tmp_path / ".github" / "workflows"
-    workflow_dir.mkdir(parents=True)
-    (tmp_path / _CALLER).write_text(_caller_text(), encoding="utf-8")
-    (workflow_dir / "other.yml").write_text(
-        _caller_text().replace("Repo Evidence Gate", "other"), encoding="utf-8"
-    )
-
+    _write_caller(tmp_path, _caller_text(trigger="pull_request_target"))
     findings = module.audit_local_workflows(
-        {"pull_request_target_exception": _EXCEPTION}, tmp_path
+        {
+            "pull_request_target_exception": {
+                "path": _CALLER,
+                "ruling": "old ruling",
+                "reason": "old reason",
+            }
+        },
+        tmp_path,
     )
 
-    assert [f.scope for f in findings] == [".github/workflows/other.yml"]
-    assert "pull_request_target is prohibited" in findings[0].message
-
-
-def test_pull_request_target_is_prohibited_without_a_policy_exception(
-    tmp_path: Path,
-) -> None:
-    findings = _audit_with_caller(tmp_path, _caller_text(), None)
-
-    assert len(findings) == 1
-    assert "pull_request_target is prohibited" in findings[0].message
-
-
-@pytest.mark.parametrize(
-    "exception",
-    [
-        pytest.param({**_EXCEPTION, "path": ".github/workflows/*.yml"}, id="glob"),
-        pytest.param({**_EXCEPTION, "path": ".github/workflows/"}, id="directory"),
-        pytest.param({**_EXCEPTION, "path": "call-repo-evidence-gate.yml"}, id="bare"),
-        pytest.param({**_EXCEPTION, "ruling": ""}, id="no-ruling"),
-        pytest.param({**_EXCEPTION, "reason": ""}, id="no-reason"),
-        pytest.param([_EXCEPTION], id="list-of-exceptions"),
-    ],
-)
-def test_pull_request_target_exception_must_be_one_named_file_citing_a_ruling(
-    tmp_path: Path, exception: object
-) -> None:
-    findings = _audit_with_caller(tmp_path, _caller_text(), exception)
-
-    messages = [f.message for f in findings]
-    assert any("pull_request_target_exception" in m for m in messages), messages
-    assert any("pull_request_target is prohibited" in m for m in messages), messages
+    assert any(
+        f.scope == _CALLER and "pull_request_target is prohibited" in f.message
+        for f in findings
+    ), findings
 
 
 @pytest.mark.parametrize(
     ("text", "needle"),
     [
         pytest.param(
-            _caller_text(trigger="pull_request"),
-            "only the pull_request_target trigger",
+            _caller_text(trigger="push"),
+            "only the pull_request trigger",
             id="wrong-trigger",
         ),
         pytest.param(
@@ -610,10 +569,12 @@ def test_pull_request_target_exception_must_be_one_named_file_citing_a_ruling(
         ),
     ],
 )
-def test_pull_request_target_caller_stays_a_pinned_read_only_reusable_call(
+def test_repo_evidence_caller_stays_a_pinned_read_only_pull_request_call(
     tmp_path: Path, text: str, needle: str
 ) -> None:
-    findings = _audit_with_caller(tmp_path, text, _EXCEPTION)
+    module = _load_script()
+    _write_caller(tmp_path, text)
+    findings = module.audit_local_workflows({}, tmp_path)
 
     if not needle:
         assert findings == []
@@ -621,25 +582,21 @@ def test_pull_request_target_caller_stays_a_pinned_read_only_reusable_call(
     assert any(needle in f.message for f in findings), [f.message for f in findings]
 
 
-def test_policy_names_exactly_the_repo_evidence_caller_as_the_exception() -> None:
+def test_policy_has_no_pull_request_target_exception() -> None:
     import yaml
 
     policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
-    exception = policy["pull_request_target_exception"]
-
-    assert exception["path"] == _CALLER
-    assert "RULING 2026-10-08T22:41:24Z" in exception["ruling"]
-    assert "OMN-20074" in exception["ruling"]
+    assert "pull_request_target_exception" not in policy
 
 
-def test_only_the_named_caller_mentions_the_base_branch_trigger() -> None:
+def test_no_workflow_mentions_pull_request_target() -> None:
     carriers = sorted(
         path.relative_to(REPO_ROOT).as_posix()
         for path in (REPO_ROOT / ".github" / "workflows").iterdir()
         if path.is_file() and "pull_request_target" in path.read_text("utf-8")
     )
 
-    assert carriers == [_CALLER]
+    assert carriers == []
 
 
 def test_policy_tracks_repos_that_drifted_to_hosted_minutes() -> None:
@@ -1521,6 +1478,35 @@ def test_the_acl_proof_file_holds_no_bare_hosted_pin_allowlist_entry() -> None:
     policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
     paths = {entry["path"] for entry in policy["hosted_runner_allowlist"]}
     assert ".github/workflows/application-acl-postgres16-proof.yml" not in paths
+
+
+@pytest.mark.parametrize(
+    ("workflow", "job", "uses_docker_seam"),
+    [
+        ("application-acl-postgres16-proof.yml", "rebuilt-postgres16-proof", True),
+        ("deploy-agent-tests.yml", "deploy-agent-tests", False),
+        ("legacy-rds-fixture-proof.yml", "fixture-proof", True),
+    ],
+)
+def test_public_ci_proofs_use_a_hosted_runner(
+    workflow: str, job: str, uses_docker_seam: bool
+) -> None:
+    """Public runs use GitHub-hosted compute while private callers keep their routing."""
+    import yaml
+
+    path = REPO_ROOT / ".github" / "workflows" / workflow
+    runs_on = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"][job]["runs-on"]
+    hosted = "'[\"ubuntu-latest\"]'"
+    docker = "vars.OMNI_DOCKER_CI_RUNS_ON_JSON || " if uses_docker_seam else ""
+    expected = (
+        "${{ github.event.repository.private && ( "
+        "(github.event_name == 'pull_request' && "
+        "github.event.pull_request.head.repo.full_name != github.repository) "
+        f"&& fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || {hosted}) "
+        f"|| fromJSON({docker}vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || {hosted})"
+        f" ) || fromJSON({hosted}) }}}}"
+    )
+    assert " ".join(runs_on.split()) == expected
 
 
 def test_public_pr_runner_variable_drift_is_reported_at_org_scope(
