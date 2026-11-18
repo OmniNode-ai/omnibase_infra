@@ -76,3 +76,19 @@ CREATE TRIGGER trg_work_state_panel_state_updated_at
     BEFORE UPDATE ON public.work_state_panel_state
     FOR EACH ROW
     EXECUTE FUNCTION public.refresh_work_state_panel_state_updated_at();
+
+DO $grant$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'role_omnibase_infra') THEN
+        GRANT SELECT, INSERT, UPDATE ON TABLE public.work_state_panel_state TO role_omnibase_infra;
+
+        IF NOT has_table_privilege('role_omnibase_infra', 'public.work_state_panel_state', 'SELECT')
+            OR NOT has_table_privilege('role_omnibase_infra', 'public.work_state_panel_state', 'INSERT')
+            OR NOT has_table_privilege('role_omnibase_infra', 'public.work_state_panel_state', 'UPDATE') THEN
+            RAISE EXCEPTION 'role_omnibase_infra lacks SELECT, INSERT, UPDATE on public.work_state_panel_state';
+        END IF;
+    ELSE
+        RAISE NOTICE 'role_omnibase_infra is absent on this lane so nothing is granted';
+    END IF;
+END
+$grant$;

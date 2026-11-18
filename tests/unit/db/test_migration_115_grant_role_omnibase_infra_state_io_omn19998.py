@@ -70,7 +70,8 @@ _UNOWNED_TABLES = {
 
 # OMN-24118: created and granted by its own migration, 115 is already applied.
 _GRANTED_BY_OWN_MIGRATION = {
-    "public.branch_deploy_state": "116_create_branch_deploy_state.sql"
+    "public.branch_deploy_state": "116_create_branch_deploy_state.sql",
+    "public.work_state_panel_state": "117_create_work_state_panel_state.sql",
 }
 
 
