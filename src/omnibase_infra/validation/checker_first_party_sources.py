@@ -437,14 +437,15 @@ def build_context_for_lane(
 
     A lane without a declaration, and every lane the policy does not name in
     ``open_pr_lanes``, gets the default context. A declaration on a lane outside
-    ``open_pr_lanes`` is refused with ``ValueError``: the stability, judge,
-    collaborator and prod paths never build a branch.
+    ``open_pr_lanes`` is refused with ``ValueError``: the judge, collaborator and prod
+    paths never build a branch. A lane is named in the policy with underscores for its
+    hyphens.
     """
     contract = load_contract(contract_path)
     declaration = parse_declared_pr(declared_pr)
     if declaration is None:
         return contract.default_context, ""
-    if lane not in contract.open_pr_lanes:
+    if lane.replace("-", "_") not in contract.open_pr_lanes:
         raise ValueError(
             f"lane {lane!r} cannot build a declared open pull request "
             f"{declaration.render()}; only {sorted(contract.open_pr_lanes)} can"
