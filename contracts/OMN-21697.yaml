@@ -99,3 +99,37 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn21697-ac1-accepted-20261119t1945z
+    description: >-
+      AC1: the contract persistence and session state handlers take one typed request. The handler-shape validator reports no findings over node_contract_persistence_effect and node_session_state_effect, and all 11 handler classes declare handle(self, request). Fails at the parent of omnibase_infra#5496 (57499b30d) with noncanonical_handle findings.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/nodes/node_contract_persistence_effect src/omnibase_infra/nodes/node_session_state_effect && env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 uv run python -c "import importlib,inspect,pkgutil,sys; ps=['omnibase_infra.nodes.node_contract_persistence_effect.handlers','omnibase_infra.nodes.node_session_state_effect.handlers']; hs=[c for p in ps for n in pkgutil.iter_modules(importlib.import_module(p).__path__) for c in vars(importlib.import_module(p+'.'+n.name)).values() if inspect.isclass(c) and c.__module__.startswith(p) and 'handle' in vars(c)]; bad=[c.__name__ for c in hs if list(inspect.signature(c.handle).parameters)!=['self','request']]; print('handlers',len(hs),'bad',bad); sys.exit(0 if len(hs)==11 and not bad else 1)"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21697-ac2-accepted-20261119t1945z
+    description: >-
+      AC2: the squash commit of omnibase_infra#5496 (4c0b70854) adds contracts/OMN-21697.yaml and does not edit contracts/OMN-21536.yaml. Control commit da8b39bd7, which edits contracts/OMN-21536.yaml, exits 1.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          sh -c 'git show --name-only --format= 4c0b708541611bb3fb99e77786d7caa71cf731bc | python3 -c "import sys; f=set(sys.stdin.read().split()); print(sorted(x for x in f if x.startswith(\"contracts/\"))); sys.exit(0 if \"contracts/OMN-21697.yaml\" in f and \"contracts/OMN-21536.yaml\" not in f else 1)"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+context:
+  ac_binding_provenance:
+    dod-omn21697-ac1-accepted-20261119t1945z:
+      - label: AC1
+        criterion_hash: 7ad0321ac2ec1934ef6e689bb652df588c5cd27e9044001a6c80737b48157de4
+        proposed_by: lane=dod-closeout-bind-2026-11-19T1945Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-19T1945Z-c3
+    dod-omn21697-ac2-accepted-20261119t1945z:
+      - label: AC2
+        criterion_hash: 33558b90f1c3ff9a6a3ddef0481753dd14e634ede5e4ada4d7d21302bc983857
+        proposed_by: lane=dod-closeout-bind-2026-11-19T1945Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-19T1945Z-c3
