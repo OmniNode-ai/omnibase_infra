@@ -30,7 +30,7 @@ from omnibase_infra.nodes.node_dev_roll_events_effect.dev_roll_events import (
     DevRollEventsPublisher,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 NODE = REPO_ROOT / "src" / "omnibase_infra" / "nodes" / "node_dev_roll_events_effect"
 POLICY = ModelDevRecreatePolicy(
     window_seconds=3600, offset_seconds=0, start_grace_seconds=300

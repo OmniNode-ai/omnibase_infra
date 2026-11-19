@@ -37,7 +37,7 @@ from omnibase_infra.nodes.node_dev_roll_events_effect.runtime_dev_roll_events im
     newest_dev_recreate,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = (
     Path(__file__).parent / "fixtures" / "recreate_window_four_starts_omn25912.json"
 )
