@@ -1,0 +1,64 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25901
+title: The dev runtime declares the pin file its read-only product clones are measured against
+summary: >-
+  The dev runtime mounts each product clone read-only, so omnimarket's dod_verify cannot fetch into one to measure freshness and refuses every check run in a clone, PRODUCT_CLONE_NOT_FRESH. The deploy agent writes DOD_VERIFY_PRODUCT_CLONE_PIN_FILE's file from each clone's own HEAD when a dev job starts, and runtime-effects (docker-compose.dev-lane.yml) and omninode-runtime (docker-compose.dev-tenant-fold.yml) mount its directory read-only and set the variable.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25901-dev-product-clone-pin
+    statement: The dev runtime declares a pin file for its read-only product clones, written by the deploy agent from the clones' own revisions, with no hand-set value and no loosened freshness check.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: both dev compose files set DOD_VERIFY_PRODUCT_CLONE_PIN_FILE in the Done guard's host service and mount the pin directory read-only, and the deploy agent's pin writer emits the verifier's pin file shape, one pin per mounted clone read from that clone, leaves out a clone it cannot read, and a clone fast-forwarded after the pin still contains it while one reset to an unrelated commit does not -- falsifier: uv run --frozen pytest tests/ci/test_dev_runtime_product_clone_pin_omn25901.py scripts/deploy-agent/tests/unit/test_product_clone_pin_writer_omn25901.py -q --no-cov, red on the base commit and green on the branch
+evidence_requirements:
+  - kind: tests
+    description: The pin declaration and writer tests pass at the pushed head and fail at the merge base, which declares no pin file for the runtime.
+    command: uv run --frozen pytest tests/ci/test_dev_runtime_product_clone_pin_omn25901.py scripts/deploy-agent/tests/unit/test_product_clone_pin_writer_omn25901.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25901-ac1-declaration
+    description: 'AC1: the compose declaration tests pass at the head; at the merge base neither compose file sets the variable or mounts the pin directory'
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_runtime_product_clone_pin_omn25901.py -q --no-cov
+        cwd: .
+  - id: dod-omn25901-ac1-writer
+    description: 'AC1: the pin writer tests pass at the head: verifier shape, one pin per mounted clone read from that clone, an unreadable clone left out, a fast-forwarded clone fresh and a reset one stale, written before a dev job preflight'
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_product_clone_pin_writer_omn25901.py -q --no-cov
+        cwd: .
+  - id: dod-omn25901-ac1-dev-lane-declaration
+    description: 'AC1 deploy scope: the dev-lane overlay at the pushed head sets the pin file variable, read from GitHub at that commit'
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F -- "/etc/onex/product-clone-pin/pins.json" > /dev/null'
+        cwd: .
+  - id: dod-omn25901-ac1-fold-declaration
+    description: 'AC1 deploy scope: the primary-dev fold overlay at the pushed head sets the pin file variable, read from GitHub at that commit'
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-tenant-fold.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F -- "/etc/onex/product-clone-pin/pins.json" > /dev/null'
+        cwd: .
+  - id: dod-omn25901-ac2-runtime-environment
+    description: 'Integrated reading: the running dev runtime carries the pin file variable. It binds no hosted criterion; the hosted gate cannot run it, so the local Done gate and the lane STATUS row carry it.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime printenv DOD_VERIFY_PRODUCT_CLONE_PIN_FILE
+        cwd: .
