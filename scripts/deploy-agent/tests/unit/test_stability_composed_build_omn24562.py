@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 from collections.abc import Mapping
@@ -24,13 +25,34 @@ from deploy_agent.events import (
 )
 from deploy_agent.executor import DeployExecutor, lane_config_for
 
-from omnibase_infra.nodes.node_setup_local_provision_effect.runtime_cost_estimator_build import (
-    STABILITY_TEST_COMPOSED_RUNTIME_SERVICES,
-)
-
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+_BUILD_SOURCE = (
+    REPO_ROOT
+    / "src"
+    / "omnibase_infra"
+    / "nodes"
+    / "node_setup_local_provision_effect"
+    / "runtime_cost_estimator_build.py"
+)
+
+
+def _declared_composed_services() -> tuple[str, ...]:
+    # The deploy-agent venv installs a released omnibase_infra without this
+    # module, so the constant is read from the checked-out source.
+    for node in ast.parse(_BUILD_SOURCE.read_text(encoding="utf-8")).body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "STABILITY_TEST_COMPOSED_RUNTIME_SERVICES"
+            and node.value is not None
+        ):
+            return tuple(ast.literal_eval(node.value))
+    raise AssertionError("STABILITY_TEST_COMPOSED_RUNTIME_SERVICES is not declared")
+
+
+STABILITY_TEST_COMPOSED_RUNTIME_SERVICES = _declared_composed_services()
 _OVERLAY = f"docker-compose.{EnumRuntimeLane.STABILITY_TEST.value}.yml"
 _COMPOSE_TAG = re.compile(r"(?m)(:\s+|-\s+)!(?:override|reset)\b[ \t]*")
 
