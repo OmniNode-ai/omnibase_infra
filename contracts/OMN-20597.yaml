@@ -43,3 +43,20 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
+  - id: dod-omn20597-ac1-accepted-20261119t1345z
+    description: "AC1: the yaml repo set includes the repository the ticket names, the yaml list equals the refresh script's MIRROR_REPOS array exactly, and the parser's positive control detects a divergence. Accepted by a second lane from a re-run at omnibase_infra origin/dev 7884785a8440 on lab h201."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: 'uv run pytest "tests/unit/observability/runner_health/test_runner_fleet_config.py::test_runner_fleet_config_git_mirror_covers_every_ci_repo" "tests/unit/observability/runner_health/test_runner_fleet_config.py::test_runner_fleet_config_git_mirror_repos_match_refresh_script" "tests/unit/observability/runner_health/test_runner_fleet_config.py::test_refresh_script_mirror_repos_parser_sees_a_divergence" -q -p no:randomly'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+context:
+  ac_binding_provenance:
+    dod-omn20597-ac1-accepted-20261119t1345z:
+      - label: AC1
+        criterion_hash: d14b5260d3f1a3b7395295a4b8a7e040a9f5ae5bceca0bc276a4f40f9d7c6d92
+        proposed_by: lane=dod-closeout-bind-2026-11-19T1345Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-19T1345Z-c0
+        accepted_at: '2026-11-19T14:16:07Z'
