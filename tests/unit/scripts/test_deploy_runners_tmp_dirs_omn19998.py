@@ -71,7 +71,7 @@ elif tool == "sudo":
         Path(args[-1]).chmod(0o644)
         sys.exit(subprocess.run(["sh", *args[2:]], check=False).returncode)
     if args[1] == "chown":
-        state["files"][args[-1]] = int(args[2].split(":")[0])
+        state.setdefault("files", {})[args[-1]] = int(args[2].split(":")[0])
         state_path.write_text(json.dumps(state))
         sys.exit(0)
     if args[1] == "chmod":
@@ -95,7 +95,7 @@ elif tool == "sudo":
     if not state.get("ignore_install"):
         state["dirs"][args[-1]] = {"uid": owner, "mode": mode}
     state_path.write_text(json.dumps(state))
-elif tool == "stat" and args[-1] in state["files"]:
+elif tool == "stat" and args[-1] in state.get("files", {}):
     mode = os.stat(args[-1]).st_mode & 0o7777
     print("regular file:" + str(state["files"][args[-1]]) + ":" + format(mode, "o"))
 elif tool == "stat":
