@@ -1,0 +1,62 @@
+{
+  "source": "delegation-regression-nightly run 43826372809, job 133161076598, case I9, read from the stability lane on 2026-11-16",
+  "delegation_events_row": {
+    "correlation_id": "6ba0cce8-7acd-4c5b-b17f-3d7e8e0d4ecc",
+    "task_type": "code_generation",
+    "delegated_to": "cohere/north-mini-code:free",
+    "operational_outcome": "inference_failed",
+    "terminal_ok": null,
+    "terminal_failure_cause": null,
+    "writer_identity": "tenant_projection_writer",
+    "written_at": "2026-11-16 07:57:09.423381+00"
+  },
+  "malformed_dlq_record": {
+    "topic": "onex.dlq.omnimarket.projection-delegation-malformed.v1",
+    "offset": 2892,
+    "handler": "node_projection_delegation",
+    "correlation_id": "6ba0cce8-7acd-4c5b-b17f-3d7e8e0d4ecc",
+    "failed_at": "2026-11-16T07:57:09.591924+00:00",
+    "failure_reason_lines": [
+      "delegate-skill terminal event failed model validation: 10 validation errors for ModelDelegateSkillTerminalProjection",
+      "terminal_failure_cause",
+      "  Input should be 'provider_quota_exhausted', 'auth_failed', 'provider_error', 'quality_gate_refused', 'timeout', 'no_terminal' or 'runtime_shutdown' [type=enum, input_value='returned_to_caller', input_type=str]",
+      "budget_evidence.ceiling_source",
+      "  Extra inputs are not permitted [type=extra_forbidden, input_value='packaged', input_type=str]",
+      "budget_evidence.ceiling_overlay_ref",
+      "  Extra inputs are not permitted [type=extra_forbidden, input_value=None, input_type=NoneType]",
+      "metrics.cost_measured",
+      "  Extra inputs are not permitted [type=extra_forbidden, input_value=None, input_type=NoneType]",
+      "attempts.0.usage_source",
+      "  Extra inputs are not permitted [type=extra_forbidden, input_value=None, input_type=NoneType]",
+      "attempts.0.configuration",
+      "  Extra inputs are not permitted [type=extra_forbidden, input_value=None, input_type=NoneType]",
+      "attempts.1.usage_source",
+      "  Extra inputs are not permitted [type=extra_forbidden, input_value=None, input_type=NoneType]",
+      "attempts.1.configuration",
+      "  Extra inputs are not permitted [type=extra_forbidden, input_value=None, input_type=NoneType]",
+      "attempts.2.usage_source",
+      "  Extra inputs are not permitted [type=extra_forbidden, input_value=None, input_type=NoneType]",
+      "attempts.2.configuration",
+      "  Extra inputs are not permitted [type=extra_forbidden, input_value=None, input_type=NoneType]"
+    ]
+  },
+  "containers": {
+    "writer": {
+      "service_label": "projection-delegation-writer",
+      "started_at": "2026-11-12T13:56:41Z",
+      "omnimarket": "0.4.283",
+      "omnibase_infra": "0.38.63"
+    },
+    "runtime": {
+      "service_label": "omninode-runtime",
+      "started_at": "2026-11-16T07:08:30Z",
+      "omnimarket": "0.4.321",
+      "omnibase_infra": "0.38.77"
+    }
+  },
+  "nightly_failed_lines": [
+    "2026-11-16T07:59:15.3976234Z FAILED tests/delegation_golden/test_layer2_live_runner.py::TestDelegationGoldenTasksLive::test_case_behaves_as_expected[I9] - AssertionError: case I9 behavioral expectation failed: [\"terminal: expected 'completed', got 'unknown'\", 'tokens: expected positive, got input=0 output=0'] (model=cohere/north-mini-code:free cost=0.0 tokens=0/0 terminal=unknown)",
+    "2026-11-16T07:59:15.3977471Z FAILED tests/delegation_golden/test_layer2_live_runner.py::TestDelegationGoldenTasksLive::test_case_behaves_as_expected[I10] - AssertionError: case I10 behavioral expectation failed: [\"terminal: expected 'failed', got 'unknown'\"] (model=none cost=0.0 tokens=0/0 terminal=unknown)"
+  ],
+  "nightly_failed_lines_source": "verbatim from the log tail of omnimarket job 133161076598 (run 43826372809), read on 2026-11-17 with onex scm job-log. The tail carries no correlation id for I10, and I10 ran with model=none, so no delegation_events row of I10 is recorded here."
+}
