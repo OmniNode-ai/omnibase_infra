@@ -112,6 +112,26 @@ class DevBootFailedError(RuntimeError):
     """A dev runtime failed boot, or cannot be safely replaced."""
 
 
+class DevBootSettingsDriftError(DevBootFailedError):
+    """A healthy dev container carries a compose config hash the clone no longer renders.
+
+    The container was created from the compose files the deploy read when it ran
+    ``up``. The deploy-source clone is a canonical clone that the canonical-clone sync
+    fast-forwards while a job runs (OMN-25942: job 20cf29c6 pinned commit 925858038 at
+    08:04:02Z and the sync moved the clone at 08:12:26Z and 08:18:26Z), so the
+    capture after a verified roll can render other files than ``up`` did. The family is
+    healthy; only the recovery point cannot be advanced.
+    """
+
+    def __init__(self, service: str, container_hash: str, rendered_hash: str) -> None:
+        super().__init__(
+            f"{service}: compose settings differ from the healthy container"
+        )
+        self.service = service
+        self.container_hash = container_hash
+        self.rendered_hash = rendered_hash
+
+
 class DevBootRecoveryError(RuntimeError):
     """The candidate deploy failed, including when recovery succeeded."""
 
@@ -838,8 +858,10 @@ class HandlerDevBootGuard:
             if not hashes.get(service) or hashes[service] != labels.get(
                 "com.docker.compose.config-hash"
             ):
-                raise DevBootFailedError(
-                    f"{service}: compose settings differ from the healthy container"
+                raise DevBootSettingsDriftError(
+                    service,
+                    labels.get("com.docker.compose.config-hash", ""),
+                    hashes.get(service, ""),
                 )
         # Compose's canonical JSON already escapes literal dollars for reuse.
         # Preserve those strings verbatim when writing the recovery config.
@@ -1030,6 +1052,47 @@ class HandlerDevBootGuard:
         ):
             logger.warning("Cannot record recovered dev container ids", exc_info=True)
 
+    def _advance_point(self, job: str, commit: str) -> None:
+        """Record the verified family as the recovery point, or keep the one held.
+
+        A roll that reached this call was replaced, verified and Docker healthy. A
+        compose config hash that no longer matches (the clone moved after ``up``, see
+        :class:`DevBootSettingsDriftError`) says the family cannot be re-rendered
+        exactly, not that the deploy failed: rolling a verified family back to the
+        previous image recreates the runtime a second time and leaves dev one image
+        behind on every such job. The previous recovery point stays held and the drift
+        is written beside the incidents for the next reader.
+        """
+        try:
+            self.point.hold(self._capture())
+        except DevBootSettingsDriftError as drift:
+            logger.warning(
+                "Dev recovery point not advanced job=%s commit=%s service=%s "
+                "container_hash=%s rendered_hash=%s",
+                job,
+                commit,
+                drift.service,
+                drift.container_hash,
+                drift.rendered_hash,
+            )
+            record: dict[str, JsonValue] = {
+                "job": job,
+                "commit": commit,
+                "service": drift.service,
+                "container_config_hash": drift.container_hash,
+                "rendered_config_hash": drift.rendered_hash,
+                "kept_recovery_revision": (
+                    self.point.current.revision if self.point.current else ""
+                ),
+                "at": self.execution._dev_boot_timestamp(),
+            }
+            try:
+                self.execution._atomic_write_private_json(
+                    self.root / f"settings-drift-{job}.json", record
+                )
+            except OSError:
+                logger.warning("Cannot record dev settings drift", exc_info=True)
+
     @contextlib.contextmanager
     def protect(
         self,
@@ -1042,7 +1105,7 @@ class HandlerDevBootGuard:
             raise DevBootFailedError("no last healthy dev revision")
         try:
             yield
-            self.point.hold(self._capture())
+            self._advance_point(job, commit)
             _announce_start(self, job, success=True)
         except Exception as exc:
             _announce_start(self, job, success=False)
