@@ -32,6 +32,7 @@ script builds that image or repoints the operator env file.
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 from contextlib import nullcontext
@@ -59,6 +60,30 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 DEPLOY_SCRIPT = (
     REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
 )
+
+
+def _stability_composed_services() -> tuple[str, ...]:
+    # The deploy-agent venv installs a released omnibase_infra without this
+    # module, so the constant is read from the checked-out source.
+    source = (
+        REPO_ROOT
+        / "src"
+        / "omnibase_infra"
+        / "nodes"
+        / "node_setup_local_provision_effect"
+        / "runtime_cost_estimator_build.py"
+    )
+    for node in ast.parse(source.read_text(encoding="utf-8")).body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "STABILITY_TEST_COMPOSED_RUNTIME_SERVICES"
+            and node.value is not None
+        ):
+            return tuple(ast.literal_eval(node.value))
+    raise AssertionError("STABILITY_TEST_COMPOSED_RUNTIME_SERVICES is not declared")
+
+
 DEV_LANE_OVERLAY_BASENAME = "docker-compose.dev-lane.yml"
 
 
@@ -286,7 +311,10 @@ class TestTheBuildPhaseReachesThem:
     def test_a_stability_build_names_no_dev_lane_only_service(self) -> None:
         builds = self._captured_build_commands(EnumRuntimeLane.STABILITY_TEST)
         flat = {tok for cmd in builds for tok in cmd}
-        assert flat.isdisjoint(set(DEV_LANE_ONLY_RUNTIME_SERVICES))
+        # OMN-24562: the stability build names its composed runtime services,
+        # some of which are also dev-lane-only; nothing else from that set.
+        composed = set(_stability_composed_services())
+        assert flat.isdisjoint(set(DEV_LANE_ONLY_RUNTIME_SERVICES) - composed)
 
     def test_a_stability_build_does_not_pass_the_dev_lane_overlay(self) -> None:
         builds = self._captured_build_commands(EnumRuntimeLane.STABILITY_TEST)
