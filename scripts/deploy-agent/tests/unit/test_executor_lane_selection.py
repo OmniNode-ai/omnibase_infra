@@ -100,6 +100,9 @@ class TestComposeUpLaneSelection:
         def fake_run(
             cmd: list[str], timeout: int, **kwargs: object
         ) -> subprocess.CompletedProcess:
+            if cmd[:2] == ["docker", "inspect"]:
+                # OMN-25106: the roll reads a service's health before it rolls it.
+                return subprocess.CompletedProcess(cmd, 1, "", "No such object")
             captured.append(cmd)
             return _ok()
 
@@ -136,6 +139,9 @@ class TestComposeUpLaneSelection:
         def fake_run(
             cmd: list[str], timeout: int, **kwargs: object
         ) -> subprocess.CompletedProcess:
+            if cmd[:2] == ["docker", "inspect"]:
+                # OMN-25106: the roll reads a service's health before it rolls it.
+                return subprocess.CompletedProcess(cmd, 1, "", "No such object")
             captured.append(cmd)
             return _ok()
 
@@ -167,6 +173,9 @@ class TestComposeUpLaneSelection:
         def fake_run(
             cmd: list[str], timeout: int, **kwargs: object
         ) -> subprocess.CompletedProcess:
+            if cmd[:2] == ["docker", "inspect"]:
+                # OMN-25106: the roll reads a service's health before it rolls it.
+                return subprocess.CompletedProcess(cmd, 1, "", "No such object")
             captured.append(cmd)
             return _ok()
 

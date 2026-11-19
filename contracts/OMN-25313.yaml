@@ -1,0 +1,94 @@
+schema_version: 1.0.0
+ticket_id: OMN-25313
+title: Review findings 1 to 7 on omnibase_infra PR 6047 at head 7ce37985d13c are fixed or argued
+summary: >-
+  The review of the stability lane's writer roll found that the writers were recreated before the runtime build and the boot preflight had passed, that nothing read them healthy or on the runtime's image, that the stability compose read the DEV_LANE overlay roots directory with a relative default, that the assertion keeping other dev-only services out of a stability build was weakened, and that one fixture test compared literals with themselves. This change splits the roll into a build (after the runtime build) and a recreate (after the boot preflight) that reads each writer healthy, unrestarted and at the deploy's sha, makes the roots directory a required variable, restores the disjointness assertion over the dev-only services outside the seven writers, and folds the self-comparing test into the test that reads the real compose.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25313-review-findings
+    statement: The blocking review findings on the stability writer roll are fixed or argued with evidence.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the writers are recreated only after the runtime build and the boot preflight have passed, and a test with a raising preflight runs no up command -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails that test on the code at head 7ce37985d13c and passes at the new head'
+      - id: AC2
+        statement: 'AC2: the main build is ordered before the writers build in the roll''s staging order and a test asserts that order, so the writers sit at the deploy''s sha -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the writers build is moved before the main build'
+      - id: AC3
+        statement: 'AC3: the roll waits for each writer to be healthy and compares each writer''s image with the runtime''s, using the same compose environment as the up call, and a test covers a crash-looping writer and a writer on another image -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails both new cases when the wait and the image comparison are removed'
+      - id: AC4
+        statement: 'AC4: the stability compose reads the DEV_LANE paths with the required-variable form that fails fast, and a test reads the resolved values and not the raw strings, with the stability deploy environment shown to set dev''s paths -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when the compose line returns to a relative default'
+      - id: AC5
+        statement: 'AC5: the dev-only scope test keeps an isdisjoint assertion over the dev-only runtime services minus the seven writers, with the constant imported, and the self-comparing fixture test is folded into the test that reads the real compose and carries the terminal unknown value -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_lane_only_scope_omn18108.py scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q fails when a dev-only service outside the writers enters a stability build'
+      - id: AC6
+        statement: 'AC6: each of the seven blocking findings is fixed or argued with evidence in a PR comment, the required suites ran on the lab (in parts if a whole-suite run timed out, with the parts named), and a comment starting Lab: head=<full head sha> is at the new head, with the red run at the base shown -- falsifier: onex scm pr-view OmniNode-ai/omnibase_infra#6047 lists a comment per finding and the Lab comment at the new head sha'
+evidence_requirements:
+  - kind: tests
+    description: The stability writer roll tests and the dev-only scope tests pass.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py scripts/deploy-agent/tests/unit/test_dev_lane_only_scope_omn18108.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25313-ac1
+    description: >-
+      A refused boot preflight leaves no writer recreated on a RUNTIME or FULL rebuild, and a failed runtime build builds none.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "refused_boot_preflight or failed_runtime_build or rolls_order" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25313-ac2
+    description: >-
+      The main build, which stages the workspace, precedes the writers build, which reuses it, in a RUNTIME and a FULL rebuild.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k rolls_order -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25313-ac3
+    description: >-
+      A crash-looping, restarted, exited, unhealthy or never-healthy writer, and a writer on another image, fail the deploy; every read uses the environment compose up uses.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "not_healthy or another_image or deploys_revision or environment_compose_up_uses or waits_for_its_healthcheck" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25313-ac4
+    description: >-
+      The stability runtime main's overlay mounts resolve to dev's host directories under the deploy environment, and the deploy refuses without the roots directory.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "overlay or project_directory" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25313-ac5
+    description: >-
+      A stability build names no dev-only service outside the seven writers, and the recorded row's test reads the real compose.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_lane_only_scope_omn18108.py scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25313-ac6
+    description: >-
+      The pull request head moved off the reviewed head 7ce37985d13c. The check reads the pull request head only, never a comment: the per-finding comments and the Lab comment at the new head are posted by the lane and read by the reviewer, so this check runs under the local Done gate only.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: command
+        check_value: onex scm pr-view OmniNode-ai/omnibase_infra#6047 | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin)['result']['head_sha'] != '7ce37985d13cfec991ad56a1f1b0a41ae973e06c' else 1)"
+        cwd: .

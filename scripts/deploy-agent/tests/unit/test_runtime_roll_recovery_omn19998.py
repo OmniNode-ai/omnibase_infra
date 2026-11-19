@@ -29,7 +29,14 @@ def test_runtime_roll_recovery_preserves_failure_and_peer_images(
     elif failure == "timeout":
         roll.side_effect = subprocess.TimeoutExpired("compose up", 900)
     recovery = Mock(return_value=success)
-    monkeypatch.setattr(executor_mod, "_run", roll)
+
+    def run(cmd: list[str], *args: object, **kwargs: object) -> object:
+        if cmd[:2] == ["docker", "inspect"]:
+            # OMN-25106: the roll reads a service's health before it rolls it.
+            return subprocess.CompletedProcess(cmd, 1, "", "No such object")
+        return roll(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(executor_mod, "_run", run)
     monkeypatch.setattr(executor_mod.subprocess, "run", recovery)
     monkeypatch.setattr(executor_mod, "_compose_env", lambda *a, **k: {})
     monkeypatch.setattr(
