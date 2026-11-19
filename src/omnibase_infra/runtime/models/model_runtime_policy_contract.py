@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from omnibase_infra.models.contracts.model_dev_broker_memory_policy import (
     ModelDevBrokerMemoryPolicy,
 )
-from omnibase_infra.models.model_dev_recreate_window import ModelDevRecreatePolicy
+from omnibase_infra.models.model_dev_recreate_policy import ModelDevRecreatePolicy
 from omnibase_infra.runtime.models.model_runtime_profile_policy import (
     ModelRuntimeProfilePolicy,
 )

@@ -46,7 +46,7 @@ handler_routing:
         module: omnibase_infra.nodes.node_dev_roll_events_effect.dev_roll_events
       event_model:
         name: ModelDevRecreateAnnouncement
-        module: omnibase_infra.models.model_dev_recreate_window
+        module: omnibase_infra.models.model_dev_recreate_announcement
 capabilities:
   - name: dev_roll.announce
     description: Announce each dev runtime start, each accepted dev roll with its issuer, and each failed roll with its evidence.

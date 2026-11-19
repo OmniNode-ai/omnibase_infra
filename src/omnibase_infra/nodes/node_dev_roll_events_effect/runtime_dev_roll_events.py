@@ -19,7 +19,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol
 
 import yaml
 from pydantic import JsonValue
@@ -30,6 +30,15 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+
+class ProtocolRecreateGate(Protocol):
+    """What the dev recreate window gate offers its callers."""
+
+    def allow(
+        self, requested_by: str, observed_last: datetime | None = None
+    ) -> bool: ...
+
 
 _NODE = "src/omnibase_infra/nodes/node_dev_roll_events_effect"
 
@@ -141,18 +150,22 @@ def recreate_gate_at(
     repo_root: Path,
     last_recreate_at: datetime | None,
     announced_for: datetime | None = None,
-) -> object:
+) -> ProtocolRecreateGate:
     """The dev recreate window gate: the policy from the checkout's rendered env, announcing
     through the node's own publisher (OMN-25912). An unreadable policy is a refusing gate,
     never an open window."""
     try:
         for relative in (
             "enums/enum_dev_recreate_verdict.py",
-            "models/model_dev_recreate_window.py",
+            "enums/enum_dev_recreate_reason.py",
+            "models/model_dev_recreate_policy.py",
+            "models/model_dev_recreate_request.py",
+            "models/model_dev_recreate_decision.py",
+            "models/model_dev_recreate_announcement.py",
             "handlers/handler_dev_recreate_window.py",
         ):
             events._load_sibling(relative)
-        window = sys.modules["omnibase_infra.models.model_dev_recreate_window"]
+        window = sys.modules["omnibase_infra.models.model_dev_recreate_policy"]
         handler = sys.modules["omnibase_infra.handlers.handler_dev_recreate_window"]
         env: dict[str, str] = {}
         policy_env = repo_root / "docker" / "runtime-policy.env"
@@ -192,7 +205,7 @@ def newest_dev_recreate(state_dir: Path) -> datetime | None:
     return newest
 
 
-def window_admits(agent: Any, requested_by: str) -> bool:
+def window_admits(agent: object, requested_by: str) -> bool:
     """Whether the dev recreate window admits ``requested_by`` now (OMN-25912).
 
     The agent holds one gate, built on first use from the checkout's rendered policy;
@@ -200,10 +213,10 @@ def window_admits(agent: Any, requested_by: str) -> bool:
     records spends the window, so a merge's recreate counts too.
     """
     if not hasattr(agent, "_recreate_gate"):
-        agent._recreate_gate = recreate_gate_at(
+        agent.__dict__["_recreate_gate"] = recreate_gate_at(
             Path(__file__).resolve().parents[4], None
         )
-    gate = agent._recreate_gate
+    gate = agent.__dict__["_recreate_gate"]
     store = getattr(agent, "job_store", None)
     observed = newest_dev_recreate(Path(store.state_dir)) if store else None
     return gate is None or bool(gate.allow(requested_by, observed))

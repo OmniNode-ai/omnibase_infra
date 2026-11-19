@@ -20,11 +20,12 @@ import sys
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from omnibase_infra.nodes.node_dev_roll_events_effect.runtime_dev_roll_events import (
     EnumDevStartCause,
+    ProtocolRecreateGate,
     build_events_at,
     newest_dev_recreate,
     recreate_gate_at,
@@ -117,7 +118,7 @@ def window_holds_apply(
     state_dir: Path,
     *,
     repo_root: Path,
-    build: Callable[..., Any] = recreate_gate_at,
+    build: Callable[..., ProtocolRecreateGate] = recreate_gate_at,
 ) -> bool:
     """Whether the recreate window holds this reapply: its restart waits for the window.
 
