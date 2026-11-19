@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID, uuid4
 
@@ -32,6 +33,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ENGINE_INFO_COMMAND: tuple[str, ...] = ("docker", "info", "--format", "{{json .}}")
+_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+_READ_CHUNK_BYTES = 64 * 1024
 _MALFORMED = "Docker returned an invalid or incomplete engine observation"
 _DOCKER_MISSING = (
     "Docker is required: the `docker` command was not found on PATH. Install "
@@ -39,16 +42,68 @@ _DOCKER_MISSING = (
 )
 
 
+class _OutputLimitError(Exception):
+    """An engine observation exceeded the setup reader's byte limit."""
+
+
+async def _read_output(stream: asyncio.StreamReader | None) -> bytes:
+    output = bytearray()
+    if stream is not None:
+        while chunk := await stream.read(
+            min(_READ_CHUNK_BYTES, _MAX_OUTPUT_BYTES + 1 - len(output))
+        ):
+            output.extend(chunk)
+            if len(output) > _MAX_OUTPUT_BYTES:
+                raise _OutputLimitError
+    return bytes(output)
+
+
+async def _collect_output(proc: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
+    stdout = asyncio.create_task(_read_output(proc.stdout))
+    stderr = asyncio.create_task(_read_output(proc.stderr))
+    waited = asyncio.create_task(proc.wait())
+    try:
+        out, err, _ = await asyncio.gather(stdout, stderr, waited)
+        return out, err
+    finally:
+        # A failed reader must release its sibling before cleanup drains it.
+        for task in (stdout, stderr, waited):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(stdout, stderr, waited, return_exceptions=True)
+
+
 async def _read_engine(timeout_seconds: float) -> tuple[int, str, str]:
     """Run the engine read; return its exit code, stderr and stdout, stripped.
 
     A missing ``docker`` binary is exit 127 with a message naming Docker.
     """
+    # Match setup's command boundary: retain Docker host/context/TLS settings,
+    # but do not lend the child ONEX, Python import or Git checkout overrides.
+    environment = os.environ.copy()
+    for name in (
+        "PYTHONPATH",
+        "OMNI_HOME",
+        "OMNIBASE_PATH",
+        "ONEX_CONTRACTS_DIR",
+        "ONEX_CONFIG_DIR",
+        "ONEX_TENANT_ID",
+        "ONEX_TENANT_SLUG",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ):
+        environment.pop(name, None)
     try:
         proc = await asyncio.create_subprocess_exec(
             *ENGINE_INFO_COMMAND,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=environment,
         )
     except FileNotFoundError:
         return 127, _DOCKER_MISSING, ""
@@ -56,8 +111,11 @@ async def _read_engine(timeout_seconds: float) -> tuple[int, str, str]:
         return 1, "Docker engine observation could not be started", ""
     try:
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout_seconds
+            _collect_output(proc), timeout=timeout_seconds
         )
+    except _OutputLimitError:
+        await _kill_and_reap(proc)
+        raise
     except TimeoutError:
         await _kill_and_reap(proc)
         return 1, "Docker engine observation timed out", ""
@@ -68,11 +126,22 @@ async def _read_engine(timeout_seconds: float) -> tuple[int, str, str]:
         await _kill_and_reap(proc)
         raise
     returncode = proc.returncode if proc.returncode is not None else 1
+    stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
+    if returncode != 0 and stderr_text != "Cannot connect to the Docker daemon":
+        # Child diagnostics can contain credentials or private Docker context.
+        # Only the exact canonical daemon-down message is public; generated
+        # missing/start/read/timeout diagnostics returned above stay intact.
+        stderr_text = f"docker info exited with code {returncode}"
     return (
         returncode,
-        stderr_bytes.decode("utf-8", errors="replace").strip(),
+        stderr_text,
         stdout_bytes.decode("utf-8", errors="replace").strip(),
     )
+
+
+async def _drain_output(stream: asyncio.StreamReader) -> None:
+    while await stream.read(_READ_CHUNK_BYTES):
+        pass
 
 
 async def _kill_and_reap(proc: asyncio.subprocess.Process) -> None:
@@ -84,11 +153,15 @@ async def _kill_and_reap(proc: asyncio.subprocess.Process) -> None:
             pass
     # A paused pipe keeps asyncio's process waiter pending even after SIGKILL.
     # Drain both streams concurrently with the wait, including after a failed
-    # communicate(). One failed reader must not cancel the other or the reap.
+    # read. One failed reader must not cancel the other or the reap.
     try:
         await asyncio.wait_for(
             asyncio.gather(
-                *(stream.read() for stream in (proc.stdout, proc.stderr) if stream),
+                *(
+                    _drain_output(stream)
+                    for stream in (proc.stdout, proc.stderr)
+                    if stream
+                ),
                 proc.wait(),
                 return_exceptions=True,
             ),
@@ -171,9 +244,16 @@ class HandlerLocalEngineInfo:
         if "timeout_seconds" in envelope:
             request_data["timeout_seconds"] = envelope["timeout_seconds"]
         request = ModelLocalEngineInfoRequest.model_validate(request_data)
-        returncode, stderr_text, stdout_text = await _read_engine(
-            request.timeout_seconds
-        )
+        try:
+            returncode, stderr_text, stdout_text = await _read_engine(
+                request.timeout_seconds
+            )
+        except _OutputLimitError:
+            return _output(
+                corr_id,
+                "malformed",
+                error="Docker engine observation exceeded the output limit",
+            )
         if returncode != 0:
             logger.error("docker info failed (rc=%d)", returncode)
             return _output(

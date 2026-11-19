@@ -49,8 +49,28 @@ _GOOD = {"NCPU": 8, "MemTotal": 8 * 1024**3, "OSType": "linux"}
 def _proc(stdout: bytes = b"", stderr: bytes = b"", returncode: int = 0) -> MagicMock:
     proc = MagicMock()
     proc.communicate = AsyncMock(return_value=(stdout, stderr))
+    for name, data in (("stdout", stdout), ("stderr", stderr)):
+        stream = asyncio.StreamReader()
+        stream.feed_data(data)
+        stream.feed_eof()
+        setattr(proc, name, stream)
+    proc.wait = AsyncMock(return_value=returncode)
     proc.returncode = returncode
     return proc
+
+
+def _fail_next_read(stream: asyncio.StreamReader) -> None:
+    original_read = stream.read
+    failed = False
+
+    async def read(size: int = -1) -> bytes:
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise OSError("sentinel-secret")
+        return await original_read(size)
+
+    stream.read = read
 
 
 async def _run(exec_mock: Any) -> ModelLocalEngineInfoResult:
@@ -225,7 +245,8 @@ async def test_interrupted_observation_leaves_no_running_child(outcome: str) -> 
         return proc
 
     if outcome == "read-error":
-        proc.communicate = AsyncMock(side_effect=OSError("sentinel-secret"))
+        assert proc.stdout is not None
+        _fail_next_read(proc.stdout)
     try:
         with patch(_EXEC, observed_process):
             task = asyncio.create_task(
@@ -317,7 +338,7 @@ async def test_read_failure_drains_full_pipes_before_reaping(descriptor: int) ->
 
     try:
         await asyncio.wait_for(saturated(), timeout=5)
-        proc.communicate = AsyncMock(side_effect=OSError("sentinel-secret"))
+        _fail_next_read(stream)
         with patch(_EXEC, AsyncMock(return_value=proc)):
             code, error, output = await asyncio.wait_for(_read_engine(0.01), timeout=5)
         assert code != 0
@@ -372,7 +393,8 @@ async def test_inherited_pipe_deadline_preserves_the_original_outcome(
     try:
         assert await asyncio.wait_for(proc.stderr.readline(), timeout=5) == b"ready\n"
         if outcome == "read-error":
-            proc.communicate = AsyncMock(side_effect=OSError("sentinel-secret"))
+            assert proc.stdout is not None
+            _fail_next_read(proc.stdout)
         with (
             patch(_EXEC, observed_process),
             patch(
@@ -407,3 +429,189 @@ async def test_inherited_pipe_deadline_preserves_the_original_outcome(
             proc.kill()
         await asyncio.wait_for(original_communicate(), timeout=5)
         await asyncio.wait_for(proc.wait(), timeout=5)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [4 * 1024 * 1024, 4 * 1024 * 1024 + 1])
+async def test_engine_output_limit_precedes_json_parsing(size: int) -> None:
+    """Even valid JSON above the previous setup reader's limit is refused."""
+    command = (
+        sys.executable,
+        "-c",
+        'import os,sys; data=b\'{"NCPU":8,"MemTotal":1024}\'; '
+        "data+=b' '*(int(sys.argv[1])-len(data)); os.write(1,data)",
+        str(size),
+    )
+    with (
+        patch(
+            "omnibase_infra.handlers.handler_local_engine_info.ENGINE_INFO_COMMAND",
+            command,
+        ),
+        patch(
+            "omnibase_infra.handlers.handler_local_engine_info.json.loads",
+            wraps=json.loads,
+        ) as parse,
+    ):
+        result = await HandlerLocalEngineInfo(MagicMock()).execute({})
+    observation = result.result
+    assert isinstance(observation, ModelLocalEngineInfoResult)
+    if size == 4 * 1024 * 1024:
+        assert observation.success
+        parse.assert_called_once()
+    else:
+        assert not observation.success
+        assert observation.engine_status == "malformed"
+        assert observation.error and "output limit" in observation.error
+        parse.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("descriptor", [1, 2])
+async def test_oversized_pipe_is_stopped_before_the_process_deadline(
+    descriptor: int,
+) -> None:
+    """An oversized writer is stopped and reaped rather than buffered to timeout."""
+    from omnibase_infra.models.model_local_engine_info_request import (
+        ModelLocalEngineInfoRequest,
+    )
+
+    original_exec = asyncio.create_subprocess_exec
+    children: list[asyncio.subprocess.Process] = []
+
+    async def fixture_process(
+        *args: object, **kwargs: Any
+    ) -> asyncio.subprocess.Process:
+        proc = await original_exec(
+            sys.executable,
+            "-c",
+            f"import os,time; os.write({descriptor}, b'x' * (4*1024*1024+1)); time.sleep(60)",
+            **kwargs,
+        )
+        children.append(proc)
+        return proc
+
+    try:
+        with patch(_EXEC, fixture_process):
+            result = await HandlerLocalEngineInfo(MagicMock()).handle_async(
+                ModelLocalEngineInfoRequest(correlation_id=uuid4(), timeout_seconds=1)
+            )
+        assert result.engine_status == "malformed"
+        assert result.error and "output limit" in result.error
+        assert len(result.error) < 200
+        assert children[0].returncode is not None
+    finally:
+        for proc in children:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.communicate()
+            await proc.wait()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", ["stdin", "environment"])
+async def test_engine_read_has_no_stdin_and_preserves_docker_environment(
+    monkeypatch: pytest.MonkeyPatch, policy: str
+) -> None:
+    original_exec = asyncio.create_subprocess_exec
+    children: list[asyncio.subprocess.Process] = []
+    for name in (
+        "PYTHONPATH",
+        "OMNI_HOME",
+        "OMNIBASE_PATH",
+        "ONEX_CONFIG_DIR",
+        "ONEX_CONTRACTS_DIR",
+        "ONEX_TENANT_ID",
+        "ONEX_TENANT_SLUG",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ):
+        monkeypatch.setenv(name, "control-value")
+    for name in (
+        "DOCKER_HOST",
+        "DOCKER_CONTEXT",
+        "DOCKER_TLS_VERIFY",
+        "DOCKER_CERT_PATH",
+    ):
+        monkeypatch.setenv(name, "docker-control")
+    observed: dict[str, Any] = {}
+
+    async def fixture_process(
+        *args: object, **kwargs: Any
+    ) -> asyncio.subprocess.Process:
+        observed.update(kwargs)
+        proc = await original_exec(
+            sys.executable, "-c", 'print(\'{"NCPU":8,"MemTotal":1024}\')', **kwargs
+        )
+        children.append(proc)
+        return proc
+
+    with patch(_EXEC, fixture_process):
+        result = await HandlerLocalEngineInfo(MagicMock()).execute({})
+    assert result.result.success
+    if policy == "stdin":
+        assert observed.get("stdin") == asyncio.subprocess.DEVNULL
+        return
+    environment = observed["env"]
+    assert all(
+        environment.get(name) == "docker-control"
+        for name in (
+            "DOCKER_HOST",
+            "DOCKER_CONTEXT",
+            "DOCKER_TLS_VERIFY",
+            "DOCKER_CERT_PATH",
+        )
+    )
+    assert all(
+        name not in environment
+        for name in (
+            "PYTHONPATH",
+            "OMNI_HOME",
+            "OMNIBASE_PATH",
+            "ONEX_CONFIG_DIR",
+            "ONEX_CONTRACTS_DIR",
+            "ONEX_TENANT_ID",
+            "ONEX_TENANT_SLUG",
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        )
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "benign-private-docker-sentinel",
+        "Cannot connect to the Docker daemon: benign-private-docker-sentinel",
+    ],
+)
+async def test_nonzero_engine_output_is_not_a_public_diagnostic(stderr: str) -> None:
+    command = (
+        sys.executable,
+        "-c",
+        "import sys; sys.stderr.write(sys.argv[1]); sys.exit(42)",
+        stderr,
+    )
+    with patch(
+        "omnibase_infra.handlers.handler_local_engine_info.ENGINE_INFO_COMMAND", command
+    ):
+        output = await HandlerLocalEngineInfo(MagicMock()).execute({})
+    result = output.result
+    assert isinstance(result, ModelLocalEngineInfoResult)
+    assert not result.success
+    assert result.engine_status == "unavailable"
+    assert result.engine_cpus is None and result.engine_memory_bytes is None
+    assert "benign-private-docker-sentinel" not in result.model_dump_json()
+    assert result.error == "docker info exited with code 42"
