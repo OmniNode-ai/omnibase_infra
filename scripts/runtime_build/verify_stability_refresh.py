@@ -69,6 +69,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -134,6 +135,22 @@ _lab_pass = importlib.util.module_from_spec(_LAB_PASS_SPEC)
 sys.modules[_LAB_PASS_SPEC.name] = _lab_pass
 _LAB_PASS_SPEC.loader.exec_module(_lab_pass)
 check_lane_sync = _lab_pass.check_lane_sync
+
+# OMN-25927: every rpk read goes as the gate's own principal once the broker requires
+# SASL; node_verify_stability_refresh's handler builds the argv (loaded by path, stdlib only).
+_GATE_SPEC = importlib.util.spec_from_file_location(
+    "handler_verify_stability_refresh",
+    Path(__file__).resolve().parents[2]
+    / "src/omnibase_infra/handlers/handler_verify_stability_refresh.py",
+)
+assert _GATE_SPEC is not None and _GATE_SPEC.loader is not None
+_gate = importlib.util.module_from_spec(_GATE_SPEC)
+_GATE_SPEC.loader.exec_module(_gate)
+
+
+def _rpk_exec(broker_container: str, *args: str) -> list[str]:
+    return _gate.rpk_exec_argv(broker_container, *args, environ=os.environ)
+
 
 # OCI label stamped from VCS_REF/GIT_SHA at build time (Dockerfile.runtime).
 _REVISION_LABEL = "org.opencontainers.image.revision"
@@ -669,16 +686,9 @@ def check_cluster_health(
 ) -> tuple[bool, str]:
     try:
         result = _run(
-            [
-                "docker",
-                "exec",
-                broker_container,
-                "rpk",
-                "cluster",
-                "health",
-                "-X",
-                "brokers=redpanda:9092",
-            ],
+            _rpk_exec(
+                broker_container, "cluster", "health", "-X", "brokers=redpanda:9092"
+            ),
             runner=runner,
         )
     except subprocess.TimeoutExpired:
@@ -707,16 +717,13 @@ def _get_partition_cap(
     """Read the live ``topic_partitions_per_shard`` cluster config value."""
     try:
         result = _run(
-            [
-                "docker",
-                "exec",
+            _rpk_exec(
                 broker_container,
-                "rpk",
                 "cluster",
                 "config",
                 "get",
                 "topic_partitions_per_shard",
-            ],
+            ),
             runner=runner,
         )
     except subprocess.TimeoutExpired:
@@ -755,7 +762,7 @@ def _get_total_partitions(
     """
     try:
         result = _run(
-            ["docker", "exec", broker_container, "rpk", "topic", "list"],
+            _rpk_exec(broker_container, "topic", "list"),
             runner=runner,
         )
     except subprocess.TimeoutExpired:
@@ -842,15 +849,7 @@ def _rpk(
     """Run one ``rpk`` subcommand inside the broker container."""
     try:
         result = _run(
-            [
-                "docker",
-                "exec",
-                broker_container,
-                "rpk",
-                *args,
-                "-X",
-                "brokers=redpanda:9092",
-            ],
+            _rpk_exec(broker_container, *args, "-X", "brokers=redpanda:9092"),
             runner=runner,
         )
     except subprocess.TimeoutExpired:
