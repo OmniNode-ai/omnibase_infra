@@ -72,6 +72,13 @@ requirements:
         statement: 'AC20: a stability runtime still failing past its declared start budget fails the job, which the agent turns into the rollback, and nothing is recreated; a shorter declared budget gives fewer probes than a longer one, so the wait is read from the container and not from a constant -- falsifier: the outlives-its-budget and wait-length tests fail when the wait length is a fixed number or the failed job passes'
       - id: AC21
         statement: 'AC21: dev behaves as before (the same one service-label lookup, the same wait, the recreate allowlist still dev only) and prod gets neither the wait nor a recreate -- falsifier: the dev lookup, fence and prod tests of the same file fail when stability or prod joins VERIFY_RECREATE_LANES or prod joins VERIFY_START_WAIT_LANES'
+  - id: req-omn24562-stability-composed-build
+    statement: The stability lane builds the runtime, worker, projection api and projection writers on omnimarket's composed image, as the dev lane does, so the kernel boots with BIFROST_BASE_CONTRACT_PATH set; the dev build is unchanged.
+    acceptance:
+      - id: AC18
+        statement: 'AC18: the stability overlay renders every runtime-profile service on the composed omnimarket build and the stability build names the overlay and those services, while the dev build argv is unchanged -- falsifier: scripts/deploy-agent/tests/unit/test_stability_composed_build_omn24562.py or tests/unit/docker/test_stability_composed_runtime_image_omn24562.py fails at the merge base'
+      - id: AC25
+        statement: 'AC25: integrated: after the agent is installed from the integration branch, one stability-follow job on h201 ends with outcome success and the stability omninode-runtime container reports healthy -- falsifier: the job record shows another outcome, or the container restarts with BIFROST_BASE_CONTRACT_PATH unset'
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -277,4 +284,28 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "python3 -c 'import glob, json, sys; hits = glob.glob(\"/data/omninode/deploy-agent/state/jobs-dev/\" + sys.argv[1] + \"*.json\"); rec = json.load(open(hits[0])) if len(hits) == 1 else {}; sys.exit(0 if rec.get(\"phase_results\", {}).get(\"verification\") == \"success\" and rec.get(\"status\") == \"success\" else 1)' \"${STABILITY_FOLLOW_JOB_ID:?set STABILITY_FOLLOW_JOB_ID to the stability-follow job id}\""
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac13-stability-composed-build
+    description: The stability overlay builds on the composed image, the stability build argv names the overlay and the composed services under the stability project, and the dev build is unchanged.
+    source: manual
+    binds_ac:
+      - AC18
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_stability_composed_runtime_image_omn24562.py tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_composed_build_omn24562.py tests/unit/test_dev_lane_composed_build_omn21279.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/docker/test_stability_composed_build_services_omn24562.py -q -p no:cacheprovider --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac14-stability-follow-green
+    description: Hosted stand-in for AC25, which is read on h201 after the agent is installed from the integration branch. The overlay on the branch carries the composed build anchor; the merge base has none.
+    source: manual
+    binds_ac:
+      - AC25
+    checks:
+      - check_type: command
+        check_value: grep -q 'x-composed-runtime-build' docker/docker-compose.stability-t*.yml
         cwd: ${OMNI_HOME}/omnibase_infra
