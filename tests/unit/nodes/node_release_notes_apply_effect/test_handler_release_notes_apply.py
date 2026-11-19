@@ -431,7 +431,10 @@ class TestHandler:
         entry.write_text(_ENTRY, encoding="utf-8")
         result = await HandlerReleaseNotesApply().handle(
             ModelReleaseNotesApplyRequest(
-                clone_path=str(clone), entry_file=str(entry), repo_name="omnibase_core"
+                clone_path=str(clone),
+                entry_file=str(entry),
+                repo_name="omnibase_core",
+                repository_visibility="private",
             )
         )
         assert result.success is True
@@ -447,7 +450,9 @@ class TestHandler:
         entry.write_text(_ENTRY, encoding="utf-8")
         result = await HandlerReleaseNotesApply().handle(
             ModelReleaseNotesApplyRequest(
-                clone_path=str(tmp_path), entry_file=str(entry)
+                clone_path=str(tmp_path),
+                entry_file=str(entry),
+                repository_visibility="private",
             )
         )
         assert result.success is False
@@ -458,7 +463,9 @@ class TestHandler:
     async def test_handle_reports_a_missing_entry_file(self, tmp_path: Path) -> None:
         result = await HandlerReleaseNotesApply().handle(
             ModelReleaseNotesApplyRequest(
-                clone_path=str(tmp_path), entry_file=str(tmp_path / "absent.md")
+                clone_path=str(tmp_path),
+                entry_file=str(tmp_path / "absent.md"),
+                repository_visibility="private",
             )
         )
         assert result.success is False
@@ -489,6 +496,33 @@ class TestCutJobWiring:
             "repo's .readme-only-docs.yaml"
         )
         assert "staged=(CHANGELOG.md)" not in body
+
+    def test_the_cut_job_reads_the_hygiene_vocabulary_for_public_targets(self) -> None:
+        steps = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))["jobs"]["cut"][
+            "steps"
+        ]
+        by_name = {step["name"]: step for step in steps}
+        visibility = by_name["Resolve release repository visibility"]
+        token = by_name["Mint public hygiene vocabulary reader token"]
+        read = by_name["Read the public hygiene vocabulary"]
+        write = by_name["Open the release pull request"]
+
+        assert "gh api" in visibility["run"] and "--jq .visibility" in visibility["run"]
+        assert (
+            token["if"]
+            == read["if"]
+            == "steps.target-visibility.outputs.visibility == 'public'"
+        )
+        assert token["with"]["permission-contents"] == "read"
+        assert read["env"]["VOCABULARY_REPO"] == "${{ vars.OMNI_HYGIENE_VOCAB_REPO }}"
+        assert read["env"]["VOCABULARY_FILE"] == "${{ vars.OMNI_HYGIENE_VOCAB_FILE }}"
+        assert token["with"]["repositories"] == read["env"]["VOCABULARY_REPO"]
+        assert (
+            write["env"]["TARGET_VISIBILITY"]
+            == "${{ steps.target-visibility.outputs.visibility }}"
+        )
+        assert "repository_visibility: $visibility" in write["run"]
+        assert "hygiene_vocabulary_file: $vocabulary" in write["run"]
 
     def test_the_cut_job_reads_the_staged_paths_without_masking_a_bad_receipt(
         self,

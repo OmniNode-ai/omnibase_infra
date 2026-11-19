@@ -117,6 +117,8 @@ requirements:
         statement: 'AC50: the scanned workflow, pin, compose, handshake, config and script files carry no retired package token outside whole-line comments -- falsifier: uv run pytest tests/ci/test_no_omnibase_compat_live_use.py -q -n 0 --no-cov'
   - id: req-omn19998-pool-prove-first-party-context
     statement: The pre-merge pool prover's image build for an isolated member passes the pre-PR slot first-party audit context the tree under test declares, so the runtime image audit no longer refuses the unmerged target built from a branch, and the prover stages the siblings at dev-merge tags for an infra proof as for every other, so lab proofs stop reading INCONCLUSIVE at the image audit.
+  - id: req-omn19998-pool-proof-log-kept
+    statement: A pool proof reads its build logs back over its transport before the teardown phase removes the work directory, keeps them in a directory beside the pr-head receipts that the receipt's stack_built evidence names, and prints the failing build step instead of the last four log lines, so a proof that ends INCONCLUSIVE leaves its cause readable; two INCONCLUSIVE proofs in a row for one repository write one lab-proof-alarm STATUS row naming the repository and both proof ids, and an INCONCLUSIVE after a PASS, or two INCONCLUSIVE proofs of different repositories, write none.
 evidence_requirements:
   - kind: tests
     description: The existing fleet-floor and multiarch tests check the baked runner version, lock agreement and architecture-specific checksum selection.
@@ -217,6 +219,9 @@ evidence_requirements:
   - kind: tests
     description: The pool prover tests read the isolated member's build command for the FIRST_PARTY_BUILD_CONTEXT build arg, run the context assignment as written against the real policy, and expect the pre-PR slot context that accepts a branch target; they fail on the merge base, whose build passes no such arg.
     command: uv run pytest tests/unit/scripts/test_prepr_pool_first_party_context_omn19998.py tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q -n 0 --no-cov
+  - kind: tests
+    description: The proof-log tests run the driver's real read-back command in a real shell against a work directory that the fake host's teardown phase removes, and read the full build log back at the path the receipt's stack_built evidence names; a failed build prints its failing step; two INCONCLUSIVE proofs in a row for one repository write the alarm row, an INCONCLUSIVE after a PASS or for another repository writes none.
+    command: uv run pytest tests/unit/scripts/test_prepr_pool_proof_logs_omn19998.py -q -n 0 --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1476,6 +1481,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/scripts/test_prepr_pool_first_party_context_omn19998.py tests/unit/scripts/test_prepr_pool_stage0_tags_omn17427.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn19998-pool-proof-log-kept
+    description: The full build log survives a teardown that removes the work directory and is readable at the path the receipt names, the failing build step is printed, and the INCONCLUSIVE-streak alarm row is written for two in a row of one repository and for no other sequence. The log-kept test fails on the merge base, whose driver reads no log back before teardown.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_pool_proof_logs_omn19998.py -q -n 0 --no-cov
         cwd: .
     binds_ac:
       - AC1
