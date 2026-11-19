@@ -8,6 +8,11 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn22867-pr-runner-placement
+    statement: Fix the public runner placement findings in the first batch of remaining PR gates.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: each of the five pull requests reads every required check green at its head or has its own red fixed forward on its branch, with each fix proven on a lab host -- falsifier: uv run pytest of each fix''s focused tests plus the check-runs read at each head'
   - id: req-omn22867-family1-hosted
     statement: Each gate workflow of the family selects only the GitHub-hosted label and is allowlisted with a reason.
     acceptance:
@@ -44,6 +49,15 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn22867-ac1-pr-runner-placement
+    description: Verify public hosted placement and the preserved private routing for the three PR gate workflows in this batch.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runner_routing_audit.py -k public_ci_proofs_use_a_hosted_runner -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn22867-ac1-family-hosted
     description: Every job of each family workflow selects ubuntu-latest and each file is allowlisted with a reason.
     source: manual
@@ -97,4 +111,31 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_public_runner_family_static_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22867-ac1-migration-sequence-git-discovery
+    description: The migration sequence hook reports git's own discovery failure with git's status and prints no git usage block, so the lane hook preflight no longer reads it as a hook usage error.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_migration_sequence_check_node.py tests/ci/test_node_parity_migration_sequence_parity_omn20568.py -k "GitDiscovery or git_failure" -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22867-integration-proof-staged-paths
+    description: Post-deploy probe. The runtime container imports the staged-paths git helper the migration sequence hook now reads through; it fails while the deployed runtime lacks the module. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'import omnibase_infra.handlers.git_staged_paths'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22867-ac1-git-staged-paths-integration
+    description: The staged-paths helper reads a real git repository and raises GitDiscoveryError with git's own text outside one.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_git_staged_paths_integration.py -q -o addopts=''
         cwd: ${OMNI_HOME}/omnibase_infra

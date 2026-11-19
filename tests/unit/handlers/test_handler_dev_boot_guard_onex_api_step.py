@@ -49,6 +49,7 @@ def _roll_execution() -> ModuleType:
     module.__dict__.update(
         EnumRuntimeLane=_Lane,
         ONEX_API_SERVICE="onex-api",
+        SERVICE_HEALTH_TARGET_INDEX={},
         runtime_health_probe_budget=lambda lane, service: 5,
         RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS=5,
         CONTAINER_VERIFY_TIMEOUT_SECONDS=5,

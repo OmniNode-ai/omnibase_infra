@@ -1,0 +1,65 @@
+schema_version: 1.0.0
+ticket_id: OMN-25110
+title: Review findings 1 to 5 on omnibase_infra PR 6039 at head ebce1bc5d110 are fixed or argued
+summary: >-
+  Review findings 1 to 5 on the pull request that mounts the real lane declaration folder in the dev runtime compose (OMN-24854). The contract of that change no longer binds a lab observation to checks that pass whatever the lab shows, the refresh and the agent refuse a lane declaration folder that holds no ci_bus_lanes.yaml, every caller of the two dev compose files sets ONEX_LANE_DECLARATION_DIR, the compose tests drop an ambient declaration folder, and a mistyped overlay directory is refused instead of rendering without the lane overlay. The ticket's fifth criterion (a Lab comment that names the pushed head, and the required suites run on the lab) is a state of the pull request and is read there; no repository check can bind it, so this contract declares only the first four.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25110-review-findings
+    statement: The review findings that block the OMN-24854 pull request are fixed, each with a test that fails at the reviewed head.
+    acceptance:
+      - id: AC1
+        statement: "AC1: contracts/OMN-24854.yaml binds its lab-observation criterion to a check that fails until the h201 run line is recorded (or binds a mount-source criterion and leaves that criterion open), and the pin at tests/ci/test_contract_omn24854_checks.py:72 is dropped -- falsifier: uv run --frozen pytest tests/ci/test_contract_omn24854_checks.py -q goes red when the lab criterion check is run against a tree with no recorded h201 run line"
+      - id: AC2
+        statement: "AC2: the refresh and the agent refuse a pinned or derived lane declaration folder that lacks ci_bus_lanes.yaml, for a stale ambient ONEX_LANE_DECLARATION_DIR and for a shell holding only the rendered ONEX_LANE_OVERLAY_DIR, with a test for each -- falsifier: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q fails at head ebce1bc5d110 and passes at the new head"
+      - id: AC3
+        statement: "AC3: every script, workflow and agent path that runs docker-compose.dev-lane.yml or docker-compose.dev-tenant-fold.yml sets the required variable, render_stack supplies it, the two required-env manifests are checked, and a render test fails with only ONEX_LANE_OVERLAY_DIR set -- falsifier: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py -q fails with the variable unset at the head and passes at the new head"
+      - id: AC4
+        statement: "AC4: the dev_agent fixture of the llm endpoint compose tests removes the ambient declaration folder so the tests pass in a shell that sourced the new refresh, and render_dev_lane refuses a non-directory overlay folder with a test -- falsifier: ONEX_LANE_DECLARATION_DIR=/nonexistent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q is red before the fix and green after it"
+evidence_requirements:
+  - kind: tests
+    description: The contract checks, the deploy agent test file and the dev lane compose binding test file.
+    command: uv run --frozen pytest tests/ci/test_contract_omn24854_checks.py tests/ci/test_dev_lane_ledger_source_binding.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25110-ac1
+    description: The OMN-24854 contract binds only its mount-source criterion and leaves the lab criteria open; its checks are tested to go red when the compose mount line is reverted, commented out or loosened.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_omn24854_checks.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25110-ac2
+    description: The refresh and the agent refuse a lane declaration folder, pinned or derived from the overlay directory, that holds no ci_bus_lanes.yaml, and a mistyped overlay directory.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25110-ac3
+    description: The compose file helpers and the pre-PR slot script set the declaration folder, and a compose render with only the overlay directory set is refused by name.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25110-ac4
+    description: The dev_agent fixture drops an ambient declaration folder, and the agent and the refresh refuse a mistyped overlay directory.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra

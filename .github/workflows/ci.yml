@@ -324,6 +324,9 @@ jobs:
       - name: Rolling runner registration preflight (OMN-18877)
         run: uv run --frozen pytest tests/ci/test_deploy_runners_registration_preflight.py -q
 
+      - name: Secondary runner image roll (OMN-25796)
+        run: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -q -n 0 --no-cov
+
       - name: Caller-owned imperative guard regression (OMN-21004)
         run: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
 
@@ -1667,7 +1670,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: fccc55217859f6091a2c746f7acbb06045ef54e3 # .github/sibling-pins.yaml
+          ref: 0238884e3849e2917bf79cc164a8e1cb9a2eaf82 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -2545,7 +2548,13 @@ jobs:
       # job's result feeds the required "CI Summary" through "CI Tests Gate".
       - name: Verify release train decision surface (OMN-20715)
         if: matrix.split == 1
-        run: uv run --frozen pytest tests/scripts/test_release_train_nightly.py tests/scripts/test_release_pr_open_omn18595.py -q --no-cov
+        run: >-
+          uv run --frozen pytest tests/scripts/test_release_train_nightly.py
+          tests/scripts/test_release_pr_open_omn18595.py
+          tests/ci/test_release_train_live_contact_omn25794.py
+          tests/integration/cli/test_release_notes_apply_node_omn17427.py
+          tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py
+          -q --no-cov
 
       # OMN-21279: the change-aware selector does not pick tests/scripts/ for a
       # contracts/ change. omnibase_infra#5370 repeated a criterion label that
@@ -4454,12 +4463,15 @@ jobs:
   # OMN-23246 (RULING 2026-11-09T01:57:48Z): the validator and policy are read from the
   # omnibase_core dev-merge tag below (omnibase_core#2298), not from the tag the workflow
   # file is called at. Its policy exempts the one check-public-runner-placement hook rev
-  # (1c9566e2c249) from the 14-tag bound until 2026-11-16 and nothing else; the migration
+  # (1c9566e2c249) from the 14-tag bound until 2026-11-24 and nothing else; the migration
   # ticket OMN-22867 bumps that rev and deletes this input in the same change.
+  # OMN-25506 (RULING 2026-11-18T01:29:21Z): the one-week extension merged in
+  # omnibase_core#2333 (dev-20261118030813-4f0a188ab62c); the input names that tag so this
+  # job reads the extended date, because the tag it replaced still held the date 2026-11-16.
   dependency-pins:
     uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261110125852-e6bc5e13e9e7
     with:
-      omnibase-core-ref: dev-20261109032923-9f0af2b9bd43
+      omnibase-core-ref: dev-20261118030813-4f0a188ab62c
     permissions:
       contents: read
 

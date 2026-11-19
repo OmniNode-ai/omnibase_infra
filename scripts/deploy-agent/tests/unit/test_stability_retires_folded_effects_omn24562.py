@@ -41,13 +41,25 @@ def _committed_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_stability_disables_only_the_folded_effects_service() -> None:
+def test_stability_disables_the_folded_effects_and_the_overlay_disabled_services() -> (
+    None
+):
     config = lane_config_for(EnumRuntimeLane.STABILITY_TEST)
-    assert config.disabled_services == frozenset({"runtime-effects"})
+    assert config.disabled_services == frozenset(
+        {"runtime-effects", "autoheal", "context-audit-consumer"}
+    )
     requested = _requested_services_for_up(
         Scope.RUNTIME, [], lane=EnumRuntimeLane.STABILITY_TEST
     )
-    assert "runtime-effects" not in requested
+    # The dev lane holds the base container names of the last two; naming them in
+    # this lane's up list would recreate them under those names.
+    assert {"runtime-effects", "autoheal", "context-audit-consumer"}.isdisjoint(
+        requested
+    )
+    # Positive control: the lane-agnostic runtime list still names both.
+    assert {"autoheal", "context-audit-consumer"} <= set(
+        _requested_services_for_up(Scope.RUNTIME, [], lane=None)
+    )
     # Positive control: the services the lane still runs by name stay requested.
     assert {"omninode-runtime", "runtime-worker"} <= set(requested)
 

@@ -3338,6 +3338,22 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37": {
+      "category": "command",
+      "contract_name": "node_runner_image_roll",
+      "event_model_module": "omnibase_infra.models.model_runner_image_roll_request",
+      "event_model_name": "ModelRunnerImageRollRequest",
+      "handler_id": "dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37",
+      "handler_module": "omnibase_infra.handlers.handler_runner_image_roll",
+      "handler_name": "HandlerRunnerImageRoll",
+      "message_types": [
+        "ModelRunnerImageRollRequest",
+        "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}",
+        "platform.runner-image-roll"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_runner_usage_effect.HandlerRunnerUsageSavings.runner_usage_estimate_savings_7c9f313b": {
       "category": "event",
       "contract_name": "node_runner_usage_effect",
@@ -3859,15 +3875,15 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 161
+        "omnibase_infra": 165
       },
-      "contracts_discovered": 182,
+      "contracts_discovered": 186,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 104,
-      "probe_count": 1141,
-      "registered_dispatchers": 140,
-      "registered_routes": 123,
-      "type_scoped_dispatchers": 87
+      "distinct_subscribe_topics": 105,
+      "probe_count": 1144,
+      "registered_dispatchers": 141,
+      "registered_routes": 124,
+      "type_scoped_dispatchers": 88
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3913,10 +3929,10 @@
       "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-11-15T16:55:15.875804+00:00",
+    "generated_at_utc": "2026-11-19T11:11:31.984252+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.73.dev9+ga09066ca",
-      "omnibase-infra": "0.38.77",
+      "omnibase-infra": "0.38.78",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
@@ -4639,6 +4655,21 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:contract:platform.CMD_REQUEST_INTROSPECTION_V1}"
+    },
+    "P1a::${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.runner-image-roll",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_PLATFORM_V1}",
+        "message_category": "command",
+        "message_type": "platform.runner-image-roll",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}"
     },
     "P1a::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -6223,6 +6254,21 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:contract:platform.CMD_REQUEST_INTROSPECTION_V1}"
+    },
+    "P1b::${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}"
     },
     "P1b::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -24613,6 +24659,26 @@
       },
       "topic": "${topic:contract:omnibase-infra.CMD_RUNNER_FLEET_SNAPSHOT_GATHER_V1}"
     },
+    "P4::dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37::${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37",
+      "event_model": "omnibase_infra.models.model_runner_image_roll_request.ModelRunnerImageRollRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runner-image-roll",
+        "payload": "ModelRunnerImageRollRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.runner-image-roll",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}"
+    },
     "P4::dispatcher.auto.node_runner_usage_effect.HandlerRunnerUsageSavings.runner_usage_estimate_savings_7c9f313b::${topic:contract:omninode.EVT_RUNNER_USAGE_RECORDED_V1}": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_runner_usage_effect.HandlerRunnerUsageSavings.runner_usage_estimate_savings_7c9f313b",
@@ -26727,6 +26793,16 @@
       "route_id": "route.auto.node_runner_health_snapshot_effect.HandlerRunnerFleetSnapshot.onex_cmd_omnibase_infra_runner_fleet_snapshot_gather_v1",
       "topic": "${topic:contract:omnibase-infra.CMD_RUNNER_FLEET_SNAPSHOT_GATHER_V1}",
       "topic_pattern": "*.cmd.omnibase-infra.runner-fleet-snapshot-gather.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_runner_image_roll",
+      "dispatcher_id": "dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37",
+      "handler_id": "dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37",
+      "message_category": "command",
+      "route_id": "route.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37.onex_cmd_platform_runner_image_roll_v1",
+      "topic": "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}",
+      "topic_pattern": "*.cmd.platform.runner-image-roll.*",
       "type_scoped": true
     },
     {

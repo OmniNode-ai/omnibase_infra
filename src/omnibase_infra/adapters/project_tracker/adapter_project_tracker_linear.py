@@ -1,14 +1,13 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Migration target for omnibase_compat.adapters.adapter_project_tracker_linear.
+"""Linear project tracker metadata queries.
 
 Provides list_teams, list_issue_labels, and list_issue_statuses via
 the shared AdapterLinearGraphQLProjectTracker transport.
 
-Migrated from omnibase_compat (compat removal date: 2026-09-01, OMN-12193).
-The compat version used synchronous urllib; this version uses async httpx and
-the standard infra error hierarchy.
+Migrated from the retired shared package (OMN-12193). Uses async httpx and the
+standard infra error hierarchy.
 """
 
 from __future__ import annotations

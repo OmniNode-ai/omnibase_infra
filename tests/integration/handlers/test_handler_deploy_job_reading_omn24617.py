@@ -56,7 +56,7 @@ def _request(job_outcome: str, lane: str = "dev") -> ModelDeployJobReadingReques
 def _append_script(tmp_path: Path) -> tuple[Path, Path]:
     sink = tmp_path / "sink.txt"
     script = tmp_path / "append.sh"
-    script.write_text(f'#!/bin/sh\necho "$@" > {sink}\ncat >> {sink}\n')
+    script.write_text(f'#!/bin/sh\necho "$@" >> {sink}\ncat >> {sink}\n')
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
     return script, sink
 

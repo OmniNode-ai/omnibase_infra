@@ -1,0 +1,85 @@
+schema_version: 1.0.0
+ticket_id: OMN-25191
+title: Review findings 1 to 4 on omnibase_infra PR 6045 at head 33e30e9f63aa are fixed or argued - the DLQ member close has no shutdown drain claim, AC2 reads a node run line, the roll-step probe fails with the call deleted and the failing stop is tested
+summary: >-
+  The review of the OMN-25106 pull request at head 33e30e9f63aa returned four blocking findings. drain_member_closes had no production caller: the DLQ replay handler has no shutdown hook the runtime calls (execute_shutdown has no caller in src), and a drain in its per-run teardown would hold the serial trigger poll loop that OMN-17137 bounds, so the function and the claim that closes are drained at shutdown are deleted. AC2 of contracts/OMN-25106.yaml greps the DLQ replay node's run line after the redeploy time named by REDEPLOY_AT instead of the boot line and a fixed 1h window, and stays open until the h201 reading is posted. The roll-step probes of OMN-25106 and OMN-25169 slice to the next top-level def and are run against the real handler source and against a copy with the call deleted. DLQConsumer.stop() is driven with a failing close for the KafkaError arm and for the re-raise of a non-Kafka error. The non-blocking findings are fixed where small: the curl flag check reads every flag token, one DeployExecutor-level test drives a wedged answer through the roll, the back-off test reads the presence through the handler, and the close-bound warning no longer claims that the broker drops the member.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25191-review-findings
+    statement: The blocking review findings 1 to 4 on the OMN-25106 pull request at head 33e30e9f63aa are fixed, each by a change with a test that fails on that head, or argued in a pull request comment.
+    acceptance:
+      - id: AC1
+        statement: "AC1: every blocking finding (1 to 4) of the review at head 33e30e9f63aa is fixed with a test that is red on that head and green on the new head, or argued with evidence in a PR comment -- falsifier: `uv run pytest tests/unit -k dlq_consumer -q` on the lab at the new head passes while each new test fails against the source files of head 33e30e9f63aa"
+      - id: AC2
+        statement: "AC2: drain_member_closes is called from the handler's teardown inside the node, or the shutdown claim in contracts/OMN-25106.yaml is dropped and a follow-up is named in the PR comment -- falsifier: `grep -rn drain_member_closes src/ scripts/` lists a production caller of the function, or the claim text is absent from contracts/OMN-25106.yaml"
+      - id: AC3
+        statement: "AC3: AC2 of contracts/OMN-25106.yaml greps a node run line after the redeploy timestamp, and the h201 reading is posted at this head or the contract AC stays open with its own falsifier -- falsifier: a contract check that goes red when the node run line grep target is removed, run with `uv run pytest tests/ci -k contract -q`"
+      - id: AC4
+        statement: "AC4: the probes of contracts/OMN-25106.yaml and OMN-25169.yaml slice the roll step source to the next top-level def and fail when the call is deleted, and DLQConsumer.stop() is driven with a failing close for the KafkaError arm and the non-Kafka re-raise -- falsifier: `uv run pytest tests/unit -k 'dlq_consumer or contract' -q` fails with the call deleted and with either except arm removed"
+      - id: AC5
+        statement: "AC5: a PR comment starting `Lab: head=<full head sha>` names exactly the pushed head after the required suites ran on the lab (a whole-suite timeout rerun in named parts), with a reply per finding -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6045` shows a head that differs from the head named in the Lab: comment, or no Lab: comment"
+evidence_requirements:
+  - kind: tests
+    description: The DLQ consumer tests, including the failing-close tests, and the contract binding tests.
+    command: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect tests/ci/test_contract_omn25106_binding.py -q -p no:cacheprovider
+  - kind: tests
+    description: The deploy agent's wedged restore test, with the DeployExecutor-level roll.
+    command: uv run --project scripts/deploy-agent --extra dev --frozen pytest scripts/deploy-agent/tests/unit/test_wedged_restore_omn25106.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25191-ac1-failing-close-tests
+    description: >-
+      DLQConsumer.stop() is driven over a fake AIOKafkaConsumer whose close fails with a KafkaError (logged, stop returns, nothing left held) and with a RuntimeError (re-raised to the caller, logged once). Removing the except KafkaError arm turns the first red, and swallowing the non-Kafka error turns the second red.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect -k dlq_consumer -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25191-ac2-no-shutdown-drain-claim
+    description: >-
+      The engine holds no drain_member_closes and the OMN-25106 contract no longer says the closes are drained at shutdown. The grep exits non-zero when any source file still names the function.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: "! grep -rn drain_member_closes src/ scripts/ contracts/OMN-25106.yaml"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25191-ac3-node-run-line-binding
+    description: >-
+      AC2 of the OMN-25106 contract greps the DLQ replay node's run line after REDEPLOY_AT, not the boot line and not a fixed window, and the binding tests go red when the grep target is no longer logged by the handler. The h201 reading is not at this head: the criterion stays open on the OMN-25106 contract, as do its AC1 and AC4.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci -k contract -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25191-ac4-probe-and-stop-tests
+    description: >-
+      The roll-step probes of both contracts are run as python against the committed handler source (pass) and against a copy with the call deleted (fail), and the failing-close tests cover both except paths.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect tests/ci/test_contract_omn25106_binding.py -k 'dlq_consumer or contract' -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25191-ac5-lab-comment
+    description: >-
+      The pull request carries a comment starting Lab: head= with the pushed head. Read after the push.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: command
+        check_value: onex scm pr-view OmniNode-ai/omnibase_infra#6045 | grep -c 'head_sha'
+        cwd: ${OMNI_HOME}/omnibase_infra

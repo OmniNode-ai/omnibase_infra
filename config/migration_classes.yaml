@@ -125,6 +125,7 @@ migrations:
   forward/114_create_code_eval_trial_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
   forward/115_grant_role_omnibase_infra_state_io_omn19998.sql: expand-only
   forward/116_create_branch_deploy_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
+  forward/117_add_registration_runtime_entity_id.sql: expand-only
   forward/nodes/node_canary_score_reducer/0001_create_capability_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
@@ -324,8 +325,12 @@ migrations:
   forward/nodes/node_projection_dod_verdict/0002_dod_verify_runs_delegation_correlation_id.sql: expand-only
   forward/nodes/node_projection_dod_verdict/0003_dod_verify_runs_goal.sql: expand-only # additive
   forward/nodes/node_projection_dod_verdict/0004_dod_verify_runs_contract_subject.sql: expand-only # additive
+  forward/nodes/node_projection_done_items/0000_create_done_items.sql: expand-only # CREATE TABLE done_items and a non-unique index on projected_at
+  forward/nodes/node_projection_done_items/0001_grant_omninode_runtime_done_items.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on done_items
   forward/nodes/node_projection_event_chain/0001_create_event_chain.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PK_EVENT_CHAIN; ALTER TABLE ADD CONSTRAINT NON_NEGATIVE_EVENT_CHAIN_SEQUEN
   forward/nodes/node_projection_event_chain/0002_grant_omninode_runtime_event_chain.sql: expand-only
+  forward/nodes/node_projection_floor_integration/0000_create_floor_integration_rows.sql: expand-only # CREATE TABLE floor_integration_rows, one ADD COLUMN IF NOT EXISTS per column and a non-unique index on as_of
+  forward/nodes/node_projection_floor_integration/0001_grant_omninode_runtime_floor_integration_rows.sql: expand-only # GRANT SELECT, INSERT, UPDATE, DELETE to omninode_runtime on floor_integration_rows
   forward/nodes/node_projection_goal_trace/0000_create_goal_trace_events.sql: forward-only # OMN-15376 shape reconciliation: ALTER TABLE ALTER COLUMN SET NOT NULL; ALTER TABLE ADD CONSTRAINT (primary key, checks)
   forward/nodes/node_projection_goal_trace/0001_grant_omninode_runtime_goal_trace.sql: expand-only
   forward/nodes/node_projection_instruction_eval/0001_create_instruction_eval_aggregate_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT INSTRUCTION_EVAL_AGGREGATE_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT UQ_I
@@ -501,6 +506,7 @@ migrations:
   forward/nodes/node_projection_work_ledger/0010_grant_work_ledger_seq_conflicts.sql: expand-only # additive GRANT
   forward/nodes/node_projection_work_ledger/0011_work_ledger_latest.sql: forward-only # CREATE TABLE IF NOT EXISTS omninode_internal.work_ledger_latest, CREATE INDEX IF NOT EXISTS, and an INSERT ... SELECT backfill from work_ledger_rows guarded by ON CONFLICT, declared forward-only per the checker's rule
   forward/nodes/node_projection_work_ledger/0012_grant_omninode_runtime_work_ledger_latest.sql: expand-only # additive GRANT
+  forward/nodes/node_projection_work_ledger/0013_work_ledger_seq_provisional.sql: expand-only # ALTER TABLE ADD COLUMN IF NOT EXISTS with a constant default
   forward/nodes/node_projection_overlay_store/0000_create_overlay_store.sql: forward-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the overlay store table
   forward/nodes/node_projection_overlay_store/0001_grant_omninode_runtime_overlay_store.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the overlay store table
   forward/nodes/node_view_seam_reading_reducer/0001_create_view_seam_readings.sql: forward-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the view seam readings table
@@ -550,3 +556,6 @@ migrations:
   forward/nodes/node_projection_experiment_result/0000_create_experiment_arm_results.sql: forward-only # CREATE TABLE and CREATE INDEX for the experiment arm results table
   forward/nodes/node_projection_experiment_result/0001_grant_tenant_projection_writer_experiment_arm_results.sql: expand-only # GRANT SELECT, INSERT, UPDATE to tenant_projection_writer on the experiment arm results table
   forward/nodes/node_projection_experiment_result/0002_force_rls_experiment_arm_results.sql: forward-only # FORCE ROW LEVEL SECURITY and the tenant isolation policy on the experiment arm results table
+  forward/nodes/node_projection_eval_results/0000_create_eval_results_tables.sql: forward-only # CREATE TABLE and CREATE INDEX for the eval results tables
+  forward/nodes/node_projection_eval_results/0001_grant_tenant_projection_writer_eval_results.sql: expand-only # GRANT table privileges to tenant_projection_writer on the eval results tables
+  forward/nodes/node_projection_eval_results/0002_force_rls_eval_results_tables.sql: forward-only # FORCE ROW LEVEL SECURITY and tenant isolation policies on the eval results tables

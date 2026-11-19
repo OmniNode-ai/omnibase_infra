@@ -464,6 +464,14 @@ repos:
         require_serial: true
         files: ^(scripts/deploy-runners\.sh|tests/ci/test_deploy_runners_registration_preflight\.py|tests/ci/fixtures/rolling_runner_registration_preflight\.json|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
         stages: [pre-commit]
+      - id: secondary-runner-image-roll
+        name: Secondary runner image roll (OMN-25796)
+        entry: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -q -n 0 --no-cov
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/deploy-runners\.sh|docker/runners/Dockerfile|src/omnibase_infra/(handlers/handler_runner_image_roll\.py|models/model_runner_image_roll_.*|nodes/node_runner_image_roll/.*)|tests/unit/scripts/test_deploy_runners_secondary_rolling\.py|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
       # OMN-18786: same blocking scan as the CI Summary context.
       - id: seed-provenance-check
         name: Seed Provenance Check
@@ -735,10 +743,32 @@ repos:
       - id: release-train-nightly-tests
         require_serial: true
         name: Release train decision surface (OMN-20715)
-        entry: uv run --frozen pytest tests/scripts/test_release_train_nightly.py tests/scripts/test_release_pr_open_omn18595.py -q --no-cov
+        entry: |-
+          uv run --frozen pytest tests/scripts/test_release_train_nightly.py
+          tests/scripts/test_release_pr_open_omn18595.py
+          tests/ci/test_release_train_live_contact_omn25794.py
+          tests/integration/cli/test_release_notes_apply_node_omn17427.py
+          tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py
+          -q --no-cov
         language: system
         pass_filenames: false
-        files: ^(config/release_train_policy\.yaml|scripts/ci/release_train\.py|\.github/workflows/release-train-nightly\.yml|tests/scripts/test_release_train_nightly\.py|tests/scripts/test_release_pr_open_omn18595\.py)$
+        files: |-
+          (?x)^(
+            config/release_train_policy\.yaml |
+            scripts/ci/release_train\.py |
+            \.github/workflows/release-train-nightly\.yml |
+            src/omnibase_infra/(
+              handlers/handler_release_notes_apply\.py |
+              models/model_release_notes_apply_request\.py |
+              nodes/node_release_notes_apply_effect/contract\.yaml
+            ) |
+            tests/(
+              scripts/(test_release_train_nightly|test_release_pr_open_omn18595)\.py |
+              ci/(test_release_train_live_contact_omn25794\.py|fixtures/ci_live_contact/omnimarket_release_changelog_omn25794\.json) |
+              integration/cli/test_release_notes_apply_node_omn17427\.py |
+              unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply\.py
+            )
+          )$
         stages: [pre-commit]
       - id: runner-disk-admission-self-pause
         require_serial: true
@@ -1200,7 +1230,7 @@ repos:
         files: ^src/.*/contract\.yaml$
         stages: [pre-commit]
       # OMN-13873: dep-provenance gate — forbid first-party git-source overrides.
-      # omnibase-core / omnibase-spi / omnibase-compat must resolve from PyPI, not
+      # omnibase-core and omnibase-spi must resolve from PyPI, not
       # git commits/branches/tags, on dev/main (recurrence guard for PR #2184's
       # UNRELEASED-commit overrides that passed all CI green). Pure static +
       # offline. Escape a single line with '# raw-override-ok: <ticket>'. SYNC
@@ -2351,8 +2381,8 @@ repos:
       # command that was supposed to move the surface -- that makes a repair and a
       # no-op the same observation, which is how a `.201` clone with core.bare=true
       # read as "synced" while `git checkout` failed with exit 128 forever, and how
-      # a venv whose provider co-install silently downgraded omnibase-compat read as
-      # reconciled. Structural half: reconcile-host.sh must invoke the verifier, and
+      # a venv with a silent dependency downgrade was reported as reconciled.
+      # Structural half: reconcile-host.sh must invoke the verifier, and
       # verdict() must take no exit status. Ratchet half: any scripts/reconcile*.sh
       # must invoke the verifier or declare `# movement-proof:` /
       # `# movement-proof-delegated-to:`. Whole-repo by design (a reconciler can be

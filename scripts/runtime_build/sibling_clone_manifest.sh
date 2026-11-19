@@ -154,48 +154,40 @@ resolve_deploy_source_clone_root() {
     export OMNI_HOME
 }
 
-# OMN-20687: where `onex-runtime-deploy` lives. It is a console script of the
-# omnibase_internal project, not of omnibase_infra and not of the dispatch venv.
-# It is installed into that clone's own `.venv` by its `onex-internal-clone-sync`
-# timer, and nothing puts it on PATH, so a bare default of `onex-runtime-deploy`
-# made every lane refresh exit 64 on a host whose PATH did not carry it. The
-# clone lookup is the one omniclaude#2592 (OMN-17427) settled on for
-# `onex-host-reconcile`, in the same order, so the two commands cannot be found
-# in two different places.
+# OMN-20687, OMN-25330: where `onex-runtime-deploy` lives. It is a console script
+# of one first-party clone's own `.venv` (the clone that owns the runtime deploy
+# node), and nothing puts it on PATH. A bare default of `onex-runtime-deploy` made
+# every lane refresh exit 64 on a host whose PATH did not carry it. A lookup in a
+# fixed clone made it exit 64 on h201 after that command moved to another clone,
+# so a refresh run there read NOT RUNNING until the operator named the command by
+# hand. The lookup therefore names no clone: it takes the first first-party clone
+# under OMNI_HOME (SIBLING_CLONE_MANIFEST) whose venv holds the command.
 #
 # Resolution order; sets DEPLOY_RUNTIME and DEPLOY_RUNTIME_TRIED, always returns
 # 0 (each caller keeps its own `command -v` refusal and prints the tried list):
 #   1. DEPLOY_RUNTIME, when set: the operator named it, and it is used as given.
-#   2. The omnibase_internal clone's `.venv/bin/onex-runtime-deploy`. The clone is
-#      OMNIBASE_INTERNAL_HOME when set (and then no other clone is searched), else
-#      the sibling of OMNI_HOME as written, then the sibling of its resolved
-#      target. A symlinked OMNI_HOME can put a stale second copy beside the link
-#      (h201: ~/Code/omnibase_internal beside the link, /data/omninode/
-#      omnibase_internal beside the target), so the answer is the first candidate
-#      that holds an executable command, not the first directory.
+#   2. A clone's `.venv/bin/onex-runtime-deploy`. The clone is DEPLOY_RUNTIME_HOME
+#      when set (and then no other clone is searched), else each clone of
+#      SIBLING_CLONE_MANIFEST under OMNI_HOME in manifest order; the first
+#      executable command wins.
 #   3. `onex-runtime-deploy` on PATH.
 # Call it after OMNI_HOME is final (the operator env is loaded and
 # DEPLOY_SOURCE_CLONE_ROOT applied). When nothing is found DEPLOY_RUNTIME is the
 # bare name, so the plan the caller prints still reads.
 resolve_runtime_deploy() {
     local -a homes=()
-    local home resolved
+    local home name
     DEPLOY_RUNTIME_TRIED=""
     if [[ -n "${DEPLOY_RUNTIME:-}" ]]; then
         DEPLOY_RUNTIME_TRIED="DEPLOY_RUNTIME=${DEPLOY_RUNTIME}"
         return 0
     fi
-    if [[ -n "${OMNIBASE_INTERNAL_HOME:-}" ]]; then
-        homes+=("${OMNIBASE_INTERNAL_HOME%/}")
+    if [[ -n "${DEPLOY_RUNTIME_HOME:-}" ]]; then
+        homes+=("${DEPLOY_RUNTIME_HOME%/}")
     elif [[ -n "${OMNI_HOME:-}" ]]; then
-        # Lexical parents, not `/..`: the kernel resolves `link/..` through the
-        # symlink, which would make the "as written" candidate the resolved one.
-        home="${OMNI_HOME%/}"
-        homes+=("${home%/*}/omnibase_internal")
-        resolved="$(cd "${OMNI_HOME}" 2>/dev/null && pwd -P)" || resolved=""
-        if [[ -n "${resolved}" && "${resolved}" != "${home}" ]]; then
-            homes+=("${resolved%/*}/omnibase_internal")
-        fi
+        for name in "${SIBLING_CLONE_MANIFEST[@]}"; do
+            homes+=("${OMNI_HOME%/}/${name}")
+        done
     fi
     for home in ${homes[@]+"${homes[@]}"}; do
         DEPLOY_RUNTIME_TRIED+="${DEPLOY_RUNTIME_TRIED:+ }${home}/.venv/bin/onex-runtime-deploy"

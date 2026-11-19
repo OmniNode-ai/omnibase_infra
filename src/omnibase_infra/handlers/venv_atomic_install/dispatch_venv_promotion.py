@@ -99,6 +99,10 @@ def staging_lock_acquire(path: Path, pid: int, host: str | None = None) -> int:
     for _attempt in range(2):
         try:
             path.symlink_to(record)
+            _say(
+                f"dispatch venv: staging lock taken on {_staging_display(path)} "
+                f"(pid {pid} on {host})"
+            )
             return EXIT_OK
         except FileExistsError:
             try:

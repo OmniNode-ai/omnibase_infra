@@ -4,14 +4,19 @@
 scripts/publish_test_failure_baseline.py (OMN-13027).
 
 Tests validate baseline parsing, expiry logic, new-cluster detection, and
-the ratchet gate exit codes — all without subprocess or network calls.
+the ratchet gate exit codes — without network calls. The cluster-ticket
+node (OMN-19998) is exercised only through a stub script written to
+tmp_path, never through the real node.
 """
 
 from __future__ import annotations
 
 import datetime
 import importlib.util
+import json
 import math
+import shlex
+import sys
 import textwrap
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -29,7 +34,7 @@ pytestmark = pytest.mark.unit
 _SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 
 
-def _load(name: str) -> object:
+def _load(name: str) -> Any:
     path = _SCRIPTS / f"{name}.py"
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None, f"cannot load {path}"
@@ -40,6 +45,11 @@ def _load(name: str) -> object:
 
 ratchet = _load("check_test_failure_ratchet")
 publisher = _load("publish_test_failure_baseline")
+
+
+def run_publisher(argv: list[str]) -> int:
+    """The publisher's main(); ``publisher`` is loaded by path, so its attributes are untyped."""
+    return int(publisher.main(argv))
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +90,87 @@ def _past_expiry() -> str:
     return (
         datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=1)
     ).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Cluster-ticket node stub (OMN-19998)
+#
+# The publisher consults the node on every failing cluster; the stub answers
+# the way the real node does — one ticket per cluster signature: `created`
+# the first time it sees a cluster, `commented` afterwards, always with the
+# same ticket. Each call appends its --input JSON to calls.jsonl and its
+# answer to answers.jsonl so tests can assert on both sides.
+# ---------------------------------------------------------------------------
+
+_STUB_TICKET = "OMN-90001"
+
+_NODE_STUB = textwrap.dedent(
+    """
+    import json
+    import sys
+    from pathlib import Path
+
+    here = Path(__file__).resolve().parent
+    argv = sys.argv
+    payload = json.loads(argv[argv.index("--input") + 1])
+    cluster = payload["cluster"]
+
+    calls = here / "calls.jsonl"
+    seen = False
+    if calls.exists():
+        for line in calls.read_text().splitlines():
+            if line.strip() and json.loads(line).get("cluster") == cluster:
+                seen = True
+                break
+    with calls.open("a") as fh:
+        fh.write(json.dumps(payload) + "\\n")
+
+    state = "commented" if seen else "created"
+    with (here / "answers.jsonl").open("a") as fh:
+        fh.write(json.dumps({"state": state, "ticket": "OMN-90001"}) + "\\n")
+    print(
+        json.dumps(
+            {
+                "correlation_id": "stub",
+                "requested_by_lane": payload["requested_by_lane"],
+                "repo": payload["repo"],
+                "cluster": cluster,
+                "outcome": "completed",
+                "result": {
+                    "state": state,
+                    "ticket": "OMN-90001",
+                    "via": None,
+                    "previous_ticket": None,
+                    "cause": None,
+                },
+            }
+        )
+    )
+    """
+).strip()
+
+
+def _write_node_stub(tmp_path: Path) -> Path:
+    """Write the stub cluster-ticket node; logs land beside it in tmp_path."""
+    stub = tmp_path / "cluster_ticket_node_stub.py"
+    stub.write_text(_NODE_STUB)
+    return stub
+
+
+def _report_argv(stub: Path) -> list[str]:
+    """CLI args wiring the stub in as the report command, lane lane-x."""
+    return [
+        "--report-command",
+        f"{sys.executable} {shlex.quote(str(stub))}",
+        "--report-lane",
+        "lane-x",
+    ]
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -389,21 +480,74 @@ class TestBaselinePublisher:
             data = yaml.safe_load(fh)
         assert data["clusters"] == {}
 
-    def test_main_adds_new_cluster_without_ticket_when_no_api_key(
+    def test_two_runs_with_a_still_failing_cluster_report_it_both_times_and_make_one_ticket(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """FAILING CONTROL for the old behavior.
+
+        The node owns the ticket decision and searches by the cluster's
+        stable signature, so the publisher consults it on EVERY failing
+        cluster of the run — including a run that already finds the cluster
+        in the baseline file. Two main() runs over the same JUnit therefore
+        call the stub twice; the stub answers created then commented with
+        the same ticket, and the baseline carries that ticket after both
+        runs. The old script filed nothing at all on the second run.
+        """
+        monkeypatch.chdir(tmp_path)
+        stub = _write_node_stub(tmp_path)
+        junit = tmp_path / "dev-baseline-junit.xml"
+        _write_junit(junit, [("tests.unit.test_foo", "test_bar")])
+        (tmp_path / "config" / "validation").mkdir(parents=True)
+
+        argv = [
+            "--skip-run",
+            "--repo",
+            "OmniNode-ai/omnibase_infra",
+            *_report_argv(stub),
+        ]
+        rc = run_publisher(argv)
+        assert rc == 0
+        rc = run_publisher(argv)
+        assert rc == 0
+
+        calls = _read_jsonl(stub.parent / "calls.jsonl")
+        assert len(calls) == 2, (
+            "the node must be consulted once per run, even on the run that "
+            "already finds the cluster in the baseline file"
+        )
+        assert all(call["cluster"] == "tests.unit" for call in calls)
+        answers = _read_jsonl(stub.parent / "answers.jsonl")
+        assert answers == [
+            {"state": "created", "ticket": _STUB_TICKET},
+            {"state": "commented", "ticket": _STUB_TICKET},
+        ]
+
+        baseline_path = (
+            tmp_path / "config" / "validation" / "test-failure-baseline.yaml"
+        )
+        with baseline_path.open() as fh:
+            data = yaml.safe_load(fh)
+        assert data["clusters"]["tests.unit"]["ticket"] == _STUB_TICKET
+
+    def test_report_command_exiting_nonzero_leaves_rc_zero_and_empty_ticket(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An unavailable node must not fail the run: rc 0, baseline written,
+        the new cluster entered with an empty ticket."""
         monkeypatch.chdir(tmp_path)
         junit = tmp_path / "dev-baseline-junit.xml"
         _write_junit(junit, [("tests.unit.test_foo", "test_bar")])
         (tmp_path / "config" / "validation").mkdir(parents=True)
 
-        rc = publisher.main(  # type: ignore[attr-defined]
+        rc = run_publisher(
             [
                 "--skip-run",
                 "--repo",
                 "OmniNode-ai/omnibase_infra",
-                "--linear-api-key",
-                "",
+                "--report-command",
+                f"{sys.executable} -c 'import sys; sys.exit(1)'",
+                "--report-lane",
+                "lane-x",
             ]
         )
         assert rc == 0
@@ -413,8 +557,94 @@ class TestBaselinePublisher:
         with baseline_path.open() as fh:
             data = yaml.safe_load(fh)
         assert "tests.unit" in data["clusters"]
-        # No ticket filed (no API key) — ticket field is empty string
         assert data["clusters"]["tests.unit"]["ticket"] == ""
+
+    def test_dry_run_reports_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--dry-run consults no node and writes no baseline, even with the
+        report command and lane fully configured."""
+        monkeypatch.chdir(tmp_path)
+        stub = _write_node_stub(tmp_path)
+        junit = tmp_path / "dev-baseline-junit.xml"
+        _write_junit(junit, [("tests.unit.test_foo", "test_bar")])
+        (tmp_path / "config" / "validation").mkdir(parents=True)
+
+        rc = run_publisher(
+            [
+                "--skip-run",
+                "--dry-run",
+                "--repo",
+                "OmniNode-ai/omnibase_infra",
+                *_report_argv(stub),
+            ]
+        )
+        assert rc == 0
+        assert _read_jsonl(stub.parent / "calls.jsonl") == []
+        baseline_path = (
+            tmp_path / "config" / "validation" / "test-failure-baseline.yaml"
+        )
+        assert not baseline_path.exists()
+
+    def test_no_report_command_reports_nothing_and_passes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No --report-command (and no env default): nothing is called, the
+        run still succeeds, and the cluster lands with an empty ticket."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("BASELINE_REPORT_COMMAND", raising=False)
+        monkeypatch.delenv("BASELINE_REPORT_LANE", raising=False)
+        junit = tmp_path / "dev-baseline-junit.xml"
+        _write_junit(junit, [("tests.unit.test_foo", "test_bar")])
+        (tmp_path / "config" / "validation").mkdir(parents=True)
+
+        rc = run_publisher(["--skip-run", "--repo", "OmniNode-ai/omnibase_infra"])
+        assert rc == 0
+        baseline_path = (
+            tmp_path / "config" / "validation" / "test-failure-baseline.yaml"
+        )
+        with baseline_path.open() as fh:
+            data = yaml.safe_load(fh)
+        assert data["clusters"]["tests.unit"]["ticket"] == ""
+
+    def test_report_input_carries_repo_cluster_examples_and_run_url(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The node's --input JSON must carry the short repo name, the
+        cluster, the full failing count, examples capped at EXAMPLE_COUNT,
+        and the run reference built from the repo and GITHUB_RUN_ID."""
+        monkeypatch.chdir(tmp_path)
+        stub = _write_node_stub(tmp_path)
+        junit = tmp_path / "dev-baseline-junit.xml"
+        _write_junit(
+            junit,
+            [(f"tests.unit.test_mod{i}", f"test_fail_{i}") for i in range(7)],
+        )
+        (tmp_path / "config" / "validation").mkdir(parents=True)
+        monkeypatch.setenv("GITHUB_RUN_ID", "424242")
+
+        rc = run_publisher(
+            [
+                "--skip-run",
+                "--repo",
+                "OmniNode-ai/omnibase_infra",
+                *_report_argv(stub),
+            ]
+        )
+        assert rc == 0
+
+        calls = _read_jsonl(stub.parent / "calls.jsonl")
+        assert len(calls) == 1
+        payload = calls[0]
+        assert payload["repo"] == "omnibase_infra"  # short name from owner/name
+        assert payload["cluster"] == "tests.unit"
+        assert payload["failing_count"] == 7
+        assert payload["examples"] == [
+            f"tests.unit.test_mod{i}::test_fail_{i}" for i in range(5)
+        ]
+        assert payload["requested_by_lane"] == "lane-x"
+        assert payload["observed_at"]
+        assert payload["run_url"] == "OmniNode-ai/omnibase_infra Actions run 424242"
 
     def test_main_removes_resolved_clusters(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
