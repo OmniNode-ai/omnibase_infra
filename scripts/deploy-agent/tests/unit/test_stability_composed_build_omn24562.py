@@ -23,7 +23,7 @@ from deploy_agent.events import (
     PhaseStatus,
     Scope,
 )
-from deploy_agent.executor import DeployExecutor, lane_config_for
+from deploy_agent.executor import DeployExecutor, lane_config_for, load_dev_boot_guard
 
 pytestmark = pytest.mark.unit
 
@@ -81,7 +81,13 @@ def _builds_for(lane: EnumRuntimeLane, overlay: str) -> list[list[str]]:
     def _noop(phase: Phase, status: PhaseStatus) -> None:
         return None
 
+    effect = load_dev_boot_guard(
+        "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+    )
     with (
+        # The writer image-label read needs a real docker; this test reads argv.
+        patch.object(effect, "_assert_images_at_deploy_sha", return_value=None),
+        patch.object(effect, "writer_roll", return_value={}),
         patch("deploy_agent.executor._run", side_effect=_fake_run),
         patch(
             "deploy_agent.executor._hold_build_context",
@@ -107,7 +113,13 @@ def _builds_for(lane: EnumRuntimeLane, overlay: str) -> list[list[str]]:
 
 def test_stability_build_set_is_exactly_the_composed_overlay_services() -> None:
     composed = _stability_composed_services()
-    assert composed == set(STABILITY_TEST_COMPOSED_RUNTIME_SERVICES)
+    writers = set(
+        load_dev_boot_guard(
+            "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+        ).STABILITY_LANE_WRITER_SERVICES
+    )
+    assert composed == set(STABILITY_TEST_COMPOSED_RUNTIME_SERVICES) | writers
+    assert not set(STABILITY_TEST_COMPOSED_RUNTIME_SERVICES) & writers
     assert len(STABILITY_TEST_COMPOSED_RUNTIME_SERVICES) == len(
         set(STABILITY_TEST_COMPOSED_RUNTIME_SERVICES)
     )
@@ -127,7 +139,9 @@ def test_stability_renders_the_composed_build_under_its_own_project() -> None:
             project == lane_config_for(EnumRuntimeLane.STABILITY_TEST).compose_project
         )
         assert project != lane_config_for(EnumRuntimeLane.DEV).compose_project
-        assert set(STABILITY_TEST_COMPOSED_RUNTIME_SERVICES) <= set(cmd)
+    assert any(
+        set(STABILITY_TEST_COMPOSED_RUNTIME_SERVICES) <= set(cmd) for cmd in builds
+    )
 
 
 def test_dev_build_is_unchanged_by_the_stability_build() -> None:

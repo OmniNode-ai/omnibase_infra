@@ -14,11 +14,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 import yaml
 
 from omnibase_infra.nodes.node_setup_local_provision_effect.runtime_cost_estimator_build import (
+    STABILITY_LANE_WRITER_SERVICES,
     STABILITY_TEST_COMPOSED_RUNTIME_SERVICES,
     build_dev_lane_services,
 )
@@ -50,23 +52,34 @@ def test_stability_build_names_exactly_the_overlay_composed_services() -> None:
     execution: Any = SimpleNamespace(
         EnumRuntimeLane=SimpleNamespace(STABILITY_TEST=stability, DEV=dev),
         Scope=SimpleNamespace(RUNTIME="runtime"),
-        lane_config_for=lambda lane: SimpleNamespace(compose_files=("overlay.yml",)),
+        _STABILITY_OVERLAY="overlay.yml",
+        _compose_env=dict,
+        lane_config_for=lambda lane: SimpleNamespace(
+            compose_files=("overlay.yml",), disabled_services=frozenset()
+        ),
     )
     calls: list[dict[str, Any]] = []
 
     def _build(*args: Any, **kwargs: Any) -> None:
         calls.append(kwargs)
 
-    result = build_dev_lane_services(
-        execution,
-        _build,
-        "0" * 40,
-        lambda *a, **k: None,
-        build_source="release",
-        lane=stability,
-        git_ref="origin/dev",
-    )
+    # The writers' image-label read needs a real docker; this test reads argv.
+    with patch(
+        f"{build_dev_lane_services.__module__}._assert_images_at_deploy_sha",
+        return_value=None,
+    ):
+        result = build_dev_lane_services(
+            execution,
+            _build,
+            "0" * 40,
+            lambda *a, **k: None,
+            build_source="release",
+            lane=stability,
+            git_ref="origin/dev",
+        )
     assert result == {}
-    assert len(calls) == 1
-    assert set(calls[0]["services"]) == _overlay_composed_services()
+    assert len(calls) == 2
     assert tuple(calls[0]["services"]) == STABILITY_TEST_COMPOSED_RUNTIME_SERVICES
+    assert tuple(calls[1]["services"]) == STABILITY_LANE_WRITER_SERVICES
+    built = {name for call in calls for name in call["services"]}
+    assert built == _overlay_composed_services()
