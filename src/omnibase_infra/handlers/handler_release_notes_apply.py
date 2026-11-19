@@ -51,10 +51,46 @@ _RELEASE_IDENTITY_TEST_PATH: Final = "tests/ci/test_release_cut_identity_omn1859
 _ENTRY_HEADING: Final[re.Pattern[str]] = re.compile(
     r"^## v(\d+\.\d+\.\d+) \((\d{4}-\d{2}-\d{2})\)$"
 )
-_ENTRY_SINCE: Final[re.Pattern[str]] = re.compile(r"^### Included Since (.+)$")
+_INCLUDED_SINCE: Final = "### Included Since "
+_ENTRY_SINCE: Final[re.Pattern[str]] = re.compile(rf"^{_INCLUDED_SINCE}(.+)$")
+_REPOSITORY_NAME: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_.-]+")
 _ENTRY_PR_NUMBER: Final[re.Pattern[str]] = re.compile(r"\(#\d+\)$")
 _FENCE: Final[re.Pattern[str]] = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 _PY_LINE_LIMIT: Final = 88
+
+
+def _filter_private_repository_names(entry: str, vocabulary_file: str | None) -> str:
+    """Omit private slugs from new public subjects using the hygiene gate's data."""
+    if not vocabulary_file:
+        msg = "public release notes require a hygiene vocabulary file"
+        raise ValueError(msg)
+    try:
+        vocabulary = yaml.safe_load(Path(vocabulary_file).read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        msg = "release hygiene vocabulary is not valid YAML"
+        raise ValueError(msg) from exc
+    names = (
+        vocabulary.get("private_repo_names") if isinstance(vocabulary, dict) else None
+    )
+    if (
+        not isinstance(names, list)
+        or not names
+        or not all(
+            isinstance(name, str) and _REPOSITORY_NAME.fullmatch(name) for name in names
+        )
+    ):
+        msg = "release hygiene vocabulary requires a nonempty private_repo_names list"
+        raise ValueError(msg)
+
+    # Keep the same token boundaries as the hygiene check. A longer name that
+    # shares a prefix must be substituted before a shorter matching name.
+    alternatives = "|".join(
+        re.escape(name) for name in sorted(names, key=len, reverse=True)
+    )
+    pattern = re.compile(rf"(?<![a-z0-9_-])(?:{alternatives})(?![a-z0-9_-])", re.I)
+    header, marker, included = entry.partition(f"\n{_INCLUDED_SINCE}")
+    since, newline, subjects = included.partition("\n")
+    return header + marker + since + newline + pattern.sub("…", subjects)
 
 
 def release_notes_target(clone: Path) -> str:
@@ -334,6 +370,10 @@ class HandlerReleaseNotesApply:
     ) -> ModelReleaseNotesApplyResult:
         try:
             entry = Path(request.entry_file).read_text(encoding="utf-8")
+            if request.repository_visibility == "public":
+                entry = _filter_private_repository_names(
+                    entry, request.hygiene_vocabulary_file
+                )
             target, staged = apply_release_notes(
                 Path(request.clone_path), entry, repo_name=request.repo_name
             )
