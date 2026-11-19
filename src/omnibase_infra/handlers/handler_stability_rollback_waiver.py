@@ -80,6 +80,10 @@ class ProtocolHealthCheck(Protocol):
     def detail(self) -> str: ...
 
 
+# Called as ``probe(service=..., port=...)``; returns the check and any raised error.
+RuntimeProbe = Callable[..., tuple[ProtocolHealthCheck, BaseException | None]]
+
+
 def read_docker_state(container: str) -> str:
     """Docker's ``runtime_health_state`` of ``container``; ``""`` when unreadable.
 
@@ -95,12 +99,6 @@ def read_docker_state(container: str) -> str:
     if reader is None:
         return ""
     return str(reader("runtime_health_state", container))
-
-
-class ProtocolRuntimeProbe(Protocol):
-    def __call__(
-        self, *, service: str, port: int
-    ) -> tuple[ProtocolHealthCheck, BaseException | None]: ...
 
 
 def classify_readings(
@@ -125,7 +123,7 @@ def classify_readings(
 
 def take_readings(
     targets: Sequence[tuple[str, int]],
-    probe: ProtocolRuntimeProbe,
+    probe: RuntimeProbe,
     state: Callable[[str], str],
 ) -> list[tuple[str, str]]:
     """Probe every target with the guard's own probe: ``(status, detail)`` each.
@@ -183,7 +181,7 @@ def admit_rollback_point[Point](
     correlation_id: UUID,
     record_dir: Path,
     targets: Sequence[tuple[str, int]],
-    probe: ProtocolRuntimeProbe,
+    probe: RuntimeProbe,
     capture: Callable[[], Point | None],
     state: Callable[[str], str] | None = None,
 ) -> Point | None:
