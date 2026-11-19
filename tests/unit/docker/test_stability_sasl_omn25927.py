@@ -30,6 +30,8 @@ BASE = DOCKER_DIR / "docker-compose.infra.yml"
 USER_SERVICE = "redpanda-scram-user"
 FLIP_SERVICE = "redpanda-sasl-enable"
 PARTITION_CAP = "redpanda-partition-cap"
+# The refresh health gate's own login (verify_stability_refresh.py).
+GATE_PRINCIPAL = "stability-refresh-gate"
 H051_PRINCIPAL = "stability-h051"
 
 # Every stability service that speaks Kafka and runs in the lane's active
@@ -131,6 +133,7 @@ def test_stability_sasl_principal_set_matches_the_clients(
     superusers = _principal_pairs(env, "STABILITY_TEST_SUPERUSER_PRINCIPALS")
     expected = {name: _password_var(name) for name in STABILITY_KAFKA_CLIENTS}
     expected[PARTITION_CAP] = _password_var(PARTITION_CAP)
+    expected[GATE_PRINCIPAL] = _password_var(GATE_PRINCIPAL)
     assert superusers == expected
     acl_principals = _principal_pairs(env, "STABILITY_TEST_ACL_PRINCIPALS")
     assert acl_principals == {H051_PRINCIPAL: _password_var(H051_PRINCIPAL)}
@@ -160,3 +163,97 @@ def test_stability_sasl_never_reaches_the_base() -> None:
     assert USER_SERVICE not in base
     assert FLIP_SERVICE not in base
     assert "STABILITY_TEST_KAFKA_SASL_PASSWORD_" not in BASE.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# The refresh health gate reads the Kafka API as its own principal.
+# ---------------------------------------------------------------------------
+# After the flip, an unauthenticated `rpk topic list` or `rpk group list` is
+# refused, so a refresh whose gate reads anonymously fails and rolls back with
+# SASL left on. The gate authenticates as `stability-refresh-gate`, a declared
+# superuser principal; the refresh exports the operator env, and the gate hands
+# docker the password's NAME (RPK_PASS), never its value.
+
+RUNTIME_BUILD = DOCKER_DIR.parent / "scripts" / "runtime_build"
+
+
+def _verify_module() -> Any:
+    import importlib.util
+    import sys
+
+    if str(RUNTIME_BUILD) not in sys.path:
+        sys.path.insert(0, str(RUNTIME_BUILD))
+    spec = importlib.util.spec_from_file_location(
+        "verify_stability_refresh_omn25927",
+        RUNTIME_BUILD / "verify_stability_refresh.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_stability_sasl_gate_principal_is_a_declared_superuser(
+    services: dict[str, Any],
+) -> None:
+    env = services[USER_SERVICE]["environment"]
+    superusers = _principal_pairs(env, "STABILITY_TEST_SUPERUSER_PRINCIPALS")
+    assert superusers.get(GATE_PRINCIPAL) == _password_var(GATE_PRINCIPAL)
+    assert _referenced_var(env[_password_var(GATE_PRINCIPAL)]) == _password_var(
+        GATE_PRINCIPAL
+    )
+
+
+READERS = [
+    ("_get_total_partitions", "NAME PARTITIONS REPLICAS\nt 1 1\n"),
+    ("list_consumer_groups", "BROKER GROUP STATE\n0 g Stable\n"),
+    ("check_cluster_health", "Healthy: true\n"),
+]
+# A sentinel that only proves the value never reaches argv; not a credential.
+SENTINEL = "omn25927-sentinel-not-a-secret"
+
+
+def _commands(reader: str, stdout: str) -> list[list[str]]:
+    import subprocess
+
+    seen: list[list[str]] = []
+
+    def runner(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        seen.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    getattr(_verify_module(), reader)("broker", runner=runner)
+    assert seen, reader
+    return seen
+
+
+@pytest.mark.parametrize(("reader", "stdout"), READERS)
+def test_stability_sasl_gate_reads_the_kafka_api_as_its_principal(
+    reader: str, stdout: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    monkeypatch.setenv(_password_var(GATE_PRINCIPAL), SENTINEL)
+    monkeypatch.delenv("RPK_PASS", raising=False)
+    for cmd in _commands(reader, stdout):
+        assert cmd[:2] == ["docker", "exec"], cmd
+        assert cmd[2 : cmd.index("broker")] == [
+            "-e",
+            f"RPK_USER={GATE_PRINCIPAL}",
+            "-e",
+            "RPK_SASL_MECHANISM=SCRAM-SHA-256",
+            "-e",
+            "RPK_PASS",
+        ], cmd
+        assert SENTINEL not in " ".join(cmd), "a password reached the command line"
+    assert os.environ["RPK_PASS"] == SENTINEL
+
+
+@pytest.mark.parametrize(("reader", "stdout"), READERS)
+def test_stability_sasl_gate_stays_anonymous_without_a_password(
+    reader: str, stdout: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(_password_var(GATE_PRINCIPAL), raising=False)
+    for cmd in _commands(reader, stdout):
+        assert cmd[:3] == ["docker", "exec", "broker"], cmd

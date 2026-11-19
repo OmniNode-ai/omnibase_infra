@@ -69,6 +69,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -408,6 +409,34 @@ class HealthGateReport:
 # ─── Subprocess / HTTP helpers (mockable via `runner`) ──────────────────────
 
 
+def _rpk_exec(broker_container: str, *args: str) -> list[str]:
+    """``docker exec`` argv for one rpk call inside the broker container.
+
+    OMN-25927: once the lane's broker requires SASL, the gate reads the Kafka
+    API as the declared superuser principal stability-refresh-gate. Its password
+    is the operator env's STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_REFRESH_GATE
+    (the refresh exports that env); docker copies it into the container from
+    RPK_PASS, so only the NAME reaches the command line. With no password set
+    the call stays anonymous, as on a PLAINTEXT broker.
+    """
+    password = os.environ.get(GATE_PASSWORD_VAR)
+    login: list[str] = []
+    if password:
+        os.environ["RPK_PASS"] = password
+        login = [
+            "-e",
+            f"RPK_USER={GATE_PRINCIPAL}",
+            "-e",
+            "RPK_SASL_MECHANISM=SCRAM-SHA-256",
+        ]
+        login += ["-e", "RPK_PASS"]
+    return ["docker", "exec", *login, broker_container, "rpk", *args]
+
+
+GATE_PRINCIPAL = "stability-refresh-gate"
+GATE_PASSWORD_VAR = "STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_REFRESH_GATE"
+
+
 def _run(
     cmd: list[str], *, runner: object | None = None, timeout: int = 30
 ) -> subprocess.CompletedProcess[str]:
@@ -669,16 +698,9 @@ def check_cluster_health(
 ) -> tuple[bool, str]:
     try:
         result = _run(
-            [
-                "docker",
-                "exec",
-                broker_container,
-                "rpk",
-                "cluster",
-                "health",
-                "-X",
-                "brokers=redpanda:9092",
-            ],
+            _rpk_exec(
+                broker_container, "cluster", "health", "-X", "brokers=redpanda:9092"
+            ),
             runner=runner,
         )
     except subprocess.TimeoutExpired:
@@ -707,16 +729,13 @@ def _get_partition_cap(
     """Read the live ``topic_partitions_per_shard`` cluster config value."""
     try:
         result = _run(
-            [
-                "docker",
-                "exec",
+            _rpk_exec(
                 broker_container,
-                "rpk",
                 "cluster",
                 "config",
                 "get",
                 "topic_partitions_per_shard",
-            ],
+            ),
             runner=runner,
         )
     except subprocess.TimeoutExpired:
@@ -755,7 +774,7 @@ def _get_total_partitions(
     """
     try:
         result = _run(
-            ["docker", "exec", broker_container, "rpk", "topic", "list"],
+            _rpk_exec(broker_container, "topic", "list"),
             runner=runner,
         )
     except subprocess.TimeoutExpired:
@@ -842,15 +861,7 @@ def _rpk(
     """Run one ``rpk`` subcommand inside the broker container."""
     try:
         result = _run(
-            [
-                "docker",
-                "exec",
-                broker_container,
-                "rpk",
-                *args,
-                "-X",
-                "brokers=redpanda:9092",
-            ],
+            _rpk_exec(broker_container, *args, "-X", "brokers=redpanda:9092"),
             runner=runner,
         )
     except subprocess.TimeoutExpired:
