@@ -110,15 +110,15 @@ GATEWAY_REACHED_PORTS = {"61085", "61086", "61002"}
 FORBIDDEN_SERVICE_FRAGMENTS = ("keycloak", "infisical")
 
 #: The .201 dev lane's declared service -> its dev-202 name. AC1.
+#: The projection API, the runtime effects role and the delegation writer are
+#: folded into the dev main runtime and no longer declared by the dev lane's
+#: manifest, so the dev lane has nothing of theirs to map here.
 DEV_TO_DEV_202 = {
     "omnibase-infra-postgres": "omnibase-infra-dev-202-postgres",
     "omnibase-infra-redpanda": "omnibase-infra-dev-202-redpanda",
     "omnibase-infra-valkey": "omnibase-infra-dev-202-valkey",
-    "omnimarket-projection-api": "omnimarket-dev-202-projection-api",
     "omninode-runtime": "omninode-dev-202-runtime",
-    "omninode-runtime-effects": "omninode-dev-202-runtime-effects",
     "omnimarket-projection-tenant-registry-writer": "omnimarket-dev-202-projection-tenant-registry-writer",
-    "omnimarket-projection-delegation-writer": "omnimarket-dev-202-projection-delegation-writer",
     "omnimarket-projection-registration-writer": "omnimarket-dev-202-projection-registration-writer",
     "omnimarket-projection-savings-writer": "omnimarket-dev-202-projection-savings-writer",
     "omnimarket-projection-tenant-credentials-writer": "omnimarket-dev-202-projection-tenant-credentials-writer",
