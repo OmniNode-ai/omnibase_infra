@@ -5,6 +5,18 @@ summary: config/deploy_lane_routing.yaml routes (dev, omnimarket) rebuilds to a 
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn21402-ac1-accepted-20261117t1945z:
+      - label: AC1
+        criterion_hash: 7d5632a9c23b692cb18965913c8388f9aac7f8920bd0690bb07773bc194d034f
+        proposed_by: lane=dod-closeout-bind-2026-11-17T1945Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-17T1945Z-c3
+    dod-omn21402-ac2-accepted-20261117t1945z:
+      - label: AC2
+        criterion_hash: fcab8b76ecc8c99978149dbe3eb875665e8d9961f20422efc47dfe8d817524e2
+        proposed_by: lane=dod-closeout-bind-2026-11-17T1945Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-17T1945Z-c3
 requirements:
   - id: req-omn21402-unavailable-instance-route
     statement: A dev rebuild whose route names an unavailable instance runs on the default instance, and the routing table that says so is data read at the command's ref.
@@ -61,3 +73,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn21402-ac1-accepted-20261117t1945z
+    description: 'AC1: the deploy agent router and the CI verify-route resolver send an omnimarket dev rebuild to the default instance while the routed instance is declared unavailable and to the routed instance when it is available, with exactly one instance accepting. Both files fail with the routing code of omnibase_infra#5346 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_instance_unavailable_omn20376.py -q && uv run --frozen pytest tests/ci/test_deploy_lane_verify_route_unavailable_omn20376.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21402-ac2-accepted-20261117t1945z
+    description: 'AC2: a routing table whose available value is not a bool, or whose default instance is declared unavailable, is refused by both resolvers. The refusal tests fail with the routing code of omnibase_infra#5346 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_instance_unavailable_omn20376.py -q && uv run --frozen pytest tests/ci/test_deploy_lane_verify_route_unavailable_omn20376.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

@@ -43,18 +43,11 @@
 # baked-in literal. Set OMNIMARKET_REF to pin an exact rev for reproducibility
 # or offline use — that override always wins and is never second-guessed.
 #
-# PIN RESOLUTION (OMN-18675): the same staleness applied, unnoticed, to the two
-# omni-internal leaf deps co-installed beside omnimarket. They were baked-in
-# literals (`omnibase-compat==0.5.5`, `omninode-memory==0.15.0`, written
-# 2026-07-02 and never touched since) installed with `--no-deps` and an EXACT
-# `==`, which is an instruction rather than a floor. On 2026-09-18 a --repair
-# run therefore force-DOWNGRADED a healthy shared plugin CLI venv from
-# omnibase-compat 0.5.7 and omninode-memory 0.18.0 back to those 2026-07 pins,
-# removing `omnibase_compat.contracts.pr_occ_stamp` and breaking the whole
-# `onex` CLI — every command, every lane on the host. Both versions are now
-# read from the pyproject.toml OF THE REF BEING INSTALLED, so they cannot
-# disagree with omnimarket's own declared requirements, and every install step
-# is planned before it is applied and REFUSED if it would move any installed
+# PIN RESOLUTION (OMN-18675): hardcoded exact pins for the packages
+# co-installed beside omnimarket drifted from its requirements. On 2026-09-18
+# those pins downgraded dependencies and broke the shared `onex` CLI. The
+# installer now reads the requirements from pyproject.toml at the ref it
+# installs. The installer plans each step and refuses to move any installed
 # package backwards (scripts/venv_install_plan.py). There is no bypass flag.
 #
 # READBACK (OMN-18663): steps 3 and 4 below prove the venv still WORKS -- the

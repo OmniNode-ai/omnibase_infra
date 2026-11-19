@@ -109,6 +109,7 @@ databases:
               - delegation_lab_jobs
               - demo_readiness_latest
               - dod_verify_runs
+              - done_items
               - gate_store_reservations
               - gate_store_safety
               - gate_store_state

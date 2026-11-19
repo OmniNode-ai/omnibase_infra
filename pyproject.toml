@@ -144,12 +144,12 @@ dependencies = [
     "opentelemetry-api>=1.27.0,<2.0.0", # OpenTelemetry API
     "opentelemetry-sdk>=1.27.0,<2.0.0", # OpenTelemetry SDK
     "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0", # OTLP HTTP exporter (Phoenix uses HTTP, not gRPC)
-    "opentelemetry-instrumentation>=0.48b0,<0.66", # Base instrumentation
-    "opentelemetry-instrumentation-fastapi>=0.48b0,<0.66", # FastAPI tracing
-    "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.66", # AsyncPG tracing
-    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.66", # AIOHTTP tracing
-    "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.66", # Kafka tracing
-    "opentelemetry-instrumentation-redis>=0.48b0,<0.66", # Redis tracing
+    "opentelemetry-instrumentation>=0.48b0,<0.67", # Base instrumentation
+    "opentelemetry-instrumentation-fastapi>=0.48b0,<0.67", # FastAPI tracing
+    "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.67", # AsyncPG tracing
+    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.67", # AIOHTTP tracing
+    "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.67", # Kafka tracing
+    "opentelemetry-instrumentation-redis>=0.48b0,<0.67", # Redis tracing
     # MCP (Model Context Protocol) integration
     "mcp>=2.3.0,<3.0.0", # Anthropic MCP SDK for streamable HTTP transport
     # Additional infrastructure dependencies
@@ -690,6 +690,7 @@ node_hotpatch_ledger_reconcile_effect = "omnibase_infra.nodes.node_hotpatch_ledg
 node_impact_analyzer_compute = "omnibase_infra.nodes.node_impact_analyzer_compute"
 node_in_progress_probe_hygiene_effect = "omnibase_infra.nodes.node_in_progress_probe_hygiene_effect"
 node_invariant_evaluate_compute = "omnibase_infra.nodes.node_invariant_evaluate_compute"
+node_k3s_lab_preflight_effect = "omnibase_infra.nodes.node_k3s_lab_preflight_effect"
 node_kafka_replay_compute = "omnibase_infra.nodes.node_kafka_replay_compute"
 node_lab_proof_plan_compute = "omnibase_infra.nodes.node_lab_proof_plan_compute"
 node_lab_proof_run_effect = "omnibase_infra.nodes.node_lab_proof_run_effect"

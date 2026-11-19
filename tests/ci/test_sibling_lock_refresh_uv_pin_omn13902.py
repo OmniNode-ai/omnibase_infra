@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """A lockfile format revision alone is not a sibling refresh (OMN-13902).
 
-``[tool.uv]`` pins ``omnibase-core``, ``omnibase-spi`` and ``omnibase-compat`` to
+``[tool.uv]`` pins the foundation dependencies to
 exact versions, so ``uv lock --upgrade-package`` has nothing to move for them. The
 refresh job installs whatever ``astral-sh/setup-uv`` calls latest, and a uv newer
 than the one that wrote the committed lock raises the ``revision =`` header instead
