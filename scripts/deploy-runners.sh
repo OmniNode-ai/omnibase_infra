@@ -2562,7 +2562,7 @@ main() {
     if "${DRY_RUN}"; then log "[DRY RUN MODE] No remote commands will be executed."; fi
 
     if "${SECONDARY_HOST}" && "${ROLLING_DEPLOY}"; then
-        if "${RELABEL_ROLL}" || "${SOFT_DEPLOY}" || "${RETIRE_SURPLUS}" || "${ARTIFACTS_ONLY}" || [[ -n "${ADD_SERVICES}" ]]; then err "Secondary --rolling cannot be combined with another deploy mode."; fi
+        if "${RELABEL_ROLL}" || "${SOFT_DEPLOY}" || "${RETIRE_SURPLUS}" || "${ARTIFACTS_ONLY}" || [[ -n "${ADD_SERVICES}" ]]; then err "Secondary --rolling is mutually exclusive with every other deploy mode."; fi
         [[ -n "${TOKEN_FILE}" ]] || err "Secondary --rolling requires --token-file, including for --dry-run."
         jq -n --arg host "${RUNNER_HOST}" --arg prefix "${RUNNER_NAME_PREFIX}" --arg repo_root "${REPO_ROOT}" --arg fleet_config "${RUNNER_FLEET_CONFIG}" --arg token_path "${TOKEN_FILE}" --arg only "${ROLL_ONLY}" --arg limit "${ROLL_LIMIT}" --argjson dry_run "${DRY_RUN}" --argjson skip_build "${SKIP_BUILD}" '$ARGS.named | .limit |= tonumber' |
             uv run --frozen --project "${REPO_ROOT}" python -c 'from omnibase_infra.cli.cli_node import run_node_by_name; run_node_by_name()' node_runner_image_roll --contract "${REPO_ROOT}/src/omnibase_infra/nodes/node_runner_image_roll/contract.yaml" --input /dev/stdin --backend event_bus=inmemory --timeout 9600 --state-root "${ONEX_STATE_DIR:-${REPO_ROOT}/.onex_state}/runner-image-roll"
