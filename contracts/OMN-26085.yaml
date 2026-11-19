@@ -10,20 +10,20 @@ requirements:
   - id: req-omn26085-mount-body-cap-before-decode
     statement: "A mount's declared body cap bounds the raw and the decompressed request stream before the mounted app is dispatched."
     acceptance:
-      - id: AC26085001
-        statement: "A request whose compressed body is under the mount cap and whose decompressed body is over it is refused with 413 before the app's first receive call and before more than the cap plus one decoded byte is buffered."
-      - id: AC26085002
-        statement: "A request whose raw body is over the mount cap is refused with 413 without reading more than the cap plus one byte from the request stream."
-      - id: AC26085003
-        statement: "A request with no Content-Encoding and a body under the cap reaches the mounted app unchanged."
-      - id: AC26085004
-        statement: "The fix is installed from its branch on the lab and the same 46-byte request read through the runtime on h051 returns 413 with zero application receive calls."
+      - id: AC1
+        statement: "a request whose compressed body is under the mount cap and whose decompressed body is over it is refused with 413 before any decompressed byte beyond the cap is buffered and before the mounted app's first receive call -- falsifier: uv run pytest on the new test (a 46-byte gzip body that expands to 275 bytes against a 128-byte mount cap) fails on origin/dev and passes at the pull request head"
+      - id: AC2
+        statement: "a request whose raw body is over the mount cap is refused with 413 without reading more than the cap plus one byte from the socket -- falsifier: uv run pytest on the new test asserts the bytes read from the stream and fails on origin/dev if more than the cap plus one are read"
+      - id: AC3
+        statement: "a request with no Content-Encoding and a body under the cap still reaches the mounted app unchanged -- falsifier: uv run pytest on the existing mount tests under tests/unit/handlers/http_mount still passes at the head"
+      - id: AC4
+        statement: "the fix is installed from its branch on the lab and the same 46-byte request read through the runtime on h051 returns 413 with zero application receive calls -- falsifier: the STATUS row with installed= and observed= cites a request whose observed receive-call count is above zero or whose status is not 413"
 dod_evidence:
   - id: dod-omn26085-decoded-cap
     description: >-
       Real aiohttp listener and real bridge: a 46-byte gzip body that decodes to 275 bytes against a 128-byte mount cap gets 413, the app records zero receive calls, and the listener's request stream buffered no more than the cap plus one byte. Deflate and a gzip bomb are covered the same way.
     source: manual
-    binds_ac: [AC26085001]
+    binds_ac: [AC1]
     checks:
       - check_type: test_passes
         check_value: >-
@@ -33,7 +33,7 @@ dod_evidence:
     description: >-
       A chunked raw body over the cap, plain or gzip, is refused with 413 after the bridge pulled at most the cap plus one byte from the request stream.
     source: manual
-    binds_ac: [AC26085002]
+    binds_ac: [AC2]
     checks:
       - check_type: test_passes
         check_value: >-
@@ -43,7 +43,7 @@ dod_evidence:
     description: >-
       Identity and decoded bodies under the cap reach the app byte for byte, and the mount tests that already existed still pass.
     source: manual
-    binds_ac: [AC26085003]
+    binds_ac: [AC3]
     checks:
       - check_type: test_passes
         check_value: >-
@@ -53,7 +53,7 @@ dod_evidence:
     description: >-
       A separate runtime listener process mounts an app that never reads its body under a 128-byte cap. The 46-byte gzip request, sent with curl, gets 413. The h051 install readback of the same request is in the lane's STATUS row and the pull request's Lab line.
     source: manual
-    binds_ac: [AC26085004]
+    binds_ac: [AC4]
     checks:
       - check_type: command
         check_value: |-
