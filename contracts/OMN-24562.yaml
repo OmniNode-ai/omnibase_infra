@@ -54,6 +54,15 @@ requirements:
         statement: 'AC16: the build command of a stability job runs under the stability compose project and the stability lane configuration disables autoheal -- falsifier: scripts/deploy-agent/tests/unit/test_stability_build_project_omn24562.py fails at the merge base'
       - id: AC17
         statement: 'AC17: integrated: after the agent is installed from the integration branch, one stability-follow job on h201 builds the omninode-runtime image of the stability project at the job time and names no autoheal -- falsifier: the image list of h201 shows that image older than the job, or the job record errors name autoheal'
+  - id: req-omn24562-stability-start-wait
+    statement: verify() waits out a stability runtime's declared start the way it does on dev, reading the budget from the container's own compose healthcheck, so a runtime that takes about five minutes to start is not failed on its first probe and rolled back. A spent budget still fails the job, no lane but dev may recreate, and dev and prod behave as before.
+    acceptance:
+      - id: AC19
+        statement: 'AC19: a stability runtime that fails its first probe while Docker reports it starting is re-probed within its declared start budget and passes without a recreate -- falsifier: pytest scripts/deploy-agent/tests/unit/test_verify_stability_start_wait_omn24562.py -k "waited_for_and_passes" fails when VERIFY_START_WAIT_LANES in executor.py drops the stability lane'
+      - id: AC20
+        statement: 'AC20: a stability runtime still failing past its declared start budget fails the job, which the agent turns into the rollback, and nothing is recreated; a shorter declared budget gives fewer probes than a longer one, so the wait is read from the container and not from a constant -- falsifier: the outlives-its-budget and wait-length tests fail when the wait length is a fixed number or the failed job passes'
+      - id: AC21
+        statement: 'AC21: dev behaves as before (the same one service-label lookup, the same wait, the recreate allowlist still dev only) and prod gets neither the wait nor a recreate -- falsifier: the dev lookup, fence and prod tests of the same file fail when stability or prod joins VERIFY_RECREATE_LANES or prod joins VERIFY_START_WAIT_LANES'
   - id: req-omn24562-stability-composed-build
     statement: The stability lane builds the runtime, worker, projection api and projection writers on omnimarket's composed image, as the dev lane does, so the kernel boots with BIFROST_BASE_CONTRACT_PATH set; the dev build is unchanged.
     acceptance:
@@ -74,6 +83,9 @@ evidence_requirements:
   - kind: tests
     description: The tracked unit holds the ordering line.
     command: grep -F After=sysinit.target deploy/systemd/cpu-boost-off.service
+  - kind: tests
+    description: Stability start wait within and past the declared budget, with the dev lookup, the two fences and prod unchanged.
+    command: cd scripts/deploy-agent && uv run --frozen --extra dev python -m pytest tests/unit/test_verify_stability_start_wait_omn24562.py -q -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ""
@@ -230,6 +242,25 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "! grep -q 'build_project' scripts/deploy-agent/deploy_agent/executor.py"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac15-ac17-stability-start-wait
+    description: A stability runtime is waited for within its declared start budget and passes, fails and is not recreated past it, and dev, the two fences and prod behave as before.
+    source: manual
+    binds_ac:
+      - AC19
+      - AC20
+      - AC21
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_verify_stability_start_wait_omn24562.py tests/unit/test_verify_honours_declared_start_omn19374.py tests/unit/test_verify_force_recreate_omn18640.py tests/unit/test_auto_rollback.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac18-h201-job-record-verification
+    description: 'Unbound local Done gate for AC18 (not a hosted criterion): reads the stability-follow job record on h201 (the deploy agent state file /data/omninode/deploy-agent/state/jobs-dev/<job id>*.json) and exits 0 only when exactly one record matches the job id prefix in STABILITY_FOLLOW_JOB_ID, its phase_results.verification is success and its status is success (a job rolled back to the retained image ends failed). It is read-only, prints no secret, and exits non-zero when the variable is unset, no record matches, or verification or the job is anything other than success. The hosted runner cannot reach h201, so the item is local_done_gate and runs on h201 after the agent is installed from this branch.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "python3 -c 'import glob, json, sys; hits = glob.glob(\"/data/omninode/deploy-agent/state/jobs-dev/\" + sys.argv[1] + \"*.json\"); rec = json.load(open(hits[0])) if len(hits) == 1 else {}; sys.exit(0 if rec.get(\"phase_results\", {}).get(\"verification\") == \"success\" and rec.get(\"status\") == \"success\" else 1)' \"${STABILITY_FOLLOW_JOB_ID:?set STABILITY_FOLLOW_JOB_ID to the stability-follow job id}\""
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-ac13-stability-composed-build
     description: The stability overlay builds on the composed image, the stability build argv names the overlay and the composed services under the stability project, and the dev build is unchanged.

@@ -5,20 +5,21 @@
 
 With no arguments, inspect the current repository's staged paths and migration
 directories. An optional repository path and --verbose match the old script's
-CLI. Exit 0 for PASS, 1 for FAIL and 2 when the check cannot run.
+CLI. Exit 0 for PASS, 1 for FAIL, 2 when the check cannot run and 128 when git
+cannot find a repository at the path (git's own discovery status, printed with
+git's own ``fatal:`` line: the environment's fault, not the change's).
 """
 
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 
 from omnibase_core.models.validation.model_validation_report import (
     ModelValidationReport,
 )
-from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+from omnibase_infra.handlers.git_staged_paths import GitDiscoveryError, staged_paths
 from omnibase_infra.nodes.node_migration_sequence_check_compute.handler import (
     NodeMigrationSequenceCheckCompute,
     migration_scan_paths,
@@ -27,29 +28,16 @@ from omnibase_infra.nodes.node_migration_sequence_check_compute.models import (
     ModelMigrationSequenceCheckInput,
 )
 
-__all__ = ["collect_input", "main"]
+__all__ = ["GitDiscoveryError", "collect_input", "main"]
+
+GIT_DISCOVERY_EXIT = 128
 
 
 def _staged_paths(repo_path: Path) -> tuple[str, ...]:
-    try:
-        completed = subprocess.run(
-            ["git", "diff", "--cached", "--name-only"],
-            cwd=repo_path,
-            env=scrub_git_location_env(),
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError("git executable not found") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("git diff --cached timed out") from exc
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"git diff --cached failed (exit {completed.returncode}): {completed.stderr.strip()}"
-        )
-    return tuple(path.strip() for path in completed.stdout.splitlines() if path.strip())
+    return staged_paths(
+        repo_path,
+        timeout=10,
+    )
 
 
 def collect_input(repo_path: Path) -> ModelMigrationSequenceCheckInput:
@@ -115,6 +103,12 @@ def main(argv: list[str] | None = None) -> int:
         ):
             sys.stdout.write(_render(report, request) + "\n")
         return 1 if report.overall_status == "FAIL" else 0
+    except GitDiscoveryError as exc:
+        sys.stderr.write(
+            f"Error: git diff --cached failed (exit {exc.diff_exit}) in {repo_path}\n"
+            f"{exc.detail}\n"
+        )
+        return GIT_DISCOVERY_EXIT
     except RuntimeError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
