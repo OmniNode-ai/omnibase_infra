@@ -994,3 +994,95 @@ esac
         assert len(calls) == 2
         assert "applied" not in calls
         assert "slot_fence_refusal" in proc.stderr
+
+
+class TestRunnerTargetsAreUnchangedWithTheTokenUnset:
+    """OMN-18892: with the slot token unset the runner behaves as it does today.
+
+    The ticket's last criterion is that, with the suffix unset, the created set
+    is byte-identical to today's. ``test_the_fence_is_inert_with_the_token_unset``
+    reads the script text. This class runs the fence block itself, so the names
+    the runner would target, the fence assertion and the migration file it would
+    apply are read from what the shell computes, with a slot run beside them as
+    the positive control that the same probe sees a difference when one exists.
+    """
+
+    PROBE = r"""
+set -eu
+. "$FENCE_FILE"
+printf 'active=%s\n' "$SLOT_ACTIVE"
+printf 'pgdb=%s\n' "$PGDB"
+printf 'nodedb=%s\n' "$NODE_PGDB"
+if slot_fence_assert omnibase_infra "database"; then
+    printf 'assert=admitted\n'
+fi
+printf 'file=%s\n' "$(slot_migration_file "$MIGRATION_FILE")"
+"""
+
+    @staticmethod
+    def _fence_block() -> str:
+        text = RUNNER.read_text(encoding="utf-8")
+        start = text.index("# ---- BEGIN pre-PR verify slot fence (OMN-18892) ----")
+        end = text.index("# ---- END pre-PR verify slot fence (OMN-18892) ----")
+        return text[start:end]
+
+    def _probe(
+        self, tmp_path: Path, **env: str
+    ) -> tuple[subprocess.CompletedProcess[str], Path]:
+        fence = tmp_path / "fence.sh"
+        fence.write_text(self._fence_block(), encoding="utf-8")
+        migration = tmp_path / "003_connect.sql"
+        migration.write_text(
+            "\\connect omnidash_analytics\nSELECT 1;\n", encoding="utf-8"
+        )
+        proc = subprocess.run(
+            ["sh", "-c", self.PROBE],
+            env={
+                "PATH": "/usr/bin:/bin",
+                "TMPDIR": str(tmp_path),
+                "FENCE_FILE": str(fence),
+                "MIGRATION_FILE": str(migration),
+                "PGDB": "omnibase_infra",
+                "NODE_PGDB": "omnidash_analytics",
+                "PGUSER": "postgres",
+                **env,
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        return proc, migration
+
+    @pytest.mark.parametrize("token_env", [{}, {"ONEX_DB_SLOT": ""}])
+    def test_targets_and_migration_file_are_the_shared_lanes_own(
+        self, tmp_path: Path, token_env: dict[str, str]
+    ) -> None:
+        proc, migration = self._probe(tmp_path, **token_env)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == [
+            "active=0",
+            "pgdb=omnibase_infra",
+            "nodedb=omnidash_analytics",
+            "assert=admitted",
+            f"file={migration}",
+        ]
+        assert proc.stderr == ""
+        assert list(tmp_path.glob("slot-migration.*")) == []
+
+    def test_a_slot_changes_the_same_probe_output(self, tmp_path: Path) -> None:
+        # Positive control: the probe reports a difference when a slot is set,
+        # so the unchanged output above cannot be a probe that reads nothing.
+        proc, migration = self._probe(
+            tmp_path, ONEX_DB_SLOT="prepr1", PGUSER="role_omnibase_prepr1"
+        )
+        assert proc.returncode == 4, proc.stdout + proc.stderr
+        assert [
+            line for line in proc.stdout.splitlines() if not line.startswith("[")
+        ] == [
+            "active=1",
+            "pgdb=omnibase_infra_prepr1",
+            "nodedb=omnidash_analytics_prepr1",
+        ]
+        assert "slot_fence_refusal" in proc.stderr
+        assert migration.read_text(encoding="utf-8").startswith("\\connect omnidash")
