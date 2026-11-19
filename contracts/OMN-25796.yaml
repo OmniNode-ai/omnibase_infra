@@ -1,0 +1,72 @@
+schema_version: 1.0.0
+ticket_id: OMN-25796
+title: Restore tool-cache Python on the h202 and h053 CI runner pools
+summary: Roll the image bound by the runner image lock through the declared installer, one idle secondary runner at a time.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched: [infrastructure]
+requirements:
+  - id: req-omn25796-secondary-runner-image-roll
+    statement: A secondary CI pool can roll to the declared runner image through the installer with online readback before each subsequent recreate.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the python the failing jobs use (runner tool-cache setup-python, uv-managed or system) is named per pool with the exact loader error and what changed, read from a run log or from a run in the runner environment -- falsifier: the TERMINAL row of lane libpy-0150 has no cause= cell naming the interpreter source and the missing library path"
+      - id: AC2
+        statement: "AC2: the fix is applied through the declared host installer for the runner hosts with no hand edit of a host file, unit or plist, and any code change is a draft PR with a Lab: line -- falsifier: the declared installer's own status read on the host names a runner container still on the old image or without the library"
+      - id: AC3
+        statement: "AC3: one job step or a lab run of `python3 -c 'import sys'` in the runner environment exits 0 on the h202 pool and on hp053 -- falsifier: the same command exits 127 on either pool"
+      - id: AC4
+        statement: "AC4: a STATUS row `kv installed=<host>:<revision> observed=<what ran> read_at=<UTC>` per pool is on the work ledger -- falsifier: `python3 plugins/omni/skills/lane-brief/scripts/lane_brief.py grep 'libpy-0150'` returns no STATUS row with installed= and observed= for one of the two pools"
+evidence_requirements:
+  - kind: tests
+    description: Exercise installer dispatch and refusal, both idle signals, canary selection, and the online readback gate using local fixtures.
+    command: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25796-loader
+    description: The bound Dockerfile registers the uv-managed CPython library with the system loader. Live pre-roll probes identify the setup-python executable and loader failure for each pool.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -k registers_uv_libpython -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25796-hosted-deploy-probe
+    description: Hosted CI reads the image-roll operation from the node contract at the checked-out revision and exercises the installer on both declared pools. The head-bound Lab comment records live v14 container readback.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_runner_image_roll/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "operation: runner.image.roll" >/dev/null'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -k 'secondary_dry_run or secondary_requires or secondary_rejects' -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25796-two-pool-python-proof
+    description: Record the runner-side shell-out result in the installation STATUS for each pool after executing on v14.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c 'for host in h053 h202; do
+            python3 "${OMNI_PLUGIN_ROOT:?}/skills/lane-brief/scripts/lane_brief.py" grep OMN-25796 | awk -v host="$host" '"'"'$2=="STATUS" && /ticket=OMN-25796/ && index($0, "installed=" host ":") && /observed=.*python3.*exit(=| )0/ && /read_at=/ { print; found=1 } END { exit !found }'"'"' FS=" [|] " || exit 1
+          done'
+        cwd: .
+  - id: dod-omn25796-pool-installation-ledger
+    description: The work ledger records the installed revision, observation and UTC read time for both pools.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c 'for host in h053 h202; do
+            python3 "${OMNI_PLUGIN_ROOT:?}/skills/lane-brief/scripts/lane_brief.py" grep OMN-25796 | awk -v host="$host" '"'"'$2=="STATUS" && /ticket=OMN-25796/ && index($0, "installed=" host ":") && /observed=[^|]+/ && /read_at=/ { print; found=1 } END { exit !found }'"'"' FS=" [|] " || exit 1
+          done'
+        cwd: .

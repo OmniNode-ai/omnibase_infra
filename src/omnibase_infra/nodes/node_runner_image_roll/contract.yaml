@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_runner_image_roll
+contract_name: node_runner_image_roll
+node_name: node_runner_image_roll
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [runner-installer]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: Roll a declared secondary runner pool through the local installer.
+input_model:
+  name: ModelRunnerImageRollRequest
+  module: omnibase_infra.models.model_runner_image_roll_request
+output_model:
+  name: ModelRunnerImageRollResult
+  module: omnibase_infra.models.model_runner_image_roll_result
+event_bus:
+  subscribe_topics: ["onex.cmd.platform.runner-image-roll.v1"]
+  publish_topics: ["onex.evt.platform.runner-image-roll-completed.v1"]
+terminal_event: "onex.evt.platform.runner-image-roll-completed.v1"
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: runner.image.roll
+      handler:
+        name: HandlerRunnerImageRoll
+        module: omnibase_infra.handlers.handler_runner_image_roll
+      event_model:
+        name: ModelRunnerImageRollRequest
+        module: omnibase_infra.models.model_runner_image_roll_request
+      output_events: [ModelRunnerImageRollResult]
+capabilities:
+  - name: runner.image.roll
+    description: Recreate and verify one idle runner at a time on a declared secondary pool.
+metadata:
+  ticket: OMN-25796
+  description: Roll a secondary runner pool from the declared image lock.
