@@ -39,6 +39,77 @@ from omnibase_infra.models.contracts.model_llm_endpoint_overlay import (
     ModelLlmEndpointOverlay,
 )
 
+#: OMN-24854: the config/lab folder that holds the lane declaration (``ci_bus_lanes.yaml``).
+#: The lane compose files mount it read-only in the runtime container; the deploy agent
+#: repoints ``ONEX_LANE_OVERLAY_DIR`` at its rendered copy, so this folder travels under
+#: its own name.
+LANE_DECLARATION_DIR_ENV = "ONEX_LANE_DECLARATION_DIR"
+#: The file that makes a folder the lane declaration folder: the runtime's commitment
+#: ledger source resolves its broker address from it.
+LANE_DECLARATION_FILE = "ci_bus_lanes.yaml"
+_WITH_DECLARATION = "with-declaration"
+
+
+class LaneDeclarationDirError(RuntimeError):
+    """The lane declaration folder is named but is not one, or the overlay folder names no directory."""
+
+
+def _require_declaration_file(folder: Path, origin: str) -> str:
+    if not folder.is_dir():
+        raise LaneDeclarationDirError(f"{origin} names no directory: {folder}")
+    if not (folder / LANE_DECLARATION_FILE).is_file():
+        raise LaneDeclarationDirError(
+            f"{origin} names a folder with no {LANE_DECLARATION_FILE}: {folder}; "
+            f"set {LANE_DECLARATION_DIR_ENV} to the config/lab folder that holds it"
+        )
+    return str(folder)
+
+
+def lane_overlay_dir_or_refuse(
+    execution: ModuleType, environ: Mapping[str, str]
+) -> str | None:
+    """The directory the agent resolves for ``ONEX_LANE_OVERLAY_DIR``, or ``None`` when none is set.
+
+    A set value that names no directory is refused, never read as "no overlay folder": a
+    mistyped path must not render the lane with no lane overlay.
+    """
+    resolved: str | None = execution.resolve_lane_overlay_dir(environ)
+    configured = environ.get(execution.LANE_OVERLAY_DIR_ENV, "").strip()
+    if resolved is None and configured:
+        raise LaneDeclarationDirError(
+            f"{execution.LANE_OVERLAY_DIR_ENV} names no directory: {configured}"
+        )
+    return resolved
+
+
+def lane_declaration_dir(
+    execution: ModuleType, environ: Mapping[str, str]
+) -> str | None:
+    """The absolute config/lab folder that holds the lane declaration, or ``None``.
+
+    The one derivation both the deploy agent's compose env (``render_dev_lane``) and the
+    warm refresh (``refresh_exports``) take. An already-set ``ONEX_LANE_DECLARATION_DIR``
+    wins: it was set before anything repointed ``ONEX_LANE_OVERLAY_DIR`` at the rendered
+    copy, so a second pass in a shell that applied the first still reads the real folder
+    and never the rendered state directory. Otherwise the folder is the parent of the
+    directory the agent resolves for ``ONEX_LANE_OVERLAY_DIR`` (absolute, symlinks and
+    relative segments resolved). Either folder must hold ``ci_bus_lanes.yaml``: a stale
+    ambient value, or the parent of a rendered overlay directory (the agent's state
+    directory), is refused, not mounted. ``None`` when nothing names the folder.
+    """
+    pinned = environ.get(LANE_DECLARATION_DIR_ENV, "").strip()
+    if pinned:
+        return _require_declaration_file(
+            Path(pinned).resolve(), LANE_DECLARATION_DIR_ENV
+        )
+    overlay_dir = lane_overlay_dir_or_refuse(execution, environ)
+    if overlay_dir is None:
+        return None
+    return _require_declaration_file(
+        Path(overlay_dir).parent,
+        f"the parent of {execution.LANE_OVERLAY_DIR_ENV} ({overlay_dir})",
+    )
+
 
 class LlmEndpointEnvError(RuntimeError):
     """The llm_endpoints overlay cannot be rendered as written."""
@@ -276,18 +347,30 @@ def render_dev_lane(
         )
     ):
         return {}, None
+    # OMN-24854: the declaration folder, taken before the caller repoints the overlay
+    # directory at the rendered copy, so the compose mount keeps the real config/lab. A
+    # refusal here is about the folder, not the llm_endpoints overlay, and says so. Only
+    # the dev lane's compose files mount it: a stability job of this agent takes the render
+    # and neither needs nor is refused for the folder.
+    overlay_dir = lane_overlay_dir_or_refuse(execution, environ)
+    mounts_declaration = execution._ActiveDeployLane.lane in (
+        None,
+        execution.EnumRuntimeLane.DEV,
+    )
+    declaration_dir = (
+        lane_declaration_dir(execution, environ) if mounts_declaration else None
+    )
     try:
-        rendered = render(
-            execution,
-            environ,
-            lane_overlay_dir=environ.get(execution.LANE_OVERLAY_DIR_ENV),
-        )
+        rendered = render(execution, environ, lane_overlay_dir=overlay_dir)
     except LlmEndpointEnvError as exc:
         raise RuntimeError(
             "the dev lane's LLM endpoint env cannot be rendered from the "
             f"llm_endpoints overlay: {exc}"
         ) from exc
-    return dict(rendered.env), rendered.lane_overlay_dir
+    env = dict(rendered.env)
+    if declaration_dir is not None:
+        env[LANE_DECLARATION_DIR_ENV] = declaration_dir
+    return env, rendered.lane_overlay_dir
 
 
 def refresh_exports(
@@ -295,6 +378,8 @@ def refresh_exports(
     environ: Mapping[str, str],
     search_root: Path,
     state_dir: Path,
+    *,
+    mounts_lane_declaration: bool,
 ) -> str:
     """Shell exports of a lab lane's LLM endpoint env rendered from the overlay, for the warm refresh.
 
@@ -306,6 +391,10 @@ def refresh_exports(
     home clone is the one under ``search_root`` that carries lane fragments, unless ``environ``
     already names one; the rewritten lane overlay directory lands under ``state_dir`` unless
     ``environ`` names a state directory. An overlay that cannot be rendered is a RuntimeError.
+    ``mounts_lane_declaration`` is true for the dev lane, whose compose files mount the lane
+    declaration folder (OMN-24854): the exports then carry ``ONEX_LANE_DECLARATION_DIR``, and a
+    folder that holds no ``ci_bus_lanes.yaml`` is refused. The stability lane mounts nothing,
+    so its refresh derives, exports and refuses nothing about the folder.
     """
     from deploy_agent.instance_lanes import (  # the agent source tree holds this
         discover_lane_overlay_clone,
@@ -317,18 +406,20 @@ def refresh_exports(
     if clone is not None:
         env.setdefault("DEPLOY_AGENT_OVERLAY_HOME_CLONE", str(clone))
     env.setdefault(str(declaration(execution)["state_dir_env"]), str(state_dir))
+    overlay_dir = lane_overlay_dir_or_refuse(execution, env)
+    declaration_dir = (
+        lane_declaration_dir(execution, env) if mounts_lane_declaration else None
+    )
     try:
-        rendered = render(
-            execution,
-            env,
-            lane_overlay_dir=execution.resolve_lane_overlay_dir(env),
-        )
+        rendered = render(execution, env, lane_overlay_dir=overlay_dir)
     except LlmEndpointEnvError as exc:
         raise RuntimeError(
             "the dev lane's LLM endpoint env cannot be rendered from the "
             f"llm_endpoints overlay: {exc}"
         ) from exc
     exports = dict(rendered.env)
+    if declaration_dir is not None:
+        exports[LANE_DECLARATION_DIR_ENV] = declaration_dir
     if rendered.lane_overlay_dir is not None:
         exports[execution.LANE_OVERLAY_DIR_ENV] = rendered.lane_overlay_dir
     return lane_env_shell_exports(exports)
@@ -397,14 +488,22 @@ def validate_env_contract(
 def main(argv: Sequence[str]) -> int:
     """Print what a warm refresh sources: the exports, then the line that hands them to the deploy handler.
 
-    ``argv`` is the program name, the search root of the clones and the state directory.
+    ``argv`` is the program name, the search root of the clones, the state directory and
+    whether the lane the refresh script is hardcoded to mounts the lane declaration folder
+    (``with-declaration``, the dev lane) or not (``without-declaration``).
     ``onex-runtime-deploy`` sources the operator env again, so it takes the same exports in
     ``ONEX_DEPLOY_LANE_ENV_EXPORTS`` and sources them after it (OMN-24119). A render that
     cannot be made is the RuntimeError of :func:`refresh_exports`, a non-zero exit and no output.
     """
     from deploy_agent import executor  # the agent source tree holds this
 
-    exports = refresh_exports(executor, dict(os.environ), Path(argv[1]), Path(argv[2]))
+    exports = refresh_exports(
+        executor,
+        dict(os.environ),
+        Path(argv[1]),
+        Path(argv[2]),
+        mounts_lane_declaration=argv[3] == _WITH_DECLARATION,
+    )
     applied = " ".join(line.removeprefix("export ") for line in exports.splitlines())
     sys.stderr.write(f"LLM endpoint env applied from the overlays: {applied}\n")
     sys.stdout.write(
@@ -414,9 +513,14 @@ def main(argv: Sequence[str]) -> int:
 
 
 __all__ = [
+    "LANE_DECLARATION_DIR_ENV",
+    "LANE_DECLARATION_FILE",
+    "LaneDeclarationDirError",
     "LlmEndpointEnvError",
     "RenderedLlmEndpointEnv",
     "declaration",
+    "lane_declaration_dir",
+    "lane_overlay_dir_or_refuse",
     "main",
     "render",
     "refresh_exports",

@@ -607,14 +607,13 @@ class DevLaneContainerWriter:
         blob = self.blobs.path(f.sha256)
         if not blob.is_file() or sha256_of(blob) != f.sha256:
             return f"stored copy {f.sha256[:12]} is missing or corrupt"
-        owner_mode = "0:0 644"
         stat = self.cmd_ok(
             ["docker", "exec", "-u", "0", container, "stat", "-c", "%u:%g %a", f.path]
         )
-        if stat is not None and stat.stdout.strip():
-            owner_mode = stat.stdout.strip()
-        if self.cmd_ok(["docker", "cp", str(blob), f"{container}:{f.path}"]) is None:
-            return "docker cp failed"
+        owner_mode = (stat.stdout.strip() if stat is not None else "") or "0:0 644"
+        cp = ["docker", "cp", str(blob), f"{container}:{f.path}"]
+        if any(self.cmd_ok(a) is None for a in (*f.prepare_argv(container), cp)):
+            return "docker cp or the destination directory failed"
         owner, _, mode = owner_mode.partition(" ")
         if not (
             self.cmd_ok(

@@ -1,0 +1,58 @@
+schema_version: 1.0.0
+ticket_id: OMN-25667
+title: A Done write through the ticket node runs dod_verify to a verdict instead of crashing, so a passing ticket reaches Done
+summary: The Done-write guard runs the verifier with its own scratch --state-root, so the verifier reaches a verdict in a cwd it cannot write, and keeps the verifier's stderr in the refusal up to 4000 characters.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25667-done-write-verdict
+    statement: A Done write reaches dod_verify's verdict and the verdict decides; a verifier that produces nothing is refused with its full stderr.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a regression test built from the recorded refusal (the node''s dod_verify invocation and the traceback it hit, fixture under tests/nodes/node_linear_ticket_write_effect) fails on the broken code and passes on the fix -- falsifier: uv run pytest tests/nodes/node_linear_ticket_write_effect -q -k dod_verify_invocation'
+      - id: AC2
+        statement: 'AC2: a Done write whose contract and evidence fail dod_verify is still refused, and the refusal carries dod_verify''s own verdict text, never a crash -- falsifier: uv run pytest tests/nodes/node_linear_ticket_write_effect -q -k "done_write_refused and verdict"'
+      - id: AC3
+        statement: 'AC3: integrated: one real Done write through `onex ticket transition <id> --bus-lane dev` on a ticket whose contract and evidence pass returns completed and the ticket reads back Done, on the dev runtime revision that carries the fix -- falsifier: onex ticket transition <id> --bus-lane dev against the running dev runtime, then onex ticket read <id> read-back; on the revision before the fix it returns done_write_refused with dod_verify exit_code=1'
+evidence_requirements:
+  - kind: tests
+    description: Done-write guard state-root, stderr bound and adapter gate tests.
+    command: uv run --frozen pytest tests/unit/handlers/test_done_write_receipt_guard_state_root_omn25667.py tests/unit/adapters/test_done_write_gate_adapters.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_16846_dispatch_venv_separation.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn25667-ac1-invocation
+    description: The guard's argv, run through the real onex skill command in a cwd that cannot hold .onex_state, reaches the dispatch; the refusal for a verifier with no output carries the recorded stderr whole.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_done_write_receipt_guard_state_root_omn25667.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn25667-ac2-verdict
+    description: A real verifier subprocess in a cwd that cannot hold .onex_state reaches its failed verdict through the guard's own argv, and the verdict comes back parsed instead of a crash.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_done_write_receipt_guard_state_root_omn25667.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn25667-ac3-integration-proof
+    description: The integrated proof is a real Done write through the ticket node on the dev lane, read back as Done. It needs the dev bus, so it binds no criterion; the hosted proof is the local Done gate.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: onex ticket read OMN-24476 --lane donewrite-1930 --bus-lane dev --timeout-s 90 | grep -q ticket_status.:.Done
+        cwd: .
+  - id: dod-omn25667-ac3-argv-state-root
+    description: The argv the Done write runs carries the scratch --state-root pair; at the merge base the argv has none, so this fails there.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_16846_dispatch_venv_separation.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
