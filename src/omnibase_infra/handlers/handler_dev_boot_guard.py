@@ -245,6 +245,14 @@ def run_runtime_roll_step(
     """
     service = argv[-1]
     lane = execution.EnumRuntimeLane.DEV
+    if service in execution.SERVICE_HEALTH_TARGET_INDEX:
+        # OMN-25106: a running container that stayed unhealthy is not replaced
+        # by the compose up below, so it is restarted first.
+        restart_if_wedged(
+            execution._health_target_container(lane, service),
+            timeout,
+            execution=execution,
+        )
     wait_budget = execution.runtime_health_probe_budget(lane, service)
     command = list(argv)
     index = command.index("--no-deps")
@@ -498,6 +506,68 @@ def folded_dev_services(
 
 #: ``docker inspect`` states of a lane container that mean it is down.
 DOWN_STATES = frozenset({"created", "exited", "dead"})
+#: OMN-25106: consecutive failed health probes after which a running container
+#: reads as wedged, which restores it like a stopped one. The dev runtime's
+#: compose healthcheck probes every 30 s, so 20 is a 10 minute non-200 window;
+#: docker does not count failed probes inside ``start_period``.
+WEDGED_FAILING_STREAK: Final = 20
+#: The state, then (when the container declares a healthcheck) its health
+#: status and failing streak, as whitespace-separated fields.
+PRESENCE_INSPECT_FORMAT: Final = (
+    "{{.State.Status}}"
+    " {{if .State.Health}}{{.State.Health.Status}} {{.State.Health.FailingStreak}}{{end}}"
+)
+
+
+def _is_wedged(fields: Sequence[str]) -> bool:
+    """Whether inspect fields read a RUNNING container that stayed unhealthy too long.
+
+    Only state ``running`` can be wedged: a paused or restarting container with
+    a failing streak is not what a restart cures, so it reads as it did before.
+    """
+    return (
+        len(fields) >= 3
+        and fields[0].lower() == "running"
+        and fields[1].lower() == "unhealthy"
+        and fields[2].isdigit()
+        and int(fields[2]) >= WEDGED_FAILING_STREAK
+    )
+
+
+def _presence_of(container: str, fields: Sequence[str]) -> tuple[str, str]:
+    """``down`` or ``running`` with its detail, from one container's inspect fields."""
+    state = fields[0].lower() if fields else ""
+    if state in DOWN_STATES:
+        return "down", f"{container} is {state}"
+    if _is_wedged(fields):
+        return "down", (
+            f"{container} is {state} but unhealthy: {fields[2]} consecutive failed "
+            f"health probes, at least {WEDGED_FAILING_STREAK} read as wedged"
+        )
+    return "running", f"{container} is {state}"
+
+
+def restart_if_wedged(container: str, timeout: int, *, execution: ModuleType) -> bool:
+    """``docker restart`` one container the presence read calls wedged (OMN-25106).
+
+    The restore's rebuild converges with ``compose up -d``, which leaves a
+    running container whose image and configuration are unchanged exactly as it
+    is, and the post-deploy verify declines to recreate a runtime that still
+    answers ``/health`` degraded. A wedged container therefore has to be
+    restarted before the roll waits on it. A read or a restart that docker
+    refuses is not an error here: the roll goes on and its own wait decides.
+    """
+    try:
+        read = execution._run(
+            ["docker", "inspect", "--format", PRESENCE_INSPECT_FORMAT, container],
+            timeout=DOCKER_READ_SECONDS,
+        )
+        if read.returncode != 0 or not _is_wedged(read.stdout.split()):
+            return False
+        restarted = execution._run(["docker", "restart", container], timeout=timeout)
+    except (OSError, execution.subprocess.TimeoutExpired):
+        return False
+    return bool(restarted.returncode == 0)
 
 
 def lane_runtime_containers(
@@ -527,7 +597,8 @@ def read_lane_presence(
 ) -> tuple[str, str]:
     """``(state, detail)`` of the lane's containers: running, down, companion_down or unknown.
 
-    Main reads on its own: absent, created, exited or dead is ``down``. With
+    Main reads on its own: absent, created, exited, dead or wedged (running
+    but unhealthy for ``WEDGED_FAILING_STREAK`` probes, OMN-25106) is ``down``. With
     main running, a down container beside it is ``companion_down`` and one that
     cannot be read is ``unknown``, which never restores. ``unreadable`` is what
     ``run`` raises when docker does not answer.
@@ -536,7 +607,7 @@ def read_lane_presence(
     for container in lane_runtime_containers(health_targets, disabled_services):
         try:
             result = run(
-                ["docker", "inspect", "--format", "{{.State.Status}}", container],
+                ["docker", "inspect", "--format", PRESENCE_INSPECT_FORMAT, container],
                 timeout=DOCKER_READ_SECONDS,
             )
         except unreadable as exc:
@@ -554,13 +625,7 @@ def read_lane_presence(
                     )
                 )
         else:
-            state = result.stdout.strip().lower()
-            states.append(
-                (
-                    "down" if state in DOWN_STATES else "running",
-                    f"{container} is {state}",
-                )
-            )
+            states.append(_presence_of(container, result.stdout.split()))
     if states[0][0] != "running":
         return states[0]
     for wanted in ("down", "unknown"):
