@@ -6,11 +6,11 @@ name: "node_setup_local_provision_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 1
-  patch: 2
-node_version: "1.1.2"
+  minor: 2
+  patch: 0
+node_version: "1.2.0"
 description: >
-  EFFECT node that provisions, tears down, and checks status of local Docker Compose services defined in a ModelDeploymentTopology. Runs docker compose up -d (provision, with an optional build first), docker compose down (teardown, optionally with its volumes), and docker compose ps (status), either for the topology's services or for the whole compose project. Deduplicates --profile flags across services sharing the same profile. Async-polls ports at the local_host declared in models/network_binding/network_binding_settings.yaml until healthy or max_wait_seconds is exceeded.
+  EFFECT node that provisions, tears down, and checks status of local Docker Compose services defined in a ModelDeploymentTopology. Runs docker compose up -d (provision, with an optional build first), docker compose down (teardown, optionally with its volumes), and docker compose ps (status), either for the topology's services or for the whole compose project, and reads the engine's CPU count and memory with docker info (engine_info). Deduplicates --profile flags across services sharing the same profile. Async-polls ports at the local_host declared in models/network_binding/network_binding_settings.yaml until healthy or max_wait_seconds is exceeded.
 
 input_model:
   name: "ModelLocalProvisionEffectInput"
@@ -48,12 +48,24 @@ handler_routing:
       handler:
         name: "HandlerLocalStatus"
         module: "omnibase_infra.nodes.node_setup_local_provision_effect.handlers.handler_local_status"
+    - operation: "engine_info"
+      handler:
+        name: "HandlerLocalEngineInfo"
+        module: "omnibase_infra.handlers.handler_local_engine_info"
     - operation: "build_estimator"
       handler:
         name: "HandlerCostEstimatorBuild"
         module: "omnibase_infra.handlers.handler_cost_estimator_build"
       description: "Build the dev estimator image before the deploy agent recreates it (OMN-21487)."
 config:
+  local_engine_info:
+    description: "Read the Docker engine's CPU count and memory via docker info; a read only, nothing is started or changed."
+    input_model:
+      name: ModelLocalEngineInfoRequest
+      module: omnibase_infra.models.model_local_engine_info_request
+    output_model:
+      name: ModelLocalEngineInfoResult
+      module: omnibase_infra.models.model_local_engine_info_result
   cost_estimator_build:
     input_model:
       name: ModelCostEstimatorBuildRequest

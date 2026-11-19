@@ -1,0 +1,66 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25545
+title: Use shared wire identity in the HTTPS forwarder
+summary: The forwarder computes the HTTPS record ID from the topic, key, value and headers it sends.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25545-shared-identity
+    statement: The HTTPS transport takes its event ID from the shared ingest contract.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the leg''s record id is the shared function''s id, and two leg records equal in payload and different in key have different ids -- falsifier: `uv run pytest tests/unit/nodes/node_bus_forwarder_effect -k https_ingest_identity` with the old `envelope_payload` derivation restored turns the vector case red'
+      - id: AC2
+        statement: 'AC2: one normalization at the leg: the leg''s id for the physical topic `tenant-a.<canonical>` equals the id `PublisherHttps` computes for `<canonical>` with equal key, value and headers and equals the pinned shared vector; the leg does not strip the prefix itself -- falsifier: `uv run pytest tests/unit/nodes/node_bus_forwarder_effect -k https_ingest_topic` with the leg hashing the physical topic as given turns it red, and `git grep -n "tenant-"` over the leg''s id code finds no second prefix rule'
+      - id: AC3
+        statement: 'AC3: tests updated to the shared contract, no shim, and no derivation of an id remains in the package -- falsifier: `uv run pytest tests/unit/nodes/node_bus_forwarder_effect -q` and `git grep -n envelope_payload -- src/omnibase_infra/nodes/node_bus_forwarder_effect` finds no derivation (a hit fails the criterion)'
+evidence_requirements:
+  - kind: tests
+    description: Run the forwarder unit suite and shipped-config integration test.
+    command: uv run --frozen pytest tests/unit/nodes/node_bus_forwarder_effect tests/integration/gateway/test_delegate_skill_mirror_shipped_config_omn19439.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn25545-wire-identity
+    description: The outgoing HTTPS record matches the pinned vector and its identity changes when the key changes.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_bus_forwarder_effect/test_https_ingest_omn16459.py -k https_ingest_identity -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25545-topic-normalization
+    description: The physical topic stays in the transmitted record and its ID matches the canonical Core vector.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_bus_forwarder_effect/test_https_ingest_omn16459.py -k https_ingest_topic -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25545-remove-local-derivation
+    description: Forwarder tests use the shared identity and the outbound package has no legacy helper or shim.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_bus_forwarder_effect tests/integration/gateway/test_delegate_skill_mirror_shipped_config_omn19439.py -q -n 0 --no-cov
+        cwd: .
+      - check_type: command
+        check_value: >-
+          git grep -q 'compute_event_id(' -- src/omnibase_infra/runtime/gateway_forwarder.py && { git grep -nE 'content_addressed_event_id|envelope_with_event_id' -- src tests; test "$?" -eq 1; } && { git grep -n envelope_payload -- src/omnibase_infra/nodes/node_bus_forwarder_effect; test "$?" -eq 1; }
+        cwd: .
+  - id: dod-omn25545-deploy-ingest-smoke
+    description: Run the HTTPS transport vector tests in an isolated Python 3.12 container using the checkout and frozen dependencies.
+    source: manual
+    execution_scope: hosted_and_local
+    checks:
+      - check_type: command
+        check_value: >-
+          docker run --rm --volume "$PWD:/workspace:ro" --workdir /workspace --env UV_PROJECT_ENVIRONMENT=/tmp/onex-venv --env PYTHONDONTWRITEBYTECODE=1 ghcr.io/astral-sh/uv:python3.12-bookworm uv run --frozen pytest tests/unit/nodes/node_bus_forwarder_effect/test_https_ingest_omn16459.py -k 'https_ingest_identity or https_ingest_topic' -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .

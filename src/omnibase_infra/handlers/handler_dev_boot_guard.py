@@ -17,6 +17,7 @@ import json
 import logging
 import math
 import re
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
@@ -110,6 +111,26 @@ def redact_credential_spans(text: str) -> str:
 
 class DevBootFailedError(RuntimeError):
     """A dev runtime failed boot, or cannot be safely replaced."""
+
+
+class DevBootSettingsDriftError(DevBootFailedError):
+    """A healthy dev container carries a compose config hash the clone no longer renders.
+
+    The container was created from the compose files the deploy read when it ran
+    ``up``. The deploy-source clone is a canonical clone that the canonical-clone sync
+    fast-forwards while a job runs (OMN-25942: job 20cf29c6 pinned commit 925858038 at
+    08:04:02Z and the sync moved the clone at 08:12:26Z and 08:18:26Z), so the
+    capture after a verified roll can render other files than ``up`` did. The family is
+    healthy; only the recovery point cannot be advanced.
+    """
+
+    def __init__(self, service: str, container_hash: str, rendered_hash: str) -> None:
+        super().__init__(
+            f"{service}: compose settings differ from the healthy container"
+        )
+        self.service = service
+        self.container_hash = container_hash
+        self.rendered_hash = rendered_hash
 
 
 class DevBootRecoveryError(RuntimeError):
@@ -588,6 +609,66 @@ def lane_runtime_containers(
     return (main, f"{main}-effects")
 
 
+def running_ref_if_healthy(
+    container: str,
+    repository: str,
+    read_ref: Callable[[str, str], str | None],
+) -> str | None:
+    """``read_ref``'s answer for a healthy runtime, ``""`` for an unhealthy one (OMN-24562).
+
+    A runtime that failed its boot is parked and still answers ``docker exec`` with
+    the provenance of the image it was built from, so the stability follow read it
+    as running the tag it had just built and never rebuilt it. An unhealthy runtime
+    runs no revision: ``""`` names no tag and no commit that contains one. ``None``
+    stays what docker could not answer.
+    """
+    try:
+        shown = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+                container,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=DOCKER_READ_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if shown.returncode == 0 and shown.stdout.strip() == "unhealthy":
+        return ""
+    return read_ref(container, repository)
+
+
+def healthy_ref_reader(
+    container: Callable[[], str], read_ref: Callable[[str, str], str | None]
+) -> Callable[[str], str | None]:
+    """The repository -> running ref reader of a lane's runtime, unhealthy reading ``""``.
+
+    ``container`` resolves the lane's runtime container at READ time, never when the
+    reader is built: the agent builds this reader in ``__init__`` on every lane, and a
+    lane configuration that cannot resolve (a bad stability fold policy) must stop
+    only the lane that reads it. A resolution failure is logged and reads ``None``,
+    what docker could not answer, so that lane's follow starts no job and every other
+    lane runs on.
+    """
+
+    def read(repository: str) -> str | None:
+        try:
+            name = container()
+        except (OSError, RuntimeError, ValueError) as error:
+            logger.exception(
+                "runtime container of the followed lane unresolved: %s", error
+            )
+            return None
+        return running_ref_if_healthy(name, repository, read_ref)
+
+    return read
+
+
 def read_lane_presence(
     health_targets: Sequence[tuple[str, int]],
     disabled_services: frozenset[str],
@@ -838,8 +919,10 @@ class HandlerDevBootGuard:
             if not hashes.get(service) or hashes[service] != labels.get(
                 "com.docker.compose.config-hash"
             ):
-                raise DevBootFailedError(
-                    f"{service}: compose settings differ from the healthy container"
+                raise DevBootSettingsDriftError(
+                    service,
+                    labels.get("com.docker.compose.config-hash", ""),
+                    hashes.get(service, ""),
                 )
         # Compose's canonical JSON already escapes literal dollars for reuse.
         # Preserve those strings verbatim when writing the recovery config.
@@ -1042,7 +1125,7 @@ class HandlerDevBootGuard:
             raise DevBootFailedError("no last healthy dev revision")
         try:
             yield
-            self.point.hold(self._capture())
+            _advance_point(self, job, commit)
             _announce_start(self, job, success=True)
         except Exception as exc:
             _announce_start(self, job, success=False)
@@ -1450,6 +1533,48 @@ def _announce(
         call(events)
     except Exception:
         logger.exception("dev roll event failed friction_type=dev_event_publish_failed")
+
+
+def _advance_point(guard: HandlerDevBootGuard, job: str, commit: str) -> None:
+    """Record the verified family as the recovery point, or keep the one held.
+
+    A roll that reached this call was replaced, verified and Docker healthy. A
+    compose config hash that no longer matches (the clone moved after ``up``, see
+    :class:`DevBootSettingsDriftError`) says the family cannot be re-rendered
+    exactly, not that the deploy failed: rolling a verified family back to the
+    previous image recreates the runtime a second time and leaves dev one image
+    behind on every such job. The previous recovery point stays held and the drift
+    is written beside the incidents for the next reader.
+    """
+    try:
+        guard.point.hold(guard._capture())
+    except DevBootSettingsDriftError as drift:
+        logger.warning(
+            "Dev recovery point not advanced job=%s commit=%s service=%s "
+            "container_hash=%s rendered_hash=%s",
+            job,
+            commit,
+            drift.service,
+            drift.container_hash,
+            drift.rendered_hash,
+        )
+        record: dict[str, JsonValue] = {
+            "job": job,
+            "commit": commit,
+            "service": drift.service,
+            "container_config_hash": drift.container_hash,
+            "rendered_config_hash": drift.rendered_hash,
+            "kept_recovery_revision": (
+                guard.point.current.revision if guard.point.current else ""
+            ),
+            "at": guard.execution._dev_boot_timestamp(),
+        }
+        try:
+            guard.execution._atomic_write_private_json(
+                guard.root / f"settings-drift-{job}.json", record
+            )
+        except OSError:
+            logger.warning("Cannot record dev settings drift", exc_info=True)
 
 
 def _announce_start(guard: HandlerDevBootGuard, job: str, *, success: bool) -> None:

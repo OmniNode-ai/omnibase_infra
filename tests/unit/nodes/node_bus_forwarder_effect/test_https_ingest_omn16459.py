@@ -32,10 +32,10 @@ What these tests pin:
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
 import httpx
@@ -43,6 +43,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from omnibase_core.models.contracts.model_ingest_contract import compute_event_id
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
@@ -166,7 +167,7 @@ def test_contract_declares_the_https_ingest_leg() -> None:
     assert block["ingest_auth_ref"] == INGEST_AUTH_REF
 
 
-def test_contract_ingest_is_idempotent_on_the_content_addressed_event_id() -> None:
+def test_contract_ingest_is_idempotent_on_event_id() -> None:
     """2026-08-30 ruling clause 2: idempotency belongs on the route, keyed on the
     content-addressed event id -- not on a dedupe service and not on the sink."""
     assert _contract_https_ingest_block()["idempotency_key"] == "event_id"
@@ -467,19 +468,11 @@ def test_loader_leaves_the_kafka_outbound_leg_alone_when_the_set_is_absent(
 
 
 def _envelope_bytes(envelope_id: str) -> bytes:
-    payload = {"hello": "world"}
-    event_id = hashlib.sha256(
-        (
-            "onex.evt.omniclaude.tool-executed.v1\n"
-            + json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        ).encode("utf-8")
-    ).hexdigest()
     return json.dumps(
         {
             "envelope_id": envelope_id,
             "event_type": "omnibase.hook.tool-executed",
-            "payload": payload,
-            "metadata": {"tags": {"event_id": event_id}},
+            "payload": {"hello": "world"},
         }
     ).encode("utf-8")
 
@@ -495,6 +488,93 @@ def _ingest_transport(
         tenant_slug="beta-gateway-canary-79afa7263852",
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
         auth_token="test-gateway-token",
+    )
+
+
+def recording_https_ingest() -> tuple[
+    TransportGatewayHttpsIngest, list[dict[str, object]]
+]:
+    records: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        records.extend(json.loads(request.content)["records"])
+        return httpx.Response(202)
+
+    return _ingest_transport(handler), records
+
+
+@pytest.fixture
+def ingest_identity_vector() -> tuple[str, bytes, bytes, dict[str, bytes], str]:
+    path = (
+        REPO_ROOT
+        / "tests"
+        / "fixtures"
+        / "gateway"
+        / "https-ingest-identity-vector.yaml"
+    )
+    vector = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return (
+        vector["topic"],
+        vector["key"].encode("utf-8"),
+        vector["value"].encode("utf-8"),
+        {name: text.encode("utf-8") for name, text in vector["headers"].items()},
+        vector["event_id"],
+    )
+
+
+@pytest.fixture
+def ingest_vector_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[TransportGatewayHttpsIngest, list[dict[str, object]]]:
+    # Supply an envelope coordinate for the opaque Core vector. The adapter
+    # must still publish and identify the original opaque bytes.
+    monkeypatch.setattr(
+        gateway_forwarder,
+        "json",
+        SimpleNamespace(
+            loads=lambda value: {"envelope_id": "11111111-1111-1111-1111-111111111111"}
+        ),
+    )
+    return recording_https_ingest()
+
+
+@pytest.mark.asyncio
+async def test_https_ingest_identity_uses_the_pinned_vector_and_key(
+    ingest_vector_transport: tuple[
+        TransportGatewayHttpsIngest, list[dict[str, object]]
+    ],
+    ingest_identity_vector: tuple[str, bytes, bytes, dict[str, bytes], str],
+) -> None:
+    transport, records = ingest_vector_transport
+    topic, key, value, headers, event_id = ingest_identity_vector
+    await transport.publish(topic, key, value, headers)
+    await transport.publish(topic, b"other-key", value, headers)
+
+    assert records[0]["value"] == records[1]["value"]
+    assert records[0]["event_id"] == event_id
+    assert records[1]["event_id"] == compute_event_id(
+        topic, b"other-key", value, headers
+    )
+    assert records[0]["event_id"] != records[1]["event_id"]
+
+
+@pytest.mark.asyncio
+async def test_https_ingest_topic_matches_the_canonical_client_vector(
+    ingest_vector_transport: tuple[
+        TransportGatewayHttpsIngest, list[dict[str, object]]
+    ],
+    ingest_identity_vector: tuple[str, bytes, bytes, dict[str, bytes], str],
+) -> None:
+    transport, records = ingest_vector_transport
+    topic, key, value, headers, event_id = ingest_identity_vector
+    physical_topic = f"tenant-a.{topic}"
+    await transport.publish(physical_topic, key, value, headers)
+
+    assert records[0]["topic"] == physical_topic
+    assert (
+        records[0]["event_id"]
+        == compute_event_id(topic, key, value, headers)
+        == event_id
     )
 
 
@@ -582,9 +662,7 @@ async def test_transport_preserves_the_record_bytes_exactly() -> None:
 
 
 @pytest.mark.asyncio
-async def test_transport_sends_the_content_addressed_event_id_as_idempotency_key() -> (
-    None
-):
+async def test_transport_sends_event_id_as_idempotency_key() -> None:
     """2026-08-30 ruling clause 2 -- idempotency is asserted by the caller on the
     route, keyed on the content-addressed event id."""
     seen: list[httpx.Request] = []
@@ -593,17 +671,13 @@ async def test_transport_sends_the_content_addressed_event_id_as_idempotency_key
         seen.append(request)
         return httpx.Response(202)
 
-    await _ingest_transport(handler).publish(
-        topic="t.onex.evt.omnibase-infra.gateway-heartbeat.v1",
-        key=None,
-        value=_envelope_bytes("33333333-3333-3333-3333-333333333333"),
-    )
-    assert (
-        seen[0].headers["idempotency-key"]
-        == hashlib.sha256(
-            b'onex.evt.omniclaude.tool-executed.v1\n{"hello":"world"}'
-        ).hexdigest()
-    )
+    topic = "t.onex.evt.omnibase-infra.gateway-heartbeat.v1"
+    value = _envelope_bytes("33333333-3333-3333-3333-333333333333")
+    headers = {"message-id": b"record-a"}
+    await _ingest_transport(handler).publish(topic, None, value, headers)
+    expected = compute_event_id(topic, None, value, headers)
+    assert seen[0].headers["idempotency-key"] == expected
+    assert json.loads(seen[0].content)["records"][0]["event_id"] == expected
 
 
 @pytest.mark.asyncio
