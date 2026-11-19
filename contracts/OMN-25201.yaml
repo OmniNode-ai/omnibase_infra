@@ -1,0 +1,86 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25201
+title: Review findings 1 to 5 on the dev signing key pull request at the second review are fixed or argued
+summary: Second review round on the dev signing key pull request. The dev unit's start check refuses every line that is not the one key line, the contract readings carry their host, command and time and the suite no longer asserts they are empty, the env_file and --env-file claim is pinned over every YAML file and every source line of the agent's directories, the AC6 check of the earlier contract names the failing base tests, and the rollout order is stated. No runtime source file changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25201-review
+    statement: The five blocking review findings at the second review of the dev signing key pull request are fixed, or argued with evidence in a pull request comment.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the start check in U refuses every line that is not the one key line (an indented key line, a comment or line ending in a backslash before the key line, an extra name such as DEPLOY_AGENT_ENV_PROTECTED), and the three cases are in _BAD_KEY_FILES -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q` fails each of the three new cases on the code at head 835b8e9671e5 and passes at the new head'
+      - id: AC2
+        statement: 'AC2: real readings are recorded in K with host, command and time after the install, the all-empty assertion at C:126-129 is deleted and K:110-115 is dropped from AC4, or a PR comment argues why the readings cannot exist yet -- falsifier: `uv run pytest tests/ci/test_contract_omn24611_evidence_readings_omn25179.py -q` fails with an invented equal hex pair plus accepted and passes with recorded readings'
+      - id: AC3
+        statement: 'AC3: every compose file in the repo and the overlays of PR 571 is scanned, any env_file entry that is not allow-listed fails, the existing --env-file hit is traced to its command and a split-argv control is added, or the claim in U:166-171 is corrected -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q` fails when a compose file outside docker/ declares env_file with ${HOME}/.env and when --env-file sits in a split argv list'
+      - id: AC4
+        statement: 'AC4: the AC6 check of the contract names the 10 failing tests of tests/unit, shows them failing on the merge base 1f5f40f80b2d and deselects them by name, and none of the 10 is in T or L -- falsifier: the contract''s AC6 command run on the lab passes with the 10 deselected by name and fails when one of them is removed from the deselect list'
+      - id: AC5
+        statement: 'AC5: the rollout order (the key file on h201 before the unit) is stated in the header of U and in K, and the old-check control in T is parametrized over the three new cases -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -q` fails each of the three cases on the old check'
+      - id: AC6
+        statement: 'AC6: each blocking finding is fixed or argued with evidence in its own PR comment, the required suites ran on the lab (in named parts if a whole run timed out), and a comment starting Lab: head=<full head sha> is at the new head -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6008` lists one comment per blocking finding and the Lab comment names the full sha of the PR head'
+evidence_requirements:
+  - kind: tests
+    description: The focused tests of the dev unit's start check, the launcher pin and the evidence checks.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn25201-ac1-start-check-refuses-others
+    description: The unit's start check refuses every line that is not the one key line; the three new key files fail on the check of the reviewed head and pass on the new one.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "start_check" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25201-ac2-readings-with-provenance
+    description: The readings checks require host, command and UTC time, the all-empty assertion is gone, and the deploy probe that passed with nothing installed is dropped from the AC4 evidence.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_omn24611_evidence_readings_omn25179.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25201-ac3-env-file-claim-pinned
+    description: Every YAML file in the repository is scanned for an env_file entry and every source line in the directories the agent runs code from for --env-file; each hit is listed with its command, and each scan has failing controls including a file outside docker/ with ${HOME}/.env and a split argv.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "env_file" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25201-ac4-base-failures-named
+    description: The AC6 check of the earlier contract deselects the failing tests of tests/unit by name; they fail on the merge base and none is in the key test or the launcher test.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_omn25179_ac6_deselect_omn25201.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25201-ac5-rollout-order-old-check
+    description: The rollout order is in the unit header and the contract summary, and the old environment check is a control over the garbage line and the three new cases.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "control_an_environment_check or control_the_line_check or rollout" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25201-ac6-suite-green
+    description: The deploy agent's unit tests pass at the new head with the named base failures deselected; the per-finding comments and the Lab comment are on the pull request.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py scripts/deploy-agent/tests/unit/test_deploy_agent_launcher_omn18073.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra

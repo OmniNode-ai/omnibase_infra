@@ -1,0 +1,22 @@
+# omnirunners.slice on h051 -- OMN-25674: the host aggregate for all three h051 pools.
+#
+# The unit NAME is one per host (the pools' compose files name `cgroup_parent: omnirunners.slice`), so this file holds
+# the same limits as docker/runners/systemd/pools/hp051-ci-runner/omnirunners.slice: whichever pool is deployed last
+# installs the same values and reads them back.
+#
+# Measured 2026-11-19T17:15Z: memory.current 29.5 GB, peak 50.1 GB, no `high` or `max` event with four hp051-ci-runner
+# and four merge-queue runners; 284 GiB available on a 377 GiB host. Sixteen hp051-omnibase-ci-runner runners at a 3 GiB
+# budget per job (the the second amd64 host pool measured about 2.1 GiB) add 48 GiB, so 128G MemoryHigh holds the peak without
+# throttling and 144G MemoryMax leaves 140 GiB of the available memory to the lab lanes. MemorySwapMax and CPUWeight
+# are unchanged from the sibling pool.
+[Unit]
+Description=OmniNode CI runner pools on h051, the HP DL560 Gen8 (OMN-25674)
+Before=slices.target
+
+[Slice]
+MemoryAccounting=yes
+MemoryHigh=128G
+MemoryMax=144G
+MemorySwapMax=2G
+CPUAccounting=yes
+CPUWeight=25
