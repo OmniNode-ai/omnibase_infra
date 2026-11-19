@@ -25,4 +25,4 @@ class ModelDeployRunnersRequest(BaseModel):
     # OMN-26098: replaces the overlay projection path the lab host table is copied from (absolute, or relative to the
     # runner host user's home). deploy-runners.sh fills it from RUNNER_LAB_HOST_TABLE_PROJECTION; unset keeps the
     # declared default of ModelRunnerLabHostTablePolicy.
-    lab_host_table_projection: str | None = None
+    lab_host_table_projection: str = ""

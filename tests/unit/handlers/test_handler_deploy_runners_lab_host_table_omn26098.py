@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 from pathlib import Path
@@ -23,7 +24,14 @@ from pathlib import Path
 import pytest
 
 from omnibase_infra.handlers.handler_deploy_runners import HandlerDeployRunners
+from omnibase_infra.handlers.handler_runner_image_roll import (
+    HandlerRunnerImageRoll,
+    RunnerRollError,
+)
 from omnibase_infra.models.model_deploy_runners_request import ModelDeployRunnersRequest
+from omnibase_infra.models.model_runner_image_roll_request import (
+    ModelRunnerImageRollRequest,
+)
 from omnibase_infra.models.model_runner_lab_host_table_policy import (
     ModelRunnerLabHostTablePolicy,
 )
@@ -63,8 +71,8 @@ COMPOSE_WITH_TABLE = (
 )
 
 
-class LocalHostHandler(HandlerDeployRunners):
-    """The host is this machine with a temporary home; compose rendering is answered from a fixed document."""
+class LocalHost:
+    """The runner host is this machine with a temporary home; ssh is a local bash."""
 
     def __init__(self, home: Path, shim_dir: Path) -> None:
         self.home = home
@@ -77,33 +85,60 @@ class LocalHostHandler(HandlerDeployRunners):
         self.shim_log = shim_dir / "log"
         self.commands: list[str] = []
 
-    async def _remote(self, host: str, command: str, timeout: int) -> str:
+    def run(self, command: str, stdin: bytes | None = None) -> tuple[int, str]:
         self.commands.append(command)
-        if "compose" in command and "config" in command:
-            return json.dumps({"services": {"x-1": {"environment": {}, "volumes": []}}})
         stat_match = re.search(r"stat -c '%F:%u:%a' -- (\S+)", command)
         if stat_match is not None:
             path = Path(stat_match.group(1).strip("'"))
             owners = self.shim_log.read_text().split()[1::2]
-            return f"regular file:{owners[-1]}:{stat.S_IMODE(path.stat().st_mode):o}\n"
+            return (
+                0,
+                f"regular file:{owners[-1]}:{stat.S_IMODE(path.stat().st_mode):o}\n",
+            )
         done = subprocess.run(
             ["bash", "-c", command],
             env=self.env,
+            input=stdin,
+            stdin=None if stdin is not None else subprocess.DEVNULL,
             capture_output=True,
             check=False,
         )
-        if done.returncode:
-            raise OSError(f"SSH exited {done.returncode}")
-        return done.stdout.decode()
+        return done.returncode, done.stdout.decode()
 
-    async def _write_remote(
-        self, host: str, path: str, data: str, timeout: int
-    ) -> None:
-        self.commands.append(f"write {path}")
+    def write(self, word: str, data: str) -> None:
+        self.commands.append(f"write {word}")
+        path = shlex.split(word.replace('"$HOME"', str(self.home)))[0]
         with open(
             path, "w", encoding="utf-8", newline=""
         ) as handle:  # same inode, mode kept
             handle.write(data)
+
+
+class LocalHostHandler(HandlerDeployRunners):
+    """The deploy effect on that host; only Compose rendering is answered from a fixed document."""
+
+    def __init__(self, home: Path, shim_dir: Path) -> None:
+        self.host = LocalHost(home, shim_dir)
+        self.home = home
+        self.shim_log = self.host.shim_log
+
+    @property
+    def commands(self) -> list[str]:
+        return self.host.commands
+
+    async def _remote(self, host: str, command: str, timeout: int) -> str:
+        if "compose" in command and "config" in command:
+            self.host.commands.append("compose config")
+            return json.dumps({"services": {"x-1": {"environment": {}, "volumes": []}}})
+        rc, output = self.host.run(command)
+        if rc:
+            raise OSError(f"SSH exited {rc}")
+        return output
+
+    async def _write_remote(
+        self, host: str, word: str, data: str, timeout: int
+    ) -> None:
+        self.host.write(word, data)
 
 
 @pytest.fixture
@@ -201,7 +236,7 @@ def test_lab_host_table_key_is_appended_once_when_absent_and_a_second_deploy_cha
 
     first = asyncio.run(lab.handle(_request(lab.home, compose)))
     after_first = env.read_bytes()
-    lab.commands.clear()
+    lab.host.commands.clear()
     second = asyncio.run(lab.handle(_request(lab.home, compose)))
 
     assert first.success is True and second.success is True
@@ -282,8 +317,89 @@ def test_lab_host_table_a_compose_without_the_mount_is_left_alone(
 
 
 def test_lab_host_table_env_key_replacement_is_a_pure_function_of_the_text() -> None:
-    new = HandlerDeployRunners.with_env_value
-    assert new("", KEY, "/p") == f"{KEY}=/p\n"
-    assert new(f"{KEY}=/a\n{KEY}=/b\nB=2\n", KEY, "/p") == f"{KEY}=/p\nB=2\n"
-    assert new(f"B=2\n{KEY}=/a", KEY, "/p") == f"B=2\n{KEY}=/p"
-    assert new(f"B=2\rX\n{KEY}=/a\r\n", KEY, "/p") == f"B=2\rX\n{KEY}=/p\n"
+    def new(content: str) -> str:
+        return ModelRunnerLabHostTablePolicy().with_env_value(content, "/p")
+
+    assert new("") == f"{KEY}=/p\n"
+    assert new(f"{KEY}=/a\n{KEY}=/b\nB=2\n") == f"{KEY}=/p\nB=2\n"
+    assert new(f"B=2\n{KEY}=/a") == f"B=2\n{KEY}=/p"
+    assert new(f"B=2\rX\n{KEY}=/a\r\n") == f"B=2\rX\n{KEY}=/p\n"
+
+
+class LocalHostRoll(HandlerRunnerImageRoll):
+    """The secondary pool image roll, with its ssh seam run against the temporary home."""
+
+    def __init__(self, host: LocalHost) -> None:
+        self.host = host
+
+    async def _remote(
+        self,
+        host: str,
+        script: str,
+        *,
+        stdin: bytes | None = None,
+        timeout: int = 30,
+    ) -> tuple[int, str]:
+        return self.host.run(script, stdin)
+
+
+def _roll_request(tmp_path: Path, compose_text: str) -> ModelRunnerImageRollRequest:
+    docker = tmp_path / "repo" / "docker"
+    docker.mkdir(parents=True)
+    (docker / "docker-compose.runners-x.yml").write_text(compose_text, encoding="utf-8")
+    return ModelRunnerImageRollRequest(
+        host="h053",
+        prefix="x",
+        repo_root=tmp_path / "repo",
+        fleet_config=tmp_path / "fleet.yaml",
+        token_path=tmp_path / "token",
+    )
+
+
+def test_lab_host_table_secondary_roll_writes_the_key_before_it_recreates_anything(
+    lab: LocalHostHandler, compose: Path, tmp_path: Path
+) -> None:
+    """The roll recreates from the host's installed Compose, so it must not meet a stale key either."""
+    _projection(lab.home)
+    env = _env_file(lab.home, "A=1\n" + STALE)
+    roll = LocalHostRoll(lab.host)
+
+    asyncio.run(
+        roll._converge_lab_host_table(_roll_request(tmp_path, COMPOSE_WITH_TABLE))
+    )
+
+    copy = lab.home / ModelRunnerLabHostTablePolicy().copy_home_relative
+    assert env.read_bytes().decode() == f"A=1\n{KEY}={copy}\n"
+
+
+def test_lab_host_table_secondary_roll_halts_on_a_missing_projection_naming_the_path(
+    lab: LocalHostHandler, tmp_path: Path
+) -> None:
+    env = _env_file(lab.home, "A=1\n" + STALE)
+    roll = LocalHostRoll(lab.host)
+
+    with pytest.raises(RunnerRollError) as refusal:
+        asyncio.run(
+            roll._converge_lab_host_table(_roll_request(tmp_path, COMPOSE_WITH_TABLE))
+        )
+
+    projection = lab.home / ModelRunnerLabHostTablePolicy().projection_home_relative
+    assert str(refusal.value).startswith("RUNNER-LAB-HOST-TABLE-PROJECTION host=h053")
+    assert f"path={projection}" in str(refusal.value)
+    assert env.read_bytes().decode() == "A=1\n" + STALE
+
+
+def test_lab_host_table_secondary_roll_of_a_pool_without_the_mount_touches_nothing(
+    lab: LocalHostHandler, tmp_path: Path
+) -> None:
+    env = _env_file(lab.home, "A=1\n" + STALE)
+    roll = LocalHostRoll(lab.host)
+
+    asyncio.run(
+        roll._converge_lab_host_table(
+            _roll_request(tmp_path, COMPOSE_WITH_TABLE.replace(KEY, "OTHER"))
+        )
+    )
+
+    assert env.read_bytes().decode() == "A=1\n" + STALE
+    assert lab.host.commands == []

@@ -67,6 +67,8 @@ def test_the_files_this_change_touches_spell_no_machine_home_path() -> None:
     """The local-path hook's rule, held where the installer's own sources and tests are."""
     touched = [
         "src/omnibase_infra/handlers/handler_deploy_runners.py",
+        "src/omnibase_infra/handlers/handler_runner_image_roll.py",
+        "src/omnibase_infra/models/model_runner_lab_host_table_result.py",
         "src/omnibase_infra/models/model_runner_lab_host_table_policy.py",
         "tests/unit/handlers/test_handler_deploy_runners_lab_host_table_omn26098.py",
         "tests/ci/test_runner_lab_host_table_installer_omn26098.py",
@@ -75,3 +77,16 @@ def test_the_files_this_change_touches_spell_no_machine_home_path() -> None:
     for name in touched:
         text = (ROOT / name).read_text(encoding="utf-8")
         assert pattern.search(text) is None, name
+
+
+@pytest.mark.parametrize(
+    "installer",
+    ["handlers/handler_deploy_runners.py", "handlers/handler_runner_image_roll.py"],
+)
+def test_both_installers_that_recreate_a_pool_converge_the_table_first(
+    installer: str,
+) -> None:
+    """The deploy stand-up and ``--rolling --host`` both end in ``docker compose up``; each must write the key."""
+    source = (ROOT / "src" / "omnibase_infra" / installer).read_text(encoding="utf-8")
+    assert "ModelRunnerLabHostTablePolicy" in source
+    assert ".converge(" in source

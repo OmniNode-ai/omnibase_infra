@@ -21,3 +21,5 @@ class ModelRunnerImageRollRequest(BaseModel):
     limit: int = Field(default=0, ge=0)
     dry_run: bool = False
     skip_build: bool = False
+    # OMN-26098: replaces the overlay projection path the lab host table is copied from (see ModelRunnerLabHostTablePolicy).
+    lab_host_table_projection: str = ""
