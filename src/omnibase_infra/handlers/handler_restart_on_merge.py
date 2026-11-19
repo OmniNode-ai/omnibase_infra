@@ -70,6 +70,7 @@ from types import ModuleType
 
 import yaml
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.model_agent_unit import ModelAgentUnit
 from omnibase_infra.models.model_restart_on_merge import ModelRestartOnMerge
 from omnibase_infra.models.model_unit_settings_gap import ModelUnitSettingsGap
@@ -656,6 +657,16 @@ def restart_own_unit(
 
 class HandlerRestartOnMerge:
     """Decide whether a merge may sync and restart one agent unit, or a whole host."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure handler over the host's deploy agent."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Side-effecting: reads host unit state and the deploy-source clone."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def handle(self, request: ModelRestartOnMerge) -> ModelRestartOnMerge:
         repo_root = Path(request.repo_root)

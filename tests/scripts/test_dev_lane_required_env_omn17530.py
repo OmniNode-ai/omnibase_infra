@@ -5,7 +5,7 @@
 OMN-17530. The dev lane brings up two compose files, not one --
 ``docker/docker-compose.infra.yml`` plus ``docker/docker-compose.dev-lane.yml``
 (``resolve_compose_file_args`` in ``src/omnibase_infra/handlers/handler_runtime_deploy.sh``, and
-``_LANE_CONFIGS[DEV].compose_files`` in the deploy agent) -- and a ``${VAR:?}``
+``_lane_configs()[DEV].compose_files`` in the deploy agent) -- and a ``${VAR:?}``
 in either file is a hard requirement of the deploy.
 
 Only the base had a declared manifest. The overlay had none, so:

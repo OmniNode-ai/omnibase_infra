@@ -31,8 +31,8 @@ import yaml
 from deploy_agent import executor as agent_executor
 from deploy_agent.events import EnumRuntimeLane, Scope
 from deploy_agent.executor import (
-    _LANE_CONFIGS,
     ModelLaneConfig,
+    _lane_configs,
     _requested_services_for_up,
     lane_config_for,
 )
@@ -84,7 +84,7 @@ JUDGE_FILE = DOCKER_DIR / "docker-compose.judge.yml"
 # list in ``disabled_services`` (``_requested_services_for_up`` in
 # deploy_agent/executor.py), and an explicit name bypasses the overlay's profile-disable.
 # A service in that list that the lane neither disables nor renames is created under the
-# dev lane's bare name. The map is derived from the agent's own ``_LANE_CONFIGS``, so a
+# dev lane's bare name. The map is derived from the agent's own ``_lane_configs()``, so a
 # lane added there is covered or has to be named below.
 #
 # The prod overlay is the one named exclusion: docker-compose.prod.yml sets only the
@@ -107,7 +107,7 @@ def _overlay_file_of(lane: EnumRuntimeLane, config: ModelLaneConfig) -> Path:
 
 AGENT_RUNTIME_LANES = {
     _overlay_file_of(lane, config): lane
-    for lane, config in _LANE_CONFIGS.items()
+    for lane, config in _lane_configs().items()
     if lane is not EnumRuntimeLane.DEV and lane not in AGENT_RUNTIME_EXCLUSIONS
 }
 
@@ -154,10 +154,8 @@ def _runtime_services_from_deploy_script() -> set[str]:
 @pytest.fixture(autouse=True)
 def _committed_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     """Read this checkout's runtime policy, not the deploy host's clone path."""
-    monkeypatch.setattr(
-        "deploy_agent.executor.RUNTIME_POLICY_ENV_FILE",
-        DOCKER_DIR / "runtime-policy.env",
-    )
+    policy = DOCKER_DIR / "runtime-policy.env"
+    monkeypatch.setattr("deploy_agent.executor.runtime_policy_env_file", lambda: policy)
 
 
 def _agent_runtime_services(overlay_file: Path) -> set[str]:
@@ -396,14 +394,16 @@ def test_agent_runtime_list_feeds_the_instantiated_set(
 @pytest.mark.unit
 def test_overlay_lane_with_one_compose_file_is_refused_with_a_clear_message() -> None:
     """A non-dev lane config with no overlay fails an assertion, not an IndexError."""
-    one_file = _LANE_CONFIGS[EnumRuntimeLane.PROD].model_copy(
-        update={"compose_files": _LANE_CONFIGS[EnumRuntimeLane.PROD].compose_files[:1]}
+    one_file = _lane_configs()[EnumRuntimeLane.PROD].model_copy(
+        update={
+            "compose_files": _lane_configs()[EnumRuntimeLane.PROD].compose_files[:1]
+        }
     )
     with pytest.raises(AssertionError, match="needs the base file and its overlay"):
         _overlay_file_of(EnumRuntimeLane.PROD, one_file)
     # Positive control: the real prod config has its overlay.
     assert _overlay_file_of(
-        EnumRuntimeLane.PROD, _LANE_CONFIGS[EnumRuntimeLane.PROD]
+        EnumRuntimeLane.PROD, _lane_configs()[EnumRuntimeLane.PROD]
     ).name.endswith("prod.yml")
 
 
@@ -412,7 +412,7 @@ def test_agent_runtime_lanes_cover_every_overlay_lane_of_the_agent() -> None:
     """Every overlay lane of the agent is in the ratchet's map or a named exclusion."""
     # Hand-written, so a lane added to the agent's table fails here until it is
     # either covered or named as an exclusion.
-    assert set(_LANE_CONFIGS) == {
+    assert set(_lane_configs()) == {
         EnumRuntimeLane.DEV,
         EnumRuntimeLane.STABILITY_TEST,
         EnumRuntimeLane.PROD,

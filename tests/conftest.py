@@ -85,6 +85,7 @@ for _name, _value in (
     ("DEPLOY_AGENT_REPO_DIR", "/nonexistent/agent-clone/omnibase_infra"),
     ("DEPLOY_AGENT_CANONICAL_CLONE", "/nonexistent/canonical/omnibase_infra"),
     ("DEPLOY_AGENT_LAB_OVERLAY_SOURCE", "/nonexistent/overlay-source"),
+    ("DEPLOY_AGENT_TRACKING_REF", "dev"),
 ):
     os.environ[_name] = _value
 

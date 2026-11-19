@@ -43,6 +43,7 @@ from types import ModuleType
 
 import yaml
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.model_deploy_source_clone import ModelDeploySourceClone
 
 logger = logging.getLogger(__name__)
@@ -461,6 +462,16 @@ def apply_request(request: ModelDeploySourceClone) -> ModelDeploySourceClone:
 
 class HandlerDeploySourceClone:
     """Resolve and, on ensure, create the agent's own deploy-source clone."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure handler over the host's deploy agent."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Side-effecting: reads host unit state and the deploy-source clone."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def handle(self, request: ModelDeploySourceClone) -> ModelDeploySourceClone:
         return apply_request(request)
