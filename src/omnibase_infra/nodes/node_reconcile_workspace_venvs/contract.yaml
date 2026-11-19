@@ -37,7 +37,7 @@ handler_routing:
 io_operations:
   - operation: hook_venv.reconcile
     description: Plan exact sync, refuse dropped commits, sync and verify revisions.
-    input_fields: [workspace_root, project, uv_bin]
+    input_fields: [workspace_root, project, uv_bin, mode]
     output_fields: [status, detail, output]
 capabilities:
   - name: hook_venv.reconcile
