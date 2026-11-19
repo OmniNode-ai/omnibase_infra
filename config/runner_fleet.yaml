@@ -207,6 +207,15 @@ hosts:
       - runner_name_prefix: hp051-ci-mq-runner
         expected_count: 4
         classes: [merge-queue]
+      # OMN-25674 -- the general `omnibase-ci` pool moves here from the second amd64 host. Measured on the second amd64 host 2026-11-19T17:04Z: its slice sat at the
+      # 20 GiB MemoryHigh (high events 545,431,572), memory pressure full 94.8 percent, load 135, and the required `ci` jobs of
+      # two repositories hit their 10 minute limit there. Sixteen runners, sized from this host's measured headroom (80
+      # threads, 284 GiB available, slice peak 50.1 GB against a new 128G high). It carries `omnibase-ci` although the
+      # CPU has no AVX2: the one repository whose unit suite imports an AVX2 wheel runs its CI on GitHub-hosted runners.
+      # Deployed with `deploy-runners.sh --host=h051 --pool=hp051-omnibase-ci-runner`.
+      - runner_name_prefix: hp051-omnibase-ci-runner
+        expected_count: 16
+        classes: [action, action-multiarch]
   # h053 -- HP ProLiant Gen9 (hp-gen9), Xeon E5-2680 v4 Broadwell, 56 threads,
   # 125 GiB, amd64 WITH AVX2 (OMN-22111; RULING 2026-11-02T13:33:32Z under
   # OMN-17232). The general `omnibase-ci` runners leave the primary host here:

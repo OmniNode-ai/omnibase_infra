@@ -47,9 +47,12 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     # its CI runners off first) cut the primary host's share 10 -> 0 once the
     # 16 runners of the second amd64 host and the 5 `hp053-ci-runner` carried its labels, so
     # the declared total is 16 + 5 = 21.
+    # OMN-25674 declares the 16 runners h051 takes over from the second amd64 host before its
+    # 16 are drained (make before break), so it is 16 + 16 + 5 = 37 until the
+    # pool there is removed, and 21 again after.
     assert config.expected_count == 0
     assert config.burst_count == 0
-    assert config.declared_total("action") == 21
+    assert config.declared_total("action") == 37
 
 
 def test_runner_compose_matches_configured_count() -> None:
@@ -102,8 +105,13 @@ def test_primary_host_declares_only_its_host_specific_runners() -> None:
     action_hosts = {
         host.host for host in config.hosts if host.declared_count("action") > 0
     }
-    assert len(action_hosts) == 2
-    assert "h053" in action_hosts
+    # OMN-25674: h051 declares the pool that takes over the second amd64 host's capacity.
+    second_host = next(
+        host
+        for host in config.hosts
+        if host.host not in {"h051", "h053"} and host.declared_count("action") > 0
+    )
+    assert action_hosts == {"h051", "h053", second_host.host}
     assert config.runner_host not in action_hosts
 
 
