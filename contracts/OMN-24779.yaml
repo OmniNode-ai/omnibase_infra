@@ -37,7 +37,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/event_bus/test_omn20464_orphan_degraded_grace.py -q -p no:cacheprovider -k names_the_consumer
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn24779-ac2-installed-check-fails-without-group
+  - id: dod-omn24779-ac2-installed-check-fails-no-group
     description: >-
       The installed-and-read command of the OMN-20464 contract exits non-zero on the pre-change model and zero on the model with the group.
     source: manual
