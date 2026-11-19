@@ -25,16 +25,29 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+import yaml
 from deploy_agent import executor as executor_mod
 from deploy_agent.executor import load_dev_boot_guard
-
-from tests.helpers.lane_overlay_fixtures import load_compose
 
 pytestmark = [pytest.mark.unit, pytest.mark.product_clone_pin]
 
 REPO = Path(__file__).resolve().parents[4]
 MODULE = "nodes.node_setup_local_provision_effect.runtime_overlay_revision"
 PIN_KEYS = {"repo_root", "pinned_sha", "upstream_ref", "recorded_at"}
+
+
+def load_compose(path: Path) -> dict[str, object]:
+    """Load a compose file with its ``!override`` and ``!reset`` tags dropped.
+
+    The dev-lane overlay carries those tags, which ``yaml.safe_load`` refuses; the
+    mounts and variables read here sit outside them.
+    """
+    text = re.sub(
+        r"(?<=\s)!(override|reset)(?=\s)", "", path.read_text(encoding="utf-8")
+    )
+    loaded = yaml.safe_load(text)
+    assert isinstance(loaded, dict)
+    return loaded
 
 
 def _module() -> ModuleType:
