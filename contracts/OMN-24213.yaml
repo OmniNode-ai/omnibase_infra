@@ -1,0 +1,70 @@
+schema_version: 1.0.0
+ticket_id: OMN-24213
+title: Turn the second lab machine's development stack back on
+summary: >-
+  Child of OMN-24186. Read-only on 2026-11-13 (second lab host up 23h40m): the second dev instance's runtime, runtime-effects, runtime-worker and contract-resolver containers print "RETRIES EXHAUSTED: 5 consecutive failing boots ... not booting again" (cause on the runtime: Failed to connect to Kafka, Unable to bootstrap from redpanda:9092, at the 13:55Z host boot while the broker was still starting), and its projection-api prints the same. That instance's deploy agent (a user systemd unit) is active, but config/deploy_lane_routing.yaml declared the instance available false (OMN-21402, host out for repair), so every omnimarket rebuild resolved to the default instance and nothing recreated the stack. The declaration now says available true.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24213-available
+    statement: The routing table declares the second dev instance available and routes omnimarket dev rebuilds to it.
+    acceptance:
+      - id: AC1
+        statement: "AC1: config/deploy_lane_routing.yaml declares the second dev instance available and a test pins it -- falsifier: the new test in scripts/deploy-agent/tests/unit fails against the file that says available: false"
+      - id: AC2
+        statement: "AC2: the deploy router resolves an omnimarket dev rebuild to the second dev instance from the committed table -- falsifier: the router returns the default instance for that route"
+  - id: req-omn24213-integrated
+    statement: The stopped second dev instance stack is recreated by the declared redeploy.
+    acceptance:
+      - id: AC3
+        statement: "AC3: integrated: in the running runtime on the second lab host, after the next omnimarket dev rebuild routed to it, the instance's runtime and effects containers report healthy and its lab-pass receipt is written -- falsifier: docker ps on that host still shows the runtime stopped with 'not booting again'"
+evidence_requirements:
+  - kind: tests
+    description: The availability test passes at the pushed head and fails when the routing table is taken from the base commit.
+    command: env -u PYTHONPATH uv run --frozen pytest scripts/deploy-agent/tests/unit/test_second_dev_instance_available_omn24213.py -q --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24213-ac1
+    description: >-
+      The routing table reads available true for the second dev instance and the test rejects any other value; against the base commit's table the test fails (2 failed, 1 passed).
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest scripts/deploy-agent/tests/unit/test_second_dev_instance_available_omn24213.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24213-ac2
+    description: >-
+      The router built from the committed table returns the second dev instance for the omnimarket rebuild trigger; the same file's other routes keep the default instance.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest scripts/deploy-agent/tests/unit/test_second_dev_instance_available_omn24213.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24213-ac3
+    description: >-
+      The tests behind the declaration pass at the head; the reading of the recreated containers needs the next omnimarket rebuild on the second lab host and the verify runner re-registered, and is read on that host; hosted CI cannot reach it.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest scripts/deploy-agent/tests/unit/test_second_dev_instance_available_omn24213.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24213-integration-proof
+    description: >-
+      Live probe of the second lab host, whose address the lab environment supplies as H202_HOST and the runtime container name as SECOND_DEV_RUNTIME: the runtime container must report healthy. Fails while it prints not booting again. Reachable only from the lab network. It binds no criterion; the hosted proof is dod-omn24213-ac1.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -c 'ssh -o BatchMode=yes "${H202_HOST:?set to the second lab host address}" docker inspect "${SECOND_DEV_RUNTIME:?set to the runtime container name}" --format "{{.State.Health.Status}}" | grep -qx healthy'
+        cwd: .
