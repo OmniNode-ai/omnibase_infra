@@ -13,6 +13,7 @@ class ModelHookVenvReconcileRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     operation: Literal["hook_venv.reconcile"] = "hook_venv.reconcile"
+    mode: Literal["reconcile", "check"] = "reconcile"
     workspace_root: Path
     project: Path
     uv_bin: Path
