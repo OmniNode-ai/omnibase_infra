@@ -30,7 +30,7 @@ from omnibase_infra.nodes.node_setup_local_provision_effect import (
 pytestmark = [pytest.mark.integration]
 
 REPO = Path(__file__).resolve().parents[3]
-AGENT_SOURCE = REPO / "scripts" / "deploy-agent" / "deploy_agent" / "executor.py"
+AGENT_SOURCE = REPO / "scripts/deploy-agent/deploy_agent/executor.py"
 PIN_ENV = "DOD_VERIFY_PRODUCT_CLONE_PIN_FILE"
 COMPOSE_HOSTS: tuple[tuple[str, str], ...] = (
     ("docker-compose.dev-lane.yml", "runtime-effects"),
