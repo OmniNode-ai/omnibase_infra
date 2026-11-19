@@ -1,0 +1,80 @@
+schema_version: 1.0.0
+ticket_id: OMN-25927
+title: The stability lane holds its own stability-h051 login on the stability broker, created through the declared ACL path with its password stored in Infisical by name
+summary: The stability lane compose declares SASL/SCRAM on its own broker (a principal one-shot, a superuser-first SASL flip, and per-service client settings).
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25927-stability-broker-sasl
+    statement: The stability broker requires SASL with authorization, each stability service and the stability lane host hold a principal of their own, and every password is read from declared config by name.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the lab broker ACL tool accepts the stability lane's declaration, with a test that fails at the base and passes at the pull request head"
+      - id: AC2
+        statement: "AC2: the principal stability-h051 and its ACL rows exist on the stability broker and the ACL tool's own check reads them back with no MISSING row"
+      - id: AC3
+        statement: "AC3: each generated password sits in Infisical under one upper-snake key name and no file, ledger row, pull request body or report holds its value"
+      - id: AC4
+        statement: "AC4: the stability lane reads each value from declared config with no hand-set value, and its serve tick last-run reads exit 0 instead of exit 3 source_unread"
+      - id: AC5
+        statement: "AC5: integrated: the stability lane consumes and produces on its topics in the running system, with a log line, dispatch or job record cited in a STATUS row"
+      - id: AC6
+        statement: "AC6: no existing principal, key, dev lane ACL or dev lane principal changed and only stability lane services restarted"
+evidence_requirements:
+  - kind: tests
+    description: The stability compose declares the principal one-shot, the superuser-first SASL flip and per-service SASL client settings; the dev-lane scope guard still holds.
+    command: uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn25927.py tests/integration/infra/test_omn18012_dev_lane_broker_auth_scope.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25927-principal-declaration
+    description: The stability compose declares stability-h051 as a SCRAM principal that is not a superuser, so its rows come from the lab broker ACL declaration. The ACL tool change itself lives in the lab config repository and is not carried here.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn25927.py -k principal_set -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25927-sasl-flip
+    description: The stability broker's SASL flip waits for the principal one-shot to complete, grants superusers before enable_sasl, and proves an unauthenticated client is refused and an authenticated one accepted.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn25927.py -k 'one_shots or flip_waits' -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25927-password-references
+    description: Every stability broker password is a fail-closed reference to one upper-snake variable name and no value is in the compose file.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn25927.py -k 'own_principal or principal_set' -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25927-declared-config
+    description: Each stability Kafka client reads its principal name and password from declared compose config with no hand-set value. The stability lane host wiring and its serve tick are live reads pending after the restart.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn25927.py -k every_kafka_client -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25927-refresh-scope
+    description: The governed stability refresh re-creates the principal one-shot and re-asserts the SASL flip on every refresh. The live consume and produce read of the stability lane is pending after the restart.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_omn17448_dev_lane_writer_build_scope.py -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25927-scope
+    description: The principal and flip one-shots and the stability password variables stay out of the base compose file, and the dev-lane scope guard still keeps the dev principal and its flip out of every other lane.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn25927.py tests/integration/infra/test_omn18012_dev_lane_broker_auth_scope.py -k 'base or leak or never_reach' -q -n 0 --no-cov
+        cwd: .
