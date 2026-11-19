@@ -126,9 +126,9 @@ def assert_build_root_is_not_vcs_ignored(repo_root: Path) -> list[str]:
     # pattern ('/x/') is relative to the project root and cannot.
     #
     # The trailing slash is OPTIONAL and leaving it out of this test is a real
-    # bug this check had until a positive control caught it: omnibase_compat
-    # ignores a bare `.cache` with NO trailing slash, which in git matches a
-    # directory just as `.cache/` does. Judging that repository from a path
+    # bug this check had until a positive control caught it: a bare `.cache`
+    # with no trailing slash matches a directory just as `.cache/` does.
+    # Judging a repository with that pattern from a path
     # under `~/.cache/` produced a confident GREEN on a tree whose wheel drops
     # a real package directory.
     patterns: set[str] = set()

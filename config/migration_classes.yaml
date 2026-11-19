@@ -125,6 +125,7 @@ migrations:
   forward/114_create_code_eval_trial_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
   forward/115_grant_role_omnibase_infra_state_io_omn19998.sql: expand-only
   forward/116_create_branch_deploy_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
+  forward/117_add_registration_runtime_entity_id.sql: expand-only
   forward/nodes/node_canary_score_reducer/0001_create_capability_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
@@ -324,6 +325,8 @@ migrations:
   forward/nodes/node_projection_dod_verdict/0002_dod_verify_runs_delegation_correlation_id.sql: expand-only
   forward/nodes/node_projection_dod_verdict/0003_dod_verify_runs_goal.sql: expand-only # additive
   forward/nodes/node_projection_dod_verdict/0004_dod_verify_runs_contract_subject.sql: expand-only # additive
+  forward/nodes/node_projection_done_items/0000_create_done_items.sql: expand-only # CREATE TABLE done_items and a non-unique index on projected_at
+  forward/nodes/node_projection_done_items/0001_grant_omninode_runtime_done_items.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on done_items
   forward/nodes/node_projection_event_chain/0001_create_event_chain.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PK_EVENT_CHAIN; ALTER TABLE ADD CONSTRAINT NON_NEGATIVE_EVENT_CHAIN_SEQUEN
   forward/nodes/node_projection_event_chain/0002_grant_omninode_runtime_event_chain.sql: expand-only
   forward/nodes/node_projection_goal_trace/0000_create_goal_trace_events.sql: forward-only # OMN-15376 shape reconciliation: ALTER TABLE ALTER COLUMN SET NOT NULL; ALTER TABLE ADD CONSTRAINT (primary key, checks)
