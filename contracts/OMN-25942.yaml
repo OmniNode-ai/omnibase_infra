@@ -10,7 +10,7 @@ requirements:
     statement: A dev roll that was replaced, verified and Docker healthy stays running when the post-roll capture finds the compose files other than up read.
     acceptance:
       - id: AC1
-        statement: 'AC-V1: the failed dev job 20cf29c6 is traced to its cause from the recorded job record, container readings and log lines, and the fixture that holds them is replayed -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_compose_settings_match_omn25942.py -q -k "recorded" exits non-zero'
+        statement: 'AC-V1: the failed dev job 20cf29c6 is traced to its cause from the recorded job record, container readings and log lines, and the fixture that holds them is replayed -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_compose_settings_match_omn25942.py -q -k "recorded or does_not_roll_back" exits non-zero on dev'
       - id: AC2
         statement: 'AC-V2: the dev boot guard keeps a verified, healthy roll when the compose config hash no longer matches, and the regression built from the recorded job 20cf29c6 readings fails on omnibase_infra dev and passes on the fix -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k compose_settings_match exits 0 on omnibase_infra dev or non-zero on the fix branch'
 evidence_requirements:
@@ -23,12 +23,12 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn25942-ac1-recorded-jobs
-    description: The recorded dev job 20cf29c6 replays from its fixture.
+    description: The recorded dev job 20cf29c6 replays from its fixture, and the replayed verified roll is kept; the selection fails on omnibase_infra dev, where the guard still restores it.
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_compose_settings_match_omn25942.py -q --no-cov -n 0 -p no:randomly -k recorded
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_compose_settings_match_omn25942.py -q --no-cov -n 0 -p no:randomly -k "recorded or does_not_roll_back"
         cwd: .
   - id: dod-omn25942-ac2-compose-settings-match
     description: A verified, healthy dev roll is kept and no incident or restore is written when the rendered compose hash differs from the container's; a failed roll is still restored.
@@ -54,3 +54,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/test_dev_boot_guard_compose_settings_drift_omn25942.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn25942-deploy
+    description: Hosted-runner probe that reads the committed boot guard handler from GitHub at the checked-out commit and requires the settings-drift error and the advance helper that keeps a verified roll.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "class DevBootSettingsDriftError" in src; assert "def _advance_point" in src'
+        cwd: ${OMNI_HOME}/omnibase_infra
