@@ -203,6 +203,13 @@ class ModelDlqReplayEngineConfig(BaseModel):
     # rather than carved out of its remainder: teardown must still get a real
     # budget on a run that legitimately spent its whole clock on records.
     dependency_lifecycle_timeout_seconds: float = Field(default=15.0, gt=0.0)
+    # OMN-25106: bounds ONE detached member close (``_begin_member_close``). A
+    # ``stop()`` that never returns would otherwise keep its member joined, and
+    # its task alive, for the life of the process. Past the bound the close is
+    # abandoned half way: aiokafka stops its heartbeat only after the
+    # coordination task ends, so the member can stay in the group until the
+    # process ends (group_coordinator.close(), aiokafka 0.14).
+    member_close_timeout_seconds: float = Field(default=30.0, gt=0.0)
     # OMN-19241: how many times one record may FAIL (neither replayed nor
     # quarantined) before the drain stops attempting its partition. A failed
     # record withholds its offset, so without a bound the next run re-reads it
@@ -518,6 +525,67 @@ def should_replay(
     return (True, "Eligible for replay")
 
 
+_MEMBER_CLOSES: set[asyncio.Task[None]] = set()
+"""Closes in flight. The event loop holds only a weak reference to a task, so
+each one is kept here until it finishes (OMN-25106)."""
+
+
+async def _close_member(consumer: AIOKafkaConsumer, timeout_seconds: float) -> None:
+    try:
+        await asyncio.wait_for(consumer.stop(), timeout=timeout_seconds)
+    except TimeoutError:
+        logger.warning(
+            "DLQ consumer close did not finish within %.1fs and was abandoned; "
+            "aiokafka stops the heartbeat only after the coordination task "
+            "ends, so the member can stay in the group until this process ends",
+            timeout_seconds,
+        )
+    except KafkaError as exc:
+        logger.warning("Error stopping DLQ consumer: %s", exc)
+    except asyncio.CancelledError:
+        # aiokafka's close can raise CancelledError from a task it has just
+        # cancelled itself (see ``_stop_group_less_reader``); that is not a
+        # cancellation of this task, so it is absorbed, a real one is not.
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            raise
+        logger.debug("DLQ consumer close raised aiokafka's close-race CancelledError")
+
+
+def _member_close_finished(task: asyncio.Task[None]) -> None:
+    """Forget a finished close, and say so when it ended any way but cleanly.
+
+    Reading the exception here is also what retrieves it: a close that failed
+    with anything but a ``KafkaError`` on the start-failure path, where nothing
+    awaits the task, would otherwise end as an unretrieved task exception that
+    only the interpreter reports, at garbage collection (OMN-25106).
+    """
+    _MEMBER_CLOSES.discard(task)
+    if task.cancelled():
+        logger.warning("DLQ consumer close was cancelled before it finished")
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("DLQ consumer close failed", exc_info=exc)
+
+
+def _begin_member_close(
+    consumer: AIOKafkaConsumer, timeout_seconds: float
+) -> asyncio.Task[None]:
+    """Start closing one group member as a task of its own (OMN-25106).
+
+    The task is not a child of the caller, so a ``wait_for`` timeout or a
+    cancelled dispatch that stops waiting for it does not abort the close:
+    the member leaves the group, which is the only thing that frees its
+    partition assignment. Nothing here awaits, so it is safe on the path of
+    a cancellation.
+    """
+    task = asyncio.ensure_future(_close_member(consumer, timeout_seconds))
+    _MEMBER_CLOSES.add(task)
+    task.add_done_callback(_member_close_finished)
+    return task
+
+
 class DLQConsumer:
     """Reads and parses messages from a DLQ topic with a persistent group."""
 
@@ -537,39 +605,62 @@ class DLQConsumer:
                 "consumer_group": self.config.consumer_group,
             },
         )
-        try:
-            self._consumer = AIOKafkaConsumer(
-                apply_topic_namespace(self.config.dlq_topic),
-                bootstrap_servers=self.config.bootstrap_servers,
-                auto_offset_reset="earliest",
-                enable_auto_commit=False,
-                group_id=self.config.consumer_group,
-                # OMN-17137: this is NOT an idle-iteration timeout. In aiokafka
-                # ``consumer_timeout_ms`` is the background fetching routine's
-                # max wait (default 200ms) -- ``__anext__`` still blocks forever
-                # on a quiet topic. Nothing below ``HandlerDlqReplay.run()``
-                # bounds the wait for the next record; run() owns that bound.
-                consumer_timeout_ms=5000,
-                **build_aiokafka_auth_kwargs_from_env(),
+        if self._consumer is not None:
+            # A member this object still holds is one an earlier start() or
+            # stop() did not finish with; overwriting the reference would
+            # leave it in the group with nothing able to stop it (OMN-25106).
+            _begin_member_close(
+                self._consumer, self.config.member_close_timeout_seconds
             )
-            await self._consumer.start()
-            self._started = True
-        except KafkaConnectionError:
-            logger.exception("Failed to connect DLQ consumer to Kafka")
+            self._consumer = None
+            self._started = False
+        consumer = AIOKafkaConsumer(
+            apply_topic_namespace(self.config.dlq_topic),
+            bootstrap_servers=self.config.bootstrap_servers,
+            auto_offset_reset="earliest",
+            enable_auto_commit=False,
+            group_id=self.config.consumer_group,
+            # OMN-17137: this is NOT an idle-iteration timeout. In aiokafka
+            # ``consumer_timeout_ms`` is the background fetching routine's
+            # max wait (default 200ms) -- ``__anext__`` still blocks forever
+            # on a quiet topic. Nothing below ``HandlerDlqReplay.run()``
+            # bounds the wait for the next record; run() owns that bound.
+            consumer_timeout_ms=5000,
+            **build_aiokafka_auth_kwargs_from_env(),
+        )
+        self._consumer = consumer
+        try:
+            await consumer.start()
+        except BaseException as exc:
+            # OMN-25106: ``consumer.start()`` JOINS the shared group, and the
+            # handler bounds it with ``asyncio.wait_for``, so a timeout cancels
+            # it half way. The member has a seat and a running heartbeat from
+            # that point, but ``_started`` is still False and ``stop()`` only
+            # acts when it is True: before this the reference was overwritten
+            # by the next start() and the member stayed in the group, holding
+            # its partition assignment, until the process ended. Every failure
+            # path, a cancellation included, ends the member it began.
+            self._consumer = None
+            _begin_member_close(consumer, self.config.member_close_timeout_seconds)
+            if isinstance(exc, KafkaConnectionError):
+                logger.exception("Failed to connect DLQ consumer to Kafka")
+            elif isinstance(exc, KafkaError):
+                logger.exception("Kafka error during DLQ consumer start")
             raise
-        except KafkaError:
-            logger.exception("Kafka error during DLQ consumer start")
-            raise
+        self._started = True
 
     async def stop(self) -> None:
-        if self._started and self._consumer is not None:
-            try:
-                await self._consumer.stop()
-            except KafkaError as exc:
-                logger.warning("Error stopping DLQ consumer: %s", exc)
-            finally:
-                self._started = False
-                self._consumer = None
+        # The reference is dropped FIRST and the close runs as its own task:
+        # the handler bounds this call with ``asyncio.wait_for``, and a
+        # cancellation that reached aiokafka's close half way left a member in
+        # the group that nothing could stop again (OMN-25106). The shield lets
+        # the caller stop waiting while the close still finishes.
+        consumer, self._consumer = self._consumer, None
+        self._started = False
+        if consumer is not None:
+            await asyncio.shield(
+                _begin_member_close(consumer, self.config.member_close_timeout_seconds)
+            )
 
     async def commit_offsets(self, offsets: Mapping[tuple[str, int], int]) -> None:
         """Commit an EXPLICIT offset map built from completed records only.

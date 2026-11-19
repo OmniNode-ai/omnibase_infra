@@ -146,6 +146,9 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
     calls: list[list[str]] = []
 
     def run(cmd: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["docker", "inspect"]:
+            # OMN-25106: the roll reads a service's health before it rolls it.
+            return subprocess.CompletedProcess(cmd, 1, "", "No such object")
         calls.append(cmd)
         service = next(
             (
@@ -288,6 +291,9 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
     def run(
         cmd: list[str], timeout: int, **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["docker", "inspect"]:
+            # OMN-25106: the roll reads a service's health before it rolls it.
+            return subprocess.CompletedProcess(cmd, 1, "", "No such object")
         calls.append(cmd)
         return subprocess.CompletedProcess(
             cmd,
