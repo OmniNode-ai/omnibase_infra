@@ -85,6 +85,8 @@ _RENDER_ONLY = "render-only"
 BASE_REQUIRED_ENV: dict[str, str] = {
     # OMN-20932: lane overlays are private; the mount refuses without this.
     "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
+    # OMN-24854: the dev lane mounts the config/lab folder; the render needs a non-empty name.
+    "ONEX_LANE_DECLARATION_DIR": "/nonexistent/config/lab",
     "POSTGRES_PASSWORD": "test",
     "VALKEY_PASSWORD": "test",
     "INFISICAL_ENCRYPTION_KEY": "0" * 64,

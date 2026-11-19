@@ -52,6 +52,19 @@ def _grep_checks() -> list[list[str]]:
     ]
 
 
+COMPOSE_PROBE = re.compile(
+    r"^docker compose -f (docker/docker-compose\.dev-[a-z-]+\.yml) config --no-interpolate"
+    r" \| grep -A4 'source: \[\$\]\[\{\]ONEX_LANE_DECLARATION_DIR'"
+    r" \| grep -q 'target: /etc/onex/workspace-config/config/lab'$"
+)
+
+
+def _compose_probe_file(value: str) -> str | None:
+    """The compose file of a rendered-config mount probe, or None for any other command."""
+    match = COMPOSE_PROBE.match(value)
+    return match.group(1) if match else None
+
+
 def _can_fail(check: dict[str, str]) -> bool:
     """Whether ``check`` reads the repository tree: a test run, or an anchored grep of one file.
 
@@ -65,6 +78,9 @@ def _can_fail(check: dict[str, str]) -> bool:
         return argv[:4] == ["uv", "run", "--frozen", "pytest"] and any(
             arg in EVIDENCE_TESTS and (REPO_ROOT / arg).is_file() for arg in argv[4:]
         )
+    compose = _compose_probe_file(value)
+    if compose is not None:
+        return (REPO_ROOT / compose).is_file()
     return (
         argv[:2] == ["grep", "-qE"]
         and len(argv) == 4
@@ -177,3 +193,16 @@ def test_every_grep_check_goes_red_when_its_mount_line_is_damaged(
         gone = subprocess.run([*argv[:3], copy.name], cwd=tmp_path, check=False)
 
         assert gone.returncode == 1, (damage, argv)
+
+
+def test_the_compose_config_probes_are_accepted_only_in_their_exact_shape() -> None:
+    probe = (
+        "docker compose -f docker/docker-compose.dev-lane.yml config --no-interpolate"
+        " | grep -A4 'source: [$][{]ONEX_LANE_DECLARATION_DIR'"
+        " | grep -q 'target: /etc/onex/workspace-config/config/lab'"
+    )
+    assert _can_fail({"check_type": "command", "check_value": probe})
+    assert not _can_fail({"check_type": "command", "check_value": probe + " || true"})
+    assert not _can_fail(
+        {"check_type": "command", "check_value": probe.replace("dev-lane", "missing")}
+    )
