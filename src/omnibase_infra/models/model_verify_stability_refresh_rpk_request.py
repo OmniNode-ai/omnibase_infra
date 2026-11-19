@@ -15,3 +15,5 @@ class ModelVerifyStabilityRefreshRpkRequest(BaseModel):
     broker_container: str = Field(min_length=1)
     rpk_args: tuple[str, ...] = Field(min_length=1)
     timeout_seconds: int = Field(default=30, ge=1, le=300)
+    environ: dict[str, str] = Field(default_factory=dict, repr=False, exclude=True)
+    """Injected environment the gate's password is read from; empty keeps the read anonymous."""

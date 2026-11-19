@@ -69,6 +69,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -145,7 +146,11 @@ _GATE_SPEC = importlib.util.spec_from_file_location(
 assert _GATE_SPEC is not None and _GATE_SPEC.loader is not None
 _gate = importlib.util.module_from_spec(_GATE_SPEC)
 _GATE_SPEC.loader.exec_module(_gate)
-_rpk_exec = _gate.rpk_exec_argv
+
+
+def _rpk_exec(broker_container: str, *args: str) -> list[str]:
+    return _gate.rpk_exec_argv(broker_container, *args, environ=os.environ)
+
 
 # OCI label stamped from VCS_REF/GIT_SHA at build time (Dockerfile.runtime).
 _REVISION_LABEL = "org.opencontainers.image.revision"

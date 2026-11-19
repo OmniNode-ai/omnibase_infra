@@ -20,7 +20,6 @@ output.
 
 from __future__ import annotations
 
-import os
 import subprocess
 from collections.abc import MutableMapping
 from typing import TYPE_CHECKING
@@ -42,18 +41,17 @@ SASL_MECHANISM = "SCRAM-SHA-256"
 def rpk_exec_argv(
     broker_container: str,
     *args: str,
-    environ: MutableMapping[str, str] | None = None,
+    environ: MutableMapping[str, str],
 ) -> list[str]:
     """``docker exec`` argv for one rpk call inside the broker container.
 
     When the gate's password is set, it is copied to ``RPK_PASS`` in ``environ``
-    (the process environment by default), which docker reads by name.
+    (injected by the caller), which docker reads by name.
     """
-    env = os.environ if environ is None else environ
-    password = env.get(GATE_PASSWORD_VAR, "")
+    password = environ.get(GATE_PASSWORD_VAR, "")
     login: list[str] = []
     if password:
-        env["RPK_PASS"] = password
+        environ["RPK_PASS"] = password
         login = [
             "-e",
             f"RPK_USER={GATE_PRINCIPAL}",
@@ -88,7 +86,9 @@ class HandlerVerifyStabilityRefresh:
             ModelVerifyStabilityRefreshRpkResult,
         )
 
-        argv = rpk_exec_argv(request.broker_container, *request.rpk_args)
+        argv = rpk_exec_argv(
+            request.broker_container, *request.rpk_args, environ=request.environ
+        )
         authenticated = "RPK_PASS" in argv
         try:
             completed = subprocess.run(

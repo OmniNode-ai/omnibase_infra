@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -75,7 +76,9 @@ def test_handle_runs_one_authenticated_read(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(subprocess, "run", runner)
 
     request = ModelVerifyStabilityRefreshRpkRequest(
-        broker_container="broker", rpk_args=("topic", "list")
+        broker_container="broker",
+        rpk_args=("topic", "list"),
+        environ=dict(os.environ),
     )
     result = HandlerVerifyStabilityRefresh().handle(request)
     assert (result.exit_code, result.authenticated, result.stdout) == (
