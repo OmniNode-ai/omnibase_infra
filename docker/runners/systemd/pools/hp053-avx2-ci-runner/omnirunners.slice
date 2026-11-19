@@ -1,0 +1,21 @@
+# omnirunners.slice on h053 -- OMN-25674: the host aggregate for all three h053 pools.
+#
+# The unit NAME is one per host, so this file holds the same limits as
+# docker/runners/systemd/pools/hp053-ci-runner/omnirunners.slice.
+#
+# Measured 2026-11-19T17:15Z: the old 45G/46G slice had `max` events 2,029,063 and a peak of 47.0 GB with five
+# hp053-ci-runner and four merge-queue runners, so it already ran at its limit; the host had 106 GiB available of 125 GiB.
+# Three hp053-avx2-ci-runner runners at 8 GiB add at most 24 GiB. 64G MemoryHigh holds the measured 47 GB peak plus most
+# of that, and 68G MemoryMax leaves at least 38 GiB of the available memory to the lab-work units. MemorySwapMax and
+# CPUWeight are unchanged.
+[Unit]
+Description=OmniNode CI runner pools on h053, the HP ProLiant Gen9 (OMN-25674)
+Before=slices.target
+
+[Slice]
+MemoryAccounting=yes
+MemoryHigh=64G
+MemoryMax=68G
+MemorySwapMax=0
+CPUAccounting=yes
+CPUWeight=25

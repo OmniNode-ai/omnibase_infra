@@ -180,8 +180,9 @@ def test_the_pool_is_its_own_cgroup_slice_with_declared_limits() -> None:
     assert {s["cgroup_parent"] for s in services.values()} == {"omnirunners.slice"}
     limits = _directives(SLICE.read_text(encoding="utf-8"))
     assert limits["CPUWeight"] == "25"
-    assert limits["MemoryHigh"] == "96G"
-    assert limits["MemoryMax"] == "112G"
+    # OMN-25674: the unit is the host's aggregate for all three h051 pools.
+    assert limits["MemoryHigh"] == "128G"
+    assert limits["MemoryMax"] == "144G"
     assert limits["MemorySwapMax"] == "2G"
     ram = sum(_bytes(s["mem_limit"]) for s in services.values())
     assert ram <= _bytes(limits["MemoryHigh"]) <= _bytes(limits["MemoryMax"])
@@ -203,12 +204,13 @@ def test_the_fleet_declares_the_pool_with_the_multiarch_class_only() -> None:
     config = load_runner_fleet_config(FLEET)
     host = config.host_of_runner(f"{PREFIX}-1")
     assert host is not None
-    assert host.declared_count("action") == 0
     assert host.declared_count("verify") == 0
-    assert host.declared_count("action-multiarch") == 4
-    # The pool adds nothing to the omnibase-ci spread: the total is what the other hosts declare, whatever that is.
-    others = sum(h.declared_count("action") for h in config.hosts if h.host != "h051")
-    assert config.declared_total("action") == others
+    # OMN-25674: this pool still carries no `omnibase-ci` (its compose labels are checked above); the h051 `action`
+    # runners are the separate `hp051-omnibase-ci-runner` pool, 16 of them.
+    pools = {p.runner_name_prefix: p for p in host.pools}
+    assert pools["hp051-omnibase-ci-runner"].classes == ("action", "action-multiarch")
+    assert host.declared_count("action") == 16
+    assert host.declared_count("action-multiarch") == 4 + 16
 
 
 def test_the_runner_names_match_the_declared_count() -> None:

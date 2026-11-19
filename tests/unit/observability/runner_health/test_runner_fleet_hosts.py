@@ -136,7 +136,8 @@ def test_declared_total_sums_only_the_hosts_carrying_that_class() -> None:
     # OMN-19998 sizes it to 5 from the host's measured memory, so 10 + 16 + 5.
     # OMN-22898 cuts the primary host's share 10 -> 0 (h201 swaps under load), so
     # 0 + 16 + 5 = 21.
-    assert config.declared_total("action") == 21
+    # OMN-25674 declares h051's 16-runner pool before the second amd64 host's pool is drained: 16 + 16 + 5 = 37.
+    assert config.declared_total("action") == 37
     assert config.declared_total("customer-plane") == 3
     # The h101 mini host's one verify runner was retired with Docker on the Macs: 6 - 1.
     assert config.declared_total("verify") == 5
