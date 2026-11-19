@@ -1,0 +1,148 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25840
+title: Restore Integration Test Coverage for omnibase_infra PR 6042
+summary: >-
+  Exercise the production atomic venv installer CLI during finalize. Verify that
+  it reports the stale stage it removed and names the retained stage on stderr.
+  The lab regression and unit-source check run before publication. PR check
+  conclusions, the Lab comment, and the installed revision require live readback.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25840-coverage
+    statement: Cover the stale stage sweep through the installer CLI and verify the coverage check on the published head.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the required check Integration Test Coverage on omnibase_infra PR 6042 reads success at the new head, read through the declared scm read path -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6042` check-run read at the new head names Integration Test Coverage with a conclusion other than success
+      - id: AC2
+        statement: >-
+          AC2: no check is widened, skipped or bypassed, so the diff removes no assertion and adds no skip, xfail or loosened threshold -- falsifier: `git diff <base> <new head> -- tests/ .github/` shows a removed assert, a new skip or xfail marker or a changed required-check list
+      - id: AC3
+        statement: >-
+          AC3: a comment on the pull request starts `Lab:` and carries `head=<full new head sha>` with the lab run output that proves the red then green at that head -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6042` shows no comment naming the new head with a line starting `Lab:`
+      - id: AC4
+        statement: >-
+          AC4: when the change alters a lab host unit or the plugin, the branch is installed through the declared path and the Lab line carries `installed=<host>:<revision>` and `observed=<what ran>`; otherwise the lane says in its TERMINAL that it changes nothing that runs -- falsifier: the Lab comment names an install but carries no installed= cell, or the TERMINAL carries neither
+      - id: AC5
+        statement: >-
+          AC5: if the cause is outside the pull request, a STATUS row on the lane carries `cause=<one line>` and `shared=yes` with the evidence and no push is made -- falsifier: the ledger holds no STATUS row from the lane carrying cause= and shared=yes while the pull request is unchanged at its old head
+evidence_requirements:
+  - kind: tests
+    description: Exercise the shipped installer CLI against removable and protected stages.
+    command: uv run --frozen pytest -q -n 0 -p no:cacheprovider --no-cov tests/integration/test_venv_atomic_install_stage_sweep_omn24508.py
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25840-coverage-at-head
+    description: The PR watcher reports Integration Test Coverage completed with success at the checked-out head.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: |-
+          set -e -o pipefail
+          onex scm pr-checks 'OmniNode-ai/omnibase_infra#6042' --source local |
+            python3 -c '
+          import json, sys
+          ci = json.load(sys.stdin)["result"]
+          name = "Integration Test Coverage"
+          success = [name, "completed", "success"]
+          sys.exit(0 if ci["head_sha"] == sys.argv[1]
+                   and name not in ci["red"] and name not in ci["pending"]
+                   and any(run[:3] == success for run in ci["runs"]) else 1)
+          ' "$(git rev-parse HEAD)"
+        cwd: .
+  - id: dod-omn25840-checks-preserved
+    description: Workflows have no edits and the test diff retains assertions and adds no skip or xfail marker.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: |-
+          set -e -o pipefail
+          range="origin/${GITHUB_BASE_REF:-dev}...HEAD"
+          git diff --exit-code "$range" -- .github/
+          git diff --unified=0 "$range" -- tests/ |
+            python3 -c '
+          import re, sys
+          unsafe = r"^-\s*assert\b|^\+(?!\+).*\b(?:skip|skipif|xfail)\b"
+          sys.exit(1 if re.search(unsafe, sys.stdin.read(), re.MULTILINE) else 0)
+          '
+        cwd: .
+  - id: dod-omn25840-lab-comment
+    description: The PR conversation contains a Lab comment naming its current head and both coverage replay exit codes.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          set -e -o pipefail
+          onex scm pr-view 'OmniNode-ai/omnibase_infra#6042' --source bus |
+            python3 -c '
+          import json, sys
+          pr = json.load(sys.stdin)["result"]
+          head = sys.argv[1]
+          prefix = f"Lab: head={head} "
+          sys.exit(0 if pr["head_sha"] == head and any(
+              c["body"].startswith(prefix) and "coverage_red_exit=1" in c["body"]
+              and "coverage_green_exit=0" in c["body"] for c in pr["comments"]
+          ) else 1)
+          ' "$(git rev-parse HEAD)"
+        cwd: .
+  - id: dod-omn25840-unit-source
+    description: The hosted deploy check exercises the checked-out systemd unit and requires the no-bytecode setting in its Service section.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest -q -n 0 -p no:cacheprovider --no-cov tests/scripts/test_workspace_reconcile_no_root_bytecode_omn24899.py
+        cwd: .
+  - id: dod-omn25840-unit-install-readback
+    description: The Lab comment for the live head carries the installed revision and the observation of the reconcile unit running.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: |-
+          set -e -o pipefail
+          onex scm pr-view 'OmniNode-ai/omnibase_infra#6042' --source bus |
+            python3 -c '
+          import json, re, sys
+          pr = json.load(sys.stdin)["result"]
+          head = sys.argv[1]
+          prefix = f"Lab: head={head} "
+          sys.exit(0 if pr["head_sha"] == head and any(
+              c["body"].startswith(prefix)
+              and re.search(rf"\binstalled=[a-zA-Z0-9.-]+:{head}\b", c["body"].splitlines()[0])
+              and re.search(r"\bobserved=\S", c["body"].splitlines()[0])
+              for c in pr["comments"]
+          ) else 1)
+          ' "$(git rev-parse HEAD)"
+        cwd: .
+  - id: dod-omn25840-shared-cause-status
+    description: The PR-specific path publishes the candidate head. The shared-cause path retains the original head and records the cause in the lane ledger.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: command
+        check_value: |-
+          set -e -o pipefail
+          onex scm pr-checks 'OmniNode-ai/omnibase_infra#6042' --source local |
+            python3 -c '
+          import json, os, sys
+          from pathlib import Path
+          head = json.load(sys.stdin)["result"]["head_sha"]
+          if head != "ee2a0ea7a07ffcde73e9b6b97bf7fda1cde8c53b":
+              sys.exit(0 if head == sys.argv[1] else 1)
+          rows = Path(os.environ["ONEX_LEDGER_PATH"]).read_text().splitlines()
+          sys.exit(0 if any(
+              " | STATUS | " in line and " | ticket=OMN-25840 | " in line
+              and " | shared=yes | " in line and " | cause=" in line
+              for line in rows
+          ) else 1)
+          ' "$(git rev-parse HEAD)"
+        cwd: .

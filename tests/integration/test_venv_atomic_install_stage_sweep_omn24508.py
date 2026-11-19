@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 
@@ -88,3 +89,57 @@ def test_cli_finalize_sweeps_the_stages_that_failed_runs_left_behind(
     assert (venv / "bin").is_dir(), "finalize removed the venv's bin"
     assert (venv / "lib").is_dir(), "finalize removed the venv's lib"
     assert "swept 2 stale stage dir(s)" in finalized.stdout
+
+
+def test_cli_finalize_reports_a_stale_stage_it_cannot_remove(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    venv = tmp_path / "venv"
+    current = venv / ".atomic-stage.current"
+    removable = venv / ".atomic-stage.removable"
+    protected = venv / ".atomic-stage.protected"
+    for stage in (current, removable, protected):
+        stage.mkdir(parents=True)
+    payload = protected / "bytecode.pyc"
+    payload.write_bytes(b"retained")
+
+    if os.geteuid() == 0:
+        # Root can unlink from a read-only directory. Inject the failed
+        # deletion in the subprocess while leaving other rmtree calls real.
+        (tmp_path / "sitecustomize.py").write_text(
+            dedent("""\
+                import shutil
+                from pathlib import Path
+
+                real_rmtree = shutil.rmtree
+
+                def rmtree(path, *, ignore_errors=False):
+                    if Path(path).name == ".atomic-stage.protected":
+                        if ignore_errors:
+                            return
+                        raise PermissionError(path)
+                    return real_rmtree(path, ignore_errors=ignore_errors)
+
+                shutil.rmtree = rmtree
+                """),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("PYTHONPATH", str(tmp_path), prepend=os.pathsep)
+
+    protected.chmod(0o555)
+    try:
+        finalized = _run(tmp_path / "cache", "finalize", "--stage-dir", str(current))
+    finally:
+        if protected.is_dir():
+            protected.chmod(0o755)
+
+    assert finalized.returncode == 0, finalized.stdout + finalized.stderr
+    assert not current.exists()
+    assert not removable.exists()
+    assert payload.read_bytes() == b"retained"
+    assert f"swept stale stage {removable}" in finalized.stdout
+    assert f"swept stale stage {protected}" not in finalized.stdout
+    assert "swept 1 stale stage dir(s)" in finalized.stdout
+    assert f"stale stage {protected} could not be removed" in finalized.stderr
+    assert "1 stale stage dir(s) remain" in finalized.stderr
