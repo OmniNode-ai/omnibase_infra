@@ -1052,47 +1052,6 @@ class HandlerDevBootGuard:
         ):
             logger.warning("Cannot record recovered dev container ids", exc_info=True)
 
-    def _advance_point(self, job: str, commit: str) -> None:
-        """Record the verified family as the recovery point, or keep the one held.
-
-        A roll that reached this call was replaced, verified and Docker healthy. A
-        compose config hash that no longer matches (the clone moved after ``up``, see
-        :class:`DevBootSettingsDriftError`) says the family cannot be re-rendered
-        exactly, not that the deploy failed: rolling a verified family back to the
-        previous image recreates the runtime a second time and leaves dev one image
-        behind on every such job. The previous recovery point stays held and the drift
-        is written beside the incidents for the next reader.
-        """
-        try:
-            self.point.hold(self._capture())
-        except DevBootSettingsDriftError as drift:
-            logger.warning(
-                "Dev recovery point not advanced job=%s commit=%s service=%s "
-                "container_hash=%s rendered_hash=%s",
-                job,
-                commit,
-                drift.service,
-                drift.container_hash,
-                drift.rendered_hash,
-            )
-            record: dict[str, JsonValue] = {
-                "job": job,
-                "commit": commit,
-                "service": drift.service,
-                "container_config_hash": drift.container_hash,
-                "rendered_config_hash": drift.rendered_hash,
-                "kept_recovery_revision": (
-                    self.point.current.revision if self.point.current else ""
-                ),
-                "at": self.execution._dev_boot_timestamp(),
-            }
-            try:
-                self.execution._atomic_write_private_json(
-                    self.root / f"settings-drift-{job}.json", record
-                )
-            except OSError:
-                logger.warning("Cannot record dev settings drift", exc_info=True)
-
     @contextlib.contextmanager
     def protect(
         self,
@@ -1105,7 +1064,7 @@ class HandlerDevBootGuard:
             raise DevBootFailedError("no last healthy dev revision")
         try:
             yield
-            self._advance_point(job, commit)
+            _advance_point(self, job, commit)
             _announce_start(self, job, success=True)
         except Exception as exc:
             _announce_start(self, job, success=False)
@@ -1513,6 +1472,48 @@ def _announce(
         call(events)
     except Exception:
         logger.exception("dev roll event failed friction_type=dev_event_publish_failed")
+
+
+def _advance_point(guard: HandlerDevBootGuard, job: str, commit: str) -> None:
+    """Record the verified family as the recovery point, or keep the one held.
+
+    A roll that reached this call was replaced, verified and Docker healthy. A
+    compose config hash that no longer matches (the clone moved after ``up``, see
+    :class:`DevBootSettingsDriftError`) says the family cannot be re-rendered
+    exactly, not that the deploy failed: rolling a verified family back to the
+    previous image recreates the runtime a second time and leaves dev one image
+    behind on every such job. The previous recovery point stays held and the drift
+    is written beside the incidents for the next reader.
+    """
+    try:
+        guard.point.hold(guard._capture())
+    except DevBootSettingsDriftError as drift:
+        logger.warning(
+            "Dev recovery point not advanced job=%s commit=%s service=%s "
+            "container_hash=%s rendered_hash=%s",
+            job,
+            commit,
+            drift.service,
+            drift.container_hash,
+            drift.rendered_hash,
+        )
+        record: dict[str, JsonValue] = {
+            "job": job,
+            "commit": commit,
+            "service": drift.service,
+            "container_config_hash": drift.container_hash,
+            "rendered_config_hash": drift.rendered_hash,
+            "kept_recovery_revision": (
+                guard.point.current.revision if guard.point.current else ""
+            ),
+            "at": guard.execution._dev_boot_timestamp(),
+        }
+        try:
+            guard.execution._atomic_write_private_json(
+                guard.root / f"settings-drift-{job}.json", record
+            )
+        except OSError:
+            logger.warning("Cannot record dev settings drift", exc_info=True)
 
 
 def _announce_start(guard: HandlerDevBootGuard, job: str, *, success: bool) -> None:

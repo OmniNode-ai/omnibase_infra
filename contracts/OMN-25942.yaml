@@ -46,3 +46,11 @@ dod_evidence:
       - check_type: command
         check_value: "python3 -c 'import glob, json, sys; hits = glob.glob(\"/data/omninode/deploy-agent/state/jobs-dev/\" + sys.argv[1] + \"*.json\"); rec = json.load(open(hits[0])) if len(hits) == 1 else {}; sys.exit(0 if rec.get(\"phase_results\", {}).get(\"verification\") == \"success\" and rec.get(\"status\") == \"success\" else 1)' DEV_JOB_ID_PREFIX"
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25942-integration-proof
+    description: 'The real dev boot guard, driven through a real docker executable on PATH, keeps a verified roll when the rendered compose hash moved after up: no restore, no incident, the drift recorded.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_dev_boot_guard_compose_settings_drift_omn25942.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
