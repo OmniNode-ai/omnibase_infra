@@ -1,0 +1,105 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25199
+title: "Review findings on omnibase_infra PR 6044 at head de161744edec are fixed or argued: the contract guards fail on a grep error, and the Lab comment is at the new head"
+summary: >-
+  The fourth review of the check_lane_sync unpublished-drift fix found guards in the OMN-25184 and OMN-25101 contracts that could not fail. This change joins their commands with `&&`, replaces each negated grep with a grep followed by a test of its exit status, chains the pytest-ran check with the summary line, counts the cwd lines against the checks, checks the commit messages for a closing keyword, and pins each guard with a test that runs the real command in a wrong cwd.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25199-review-findings-answered
+    statement: >-
+      Each blocking review finding on omnibase_infra PR 6044 at head de161744edec is fixed with a check that can fail, or answered with evidence in a pull request comment.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the PR body reference to OMN-24976 is non-closing, OMN-24976 reads Backlog or In Progress after the push, a PR comment states both, and the OMN-25184 closure check tests the claim itself and not the word completed"
+      - id: AC2
+        statement: "AC2: every multi-command check at the OMN-25184 and OMN-25101 contracts is joined with `&&` and the OMN-25101 tests-wide check carries `test -n`"
+      - id: AC3
+        statement: "AC3: the negated greps read `grep ...` then `test $? -eq 1` over files that exist, live_contact is registered in pyproject.toml, and no CI marker expression deselects it"
+      - id: AC4
+        statement: "AC4: a PR comment starting `Lab: head=` followed by the new full head names the command with exit 0 and `23 passed` with no SKIPPED line, the merge-base run with `9 failed, 14 passed` and nine FAILED lines, and the tests-wide grep result"
+      - id: AC5
+        statement: "AC5: the non-blocking findings 5 to 9 are fixed with a test or argued with evidence in a PR comment"
+evidence_requirements:
+  - kind: tests
+    description: The guard tests of the review contracts, the guard file and the census unit file at the head.
+    command: uv run --frozen pytest tests/ci/test_contract_check_guards_omn25199.py tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py tests/unit/scripts/test_lane_census_unpublishable_drift_omn20798.py -q -rs --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25199-ac1-closure-claim
+    description: >-
+      The check reads commit messages through the PR head, or through the commit that introduced this fix once it is on dev. The tests exercise closing and plain references in synthetic repositories. The pull request body and the current Linear status are documented in the pull request evidence.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          end=HEAD &&
+          added=$(git log --first-parent -1 --diff-filter=A --format=%H HEAD -- contracts/OMN-24976.yaml) &&
+          if test -n "$added"; then
+            landed=$(git for-each-ref --contains "$added" --format="%(refname)" refs/remotes/origin/dev) &&
+            if test "$landed" = refs/remotes/origin/dev; then end="$added"; fi
+          fi &&
+          msgs=$(git log --format="%H %s%n%b" 75969ce9e.."$end") &&
+          test -n "$msgs" &&
+          test "$(printf "%s\n" "$msgs" | grep -ciE "(clos(e|es|ed|ing)|fix(es|ed|ing)?|resolv(e|es|ed|ing)|complet(e|es|ed|ing))[: ]+((\[?(https://[^ ]*/)?OMN-[0-9]+\]?(\([^)]*\))?)[ ,]+(and +)?)*\[?(https://[^ ]*/)?OMN-24976")" = 0'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_check_guards_omn25199.py -q --no-cov -n 0 -p no:cacheprovider -k "closing_keyword or only_reference or unreadable_range"
+        cwd: .
+  - id: dod-omn25199-ac2-guards-joined
+    description: >-
+      No check line of the two review contracts chains a guard with a semicolon or negates a grep, and each guard check fails when run in a wrong working directory.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          grep -nE ";[[:space:]]*(test|!)" contracts/OMN-25184.yaml contracts/OMN-25101.yaml contracts/OMN-24976.yaml contracts/OMN-25199.yaml
+          test $? -eq 1'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_check_guards_omn25199.py -q --no-cov -n 0 -p no:cacheprovider -k "wrong_cwd or semicolon"
+        cwd: .
+  - id: dod-omn25199-ac3-negated-greps-and-markers
+    description: >-
+      The tests pin the grep-then-status form over files that exist, the live_contact registration in pyproject.toml, and every CI marker expression running a live_contact case.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c '
+          grep -n "! gre[p]" contracts/OMN-25184.yaml contracts/OMN-25101.yaml
+          test $? -eq 1'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_check_guards_omn25199.py -q --no-cov -n 0 -p no:cacheprovider -k "missing_file or marker or live_contact"
+        cwd: .
+  - id: dod-omn25199-ac4-guard-files-23-passed
+    description: >-
+      The guard test file passes with exactly 23 tests and the summary line reads "23 passed in"; the head-bound Lab comment on the pull request carries the command, exit 0 and the merge-base run.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'out=$(uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q -rs --no-cov -n 0 -p no:cacheprovider 2>&1) && printf "%s\n" "$out" | tail -5 && printf "%s\n" "$out" | grep -Eq "^23 passed in "'
+        cwd: .
+  - id: dod-omn25199-ac5-non-blocking
+    description: >-
+      The pytest-ran chain, the cwd count, and the census helper callers are pinned by tests; the census unit file passes.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_check_guards_omn25199.py -q --no-cov -n 0 -p no:cacheprovider -k "pytest_summary or cwd or census_helper"
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_lane_census_unpublishable_drift_omn20798.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .

@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import pytest
 import yaml
@@ -2602,6 +2602,117 @@ class TestSweepExclusionRegistryFileOmn22478:
             gate_module.load_sweep_exclusions(bad)
 
 
+DELEGATION_HEALTH_CONTEXT = "delegation-health-check / Delegation Health Check"
+
+
+def _run_gate_cli(
+    tmp_path: Path, event_name: str, check_runs: list[dict[str, Any]]
+) -> tuple[int, str]:
+    """Run the gate the way the CI Summary poller does: main() over files."""
+    import contextlib
+    import io
+
+    from scripts.ci import ci_summary_gate
+
+    jobs = [
+        _job(g, "success")
+        for g in (*strict_gates_for_event(event_name), *SKIPPABLE_GATE_JOBS)
+    ]
+    (tmp_path / "jobs.json").write_text(json.dumps(jobs), encoding="utf-8")
+    (tmp_path / "check_runs.json").write_text(
+        json.dumps({"check_runs": check_runs}), encoding="utf-8"
+    )
+
+    class _Clock(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> Self:
+            return cls(2026, 11, 18, 12, 0, tzinfo=UTC)
+
+    out = io.StringIO()
+    with pytest.MonkeyPatch.context() as mp, contextlib.redirect_stdout(out):
+        mp.setattr(ci_summary_gate, "datetime", _Clock)
+        code = ci_summary_gate.main(
+            [
+                "--jobs-file",
+                str(tmp_path / "jobs.json"),
+                "--check-runs-file",
+                str(tmp_path / "check_runs.json"),
+                "--event-name",
+                event_name,
+                "--base-ref",
+                "dev",
+            ]
+        )
+    return code, out.getvalue()
+
+
+class TestDelegationHealthCheckLeavesRequiredListsOmn25514:
+    """OMN-25514 (plan step S1): no PR head waits on the delegation signal."""
+
+    @staticmethod
+    def _required_rows() -> list[dict[str, Any]]:
+        return [
+            _row(c, completed_at="2026-11-18T11:00:00Z")
+            for c in EXPECTED_EXTERNAL_CONTEXTS
+            if c != DELEGATION_HEALTH_CONTEXT
+        ]
+
+    def test_a_pull_request_head_without_the_row_reads_green(
+        self, tmp_path: Path
+    ) -> None:
+        code, report = _run_gate_cli(tmp_path, "pull_request", self._required_rows())
+        assert code == EXIT_SUCCESS, report
+        assert DELEGATION_HEALTH_CONTEXT not in report
+
+    def test_a_merge_group_head_without_the_row_reads_green(
+        self, tmp_path: Path
+    ) -> None:
+        code, report = _run_gate_cli(tmp_path, "merge_group", self._required_rows())
+        assert code == EXIT_SUCCESS, report
+        assert DELEGATION_HEALTH_CONTEXT not in report
+
+    def test_a_pull_request_head_with_a_red_row_reads_green_and_excluded(
+        self, tmp_path: Path
+    ) -> None:
+        rows = [
+            *self._required_rows(),
+            _row(
+                DELEGATION_HEALTH_CONTEXT,
+                "failure",
+                completed_at="2026-11-18T11:00:00Z",
+            ),
+        ]
+        code, report = _run_gate_cli(tmp_path, "pull_request", rows)
+        assert code == EXIT_SUCCESS, report
+        assert "external sweep exclusions applied:" in report
+        assert DELEGATION_HEALTH_CONTEXT in report
+
+    def test_a_merge_group_head_with_a_red_row_reads_green_and_excluded(
+        self, tmp_path: Path
+    ) -> None:
+        rows = [
+            *self._required_rows(),
+            _row(
+                DELEGATION_HEALTH_CONTEXT,
+                "failure",
+                completed_at="2026-11-18T11:00:00Z",
+            ),
+        ]
+        code, report = _run_gate_cli(tmp_path, "merge_group", rows)
+        assert code == EXIT_SUCCESS, report
+        assert "external sweep exclusions applied:" in report
+
+    def test_control_another_red_external_row_still_fails(self, tmp_path: Path) -> None:
+        """Positive control: the exclusion admits exactly its own name."""
+        rows = [
+            *self._required_rows(),
+            _row("Some Other Check", "failure", completed_at="2026-11-18T11:00:00Z"),
+        ]
+        code, report = _run_gate_cli(tmp_path, "pull_request", rows)
+        assert code == EXIT_FAILURE, report
+        assert "Some Other Check" in report
+
+
 class TestExternalSweepExclusions:
     """AC-2 — the exclusion registry is closed-ended or it is an allowlist."""
 
@@ -2623,6 +2734,7 @@ class TestExternalSweepExclusions:
             "Hostile Review Thread Gate",
             "Hostile Review Judge",
             "Enforce clean + promoted build source",
+            DELEGATION_HEALTH_CONTEXT,
         }
 
     def test_every_entry_carries_a_reason_an_owner_and_both_dates(self) -> None:
@@ -2634,41 +2746,28 @@ class TestExternalSweepExclusions:
                 assert entry.ticket == "OMN-22478", name
                 assert (entry.added, entry.expires) == ("2026-11-05", "2027-02-03")
                 continue
+            if name == DELEGATION_HEALTH_CONTEXT:
+                assert entry.reason.strip(), name
+                assert (entry.ticket, entry.added, entry.expires) == (
+                    "OMN-25514",
+                    "2026-11-17",
+                    "2026-12-17",
+                )
+                continue
             assert entry.reason.strip(), name
             assert entry.ticket.startswith("OMN-"), name
             assert entry.added == added_late.get(name, "2026-09-21"), name
             assert entry.expires == "2026-12-20", name
 
-    def test_a_red_delegation_health_check_fails_ci_summary(self) -> None:
-        """OMN-19451 / OMN-19998: the check blocks; nothing admits its red.
+    def test_the_delegation_health_check_is_excluded_not_registered(self) -> None:
+        """OMN-25514: the context left every required list for a dated exclusion.
 
-        It shipped as a "(shadow)" job and was then excluded from the sweep by
-        name (#4312). The 2026-09-29T12:02:35Z operator ruling removed every
-        observe-only mode, so the context is REGISTERED (layer 4 asserts it
-        present, completed and green) and no exclusion names it.
+        It read lab and stability verdicts, so a broken lab froze dev merges.
+        Layer 4 no longer asserts it; layer 5 admits the row a head that ran
+        the old pull_request caller still carries, until the entry expires.
         """
-        name = "delegation-health-check / Delegation Health Check"
-        assert name in EXPECTED_EXTERNAL_CONTEXTS
-        assert name not in EXTERNAL_SWEEP_EXCLUSIONS
-        assert not any("Delegation Health" in n for n in EXTERNAL_SWEEP_EXCLUSIONS)
-        observation = datetime(2026, 9, 29, 21, 0, tzinfo=UTC)
-        expected = (*HISTORICAL_EXTERNAL_CONTEXTS, name)
-        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
-
-        def run(check_runs: list[dict[str, Any]]) -> tuple[int, str]:
-            return evaluate(
-                _all_gates("success"),
-                check_runs=check_runs,
-                external_contexts=expected,
-                now=observation,
-            )
-
-        code, report = run([*rows, _row(name, "failure")])
-        assert code == EXIT_FAILURE, report
-        assert name in report
-
-        code, report = run([*rows, _row(name)])
-        assert code == EXIT_SUCCESS, report
+        assert DELEGATION_HEALTH_CONTEXT not in EXPECTED_EXTERNAL_CONTEXTS
+        assert DELEGATION_HEALTH_CONTEXT in EXTERNAL_SWEEP_EXCLUSIONS
 
     def test_no_entry_overlaps_the_registered_tuple(self) -> None:
         """A name in both would be judged by layer 4 and never reach layer 5."""
