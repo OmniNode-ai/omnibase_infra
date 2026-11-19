@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# cpu-boost-off.service: turn CPU boost off on lab host h202 at every boot (OMN-24562).
+#
+# Ordering: After=sysinit.target (plus the DefaultDependencies basic.target), WantedBy=multi-user.target.
+# The oneshot only writes /sys/devices/system/cpu/cpufreq/boost, so it needs no service, mount or network.
+#
+# Install on h202:
+#   sudo cp deploy/systemd/cpu-boost-off.service /etc/systemd/system/cpu-boost-off.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cpu-boost-off.service
+#
+# Revert: systemctl disable --now cpu-boost-off.service && echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost
+[Unit]
+Description=Disable CPU boost on h202 (OMN-24562)
+After=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c "echo 0 > /sys/devices/system/cpu/cpufreq/boost"
+
+[Install]
+WantedBy=multi-user.target

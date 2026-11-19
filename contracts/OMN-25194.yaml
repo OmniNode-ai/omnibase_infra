@@ -1,0 +1,55 @@
+schema_version: 1.0.0
+ticket_id: OMN-25194
+title: The h201 dev runtime log holds at least 26 hours, so hourly and daily node runs can be read from it
+summary: >-
+  omninode-runtime on the dev lane inherited json-file 10m x 3 from the base compose file's x-runtime-base, which held 18 to 27 minutes of its log at about 79 MB of json-file an hour (measured on the dev lane host, 2026-11-17). docker/docker-compose.dev-lane.yml now declares x-dev-lane-runtime-logging, json-file 200m x 15, and omninode-runtime takes it; the other services keep x-dev-lane-logging. json-file drops its oldest file whole, so the guaranteed window is (max-file - 1) x max-size, 2800 MB, 35 hours at the measured rate and above the 26 hour floor of 2080 MB. tests/ci/test_dev_runtime_log_retention_omn25194.py reads the overlay and renders every lane stack that layers it, and fails when the guaranteed window falls below the floor. The base file, the prod overlay and the catalog are untouched. The change reaches the dev lane at the next deploy-agent redeploy, which recreates omninode-runtime because its rendered compose config hash changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25194-runtime-log-retention
+    statement: The dev lane's omninode-runtime log guarantees at least 26 hours at the measured log volume, and a drop below that floor fails a test.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the declared dev compose overlay gives omninode-runtime a json-file retention whose (max-file - 1) x max-size is at least 26 hours of the measured 80 MB an hour, 2080 MB -- falsifier: the overlay test in tests/ci/test_dev_runtime_log_retention_omn25194.py fails when omninode-runtime renders the base file's 10m x 3"
+      - id: AC2
+        statement: "AC2: a test fails on the old values and passes on the new ones -- falsifier: uv run pytest tests/ci/test_dev_runtime_log_retention_omn25194.py -q passes at the unfixed base commit"
+evidence_requirements:
+  - kind: tests
+    description: The retention floor test over the overlay and the rendered lane stacks.
+    command: uv run --frozen pytest tests/ci/test_dev_runtime_log_retention_omn25194.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25194-ac1-overlay-retention
+    description: >-
+      The overlay declares json-file 200m x 15 for omninode-runtime and the floor test passes on it. At the merge base the service has no logging of its own in the overlay and the base file's 10m x 3 guarantees 20 MB, so the overlay test fails there.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_runtime_log_retention_omn25194.py -k overlay_declares -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25194-ac2-floor-test
+    description: >-
+      The floor test with its positive control, which asserts the base file's 10m x 3 is refused as 20 MB against the 2080 MB floor.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_runtime_log_retention_omn25194.py -k "overlay_declares or rejects" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25194-ac1-deploy-render
+    description: >-
+      The dev lane stack (base file plus overlay) renders omninode-runtime with json-file max-size 200m and max-file 15, read from docker compose config over the declared files. At the merge base the same command renders 10m and 3 and exits 1, so the check fails there.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: "bash -c 'docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml -f docker/docker-compose.dev-lane.yml config --no-interpolate --format json | jq -e \".services[\\\"omninode-runtime\\\"].logging.options | .[\\\"max-size\\\"] == \\\"200m\\\" and .[\\\"max-file\\\"] == \\\"15\\\"\"'"
+        cwd: .

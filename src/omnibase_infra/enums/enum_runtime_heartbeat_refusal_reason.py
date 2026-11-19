@@ -28,6 +28,15 @@ class EnumRuntimeHeartbeatRefusalReason(str, Enum):
         RUNTIME_NAME_EMPTY: The runtime's configured name is empty or whitespace.
         INTROSPECTION_SERVICE_UNBUILDABLE: The introspection service is unbuildable.
         HEARTBEAT_START_FAILED: The periodic heartbeat task could not be started.
+        INTROSPECTION_SERVICE_MISSING: The runtime was given no introspection
+            service.
+        INTROSPECTION_DISABLED: Introspection is switched off by config.
+        STARTUP_PUBLISH_FAILED: The startup introspection publish failed after
+            the bounded retries.
+        HEARTBEAT_PUBLISH_FAILED: The first heartbeat could not be published
+            after the bounded retries.
+        HEARTBEAT_PUBLISH_FAILING: A running runtime's heartbeats keep failing.
+        HEARTBEAT_TASK_STOPPED: The heartbeat task is not running.
 
     Example:
         >>> reason = EnumRuntimeHeartbeatRefusalReason.HEARTBEAT_START_FAILED
@@ -43,6 +52,24 @@ class EnumRuntimeHeartbeatRefusalReason(str, Enum):
 
     HEARTBEAT_START_FAILED = "heartbeat_start_failed"
     """The periodic heartbeat task could not be started."""
+
+    INTROSPECTION_SERVICE_MISSING = "introspection_service_missing"
+    """The runtime was given no introspection service."""
+
+    INTROSPECTION_DISABLED = "introspection_disabled"
+    """Introspection is switched off by config."""
+
+    STARTUP_PUBLISH_FAILED = "startup_publish_failed"
+    """The startup introspection publish failed after the bounded retries."""
+
+    HEARTBEAT_PUBLISH_FAILED = "heartbeat_publish_failed"
+    """The first heartbeat could not be published after the bounded retries."""
+
+    HEARTBEAT_PUBLISH_FAILING = "heartbeat_publish_failing"
+    """A running runtime's heartbeats keep failing."""
+
+    HEARTBEAT_TASK_STOPPED = "heartbeat_task_stopped"
+    """The heartbeat task is not running."""
 
     def __str__(self) -> str:
         """Return the string value for serialization."""
