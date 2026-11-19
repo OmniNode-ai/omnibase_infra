@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Pinned vector from Core's test_topic_normalization_wire_and_canonical_hash_match.
+# The key, value and header values are UTF-8 bytes.
+topic: onex.evt.test.record.v1
+key: key
+value: value
+headers:
+  message-id: record-a
+event_id: 24cab08717a8c7fae3bfe43764b695f6e7234d705649f868085879454ddc2b50

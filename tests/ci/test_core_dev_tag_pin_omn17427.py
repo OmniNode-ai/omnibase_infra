@@ -16,14 +16,14 @@ from packaging.requirements import Requirement
 from scripts.ci.check_sibling_compatible_range import violations
 
 ROOT = Path(__file__).resolve().parents[2]
-TAG = "dev-20261113013358-a09066caf945"
-COMMIT = "a09066caf945cd79e13447d92ad42549f1019f78"
+TAG = "dev-20261118065911-e9f061dc9b4c"
+COMMIT = "e9f061dc9b4c86595359ba7036623c72faa711a7"
 # The published floor is the release that first ships every core module the infra
 # nodes import (OMN-21924: node_architecture_validator); the lock tracks the dev tag.
 VERSION = "0.47.62"
 # The floor the retained core recording was made against; the recording is not remade.
 RECORDED_FLOOR = "0.47.58"
-LOCKED_VERSION = "0.47.73.dev9+ga09066ca"
+LOCKED_VERSION = "0.47.75.dev1+ge9f061dc"
 GIT_URL = "https://github.com/OmniNode-ai/omnibase_core.git"
 
 

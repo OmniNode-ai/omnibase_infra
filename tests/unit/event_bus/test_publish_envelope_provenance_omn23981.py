@@ -178,7 +178,7 @@ class TestPublishEnvelopeStampsProvenance:
         await host.publish_envelope(ModelEventEnvelope(payload={"k": "v"}), "t.topic")
 
         wire = json.loads(host.sent[0])
-        assert wire["provenance"] is None
+        assert wire.get("provenance") is None
         assert ModelEventEnvelope.model_validate(wire).provenance_lane == (
             EnumProvenanceLane.UNKNOWN
         )
@@ -193,7 +193,7 @@ class TestPublishEnvelopeStampsProvenance:
         await host.publish_envelope(ModelEventEnvelope(payload={"k": "v"}), "t.topic")
 
         wire = json.loads(host.sent[0])
-        assert wire["provenance"] is None
+        assert wire.get("provenance") is None
         assert ModelEventEnvelope.model_validate(wire).provenance_lane == (
             EnumProvenanceLane.UNKNOWN
         )
