@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-25794
+title: Release writer puts a private repository name in a public CHANGELOG
+summary: >-
+  The release train passes target repository visibility and the public hygiene vocabulary to its release-notes effect. The effect filters private repository names from newly generated public release subjects before writing the notes. The live release refresh and writer handoff are post-merge train and landing-controller steps, tracked on the ticket and not bound here because the hosted gate cannot run them.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25794-release-notes-hygiene
+    statement: Public release notes use the public hygiene vocabulary when rendering commit subjects.
+    acceptance:
+      - id: AC1
+        statement: A regression test based on the recorded subject fails on the unfixed writer and passes when the public output filters the private names from the configured vocabulary.
+      - id: AC2
+        statement: The regression's private repository control preserves the generated changelog with the private name intact.
+evidence_requirements:
+  - kind: tests
+    description: Exercise the same release-notes node the workflow invokes, with public and private test inputs.
+    command: uv run --frozen pytest tests/integration/cli/test_release_notes_apply_node_omn17427.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25794-public-release-notes
+    description: >-
+      The synthetic version of the recorded subject is filtered in public output. The real packaged CLI also writes a public release into a temporary checkout on the hosted runner from a synthetic vocabulary without credentials or a host deployment.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_release_train_live_contact_omn25794.py -q -n 0 --no-cov
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/cli/test_release_notes_apply_node_omn17427.py -q -n 0 --no-cov -k public_repository
+        cwd: .
+      - check_type: command
+        check_value: |-
+          bash -e -c '
+          probe=$(mktemp -d);
+          trap "rm -rf -- \"$probe\"" EXIT;
+          printf "%s\n" "## v1.0.0 (2026-11-18)" "" "### Included Since v0.9.0" "- fix: example-hidden-repo remains (#4610)" > "$probe/entry.md";
+          printf "%s\n" "private_repo_names: [example-hidden-repo]" > "$probe/vocabulary.yaml";
+          printf "{\"clone_path\":\"%s\",\"entry_file\":\"%s/entry.md\",\"repository_visibility\":\"public\",\"hygiene_vocabulary_file\":\"%s/vocabulary.yaml\"}\n" "$probe" "$probe" "$probe" > "$probe/request.json";
+          export PATH="$(uv run --frozen printenv VIRTUAL_ENV)/bin:$PATH";
+          onex node node_release_notes_apply_effect --input "$probe/request.json" --state-root "$probe/state" --output receipt;
+          grep -Fxq -- "- fix: … remains (#4610)" "$probe/CHANGELOG.md"'
+        cwd: .
+  - id: dod-omn25794-private-release-notes
+    description: The same configured vocabulary and release entry preserve the private repository's full changelog output.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/cli/test_release_notes_apply_node_omn17427.py -q -n 0 --no-cov -k private_repository
+        cwd: .
