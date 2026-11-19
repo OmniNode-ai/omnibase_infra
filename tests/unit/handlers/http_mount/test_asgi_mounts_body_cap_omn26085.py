@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import sys
+import tempfile
 import zlib
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -101,6 +102,42 @@ async def serve_decoded_cap_probe(port_file: Path) -> None:
         await asyncio.Event().wait()
     finally:
         await server.stop()
+
+
+async def observe_gzip_probe() -> str:
+    """Send the 46-byte gzip request through a runtime listener; report what happened."""
+    calls: list[int] = []
+    data = gzip.compress(EXPANDING, mtime=0)
+    with (
+        tempfile.TemporaryDirectory() as scratch,
+        pytest.MonkeyPatch.context() as patch,
+    ):
+        patch.setattr(
+            asgi_fixtures,
+            "create_app",
+            lambda: asgi_fixtures.create_receive_probe(calls, [], True),
+        )
+        block = _mount_block("/probe", "create_app") + f"\n  max_body_bytes: {CAP}"
+        server = await _server()
+        try:
+            await _mounted(server, _manifest(Path(scratch), block))
+            url = f"http://127.0.0.1:{_bound_port(server)}/probe"
+            async with (
+                aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as session,
+                session.post(
+                    url, data=data, headers={"Content-Encoding": "gzip"}
+                ) as response,
+            ):
+                await response.read()
+                status = response.status
+        finally:
+            await server.stop()
+    return (
+        f"request_bytes={len(data)} decoded_bytes={len(EXPANDING)} cap={CAP} "
+        f"status={status} receive_calls={len(calls)}"
+    )
 
 
 def _compress(body: bytes, coding: str) -> bytes:
