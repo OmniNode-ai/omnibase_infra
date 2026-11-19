@@ -90,8 +90,18 @@ dod_evidence:
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_agent_own_signing_key_omn24565.py -k "env_file" -q
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24611-ac2-store-entry-named
-    description: The secret store's own node holds the generated dev-only entry and its generate test is on the omnimarket dev branch. This reads the sibling checkout of omnimarket at origin/dev, so it stays red while the omnimarket pull request of this ticket is unmerged (the criterion is open until then). The environment example of this repository also names the entry.
+    description: The environment example of this repository names the dev-only entry DEPLOY_AGENT_DEV_HMAC_SECRET. The omnimarket node and its generate test are read by the local item below, because the hosted runner has no omnimarket sibling checkout.
     source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: grep -q 'DEPLOY_AGENT_DEV_HMAC_SECRET' docker/env-example-full.txt
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24611-ac2-store-node-omnimarket-local
+    description: The secret store's own node holds the generated dev-only entry and its generate test is on the omnimarket dev branch. This reads the sibling checkout of omnimarket at origin/dev, so it stays red while the omnimarket pull request of this ticket is unmerged (the criterion is open until then). The hosted gate cannot run it, so the local Done gate carries it.
+    source: manual
+    execution_scope: local_done_gate
     binds_ac:
       - AC2
     checks:
@@ -101,9 +111,6 @@ dod_evidence:
           git show origin/dev:src/omnimarket/nodes/node_secret_store_effect/contract.yaml | grep -q 'key: DEPLOY_AGENT_DEV_HMAC_SECRET';
           git cat-file -e origin/dev:tests/unit/nodes/node_secret_store_effect/test_generate_deploy_agent_dev_key.py
         cwd: ${OMNI_HOME}/omnimarket
-      - check_type: command
-        check_value: grep -q 'DEPLOY_AGENT_DEV_HMAC_SECRET' docker/env-example-full.txt
-        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24611-ac3-same-key
     description: The key check value the dev agent serves equals the key check value of the store's entry on the sending lab hosts. Both readings are recorded under context.evidence_readings (16 hex characters each), each with its OWN host, command and UTC time (the agent's value read on h201 by the command that reads the agent's hmac_key_check, the store's value read on a sending lab host by the command that runs node_deploy_agent_key_check_effect). The check requires both values present and equal, the agent's host to be h201, the two commands to name those two readers, and both times to be UTC times from this head's day up to now, so it is red while any is absent, red when they differ, and red for a pair typed with a placeholder host, a foreign command or a date outside that window. Both readings were recorded after the unit was installed on h201 from this branch. The unit-level behaviour (the agent environment carries the unit file's value under the name auth.py reads) is the first check.
     source: manual
