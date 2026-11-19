@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-25753
+title: Lab-overlay parity tests read the dev lane's folded services as the private manifest now declares them
+summary: >-
+  The required context Lab-overlay parity tests (OMN-20934) reads red on open omnibase_infra pull requests because the private lane manifest dropped three folded services from the dev lane (omnimarket-projection-api, omninode-runtime-effects, omnimarket-projection-delegation-writer) while tests/ci/test_dev_105_lane_boundary_omn19544.py and tests/ci/test_dev_202_lane_boundary_omn19505.py still required the dev lane to declare them. Both service maps now list only what the dev lane declares. Each test keeps its equality assertion.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25753-parity-maps
+    statement: The two dev-lane boundary tests agree with the dev lane's declared services in the private manifest.
+    acceptance:
+      - id: AC2
+        statement: "AC2: one pull request on the default branch fixes the shared red at its source with a test that fails on the unfixed code and passes on the fix -- falsifier: the two dev-lane service tests pass at the unfixed base commit with the private census"
+      - id: AC3
+        statement: "AC3: the fix widens or bypasses no check, so the diff removes no assertion and adds no skip, xfail, loosened threshold or changed required-check list -- falsifier: git diff of tests/ and .github/ against the base shows a removed assert, a new skip or xfail marker or a changed required-check list"
+evidence_requirements:
+  - kind: tests
+    description: The two boundary test files pass the lab_overlay selection against the private census and their unmarked tests pass without it.
+    command: uv run --frozen pytest tests/ci/test_dev_105_lane_boundary_omn19544.py tests/ci/test_dev_202_lane_boundary_omn19505.py -m "not lab_overlay" -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25753-ac2-boundary-tests
+    description: >-
+      The unmarked cases of the two boundary test files pass here. The lab_overlay cases read the private census, so they run in the Lab-overlay parity job with the census fetched.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_105_lane_boundary_omn19544.py tests/ci/test_dev_202_lane_boundary_omn19505.py -m "not lab_overlay" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25753-ac3-no-assertion-removed
+    description: >-
+      The diff of the two test files removes service-map entries only; no assert line, skip or xfail marker is removed or added.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: "! git diff origin/dev -- tests/ci/test_dev_105_lane_boundary_omn19544.py tests/ci/test_dev_202_lane_boundary_omn19505.py | grep -E '^[-+][[:space:]]*(assert|@pytest.mark.(skip|xfail))'"
+        cwd: .

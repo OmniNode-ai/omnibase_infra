@@ -4,13 +4,13 @@
 
 Runs the full test suite on dev, parses JUnit XML output, computes failure
 clusters (by test module path), writes ``config/validation/test-failure-baseline.yaml``,
-and auto-files Urgent Linear tickets for any new cluster that has no tracking
-ticket yet.
+and reports each failing cluster to the cluster-ticket node (OMN-19998),
+which owns the ticket decision for the cluster.
 
 Entry-point for the ``dev-baseline-publisher`` scheduled workflow.
 
 Exit codes:
-    0  — success (baseline written, tickets filed where needed)
+    0  — success (baseline written, failing clusters reported where configured)
     1  — unexpected internal error
 """
 
@@ -20,12 +20,12 @@ import argparse
 import datetime
 import json
 import os
+import shlex
 import subprocess
 import sys
-import urllib.error
-import urllib.request
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -37,10 +37,9 @@ import yaml
 BASELINE_FILE = Path("config/validation/test-failure-baseline.yaml")
 JUNIT_XML = Path("dev-baseline-junit.xml")
 BASELINE_TTL_DAYS = 7
-LINEAR_API_URL = "https://api.linear.app/graphql"
-# Omninode team + "Urgent" priority
-LINEAR_PRIORITY_URGENT = 1
-LINEAR_TEAM_KEY = "OMN"
+# Number of failing-test examples stored per cluster in the baseline file and
+# sent to the cluster-ticket node.
+EXAMPLE_COUNT = 5
 
 
 # ---------------------------------------------------------------------------
@@ -123,98 +122,54 @@ def prune_expired(clusters: dict[str, Any], now: datetime.datetime) -> dict[str,
 
 
 # ---------------------------------------------------------------------------
-# Linear ticket filing
+# Cluster-ticket node reporting (OMN-19998)
 # ---------------------------------------------------------------------------
 
 
-def _graphql(api_key: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-    """Execute a Linear GraphQL request; raise on HTTP errors."""
-    payload = json.dumps({"query": query, "variables": variables}).encode()
-    req = urllib.request.Request(  # noqa: S310 — LINEAR_API_URL is a constant HTTPS endpoint
-        LINEAR_API_URL,
-        data=payload,
-        headers={
-            "Authorization": api_key,
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode(errors="replace")
-        raise RuntimeError(f"Linear HTTP {exc.code}: {body}") from exc
-
-
-def get_team_id(api_key: str, team_key: str) -> str:
-    """Resolve Linear team ID by key."""
-    query = """
-    query GetTeam($key: String!) {
-        teams(filter: { key: { eq: $key } }) {
-            nodes { id key name }
-        }
-    }
-    """
-    resp = _graphql(api_key, query, {"key": team_key})
-    nodes = resp.get("data", {}).get("teams", {}).get("nodes", [])
-    if not nodes:
-        raise RuntimeError(f"No Linear team found with key '{team_key}'")
-    return str(nodes[0]["id"])
-
-
-def create_linear_ticket(
-    api_key: str,
-    team_id: str,
-    cluster: str,
-    examples: list[str],
+def report_cluster(
+    report_argv: list[str],
+    *,
     repo: str,
-) -> str:
-    """Create an Urgent Linear ticket for a new failure cluster. Returns issue ID."""
-    example_list = "\n".join(f"- `{t}`" for t in examples[:5])
-    title = f"[dev-baseline] Test failure cluster: {cluster} ({repo})"
-    description = (
-        f"## Dev-baseline ratchet: new failure cluster detected\n\n"
-        f"**Repo:** `{repo}`  \n"
-        f"**Cluster:** `{cluster}`  \n\n"
-        f"### Failing tests (first {min(5, len(examples))} of {len(examples)})\n\n"
-        f"{example_list}\n\n"
-        f"This ticket was auto-filed by the `dev-baseline-publisher` workflow "
-        f"(OMN-13027). The cluster entry will expire from the baseline after "
-        f"{BASELINE_TTL_DAYS} days if not resolved. Fix the failures and delete "
-        f"the cluster entry from `config/validation/test-failure-baseline.yaml` "
-        f"to drain the ratchet.\n\n"
-        f"**Do not ignore this ticket.** No PR may introduce a new failure not "
-        f"listed in the baseline."
-    )
+    cluster: str,
+    tests: list[str],
+    run_ref: str,
+    observed_at: str,
+    lane: str,
+    timeout_s: int,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict[str, str]:
+    """Report one failing cluster to the cluster-ticket node; reporting never fails the run.
 
-    mutation = """
-    mutation CreateIssue($teamId: String!, $title: String!, $description: String!, $priority: Int!) {
-        issueCreate(input: {
-            teamId: $teamId
-            title: $title
-            description: $description
-            priority: $priority
-        }) {
-            success
-            issue { id identifier }
-        }
-    }
+    ``report_argv`` is the node command already split with ``shlex``; this appends
+    ``--input``/``--timeout`` and runs it. The node's stdout ``result`` comes back as
+    ``{"state": ..., "ticket": ...}``; a nonzero exit, a timeout or an unparseable answer
+    is ``unavailable`` with a warning that names the cluster, never the command.
     """
-    resp = _graphql(
-        api_key,
-        mutation,
-        {
-            "teamId": team_id,
-            "title": title,
-            "description": description,
-            "priority": LINEAR_PRIORITY_URGENT,
-        },
-    )
-    issue = resp.get("data", {}).get("issueCreate", {}).get("issue")
-    if not issue:
-        raise RuntimeError(f"Linear ticket creation failed: {resp}")
-    return str(issue["identifier"])
+    node_input = {
+        "requested_by_lane": lane,
+        "repo": repo,
+        "cluster": cluster,
+        "failing_count": len(tests),
+        "examples": tests[:EXAMPLE_COUNT],
+        "run_url": run_ref,
+        "observed_at": observed_at,
+    }
+    cmd = [*report_argv, "--input", json.dumps(node_input), "--timeout", str(timeout_s)]
+    try:
+        proc = runner(
+            cmd, capture_output=True, text=True, check=False, timeout=timeout_s + 30
+        )
+        if proc.returncode != 0:
+            raise ValueError(f"exit {proc.returncode}")
+        result = json.loads(proc.stdout)["result"]
+        return {"state": str(result["state"]), "ticket": str(result["ticket"] or "")}
+    except (subprocess.TimeoutExpired, ValueError, KeyError, TypeError) as exc:
+        print(
+            f"::warning::Cluster-ticket node gave no answer for cluster {cluster}: "
+            f"{type(exc).__name__}",
+            file=sys.stderr,
+        )
+        return {"state": "unavailable", "ticket": ""}
 
 
 # ---------------------------------------------------------------------------
@@ -262,12 +217,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Do not file Linear tickets or commit changes",
+        help="Do not report clusters to the node or write the baseline",
     )
     parser.add_argument(
-        "--linear-api-key",
-        default=os.environ.get("LINEAR_API_KEY", ""),
-        help="Linear API key for filing tickets",
+        "--report-command",
+        default=os.environ.get("BASELINE_REPORT_COMMAND", ""),
+        help=(
+            "Cluster-ticket node command as one shell-quoted string "
+            "(default: env BASELINE_REPORT_COMMAND)"
+        ),
+    )
+    parser.add_argument(
+        "--report-lane",
+        default=os.environ.get("BASELINE_REPORT_LANE", ""),
+        help=(
+            "requested_by_lane sent to the cluster-ticket node "
+            "(default: env BASELINE_REPORT_LANE)"
+        ),
+    )
+    parser.add_argument(
+        "--report-timeout-s",
+        type=int,
+        default=120,
+        help="Timeout in seconds passed to the cluster-ticket node",
     )
     args = parser.parse_args(argv)
 
@@ -298,44 +270,60 @@ def main(argv: list[str] | None = None) -> int:
     new_clusters = set(current_failures.keys()) - set(existing_clusters.keys())
     print(f"New clusters (not in baseline): {sorted(new_clusters)}")
 
-    # 5. File Linear tickets for new clusters
-    team_id: str | None = None
-    if new_clusters and args.linear_api_key and not args.dry_run:
-        try:
-            team_id = get_team_id(args.linear_api_key, LINEAR_TEAM_KEY)
-        except Exception as exc:  # noqa: BLE001 — graceful degradation: no ticket if API unreachable
-            print(f"::warning::Could not resolve Linear team: {exc}", file=sys.stderr)
+    # 5. Report every failing cluster to the cluster-ticket node (OMN-19998).
+    # The node owns the ticket decision and searches by the cluster's stable
+    # signature, so it is consulted on EVERY failing cluster of the run — not
+    # only on clusters that are new to the baseline file.
+    report_argv = shlex.split(args.report_command) if args.report_command else []
+    reporting_on = not args.dry_run and bool(report_argv) and bool(args.report_lane)
+    if not args.dry_run and current_failures and not reporting_on:
+        print(
+            "::warning::Skipping failure-cluster reporting: the report command "
+            "or the report lane is not configured",
+            file=sys.stderr,
+        )
+
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    run_ref = f"{args.repo} Actions run {run_id}" if run_id else ""
+    observed_at = now.isoformat()
+    repo_name = args.repo.split("/")[-1]
 
     # 6. Build updated clusters dict
     expires_at = (now + datetime.timedelta(days=BASELINE_TTL_DAYS)).isoformat()
 
     for cluster, tests in current_failures.items():
-        if cluster in existing_clusters:
-            # Refresh expiry on still-failing clusters; preserve ticket
-            existing_clusters[cluster]["expires_at"] = expires_at
-            existing_clusters[cluster]["count"] = len(tests)
-            existing_clusters[cluster]["examples"] = tests[:5]
-        else:
-            # New failure cluster
-            ticket_id = ""
-            if team_id and not args.dry_run:
-                try:
-                    repo_name = args.repo.split("/")[-1]
-                    ticket_id = create_linear_ticket(
-                        args.linear_api_key, team_id, cluster, tests, repo_name
-                    )
-                    print(f"Filed Linear ticket {ticket_id} for cluster: {cluster}")
-                except Exception as exc:  # noqa: BLE001 — graceful degradation: skip ticket on API failure
-                    print(
-                        f"::warning::Failed to file ticket for cluster {cluster}: {exc}",
-                        file=sys.stderr,
-                    )
+        answered_ticket: str | None = None
+        if reporting_on:
+            answer = report_cluster(
+                report_argv,
+                repo=repo_name,
+                cluster=cluster,
+                tests=tests,
+                run_ref=run_ref,
+                observed_at=observed_at,
+                lane=args.report_lane,
+                timeout_s=args.report_timeout_s,
+            )
+            if answer["state"] in ("created", "commented", "linked"):
+                answered_ticket = answer["ticket"]
 
+        if cluster in existing_clusters:
+            # Refresh expiry on still-failing clusters; keep the entry's
+            # ticket unless the node answered with one this run.
+            entry = existing_clusters[cluster]
+            if answered_ticket is not None:
+                entry["ticket"] = answered_ticket
+            entry["expires_at"] = expires_at
+            entry["count"] = len(tests)
+            entry["examples"] = tests[:EXAMPLE_COUNT]
+        else:
+            # New failure cluster; ticket comes from the node's answer, or
+            # "" when it could not answer.
             existing_clusters[cluster] = {
-                "ticket": ticket_id,
+                "ticket": answered_ticket or "",
                 "expires_at": expires_at,
                 "count": len(tests),
-                "examples": tests[:5],
+                "examples": tests[:EXAMPLE_COUNT],
                 "first_seen": now.isoformat(),
             }
 
