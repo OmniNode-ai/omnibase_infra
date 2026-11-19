@@ -1,0 +1,132 @@
+schema_version: 1.0.0
+ticket_id: OMN-25390
+title: Review findings 1 to 10 on omnibase_infra PR 6047 at head fca8c3ea6891 are fixed or argued
+summary: The fifth review of the stability writer roll found that the writers were recreated before the runtime leg's migrations were ready and inside the held build context, that the container listing lacked the runtime profile the up and config commands pass, that nothing tied the build target of the runtime and the writers to the labelled stage, that the empty-sha refusal fired after the builds, that a writer read healthy was never read again, and that three contracts said a check reads the sha in the Lab comment. This change rolls the writers from inside the runtime _compose_up after the migrations and the changed oneshots (outside the build-context lock), gives up, config and ps one argv prefix, asserts the build stage of the runtime and each writer over the lane's compose files, refuses an empty sha at the entry of rebuild_scope, adds a final health pass, amends the three contracts, drops the order test the test itself ordered and leaves the unrelated env template line removed (restoring it names a private checkout path, which the local-path hooks refuse).
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25390-review-findings
+    statement: The review findings on the stability writer roll at head fca8c3ea6891 are fixed or argued with evidence.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the writer roll in the deploy agent executor runs after the runtime leg''s migrations are ready and the changed oneshots are rerun, and a test asserts that call order with neither helper stubbed away from the order check -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q` fails when the roll is moved before the migrations helper'
+      - id: AC2
+        statement: 'AC2: the writer container listing passes the same `--profile runtime` argv prefix as up and config, and the Lab comment carries the lab output of the three reads (ps -a -q, config --format json for one writer, and the project-service default name) -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q` fails when the ps argv lacks the profile'
+      - id: AC3
+        statement: 'AC3: a test asserts over the lane''s compose files that the build target of the runtime service and of each of the seven writers is the runtime stage of Dockerfile.runtime that carries the revision label -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q` fails when one writer''s build target is another stage'
+      - id: AC4
+        statement: 'AC4: the Lab comment holds the lab read of the stability agent''s environment source naming DEV_LANE_SKILL_OVERLAY_ROOTS_DIR, shows the variable reaching stability''s compose environment, and lists each workflow or script that renders the stability compose overlay with its setting of it -- falsifier: the Lab comment contains no read of the env file, or one rendering path is listed without the variable'
+      - id: AC5
+        statement: 'AC5: the empty-sha refusal fires at the entry of rebuild_scope before any build, preflight or deps up, and a test covers each caller of rebuild_scope -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q` fails when the refusal is moved after the builds'
+      - id: AC6
+        statement: 'AC6: contracts/OMN-25339.yaml (AC7 and the summary), the ac5 check of contracts/OMN-25367.yaml and contracts/OMN-25313.yaml line 93 state that the check reads commits or the head only, AC7 of OMN-25367 names four files, and AC8 no longer puts the FULL recreate in the preflight''s block -- falsifier: `grep -n "Lab comment''s sha" contracts/OMN-25339.yaml contracts/OMN-25367.yaml contracts/OMN-25313.yaml` matches a line'
+      - id: AC7
+        statement: 'AC7: the PR carries one comment per finding 1 to 9, a comment amending AC6 with the reason (no I10 row in the fixture), the red base run, the four files that fail at origin/dev, and a PR body line starting `Lab:` with the full 40 character sha -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6047` lists no comment starting `Lab: head=` with the full new head sha'
+      - id: AC8
+        statement: 'AC8: the writer roll sits after the build-context lock is released and not inside the held build context, and a test asserts it -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q` fails when the roll moves inside the held block'
+      - id: AC9
+        statement: 'AC9: a final pass re-reads every writer''s health after the last roll, and a test asserts that a writer healthy on the first read and unhealthy on the last read fails the roll -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q` passes with a writer unhealthy on the final pass'
+      - id: AC10
+        statement: 'AC10: the test that orders two calls the test itself makes is dropped and docs/env-example-full.txt line 237 is reverted to its origin/dev text, or argued: the line names a private checkout path, and the never-exemptable hygiene hooks (check-local-paths-compute, public-repo-hygiene) refuse a commit that adds it back, so the line stays removed -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q` fails'
+evidence_requirements:
+  - kind: tests
+    description: The stability writer roll tests and the dev-only scope tests pass.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py scripts/deploy-agent/tests/unit/test_dev_lane_only_scope_omn18108.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn25390-ac1
+    description: The writer roll runs after the migrations and the changed oneshots, which record their calls in the fixture.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "after_the_migrations" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25390-ac2
+    description: Up, config and ps share one argv prefix with the runtime profile. The lab output of the three reads is in the Lab comment, read by the reviewer.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "one_argv_prefix" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25390-ac3
+    description: The runtime and the seven writers build the runtime stage; a writer built from another stage is named.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "carries_the_label or another_stage" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25390-ac4
+    description: The read of the agent's environment source, the compose environment and each rendering path are in the Lab comment, which no local reader returns; this check reads the head only and runs under the local Done gate.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: onex scm pr-commits OmniNode-ai/omnibase_infra#6047 | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; old='fca8c3ea6891cc4a7b4becdeb8945b1bb308b853'; sys.exit(0 if r['head_sha'] != old and any(old in c['parents'] and 'OMN-25390' in c['subject'] for c in r['commits']) else 1)"
+        cwd: .
+  - id: dod-omn25390-ac5
+    description: An empty sha is refused at the entry of rebuild_scope on RUNTIME and FULL, and the one caller passes the sha the job pulled.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "empty_sha or only_caller" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25390-ac6
+    description: No contract states that a check reads the sha in a Lab comment, and AC7 of OMN-25367 names four files.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: command
+        check_value: '! grep -nE "Lab comment''s (full )?(sha|head)|names the five" contracts/OMN-25339.yaml contracts/OMN-25367.yaml contracts/OMN-25313.yaml'
+        cwd: .
+  - id: dod-omn25390-ac7
+    description: The comments and the PR body are read by the reviewer; no local reader returns them, so this check reads the commits only and runs under the local Done gate.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC7
+    checks:
+      - check_type: command
+        check_value: onex scm pr-commits OmniNode-ai/omnibase_infra#6047 | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; old='fca8c3ea6891cc4a7b4becdeb8945b1bb308b853'; sys.exit(0 if r['head_sha'] != old and any(old in c['parents'] and 'OMN-25390' in c['subject'] for c in r['commits']) else 1)"
+        cwd: .
+  - id: dod-omn25390-ac8
+    description: The writer roll follows the release of the build-context lock.
+    source: manual
+    binds_ac:
+      - AC8
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "build_context_lock" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25390-ac9
+    description: A writer healthy on the first read and unhealthy on the last fails the roll.
+    source: manual
+    binds_ac:
+      - AC9
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k "unhealthy_on_the_last" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25390-ac10
+    description: 'The order test that the test itself ordered is gone. The removed line of docs/env-example-full.txt is argued in a PR comment: restoring it is refused by the never-exemptable local-path hooks.'
+    source: manual
+    binds_ac:
+      - AC10
+    checks:
+      - check_type: command
+        check_value: '! grep -n ''def test_the_writers_are_built_before_they_are_recreated'' scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py'
+        cwd: .
