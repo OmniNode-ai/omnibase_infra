@@ -1,0 +1,37 @@
+# OMN-24693 contract file for omnibase_infra deploy-gate.
+# This PR adds one integration test only; no runtime, container, broker topic or service changes.
+schema_version: "1.0.0"
+ticket_id: "OMN-24693"
+title: "Real-path test that a node of the fixed shape (no publish_topics, handler returns no model) never takes the undeliverable-output route"
+summary: >
+  Adds tests/integration/nodes/node_host_table_keys_ingest_effect/test_no_undeliverable_output_integration.py. It wires a stand-in contract through wire_from_manifest, asserts the undeliverable-output route is never awaited for the fixed shape, and asserts the same wiring awaits it once with UndeliverableDispatchOutputError for the unfixed shape (a handler returning a model, no publish_topics). Test-only change.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24693-no-undeliverable
+    statement: A node of the fixed shape (no publish_topics, handler returns no model) never takes the undeliverable-output route when dispatched through the real auto-wiring boundary.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the fixed shape never awaits the undeliverable-output route and the unfixed shape awaits it once with UndeliverableDispatchOutputError -- falsifier: uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov -k test_unfixed_handler_shape_does_route_undeliverable_output passes, and its assertion that the route is awaited once with UndeliverableDispatchOutputError is the control that separates the unfixed shape from the fixed one"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn24693-ac2"
+    description: "The real-path test passes: the fixed shape never routes undeliverable output and the unfixed shape routes it once as UndeliverableDispatchOutputError."
+    source: "manual"
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u PYTHONPATH uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov"
+        cwd: .
+  - id: "dod-deploy"
+    description: "No runtime deploy, restart, broker topic, container image, or live service change is required for this test-only change."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "echo 'deploy-gate: OMN-24693 adds one integration test in omnibase_infra; no runtime deploy or restart required'"
