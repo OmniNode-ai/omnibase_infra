@@ -1,0 +1,36 @@
+{
+  "recorded_by": "OMN-25901",
+  "recorded_from": "lane done2-0910, dry run of dod_verify for OMN-25709 inside the dev runtime",
+  "runtime": {
+    "lane": "dev",
+    "container": "omninode-runtime",
+    "omni_home_in_container": "/app",
+    "omnimarket_revision": "5bf30a3f5258f3e797bd86d05a5847dca9efcc82",
+    "pin_file_variable": "DOD_VERIFY_PRODUCT_CLONE_PIN_FILE",
+    "pin_file_variable_in_container_environment": false
+  },
+  "dry_run": {
+    "read_at": "2026-11-19T09:29:43Z",
+    "command": "docker exec -u 1000 -e OMNI_HOME=/app omninode-runtime python -m omnimarket.nodes.node_dod_verify --ticket-id OMN-25709 --execution-audience hosted",
+    "correlation_id": "ff3999d3-6d8b-4f81-b667-8d451cdc7760",
+    "status": "skipped",
+    "total_checks": 9,
+    "verified_count": 3,
+    "failed_count": 0,
+    "skipped_count": 6,
+    "error": "EVIDENCE_UNVERIFIABLE: 5/9 evidence check(s) for OMN-25709 could not be evaluated (product_clone_freshness_unknown); 3 verified, 0 failed.",
+    "check_message_code": "PRODUCT_CLONE_NOT_FRESH",
+    "check_message_cause": "the fetch of origin dev failed ... cannot open '.git/FETCH_HEAD': Read-only file system",
+    "resolved_cwd": "/app/omnibase_infra"
+  },
+  "mounted_clones": [
+    "omnibase_core",
+    "omnibase_infra",
+    "omnibase_spi",
+    "omniclaude",
+    "omnidash",
+    "omniintelligence",
+    "omnimarket",
+    "omnimemory"
+  ]
+}
