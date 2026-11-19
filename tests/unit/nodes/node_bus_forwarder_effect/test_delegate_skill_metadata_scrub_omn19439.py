@@ -16,6 +16,7 @@ metadata ALLOWLIST applied at the boundary, before the content-addressed
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ from uuid import uuid4
 import pytest
 import yaml
 
+from omnibase_core.models.contracts.model_ingest_contract import compute_event_id
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
@@ -35,7 +37,6 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models.model_gateway_forward
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
     ServiceGatewayForwarder,
-    content_addressed_event_id,
 )
 from tests.unit.nodes.node_bus_forwarder_effect.test_egress_redaction_omn16979 import (
     PRINCIPAL_ID,
@@ -47,6 +48,9 @@ from tests.unit.nodes.node_bus_forwarder_effect.test_egress_redaction_omn16979 i
 )
 from tests.unit.nodes.node_bus_forwarder_effect.test_egress_redaction_omn16979 import (
     _config as _base_config,
+)
+from tests.unit.nodes.node_bus_forwarder_effect.test_https_ingest_omn16459 import (
+    recording_https_ingest,
 )
 
 _CONTRACT_PATH = (
@@ -334,17 +338,18 @@ async def test_a_terminal_crosses_without_its_prompt_or_response(topic: str) -> 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_event_id_is_computed_over_the_scrubbed_payload() -> None:
-    local_bus, cloud_bus = _Bus(), _Bus()
+    cloud_bus, records = recording_https_ingest()
     service = ServiceGatewayForwarder(
         config=_config(outbound=(UNGOVERNED_OUTBOUND, *TERMINALS), scrub=_scrub()),
-        local_bus=local_bus,
+        local_bus=_Bus(),
         cloud_bus=cloud_bus,
     )
     payload = _terminal_payload()
     await service.forward_outbound_message(_message(COMPLETED, payload))
-    decoded = json.loads(cloud_bus.published[0].value)
-    expected = content_addressed_event_id(_envelope(_scrub().scrub(payload)), COMPLETED)
-    assert decoded["metadata"]["tags"]["event_id"] == expected
+    (record,) = records
+    value = base64.b64decode(str(record["value"]))
+    assert json.loads(value)["payload"] == _scrub().scrub(payload)
+    assert record["event_id"] == compute_event_id(str(record["topic"]), b"k", value, {})
 
 
 @pytest.mark.unit
