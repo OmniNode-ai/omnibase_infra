@@ -32,6 +32,7 @@ script builds that image or repoints the operator env file.
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 from collections.abc import Callable
@@ -65,6 +66,30 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 DEPLOY_SCRIPT = (
     REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
 )
+
+
+def _stability_composed_services() -> tuple[str, ...]:
+    # The deploy-agent venv installs a released omnibase_infra without this
+    # module, so the constant is read from the checked-out source.
+    source = (
+        REPO_ROOT
+        / "src"
+        / "omnibase_infra"
+        / "nodes"
+        / "node_setup_local_provision_effect"
+        / "runtime_cost_estimator_build.py"
+    )
+    for node in ast.parse(source.read_text(encoding="utf-8")).body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "STABILITY_TEST_COMPOSED_RUNTIME_SERVICES"
+            and node.value is not None
+        ):
+            return tuple(ast.literal_eval(node.value))
+    raise AssertionError("STABILITY_TEST_COMPOSED_RUNTIME_SERVICES is not declared")
+
+
 DEV_LANE_OVERLAY_BASENAME = "docker-compose.dev-lane.yml"
 
 
@@ -330,7 +355,11 @@ class TestTheBuildPhaseReachesThem:
         # OMN-18108 rule, kept for every dev-only service the ruling does not
         # move: only the seven writers follow the runtime build onto stability.
         writers = set(_stability_writers())
-        outside = set(DEV_LANE_ONLY_RUNTIME_SERVICES) - writers
+        outside = (
+            set(DEV_LANE_ONLY_RUNTIME_SERVICES)
+            - writers
+            - set(_stability_composed_services())
+        )
         assert outside, "positive control: dev-only services outside the writers"
         builds = self._captured_build_commands(EnumRuntimeLane.STABILITY_TEST)
         flat = {tok for cmd in builds for tok in cmd}

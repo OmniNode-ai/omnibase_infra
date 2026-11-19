@@ -226,6 +226,19 @@ def dev_lane_web_follow(
         return None
 
 
+# OMN-24562: the stability runtime services that build on omnimarket's composed
+# image (the stability overlay). The lane-agnostic build passes
+# only docker-compose.infra.yml and builds them from the infra Dockerfile alone,
+# so the stability build names them again with the overlay. The overlay's
+# projection writers are built by ``build_stability_lane_writers``.
+STABILITY_TEST_COMPOSED_RUNTIME_SERVICES: tuple[str, ...] = (
+    "omninode-runtime",
+    "runtime-effects",
+    "runtime-worker",
+    "projection-api",
+)
+
+
 #: OMN-24903: the projection writers the stability lane's compose overlay
 #: declares (OMN-17562). ``services_for_scope`` names them on the dev lane only, so a
 #: stability deploy rebuilt and recreated the runtime and never these: on
@@ -638,6 +651,20 @@ def build_dev_lane_services(
     | None = None,
 ) -> dict[str, str]:
     """Validate first, then build dev images before the existing recreate."""
+    if lane == execution.EnumRuntimeLane.STABILITY_TEST:
+        # OMN-24562: the stability overlay builds the runtime on the composed
+        # image, as the dev lane does; its build names the overlay.
+        build_images(
+            execution.Scope.RUNTIME,
+            git_sha,
+            on_phase_update,
+            build_source=build_source,
+            runtime_lane=lane,
+            git_ref=git_ref,
+            compose_files=execution.lane_config_for(lane).compose_files,
+            services=STABILITY_TEST_COMPOSED_RUNTIME_SERVICES,
+            stage_workspace=False,
+        )
     build_stability_lane_writers(
         execution,
         build_images,
