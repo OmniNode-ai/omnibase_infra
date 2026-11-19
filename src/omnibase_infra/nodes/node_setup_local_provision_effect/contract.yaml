@@ -112,6 +112,25 @@ config:
     read_timeout_seconds: 30
     description: >-
       Renders one revision of the overlays repository into the dev agent's state directory and names it as the dev lane's overlay store root for the deploy that declares it; no value lives here.
+  product_clone_pin:
+    repositories:
+      - omnibase_core
+      - omnibase_infra
+      - omnibase_spi
+      - omniclaude
+      - omnidash
+      - omniintelligence
+      - omnimarket
+      - omnimemory
+    container_root: /app
+    pin_dir_parts:
+      - .onex_state
+      - product-clone-pin
+    pin_file_name: pins.json
+    schema_version: 1
+    read_timeout_seconds: 30
+    description: >-
+      The dev runtime mounts these clones read-only (docker-compose.dev-lane.yml and docker-compose.dev-tenant-fold.yml, the product clones block), so omnimarket's dod_verify cannot fetch into one to measure its freshness. When a dev runtime job starts, each clone's own HEAD is written as one pin of the version 1 pin file under the registry root (the parent of the agent's compose clone), in a directory both compose files mount read-only and name through DOD_VERIFY_PRODUCT_CLONE_PIN_FILE. A clone whose revision cannot be read gets no pin; no revision lives here.
   overlay_home_lane_env:
     clone_env: DEPLOY_AGENT_OVERLAY_HOME_CLONE
     ref: origin/main
