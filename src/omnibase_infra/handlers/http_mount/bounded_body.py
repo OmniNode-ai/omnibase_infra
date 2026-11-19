@@ -38,7 +38,7 @@ class UnsupportedCodingError(Exception):
     """The ``Content-Encoding`` names a coding this bridge does not decode."""
 
 
-class _ContentStream(Protocol):
+class ContentStream(Protocol):
     async def read(self, n: int = -1) -> bytes: ...
 
     async def readany(self) -> bytes: ...
@@ -118,7 +118,7 @@ class BoundedInflater:
 
 
 async def decoded_chunks(
-    content: _ContentStream, inflater: BoundedInflater, raw_limit: int | None
+    content: ContentStream, inflater: BoundedInflater, raw_limit: int | None
 ) -> AsyncIterator[bytes]:
     """Yield decoded chunks, reading at most ``raw_limit + 1`` raw bytes.
 

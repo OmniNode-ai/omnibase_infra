@@ -60,7 +60,9 @@ _AsgiApp = Callable[[_AsgiScope, _AsgiReceive, _AsgiSend], Awaitable[None]]
 _SKIPPED_RESPONSE_HEADERS = frozenset({"transfer-encoding", "connection"})
 
 
-def listener_runner(app: web.Application, **runner_options: Any) -> web.AppRunner:
+def listener_runner(
+    app: web.Application, *, shutdown_timeout: float | None = None
+) -> web.AppRunner:
     """The runner for an application that carries mounts (OMN-26085).
 
     ``auto_decompress=False`` leaves a request body as it came off the socket, so
@@ -68,7 +70,14 @@ def listener_runner(app: web.Application, **runner_options: Any) -> web.AppRunne
     to a read buffer of it ahead of any check. ``lingering_time=0`` stops aiohttp
     from reading and discarding the rest of a refused body before it closes.
     """
-    return web.AppRunner(app, auto_decompress=False, lingering_time=0, **runner_options)
+    if shutdown_timeout is None:
+        return web.AppRunner(app, auto_decompress=False, lingering_time=0)
+    return web.AppRunner(
+        app,
+        auto_decompress=False,
+        lingering_time=0,
+        shutdown_timeout=shutdown_timeout,
+    )
 
 
 def _refuse(status: type[web.HTTPClientError], reason: str) -> web.HTTPClientError:
