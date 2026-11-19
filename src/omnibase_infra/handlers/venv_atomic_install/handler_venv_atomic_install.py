@@ -116,5 +116,7 @@ class HandlerVenvAtomicInstall:
                 no_deps=request.no_deps,
                 label=request.label,
                 paths=[str(p) for p in request.paths],
+                lock_held=request.lock_held_path,
+                lock_timeout_s=request.lock_timeout_seconds,
             )
         )

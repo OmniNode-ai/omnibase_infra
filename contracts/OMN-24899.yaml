@@ -20,7 +20,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: >-
-      Finalize keeps and names a stage folder it cannot remove and counts only removed folders as swept; the root scheduler unit sets the no-bytecode setting in its service section.
+      The sweep (PR 6005) reports a stage folder it cannot remove as failed and counts only removed folders as swept; the root scheduler unit sets the no-bytecode setting in its service section.
     command: uv run --frozen pytest tests/scripts/test_venv_atomic_stage_sweep.py tests/scripts/test_workspace_reconcile_no_root_bytecode_omn24899.py -q -n 0
 emergency_bypass:
   enabled: false
@@ -29,11 +29,11 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn24899-ac1-installer-carries-sweep
     description: >-
-      Deploy probe. The engine file GitHub serves at the checked-out commit carries the sweep of PR 5993 and the honest report of this change, which is what the installer runs. The probe exits nonzero on a tree without the report, so it fails at the merge base.
+      Deploy probe. The engine file GitHub serves at the checked-out commit carries the locked sweep of PR 6005 with its honest failed-removal report, which is what the installer runs. The probe exits nonzero on a tree without the report, so it fails at the merge base.
     source: manual
     checks:
       - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/venv_atomic_install/atomic_venv_install.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'could not be removed' | grep -qx 1"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/venv_atomic_install/atomic_venv_install.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'cannot remove stage' | grep -qx 1"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn24899-ac2-no-false-sweep
@@ -42,7 +42,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_venv_atomic_stage_sweep.py -q -n 0 -p no:cacheprovider -k "cannot_remove"
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_venv_atomic_stage_sweep.py -q -n 0 -p no:cacheprovider -k "failed_removal"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
   - id: dod-omn24899-ac2-unit-no-bytecode

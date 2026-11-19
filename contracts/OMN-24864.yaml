@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-24864
+title: The surplus-runner retire reads idle from the container, so a caller with no GitHub read can apply a runner-count cut
+summary: >-
+  scripts/deploy-runners.sh --retire-surplus judged a surplus runner idle with runner_is_idle, whose first signal is a GitHub org runner read through gh api. A caller that cannot make that read, such as a lane behind the gh shim or a host timer with no org admin credential, read every runner "unknown" and the check failed closed, so the ten general runners that the merged change to config/runner_fleet.yaml and docker/docker-compose.runners.yml took off the declared fleet were never retired, and no node, timer or lane owned the apply. surplus_runner_is_idle now calls relabel_container_idle, the container-only judgement --relabel and --add already use - stopped is idle; running needs no Runner.Worker in docker top and no unfinished "Running job:" in the listener log; anything unreadable is not idle. The GitHub-offline allowance of OMN-22478 (IDLE_ACCEPTS_OFFLINE) and the now unused container_is_running are deleted; a dead listener reads idle on the same container evidence. --rolling keeps the GitHub-backed runner_is_idle unchanged. Deregistering a retired runner's GitHub registration stays best effort and still needs a gh read. tests/unit/scripts/test_deploy_runners_retire_dead_listener_omn22478.py runs the real functions against replayed docker output and a gh stub that records any call. The runtime acceptance criteria of the ticket (the ten containers gone on the host, the STATUS row, the next integration pass reading it running) are post-install runtime reads that no check here can bind, so this contract carries no entry for them.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24864-retire-idle-container
+    statement: The surplus-runner retire judges a runner idle on the container's own evidence and makes no GitHub read for it.
+    acceptance:
+      - id: AC1
+        statement: "AC1: surplus_runner_is_idle reads idle for a stopped container and for a running one with no Runner.Worker and no unfinished listener job, and makes no gh call -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_retire_dead_listener_omn22478.py -q --no-cov -n 0 fails on the previous script"
+      - id: AC2
+        statement: "AC2: a live Runner.Worker, an unfinished job in the listener log, or an unreadable process list each read busy, and --rolling still refuses an offline running runner -- falsifier: the same command with the Runner.Worker or listener-log probe removed from relabel_container_idle fails"
+evidence_requirements:
+  - kind: tests
+    description: The retire idle-check regression with its failing and positive controls.
+    command: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_retire_dead_listener_omn22478.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24864-ac1-retire-idle
+    description: >-
+      The retire idle check reads idle on container evidence alone and makes no gh call. Four of the eight tests fail at the merge base, where surplus_runner_is_idle still needs the GitHub read.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_retire_dead_listener_omn22478.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24864-ac2-busy-controls
+    description: >-
+      The busy controls stay fail-closed on the container evidence, and the rolling caller is unchanged.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_retire_dead_listener_omn22478.py -k "busy or fail_closed or rolling" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
