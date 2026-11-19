@@ -86,12 +86,13 @@ PRUNE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
 
 # Relations whose vendored migration also grants DELETE, which no ``access`` mode
 # derives. The reservations table is released or expired by deleting its rows
-# (OMN-23055, node_gate_store_effect/0001). Each is declared as a separate
+# (OMN-23055, node_gate_store_effect/0001). floor_integration_rows deletes the
+# rows of an older integration pass that the newest no longer names (OMN-25103,
+# node_projection_floor_integration/0001). Each is declared as a separate
 # PRUNE_PRIVILEGES grant beside the derived one, so no grant carries a
-# non-canonical privilege set; expire with the gate store bridge.
-PRUNED_RELATIONS: frozenset[tuple[str, str]] = frozenset(
-    {("omninode_internal", "gate_store_reservations")}
-)
+# non-canonical privilege set; expire with its bridge.
+_PRUNED_TABLES = ("gate_store_reservations", "floor_integration_rows")
+PRUNED_RELATIONS = frozenset(("omninode_internal", t) for t in _PRUNED_TABLES)
 
 # Mirrors ``_projection_operation_bindings``. PLATFORM_CATALOG is absent by
 # design: that domain requires a caller-supplied read/write binding, so a

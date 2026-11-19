@@ -32,6 +32,7 @@ import importlib.resources
 import json
 import logging
 import sys
+import tempfile
 from collections.abc import Awaitable, Callable, Mapping
 from functools import lru_cache
 from pathlib import Path
@@ -173,6 +174,10 @@ LINEAR_COMPLETED_STATE_TYPE = "completed"
 LINEAR_DONE_STATE_NAME = "done"
 #: A verifier run executes the contract's checks, so it is slow by design.
 DEFAULT_DOD_VERIFY_TIMEOUT_SECONDS = TIMEOUTS.done_write_verify_seconds
+#: Longest verifier stderr kept in a refusal reason. A traceback's cause is its
+#: tail, so an over-long text keeps its last characters, with the omitted count
+#: stated at the head (OMN-25667).
+MAX_VERIFIER_ERROR_CHARS = 4000
 
 # Injectable runner signature (the real one execs the dispatch venv's `onex`;
 # tests inject fakes with the same shape).
@@ -181,7 +186,9 @@ TypeRunDodVerifyCommand = Callable[
 ]
 
 
-def dod_verify_argv(ticket_id: str, *, contract_path: str = "") -> list[str]:
+def dod_verify_argv(
+    ticket_id: str, *, contract_path: str = "", state_root: str = ""
+) -> list[str]:
     """Argv that dispatches the verifier from THIS process's own environment.
 
     OMN-16846. This used to be ``["uv", "run", "onex", "skill", "dod_verify",
@@ -212,6 +219,13 @@ def dod_verify_argv(ticket_id: str, *, contract_path: str = "") -> list[str]:
     which the caller already converts into a named per-ticket error; the
     sweep job additionally asserts the binary resolves before any ticket is
     scanned, so the loud failure comes first.
+
+    OMN-25667. ``onex skill`` writes its input payload under ``--state-root``,
+    whose default is the cwd-relative ``.onex_state``. The runtime's cwd is
+    ``/app``, which its unprivileged user cannot write, so every Done write
+    died on ``PermissionError: '.onex_state'`` before the verifier produced a
+    verdict. ``state_root`` names a directory the caller owns; with none the
+    CLI default applies, as before.
     """
     return [
         str(Path(sys.executable).parent / "onex"),
@@ -221,7 +235,20 @@ def dod_verify_argv(ticket_id: str, *, contract_path: str = "") -> list[str]:
         "--execution-audience",
         "hosted",
         *(["--contract-path", contract_path] if contract_path else []),
+        *(["--state-root", state_root] if state_root else []),
     ]
+
+
+def bound_verifier_error(text: str) -> str:
+    """The verifier's stderr, whole up to ``MAX_VERIFIER_ERROR_CHARS``.
+
+    Over the bound it keeps the tail (the exception line of a traceback) and
+    says how many leading characters it dropped.
+    """
+    if len(text) <= MAX_VERIFIER_ERROR_CHARS:
+        return text
+    omitted = len(text) - MAX_VERIFIER_ERROR_CHARS
+    return f"[{omitted} chars omitted] ...{text[-MAX_VERIFIER_ERROR_CHARS:]}"
 
 
 async def reap_timed_out_process(proc: asyncio.subprocess.Process) -> None:
@@ -246,9 +273,28 @@ async def reap_timed_out_process(proc: asyncio.subprocess.Process) -> None:
 async def run_dod_verify_command(
     ticket_id: str, cwd: str, timeout: float, *, contract_path: str = ""
 ) -> tuple[dict[str, object] | None, int, str]:
+    # The verifier's payload and capture files live in a scratch directory of
+    # this call, never under the cwd (OMN-25667): the verdict comes back on
+    # stdout and no caller reads a file the verifier wrote.
+    with tempfile.TemporaryDirectory(prefix="onex-dod-verify-") as state_root:
+        return await _run_dod_verify_in(
+            ticket_id, cwd, timeout, contract_path=contract_path, state_root=state_root
+        )
+
+
+async def _run_dod_verify_in(
+    ticket_id: str,
+    cwd: str,
+    timeout: float,
+    *,
+    contract_path: str,
+    state_root: str,
+) -> tuple[dict[str, object] | None, int, str]:
     # OMN-16846: resolved from THIS process's interpreter, not re-resolved
     # by `uv run` from the cwd. See `dod_verify_argv`.
-    args = dod_verify_argv(ticket_id, contract_path=contract_path)
+    args = dod_verify_argv(
+        ticket_id, contract_path=contract_path, state_root=state_root
+    )
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,
@@ -287,7 +333,9 @@ async def run_dod_verify_command(
         return (
             None,
             exit_code,
-            stderr_text if exit_code != 0 else f"Invalid dod_verify JSON: {exc}",
+            bound_verifier_error(stderr_text)
+            if exit_code != 0
+            else f"Invalid dod_verify JSON: {exc}",
         )
     if not isinstance(parsed, dict):
         return None, exit_code, "dod_verify output was not a JSON object"
@@ -384,6 +432,8 @@ class DoneWriteReceiptGuard:
 
 __all__ = [
     "DEFAULT_DOD_VERIFY_TIMEOUT_SECONDS",
+    "MAX_VERIFIER_ERROR_CHARS",
+    "bound_verifier_error",
     "DoneWriteReceiptGuard",
     "DoneWriteGateResolutionError",
     "resolve_done_write_receipt_gate",

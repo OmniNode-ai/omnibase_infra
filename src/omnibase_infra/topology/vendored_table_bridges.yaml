@@ -26,6 +26,14 @@
   prefix: ""
   opts: {schema: public}
   tables: [experiment_arm_results]
+# OMN-25505: infra vendors the eval results tables ahead of the node contract.
+# The tenant projection writer receives the table grants; FORCE RLS is fenced.
+- ticket: OMN-25505
+  node: node_projection_eval_results
+  create: 0000_create_eval_results_tables.sql
+  prefix: ""
+  opts: {schema: public}
+  tables: [eval_item_scores, eval_item_traces, eval_run_closes, eval_run_rates]
 # OMN-25104: infra vendors done_items (node_projection_done_items 0000-0001)
 # ahead of the omnimarket node contract; 0001 grants omninode_runtime SELECT,
 # INSERT, UPDATE. Retired when the omnimarket pin carries the node.
@@ -35,3 +43,12 @@
   prefix: ""
   opts: {}
   tables: [done_items]
+# OMN-25103: infra vendors floor_integration_rows (node_projection_floor_integration
+# 0000-0001) ahead of the omnimarket node contract; 0001 grants omninode_runtime
+# SELECT, INSERT, UPDATE, DELETE. Retired when the omnimarket pin carries the node.
+- ticket: OMN-25103 # omnimarket OMN-25103
+  node: node_projection_floor_integration
+  create: 0000_create_floor_integration_rows.sql
+  prefix: ""
+  opts: {}
+  tables: [floor_integration_rows]
