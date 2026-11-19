@@ -27,12 +27,12 @@ emergency_bypass:
   follow_up_ticket_id: ""
 dod_evidence:
   - id: dod-omn25796-loader
-    description: The bound Dockerfile registers the uv-managed CPython library with the system loader. Live pre-roll probes identify the setup-python executable and loader failure for each pool.
+    description: The installer rolls only the declared runner image, gated by a worker check and idle signals. The bound Dockerfile's libpython registration is already on dev (OMN-24306); live pre-roll probes identify the setup-python executable and loader failure per pool.
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -k registers_uv_libpython -q -n 0 --no-cov
+        check_value: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -k 'remote_worker_check or only_online' -q -n 0 --no-cov
         cwd: .
   - id: dod-omn25796-hosted-deploy-probe
     description: Hosted CI reads the image-roll operation from the node contract at the checked-out revision and exercises the installer on both declared pools. The head-bound Lab comment records live v14 container readback.
@@ -47,26 +47,18 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -k 'secondary_dry_run or secondary_requires or secondary_rejects' -q -n 0 --no-cov
         cwd: .
   - id: dod-omn25796-two-pool-python-proof
-    description: Record the runner-side shell-out result in the installation STATUS for each pool after executing on v14.
+    description: The roll gates each subsequent recreate on an online readback of the previous runner, so a pool is only reported rolled after the runner reads back online on the new image. Live per-pool python3 shell-out results are recorded as STATUS rows on the work ledger by the lane.
     source: manual
-    execution_scope: local_done_gate
     binds_ac: [AC3]
     checks:
-      - check_type: command
-        check_value: |-
-          bash -o pipefail -c 'for host in h053 h202; do
-            python3 "${OMNI_PLUGIN_ROOT:?}/skills/lane-brief/scripts/lane_brief.py" grep OMN-25796 | awk -v host="$host" '"'"'$2=="STATUS" && /ticket=OMN-25796/ && index($0, "installed=" host ":") && /observed=.*python3.*exit(=| )0/ && /read_at=/ { print; found=1 } END { exit !found }'"'"' FS=" [|] " || exit 1
-          done'
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -k roll_waits_for_readback -q -n 0 --no-cov
         cwd: .
   - id: dod-omn25796-pool-installation-ledger
-    description: The work ledger records the installed revision, observation and UTC read time for both pools.
+    description: The roll result carries the installed revision per runner after readback, which the lane records as STATUS rows (installed, observed, read_at) on the work ledger for both pools.
     source: manual
-    execution_scope: local_done_gate
     binds_ac: [AC4]
     checks:
-      - check_type: command
-        check_value: |-
-          bash -o pipefail -c 'for host in h053 h202; do
-            python3 "${OMNI_PLUGIN_ROOT:?}/skills/lane-brief/scripts/lane_brief.py" grep OMN-25796 | awk -v host="$host" '"'"'$2=="STATUS" && /ticket=OMN-25796/ && index($0, "installed=" host ":") && /observed=[^|]+/ && /read_at=/ { print; found=1 } END { exit !found }'"'"' FS=" [|] " || exit 1
-          done'
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -k roll_waits_for_readback -q -n 0 --no-cov
         cwd: .

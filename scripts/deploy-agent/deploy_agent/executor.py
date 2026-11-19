@@ -164,8 +164,7 @@ for package in os.environ.get("ONEX_ACTIVE_RUNTIME_PACKAGES", "").split(","):
 
 def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
     """Load host-effect modules from the standalone agent's own checkout."""
-    prefix = "omnibase_infra." if "." in effect else "omnibase_infra.handlers."
-    name = prefix + effect
+    name = ("omnibase_infra." if "." in effect else "omnibase_infra.handlers.") + effect
     if name in sys.modules:
         return sys.modules[name]
     root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
@@ -195,6 +194,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "handlers/handler_onex_api_image_build.py",
         "models/model_dev_lane_pin_staleness.py",
         "handlers/handler_dev_lane_pin_compose_guard.py",
+        "handlers/handler_stability_rollback_waiver.py",
         "models/model_cost_estimator_build_config.py",
         "models/model_cost_estimator_build_request.py",
         "models/model_cost_estimator_build_result.py",
@@ -221,6 +221,14 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         module = sys.modules[module_name] = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     return sys.modules[name]
+
+
+# The runtime cost estimator build module, which also rolls the stability writers.
+_RCB = "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+
+
+def _rcb() -> ModuleType:
+    return load_dev_boot_guard(_RCB)
 
 
 def dev_boot_report_config() -> ModelDevBootReportConfig:
@@ -4704,6 +4712,9 @@ class DeployExecutor:
             )
             return services
 
+        # OMN-24903: a stability roll with no sha is refused before any build.
+        roll = _rcb().writer_roll(sys.modules[__name__], lane, scope, git_sha)
+
         # OMN-23368: before any build, refuse a service the lane's compose lacks.
         self.pin_staleness_report = load_dev_boot_guard(
             "handler_dev_lane_pin_compose_guard"
@@ -4732,9 +4743,7 @@ class DeployExecutor:
             # staged provenance a reconcile checkout would reset to a placeholder.
             # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
             with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
-                settings = load_dev_boot_guard(
-                    "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-                ).dev_lane_build_settings(sys.modules[__name__], lane)
+                settings = _rcb().dev_lane_build_settings(sys.modules[__name__], lane)
                 for build_scope in (Scope.CORE, Scope.RUNTIME):
                     self._compose_build(
                         build_scope,
@@ -4771,7 +4780,7 @@ class DeployExecutor:
             )
             # OMN-18143: every image was built above; compose must not build
             # them again inside the up ceiling.
-            self._compose_up(
+            _rcb().handed_over(self._compose_up, roll)(
                 Phase.RUNTIME,
                 Scope.RUNTIME,
                 [],
@@ -4797,12 +4806,8 @@ class DeployExecutor:
         # cannot reset staged provenance before the dev-only build consumes it.
         # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
         with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
-            settings = (
-                load_dev_boot_guard(
-                    "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-                ).dev_lane_build_settings(sys.modules[__name__], lane)
-                if scope == Scope.RUNTIME
-                else None
+            settings = _rcb().dev_lane_build_settings(
+                sys.modules[__name__], lane, scope
             )
             self._compose_build(
                 scope,
@@ -4823,7 +4828,7 @@ class DeployExecutor:
                     read_settings=lambda: settings,
                 )
                 self._preflight_runtime_boot(services, on_phase_update, lane=lane)
-        self._compose_up(
+        _rcb().handed_over(self._compose_up, roll)(
             phase,
             scope,
             services,
@@ -5135,9 +5140,7 @@ class DeployExecutor:
         git_ref: str,
         read_settings: Callable[[], Any] | None = None,
     ) -> dict[str, str]:
-        environment: dict[str, str] = load_dev_boot_guard(
-            "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-        ).build_dev_lane_services(
+        environment: dict[str, str] = _rcb().build_dev_lane_services(
             sys.modules[__name__],
             self._compose_build,
             git_sha,
@@ -6240,6 +6243,7 @@ class DeployExecutor:
         force_recreate: bool = True,
         build: bool = True,
         compose_may_build: bool = True,
+        after_migrations: Callable[..., object] = lambda *_: None,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
 
@@ -6287,6 +6291,9 @@ class DeployExecutor:
             self.rerun_changed_oneshots(
                 lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME], build=build
             )
+            # OMN-24903: the stability writers roll here, on the migrated schema,
+            # before the runtime up and outside the build-context lock.
+            after_migrations(extra_env)
             if self.cloud_migration_failure:
                 had_requested_services = bool(requested_services)
                 requested_services = self._without_failed_cloud_consumers(
