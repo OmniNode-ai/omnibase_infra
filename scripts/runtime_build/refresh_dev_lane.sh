@@ -631,7 +631,7 @@ from pathlib import Path
 from deploy_agent import executor
 from deploy_agent.instance_lanes import default_instance_lane_env_exports
 llm = executor.load_dev_boot_guard(executor._LLM_ENV_MODULE)
-sys.stdout.write(default_instance_lane_env_exports(sys.argv[1], Path(sys.argv[2])) + llm.refresh_exports(executor, dict(os.environ), Path(sys.argv[2]), Path(sys.argv[3])))' \
+sys.stdout.write(default_instance_lane_env_exports(sys.argv[1], Path(sys.argv[2])) + llm.refresh_exports(executor, dict(os.environ), Path(sys.argv[2]), Path(sys.argv[3]), mounts_lane_declaration=True))' \
         "${REPO_ROOT}" "${OMNI_HOME}" "${STATE_DIR}")"; then
     err "LANE_ENV_FRAGMENT_REFUSED: the lane env fragment or the LLM endpoint env could not be applied"
     err "  (reason above); nothing was built or restarted."

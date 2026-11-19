@@ -384,10 +384,9 @@ def test_the_guard_catches_a_pattern_with_no_trailing_slash(
     """A bare name with no trailing slash matches a directory in git too.
 
     This is a real bug this guard had until a positive control caught it.
-    omnibase_compat ignores a bare ``.cache`` with NO trailing slash; judging
-    that repository from a path under ``~/.cache/`` produced a confident
-    GREEN on the tree whose wheel drops ``src/omnibase_compat/env/``. A guard
-    that only looked at patterns ending in ``/`` saw nothing.
+    A bare ``.cache`` rule made the guard accept a build root under
+    ``~/.cache/``, even though the wheel omitted a required directory.
+    The guard now checks patterns with and without a trailing slash.
     """
     root = tmp_path / ".cache" / "proj"
     root.mkdir(parents=True)

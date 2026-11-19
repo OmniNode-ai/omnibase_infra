@@ -105,7 +105,7 @@ def _make_omni_home(root: Path, *, version: str = "0.4.119") -> tuple[Path, str]
     _git(work, "config", "user.name", "Test")
     (work / "pyproject.toml").write_text(
         f'[project]\nname = "omnimarket"\nversion = "{version}"\n'
-        'dependencies = ["omnibase-compat>=0.5.7,<0.6.0"]\n',
+        'dependencies = ["omnibase-example>=0.5.7,<0.6.0"]\n',
         encoding="utf-8",
     )
     _git(work, "add", "pyproject.toml")

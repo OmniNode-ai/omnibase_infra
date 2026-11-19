@@ -1,23 +1,23 @@
 schema_version: "1.0.0"
 ticket_id: OMN-14108
-title: "omnibase_compat is retired: omnibase_infra's fleet lists stop naming it"
+title: "Remove the retired repository from infrastructure fleet lists"
 summary: >-
-  omnibase_compat is retired (RULING 2026-10-22T21:43:04Z). The clone, merge-sweep and merge-method audit lists in scripts/pull-all.sh, scripts/lib/merge_sweep_common.sh, scripts/audit-merge-method-on-main.sh and scripts/verify-merge-queue-no-bypass.sh stop naming it, and a test refuses it in any of them. The CI mirror list keeps it until the workflows that check compat out stop doing so.
+  The clone, sweep and audit lists dropped the retired repository. The fleet-list guard rejects its return in any of the four lists.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-omn14108-infra-fleet-lists
     statement: >-
-      No omnibase_infra clone, sweep or audit repository list names omnibase_compat.
+      No omnibase_infra clone, sweep or audit repository list names the retired shared package.
     acceptance:
       - id: AC2
         statement: >-
-          AC2: no first-party repository imports omnibase_compat, and the fleet lists that clone, sweep or audit it are refused if they name it -- falsifier: uv run pytest tests/ci/test_no_compat_fleet_lists_omn14108.py fails when omnibase_compat is put back in any of the four REPOS lists
+          AC2: no first-party repository imports the retired shared package, and the fleet lists that clone, sweep or audit it are refused if they name it -- falsifier: uv run pytest tests/ci/test_no_compat_fleet_lists_omn14108.py fails when the retired shared package is put back in any of the four REPOS lists
 evidence_requirements:
   - kind: tests
     description: >-
-      The four REPOS lists omit omnibase_compat, and each test fails at the merge base, where every list names it.
+      The four REPOS lists omit the retired shared package, and each test fails at the merge base, where every list names it.
     command: uv run --frozen pytest tests/ci/test_no_compat_fleet_lists_omn14108.py -q -n 0
 emergency_bypass:
   enabled: false
@@ -26,7 +26,7 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn14108-ac2-infra-fleet-lists
     description: >-
-      The four REPOS lists omit omnibase_compat. At the merge base all four tests fail.
+      The four REPOS lists omit the retired shared package. At the merge base all four tests fail.
     source: manual
     checks:
       - check_type: test_passes

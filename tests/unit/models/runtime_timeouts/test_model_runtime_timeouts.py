@@ -66,6 +66,9 @@ _SENTINEL: dict[str, float] = {
     "llm_post_seconds": 31.5,
     "introspection_base_backoff_seconds": 1.125,
     "introspection_heartbeat_interval_seconds": 33.75,
+    "introspection_heartbeat_start_attempts": 5,
+    "introspection_heartbeat_retry_backoff_seconds": 1.375,
+    "introspection_heartbeat_unhealthy_after_failures": 7,
 }  # fmt: skip
 
 
