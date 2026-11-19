@@ -1,0 +1,64 @@
+schema_version: "1.0.0"
+ticket_id: OMN-26102
+title: "A host installer verb installs one omnimarket pull request head into a host's dispatch venv for named units, records installed=<host>:<sha> and reverts to merged dev with one command"
+summary: "No declared installer put one omnimarket pull request head into a host's dispatch venv and took it out again, so a proof that code runs from the branch waited for the merge and the reconcile tick. node_venv_branch_install installs the head the pull request watcher read through the atomic venv install (shape A: an in-place exchange of only the omnimarket package, under the staging lock, with a journal), writes a receipt holding installed=<host>:<sha> and the revision it replaced, and reverts to that revision with one command. It runs no git command, touches no shared clone and restarts nothing."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26102-branch-install
+    statement: A host can install one omnimarket pull request head into its dispatch venv for named units and take it out again, with a receipt, and without moving a shared clone or restarting a runtime.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the host installer has a branch-install verb that takes a host, an omnimarket pull request number and head sha and the named units, installs that head into the host's dispatch venv through the atomic venv install, and writes one receipt that names installed=<host>:<full sha> -- falsifier: uv run pytest -q on the new verb's unit test against a fixture venv, red on origin/dev before the change and green after"
+      - id: AC2
+        statement: "AC2: one revert command returns the venv to the merged dev revision the receipt recorded before the install, and an install that fails part-way leaves the venv file listing identical to the one before it -- falsifier: uv run pytest -q on the revert test and the injected-failure test, red on origin/dev before the change and green after"
+      - id: AC3
+        statement: "AC3: the verb runs no git write against any shared canonical clone and does not restart the shared dev runtime -- falsifier: uv run pytest -q on a test that records every git and restart call the verb makes and fails on any against a canonical clone path or the runtime"
+      - id: AC4
+        statement: "AC4: omnimarket#6393 head is installed on h051 through the new verb from its own branch, the onex-floor-fill-tick unit runs once and reads exit 0 with its floor-fill run line, or the STATUS row carries the next cause word for word -- falsifier: grep -F 'pr=omnimarket#6393' over the lane STATUS rows | grep -E 'installed=h051:[0-9a-f]{40}' finds no row, or onex_lab_run.py --via bus --host h051 systemctl --user show onex-floor-fill-tick.service -p ExecMainStatus reads a value other than 0 while the row claims exit 0"
+evidence_requirements:
+  - kind: tests
+    description: The branch install tests pass at the pushed head and fail at the base commit, where the handler module does not exist.
+    command: uv run pytest tests/unit/handlers/test_handler_venv_branch_install_omn26102.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26102-ac1
+    description: 'AC1: against a fixture venv with three packages only omnimarket moves, the head is read back, and the receipt names installed=<host>:<full sha>; at the base commit the module is absent.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_venv_branch_install_omn26102.py -q -k "moves_only_omnimarket or receipt_names"
+        cwd: .
+  - id: dod-omn26102-ac2
+    description: 'AC2: the revert returns the venv file listing to the one before the install, and a failure after the first exchange leaves the listing identical; a host with no recorded rollback target is refused.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_venv_branch_install_omn26102.py -q -k "revert or failure_after or no_recorded_rollback"
+        cwd: .
+  - id: dod-omn26102-ac3
+    description: 'AC3: every subprocess call of an install and a revert is recorded and none is a git command, a restart, or against a clone path; the module names none.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_venv_branch_install_omn26102.py -q -k "no_git_or_restart or names_no_restart"
+        cwd: .
+  - id: dod-omn26102-ac4
+    description: 'hosted proxy for AC4: the live install of the omnimarket#6393 head on h051 needs the lab, so the proof is the STATUS row of the lane and the Lab line; this check runs the install and revert tests the live run uses.'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_venv_branch_install_omn26102.py -q
+        cwd: .
