@@ -17,6 +17,10 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # died with 'HOME: unbound variable' on the lab host before this line).
 Environment=HOME=/root
 Environment=LOGNAME=root
+# OMN-24899: this unit runs as root and runs the dispatch venv's python for its readbacks; the
+# bytecode root writes into the owner's venv is root-owned and the owner's installer cannot delete
+# it, which left a `.atomic-stage.*` folder in the venv root after an omnimarket move.
+Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/data/maintenance/bin/omninode-workspace-reconcile.sh
 StandardOutput=append:/data/maintenance/logs/workspace-reconcile.log
 StandardError=append:/data/maintenance/logs/workspace-reconcile.log

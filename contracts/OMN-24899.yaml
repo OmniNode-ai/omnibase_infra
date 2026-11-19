@@ -1,0 +1,47 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24899
+title: "The venv installer's sweep reports only the stage folders it removed, and the root scheduler stops writing root-owned bytecode into the venv"
+summary: >-
+  On h201 the installer's finalize printed that it swept a leftover .atomic-stage folder, exited 0, and the folder was still in the venv root, because root-owned __pycache__ files written by the root scheduler's readbacks cannot be deleted by the venv owner's installer and the sweep ignored the error. The sweep now counts a folder as swept only when it is gone and names each folder that stayed on stderr; the root scheduler's systemd unit sets PYTHONDONTWRITEBYTECODE=1 so its processes write no further root-owned bytecode into the venv.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24899-honest-sweep
+    statement: >-
+      A finalize run never reports a stage folder as swept while it is still in the venv root, and the root scheduler stops creating the files that make a folder unremovable.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the installed copy of the venv installer on h051 and on h201 names the merged revision of PR 5993, read on each host through the declared installer -- falsifier: the installer's own readback on each host, read against the PR's merge sha
+      - id: AC2
+        statement: >-
+          AC2: one run of the installer after that revision leaves no leftover .atomic-stage folder in the venv root on h051 and h201 -- falsifier: a directory listing of the venv root on each host after the run, filtered for the stage prefix
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The root scheduler unit sets the no-bytecode setting in its service section.
+    command: uv run --frozen pytest tests/scripts/test_workspace_reconcile_no_root_bytecode_omn24899.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24899-ac1-unit-on-served-tree
+    description: >-
+      Deploy probe. The unit file GitHub serves at the checked-out commit carries the PYTHONDONTWRITEBYTECODE=1 line the root scheduler installs from. The probe exits nonzero on a tree without the line, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/deploy/maintenance/systemd/omninode-workspace-reconcile.service?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c '^Environment=PYTHONDONTWRITEBYTECODE=1$' | grep -qx 1"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn24899-ac2-unit-no-bytecode
+    description: >-
+      The root scheduler unit sets PYTHONDONTWRITEBYTECODE=1 in its service section; the unchanged unit has no such line, so the test fails there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_workspace_reconcile_no_root_bytecode_omn24899.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
