@@ -4,12 +4,27 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 
 LIFESPAN_LOG: list[str] = []
+
+
+def create_body_echo(chunks: list[bytes], first_chunk: asyncio.Event) -> FastAPI:
+    """Record the chunks handed to an app that consumes the request stream."""
+    app = FastAPI()
+
+    @app.post("/body")
+    async def echo(request: Request) -> Response:
+        async for chunk in request.stream():
+            chunks.append(chunk)
+            first_chunk.set()
+        return Response(b"".join(chunks), media_type="application/octet-stream")
+
+    return app
 
 
 def create_app() -> FastAPI:

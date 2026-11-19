@@ -251,11 +251,23 @@ class AsgiMounts:
             if mount.covers(request.path):
                 if not self._started:
                     return web.json_response({"status": "starting"}, status=503)
-                return await self._serve(app, request)
+                return await self._serve(app, request, mount.max_body_bytes)
         return await handler(request)
 
     @staticmethod
-    async def _serve(app: _AsgiApp, request: web.Request) -> web.StreamResponse:
+    async def _serve(
+        app: _AsgiApp, request: web.Request, max_body_bytes: int | None
+    ) -> web.StreamResponse:
+        def reject_body(limit: int, size: int) -> web.HTTPRequestEntityTooLarge:
+            error = web.HTTPRequestEntityTooLarge(max_size=limit, actual_size=size)
+            error.force_close()
+            return error
+
+        if max_body_bytes is not None:
+            content_length = request.content_length
+            if content_length is not None and content_length > max_body_bytes:
+                raise reject_body(max_body_bytes, content_length)
+
         peer = (
             request.transport.get_extra_info("peername") if request.transport else None
         )
@@ -276,12 +288,24 @@ class AsgiMounts:
         }
         finished = asyncio.Event()
         body_done = False
+        body_size = 0
+        body_rejection: web.HTTPRequestEntityTooLarge | None = None
         response: web.StreamResponse | None = None
 
         async def receive() -> _AsgiMessage:
-            nonlocal body_done
+            nonlocal body_done, body_size, body_rejection
+            if body_rejection is not None:
+                raise body_rejection
             if not body_done:
-                chunk = await request.content.readany()
+                if max_body_bytes is None:
+                    chunk = await request.content.readany()
+                else:
+                    # Read at most the remaining allowance and one overflow byte.
+                    chunk = await request.content.read(max_body_bytes - body_size + 1)
+                    body_size += len(chunk)
+                    if body_size > max_body_bytes:
+                        body_rejection = reject_body(max_body_bytes, body_size)
+                        raise body_rejection
                 body_done = request.content.at_eof()
                 return {
                     "type": "http.request",
@@ -293,6 +317,8 @@ class AsgiMounts:
 
         async def send(message: _AsgiMessage) -> None:
             nonlocal response
+            if body_rejection is not None:
+                return
             if message["type"] == "http.response.start":
                 response = web.StreamResponse(status=message["status"])
                 for name, value in message.get("headers", ()):
@@ -311,12 +337,19 @@ class AsgiMounts:
         try:
             await app(scope, receive, send)
         except Exception:
-            logger.exception("mounted ASGI app raised for %s", request.path)
-            if response is None or not response.prepared:
-                return web.Response(status=500, text="Internal Server Error")
-            raise
+            if body_rejection is None:
+                logger.exception("mounted ASGI app raised for %s", request.path)
+                if response is None or not response.prepared:
+                    return web.Response(status=500, text="Internal Server Error")
+                raise
         finally:
             finished.set()
+        if body_rejection is not None:
+            if response is not None and response.prepared:
+                # An app streaming its response may already have sent the status.
+                request.protocol.force_close()
+                return response
+            raise body_rejection
         if response is None:
             return web.Response(status=500, text="Internal Server Error")
         return response
