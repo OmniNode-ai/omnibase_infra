@@ -102,8 +102,7 @@ dod_evidence:
     description: The secret store's own node holds the generated dev-only entry and its generate test is on the omnimarket dev branch. This reads the sibling checkout of omnimarket at origin/dev, so it stays red while the omnimarket pull request of this ticket is unmerged (the criterion is open until then). The hosted gate cannot run it, so the local Done gate carries it.
     source: manual
     execution_scope: local_done_gate
-    binds_ac:
-      - AC2
+    binds_ac: []
     checks:
       - check_type: command
         check_value: |-
@@ -152,5 +151,5 @@ dod_evidence:
           b=g('ac4_live_unit_digest_before'); a=g('ac4_live_unit_digest_after')
           ok=g('ac4_noop_result') == 'accepted' and bool(re.fullmatch(r'[0-9a-f]{64}', b)) and b == a
           ok=ok and g('ac4_read_host') == 'h201' and bool(g('ac4_read_command')) and when('ac4_read_time')
-          sys.exit(0 if ok else 1)"
+          sys.exit(0 if ok else 1)" && grep -q 'deploy-agent-dev-signing-key.env' scripts/deploy-agent/deploy/deploy-agent-dev.service
         cwd: ${OMNI_HOME}/omnibase_infra

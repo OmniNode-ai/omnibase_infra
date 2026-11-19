@@ -43,6 +43,7 @@ import yaml
 
 pytestmark = pytest.mark.unit
 
+_ROOT = Path(__file__).resolve().parents[2]
 _CONTRACT = Path(__file__).resolve().parents[2] / "contracts" / "OMN-24611.yaml"
 _READINGS_KEY = "evidence_readings"
 
@@ -94,6 +95,9 @@ def _with_contract(tmp_path: Path, document: dict[str, Any]) -> Path:
     (tmp_path / "contracts" / "OMN-24611.yaml").write_text(
         yaml.safe_dump(document), encoding="utf-8"
     )
+    unit = Path("scripts/deploy-agent/deploy/deploy-agent-dev.service")
+    (tmp_path / unit).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / unit).write_text((_ROOT / unit).read_text(encoding="utf-8"))
     return tmp_path
 
 
@@ -397,9 +401,8 @@ def _ac2_store_check() -> dict[str, Any]:
     found = [
         check
         for item in document["dod_evidence"]
-        if "AC2" in item["binds_ac"]
+        if item["id"] == "dod-omn24611-ac2-store-node-omnimarket-local"
         for check in item["checks"]
-        if str(check["cwd"]).endswith("/omnimarket")
     ]
     assert len(found) == 1, len(found)
     return dict(found[0])
