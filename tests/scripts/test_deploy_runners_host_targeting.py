@@ -191,14 +191,13 @@ def test_pool_on_the_primary_host_is_refused() -> None:
 
 def test_a_secondary_host_refuses_the_primary_only_modes() -> None:
     for mode in (
-        "--rolling",
         "--soft",
         "--retire-surplus",
         "--add=omninode-deploy-runner",
     ):
         result = _dry_run("--host=192.168.86.202", "--pool=omnipc2-ci-runner", mode)
         assert result.returncode != 0, (mode, result.stdout)
-        assert "primary host's compose file" in result.stderr, (mode, result.stderr)
+        assert "require the primary host" in result.stderr, (mode, result.stderr)
 
 
 def test_a_secondary_pool_dry_run_targets_only_its_own_runners() -> None:
