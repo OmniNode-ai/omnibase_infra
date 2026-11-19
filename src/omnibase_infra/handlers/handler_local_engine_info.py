@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID, uuid4
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
@@ -24,6 +24,7 @@ from omnibase_infra.models.model_local_engine_info_request import (
 from omnibase_infra.models.model_local_engine_info_result import (
     ModelLocalEngineInfoResult,
 )
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
@@ -38,7 +39,7 @@ _DOCKER_MISSING = (
 )
 
 
-async def _read_engine() -> tuple[int, str, str]:
+async def _read_engine(timeout_seconds: float) -> tuple[int, str, str]:
     """Run the engine read; return its exit code, stderr and stdout, stripped.
 
     A missing ``docker`` binary is exit 127 with a message naming Docker.
@@ -51,13 +52,54 @@ async def _read_engine() -> tuple[int, str, str]:
         )
     except FileNotFoundError:
         return 127, _DOCKER_MISSING, ""
-    stdout_bytes, stderr_bytes = await proc.communicate()
+    except OSError:
+        return 1, "Docker engine observation could not be started", ""
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout_seconds
+        )
+    except TimeoutError:
+        await _kill_and_reap(proc)
+        return 1, "Docker engine observation timed out", ""
+    except OSError:
+        await _kill_and_reap(proc)
+        return 1, "Docker engine observation could not be read", ""
+    except asyncio.CancelledError:
+        await _kill_and_reap(proc)
+        raise
     returncode = proc.returncode if proc.returncode is not None else 1
     return (
         returncode,
         stderr_bytes.decode("utf-8", errors="replace").strip(),
         stdout_bytes.decode("utf-8", errors="replace").strip(),
     )
+
+
+async def _kill_and_reap(proc: asyncio.subprocess.Process) -> None:
+    """End an interrupted engine observation before returning to its caller."""
+    if proc.returncode is None:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+    # A paused pipe keeps asyncio's process waiter pending even after SIGKILL.
+    # Drain both streams concurrently with the wait, including after a failed
+    # communicate(). One failed reader must not cancel the other or the reap.
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(
+                *(stream.read() for stream in (proc.stdout, proc.stderr) if stream),
+                proc.wait(),
+                return_exceptions=True,
+            ),
+            timeout=TIMEOUTS.kill_wait_seconds,
+        )
+    except TimeoutError:
+        # A descendant may retain inherited pipes after our child has exited.
+        # Process has no public close API; closing its owned transport releases
+        # these pipes without replacing the caller's timeout/cancellation.
+        transport = cast("asyncio.SubprocessTransport", vars(proc)["_transport"])
+        transport.close()
 
 
 def _positive_int(value: object) -> int | None:
@@ -97,7 +139,12 @@ class HandlerLocalEngineInfo:
         self, request: ModelLocalEngineInfoRequest
     ) -> ModelLocalEngineInfoResult:
         """Dispatch entrypoint (OMN-14135): one engine read for one request."""
-        output = await self.execute({"correlation_id": request.correlation_id})
+        output = await self.execute(
+            {
+                "correlation_id": request.correlation_id,
+                "timeout_seconds": request.timeout_seconds,
+            }
+        )
         result = output.result
         if not isinstance(result, ModelLocalEngineInfoResult):
             raise TypeError("engine_info returned no ModelLocalEngineInfoResult")
@@ -120,7 +167,13 @@ class HandlerLocalEngineInfo:
             correlation_id_raw if isinstance(correlation_id_raw, UUID) else uuid4()
         )
 
-        returncode, stderr_text, stdout_text = await _read_engine()
+        request_data: dict[str, object] = {"correlation_id": corr_id}
+        if "timeout_seconds" in envelope:
+            request_data["timeout_seconds"] = envelope["timeout_seconds"]
+        request = ModelLocalEngineInfoRequest.model_validate(request_data)
+        returncode, stderr_text, stdout_text = await _read_engine(
+            request.timeout_seconds
+        )
         if returncode != 0:
             logger.error("docker info failed (rc=%d)", returncode)
             return _output(
