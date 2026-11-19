@@ -103,10 +103,6 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "0004_node_service_registry_no_force_rls.sql"
         ),
         Path(
-            "docker/migrations/forward/nodes/node_canary_score_reducer/"
-            "0003_capability_scores_tenant_id_to_uuid.sql"
-        ),
-        Path(
             "docker/migrations/forward/nodes/node_projection_context_roi/"
             "003_context_roi_scores_tenant_id_and_rls.sql"
         ),
@@ -273,6 +269,18 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/rollback/"
             "rollback_111_widen_runtime_error_triage_active_unique_to_escalated.sql"
         ),
+        # OMN-24495: 117 and the registration projection schema file add the
+        # runtime_entity_id column to registration_projections, which the
+        # omnibase_infra SERVICE database (declared schema: public) created long
+        # before this gate. Like 110 and 111 above, this is existing service
+        # authority, not a new application relation: the scanner has no valid
+        # qualification form for it (`public` is prohibited for an application
+        # relation and carries an ownership requirement no manifest declares),
+        # and the migration runner resolves the table through the connection
+        # search_path. Keep the exact-path exemptions: created-object ownership
+        # validation still runs unconditionally.
+        Path("docker/migrations/forward/117_add_registration_runtime_entity_id.sql"),
+        Path("src/omnibase_infra/schemas/schema_registration_projection.sql"),
         # OMN-18172: 106 alters the existing delegation_workflow_state relation
         # created by 090 in the omnibase_infra SERVICE database. That database
         # has exactly one declared schema, public, while StateStoreAdapter and

@@ -30,7 +30,7 @@ from typing import Any
 from uuid import uuid4
 
 import yaml
-from scoped_effects_plan import ModelEffectsDeployPlan
+from scoped_effects_plan import SIBLINGS, ModelEffectsDeployPlan
 
 CommandRunner = Callable[[list[str], str | None, int], str]
 _PROJECT_LABEL = "com.docker.compose.project"
@@ -689,7 +689,7 @@ def _probe(
         args = ["docker", "exec", "-i", container, "/app/.venv/bin/python"]
     else:
         raise RuntimeError("probe requires a specific image or container")
-    args.append("-")
+    args.extend(("-", *SIBLINGS))
     try:
         output = runner(args, script, timeout)
     except CommandProcessUnfencedError:

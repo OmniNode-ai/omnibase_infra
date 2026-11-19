@@ -173,6 +173,10 @@ services:
     profiles: !override ["dev-202-disabled"]
   infisical:
     profiles: !override ["dev-202-disabled"]
+  # OMN-24714: the dev-lane overlay makes the architecture graph's store a
+  # dependency of the dev lane; this lane starts no graph, so it is scaled to 0.
+  omnibase-infra-memgraph:
+    scale: 0
   forward-migration:
     container_name: omnibase-infra-dev-202-forward-migration
     labels:

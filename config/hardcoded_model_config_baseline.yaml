@@ -1871,9 +1871,6 @@ entries:
   - path: scripts/publish_pr_webhook_event.py
     family: O
     content_sha1: 7c8576367983dc392c1e512cecf771f583f0f16e
-  - path: scripts/publish_test_failure_baseline.py
-    family: O
-    content_sha1: b39e6da24c5a5b6c2f9ee08981ce4b5dfa652512
   - path: scripts/pull-all.sh
     family: O
     content_sha1: 642618de1bfe68c92e089a092eebb724bb89c0ed
@@ -1982,12 +1979,6 @@ entries:
   - path: scripts/run_baselines_batch_compute.py
     family: O
     content_sha1: bb00bb6fb0b6b1e95eebd4ddc7b11bbbde165b07
-  - path: scripts/runtime_build/build_effects_candidate.py
-    family: P
-    content_sha1: a22a55f4c896f4fd8610b8d7b75c061610a45d29
-  - path: scripts/runtime_build/build_effects_candidate.py
-    family: P
-    content_sha1: c8a0093c317d4051f3e81b9ec0030589c45760d4
   - path: scripts/runtime_build/compose_wait_timeout.sh
     family: O
     content_sha1: ec99730cdf6f1df1f1c48b94a175c49cadbc9c71
@@ -2105,21 +2096,9 @@ entries:
   - path: scripts/runtime_build/scoped_effects_plan.py
     family: O
     content_sha1: eb9b73b1856e5561128c869c58fb031df8111ab9
-  - path: scripts/runtime_build/scoped_effects_plan.py
-    family: P
-    content_sha1: 5f1e7ae34d226122f0c2cf6535f6878499ea5408
-  - path: scripts/runtime_build/scoped_effects_plan.py
-    family: P
-    content_sha1: 92bad8306a787827eace9f717df9a6616b92de38
   - path: scripts/runtime_build/scoped_image_probe.py
     family: F
     content_sha1: 9f44ac011489632926e2dd94332af6fe6c8f0ab9
-  - path: scripts/runtime_build/scoped_image_probe.py
-    family: P
-    content_sha1: c8a0093c317d4051f3e81b9ec0030589c45760d4
-  - path: scripts/runtime_build/scoped_image_probe.py
-    family: P
-    content_sha1: cb354258d0279b73600feb369c99488e90d8833f
   - path: scripts/runtime_build/stage_pinned_proof_root.py
     family: F
     content_sha1: 12de87f4a4eaf14b3c866c3993f45d9cd1868ec8

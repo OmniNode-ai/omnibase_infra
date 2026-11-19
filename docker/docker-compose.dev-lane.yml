@@ -145,6 +145,22 @@ x-dev-lane-logging: &dev_lane_logging
   options:
     max-size: "10m"
     max-file: "3"
+# OMN-25194: omninode-runtime's own log retention. The base file's 10m x 3
+# held 18 to 27 minutes of this service, because the main runtime writes about
+# 79 MB of json-file an hour (measured on the dev lane host, 2026-11-17: 101,974
+# lines, 17.6 MB of `docker logs --timestamps` text over 16.4 minutes, about 22
+# MB on disk with the json-file envelope). The hourly integration pass reads
+# merged changes running on the lane from this log, and an hourly or daily node
+# run never shows in 20 minutes. json-file drops its oldest file whole, so the
+# guaranteed window is (max-file - 1) x max-size: 14 x 200m = 2800 MB, 35 hours
+# at the measured rate, against a 26 hour floor of 2080 MB. A change to either
+# number below the floor fails tests/ci/test_dev_runtime_log_retention_omn25194.py.
+# Only omninode-runtime takes this; every other service keeps `dev_lane_logging`.
+x-dev-lane-runtime-logging: &dev_lane_runtime_logging
+  driver: json-file
+  options:
+    max-size: "200m"
+    max-file: "15"
 # OMN-19812: the runtime image's open-file limit, as x-runtime-base declares
 # it in the base file (anchors do not cross compose files).
 x-dev-lane-runtime-ulimits: &dev_lane_runtime_ulimits
@@ -980,6 +996,8 @@ services:
       - "com.omninode.service=runtime-main"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+    # OMN-25194: 26 hours of this service's log, not 20 minutes (see the anchor).
+    logging: *dev_lane_runtime_logging
   runtime-effects:
     build: *dev_lane_composed_runtime_build
     # OMN-22930 (T8): gated from the runtime policy like the folded writers. On
@@ -1137,6 +1155,21 @@ services:
       # overlay folder under the workspace config root's config/lab, which the infra
       # compose already requires, so its parent is config/lab. Read-only.
       - ${ONEX_LANE_OVERLAY_DIR}/..:/etc/onex/workspace-config/config/lab:ro
+      # Product clones (OMN-25709): the Done guard's dod_verify finds a ticket's contract only through
+      # a canonical clone at $OMNI_HOME/<name> (OMNI_HOME=/app in the runtime image) and returned
+      # CONTRACT_MISSING with product_clones=[] for every ticket while /app held none. Each product
+      # clone is mounted read-only from the registry-root layout the canonical-clone sync keeps current
+      # (the same layout the overlays store root above is derived from), so the lane host needs no new
+      # operator variable and no credential. onex_change_control is the governance repository the
+      # verifier never reads as a product clone and is not mounted.
+      - ../../omnibase_core:/app/omnibase_core:ro
+      - ../../omnibase_infra:/app/omnibase_infra:ro
+      - ../../omnibase_spi:/app/omnibase_spi:ro
+      - ../../omniclaude:/app/omniclaude:ro
+      - ../../omnidash:/app/omnidash:ro
+      - ../../omniintelligence:/app/omniintelligence:ro
+      - ../../omnimarket:/app/omnimarket:ro
+      - ../../omnimemory:/app/omnimemory:ro
     healthcheck:
       test:
         - CMD
@@ -1906,3 +1939,21 @@ services:
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-21481"
       - "autoheal=true"
+  # ==========================================================================
+  # OMN-24714 -- the architecture graph's store runs on the dev lane.
+  # ==========================================================================
+  # docker-compose.infra.yml declares omnibase-infra-memgraph under the profiles
+  # omnimemory and full. The deploy agent starts the runtime family by name
+  # under `--profile runtime` and the dependency set by `--profile core`, which
+  # compose resolves to every service with NO profile; neither reached a service
+  # that sits only in omnimemory and full, so no dev deploy ever started it and
+  # the graph nodes had nothing to answer from.
+  #
+  # Emptying the profile list here makes it a dependency of this lane, started by
+  # the core phase beside postgres and redpanda (config/validation/stack_shape.yaml
+  # already lists it under `dependencies`). It is declared HERE and not in the
+  # base file for the reason this file exists: the base is merged by every lane,
+  # and every other lane must keep starting no graph. Another dev
+  # instance that layers this file turns it off with scale 0 in its own overlay.
+  omnibase-infra-memgraph:
+    profiles: !override []

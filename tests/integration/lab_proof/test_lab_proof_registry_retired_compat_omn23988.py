@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""The lab proof registry and plan node contract name no retired omnibase_compat."""
+"""Guard the lab proof registry and plan contract against the retired package."""
 
 from __future__ import annotations
 
