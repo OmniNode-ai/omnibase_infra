@@ -36,6 +36,13 @@ OTHER_LANE_OVERLAYS = (
     "docker-compose.judge.yml",
     "docker-compose.lakshman.yml",
 )
+# OMN-25927: the stability overlay declares its OWN principal and flip one-shots
+# (its own container names and STABILITY_TEST_* credentials), so the service-name
+# leak checks cover the lanes with no broker auth of their own. The
+# DEV_KAFKA_SASL_USERNAME needle check still covers every other overlay.
+NO_BROKER_AUTH_OVERLAYS = tuple(
+    name for name in OTHER_LANE_OVERLAYS if "stability" not in name
+)
 
 SERVICE = "redpanda-scram-user"
 FLIP_SERVICE = "redpanda-sasl-enable"
@@ -120,7 +127,7 @@ def test_the_scram_principal_never_leaks_into_the_base_or_another_lane() -> None
         "compose render on DEV_KAFKA_SASL_USERNAME. Move it to "
         f"{DEV_LANE_OVERLAY.name}."
     )
-    for name in OTHER_LANE_OVERLAYS:
+    for name in NO_BROKER_AUTH_OVERLAYS:
         path = DOCKER_DIR / name
         if not path.exists():
             continue
@@ -183,7 +190,7 @@ def test_the_sasl_flip_is_a_dev_lane_one_shot_and_reaches_no_other_lane() -> Non
         "prod, judge and lakshman all merge -- this would flip four other "
         "lanes' brokers to SASL with no client anywhere configured for it"
     )
-    for name in OTHER_LANE_OVERLAYS:
+    for name in NO_BROKER_AUTH_OVERLAYS:
         path = DOCKER_DIR / name
         if path.exists():
             assert FLIP_SERVICE not in _services(path), (
@@ -294,7 +301,7 @@ def test_the_credentials_never_reach_the_base_or_another_lane() -> None:
         assert key not in BASE.read_text(encoding="utf-8"), (
             f"{key} is in the BASE compose file; four other lanes merge it"
         )
-        for name in OTHER_LANE_OVERLAYS:
+        for name in NO_BROKER_AUTH_OVERLAYS:
             path = DOCKER_DIR / name
             if path.exists():
                 assert key not in path.read_text(encoding="utf-8"), (
