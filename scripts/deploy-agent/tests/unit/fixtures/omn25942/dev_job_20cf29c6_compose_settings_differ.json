@@ -1,0 +1,54 @@
+{
+  "_source": "read on h201 at 2026-11-19T08:36Z to 09:00Z by lane devverify2-0840 (OMN-25942); no credential value is held here",
+  "job_record": {
+    "correlation_id": "20cf29c6-b38f-48ea-a986-16aadd2a6f42",
+    "requested_by": "gha/omnibase_infra/pr-6026",
+    "runtime_lane": "dev",
+    "scope": "full",
+    "git_ref": "925858038b4175db599eb3a3140f995612f05fe0",
+    "accepted_at": "2026-11-19T08:03:55Z",
+    "completed_at": "2026-11-19T08:37:54Z",
+    "status": "failed",
+    "phase_results": {
+      "preflight": "success",
+      "git": "success",
+      "compose_gen": "success",
+      "seed": "success",
+      "core": "success",
+      "runtime": "success",
+      "verification": "success",
+      "publish": "success"
+    },
+    "errors": [
+      "commit=925858038b4175db599eb3a3140f995612f05fe0: RuntimeError: omninode-runtime: compose settings differ from the healthy container;"
+    ]
+  },
+  "incident": {
+    "at": "2026-11-19T08:24:14Z",
+    "restored_revision": "bba614d1c118171f8506063209624451a6c09f97",
+    "health_probe_started_at": "2026-11-19T08:13:51.67065132Z",
+    "health_probe_last_result": "PASS [healthy] runtime healthy at 2026-11-19T08:24:09Z",
+    "restart_count": 0
+  },
+  "deploy_source_clone_reflog": {
+    "path": "the deploy-source canonical clone of omnibase_infra on h201",
+    "entries_utc": [
+      {"at": "2026-11-19T08:04:02Z", "action": "reset: moving to 925858038b4175db599eb3a3140f995612f05fe0", "actor": "the job's own git phase"},
+      {"at": "2026-11-19T08:12:26Z", "action": "merge 02f694796e838fc4a97d924472572cea2b16c3cf: Fast-forward", "actor": "canonical clone sync"},
+      {"at": "2026-11-19T08:18:26Z", "action": "merge dbed2e1806441b05c6b06c28cc58330ef828cabe: Fast-forward", "actor": "canonical clone sync"},
+      {"at": "2026-11-19T08:30:35Z", "action": "merge 98e35ea77c168f1e4996a4c3a63ca94e386de5e0: Fast-forward", "actor": "canonical clone sync"}
+    ],
+    "compose_files_changed_between_job_commit_and_first_move": [
+      "docker/docker-compose.dev-lane.yml",
+      "docker/docker-compose.dev-tenant-fold.yml"
+    ]
+  },
+  "other_failures_with_the_same_error": [
+    {"job": "44ebf794-1a06-4fc6-a892-ae80b1b9fd9b", "commit": "476b36a035860e63a0922afd3e8b3d76f87acf93", "incident_at": "2026-11-19T03:29:16Z"},
+    {"job": "a071ca0f-ce27-4729-a5db-66f4549f75a5", "commit": "f2789cb4e0e8bc8a95dfea3295337f778c24307e", "incident_at": "2026-11-19T04:17:41Z"}
+  ],
+  "successful_dev_jobs_before": [
+    {"job": "46498207-11b6-4e21-a509-a51652ec50ad", "commit": "8391037a553fe9caeb1b95f0a000ac44d66e53cb", "completed_at": "2026-11-19T05:16:30Z"},
+    {"job": "82bdbf33", "commit": "bba614d1c118171f8506063209624451a6c09f97", "completed_at": "2026-11-19T05:57:05Z"}
+  ]
+}
