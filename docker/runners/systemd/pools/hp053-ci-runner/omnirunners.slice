@@ -8,8 +8,8 @@ Before=slices.target
 # 3 to 15 GiB to the lanes however the runners behave.
 [Slice]
 MemoryAccounting=yes
-MemoryHigh=64G
-MemoryMax=68G
+MemoryHigh=45G
+MemoryMax=46G
 MemorySwapMax=0
 CPUAccounting=yes
 CPUWeight=25

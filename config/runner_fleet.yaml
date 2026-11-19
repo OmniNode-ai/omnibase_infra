@@ -211,7 +211,7 @@ hosts:
       # 20 GiB MemoryHigh (high events 545,431,572), memory pressure full 94.8 percent, load 135, and the required `ci` jobs of
       # two repositories hit their 10 minute limit there. Sixteen runners, sized from this host's measured headroom (80
       # threads, 284 GiB available, slice peak 50.1 GB against a new 128G high). It carries `omnibase-ci` although the
-      # CPU has no AVX2: the one repository whose unit suite needs AVX2 asks for `omnibase-ci-avx2` (the h053 pool below).
+      # CPU has no AVX2: the one repository whose unit suite imports an AVX2 wheel runs its CI on GitHub-hosted runners.
       # Deployed with `deploy-runners.sh --host=h051 --pool=hp051-omnibase-ci-runner`.
       - runner_name_prefix: hp051-omnibase-ci-runner
         expected_count: 16
@@ -251,13 +251,6 @@ hosts:
       - runner_name_prefix: hp053-ci-mq-runner
         expected_count: 4
         classes: [merge-queue]
-      # OMN-25674 -- the AVX2 pool: runners labelled `omnibase-ci-avx2` alone, for the job of the one repository whose unit suite
-      # imports an AVX2 wheel (it cannot run on h051, which has no AVX2). Class `action-avx2` counts toward no other class.
-      # Three runners with their job directories on /mnt/h053-nvme; h053's CPU headroom is thin (load 20 to 31 of 56 threads).
-      # Deployed with `deploy-runners.sh --host=h053 --pool=hp053-avx2-ci-runner`.
-      - runner_name_prefix: hp053-avx2-ci-runner
-        expected_count: 3
-        classes: [action-avx2]
   # .200 -- Mac Studio M2 Ultra, arm64, always-on (OMN-19657, operator approval
   # ledger 2026-09-25T18:27:30Z, answering the open question at ledger
   # 2026-09-25T10:29:02Z). One verify runner, labelled host-200, for the

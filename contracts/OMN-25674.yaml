@@ -14,20 +14,20 @@ requirements:
         statement: >-
           AC1: the deploy of a secondary host prepares the pause bind source of the rendered compose as uid 1001 mode 755, leaves other binds alone, and refuses before registration when the readback differs -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_tmp_dirs_omn19998.py, red on the unchanged handler and green on the change
   - id: req-omn25674-hp-ci-pools
-    statement: The omnibase-ci capacity declared on the second amd64 host is declared on the HP hosts, sized from measured headroom, with no timeout raised and no required check changed.
+    statement: The omnibase-ci capacity declared on the second amd64 host is declared on h051, sized from measured headroom, with no timeout raised and no required check changed.
     acceptance:
       - id: AC2
         statement: >-
-          AC2: config/runner_fleet.yaml declares hp051-omnibase-ci-runner (16, classes action and action-multiarch) on h051 and hp053-avx2-ci-runner (3, class action-avx2) on h053, each with a compose file whose service count matches, whose labels keep omnibase-ci on h051 and carry only omnibase-ci-avx2 on h053, whose job directories are NVMe binds and not tmpfs, and the declared action total less the the second amd64 host pool is 21 -- falsifier: uv run --frozen pytest tests/ci/test_ci_pools_hp_hosts_omn25674.py -q --no-cov fails on the base commit, which declares neither pool
+          AC2: config/runner_fleet.yaml declares hp051-omnibase-ci-runner (16, classes action and action-multiarch) on h051 with a compose file whose service count matches, whose labels keep omnibase-ci, whose job directories are NVMe binds and not tmpfs, and the declared action total less the the second amd64 host pool is 21 -- falsifier: uv run --frozen pytest tests/ci/test_ci_pools_hp_hosts_omn25674.py -q --no-cov fails on the base commit, which declares no such pool
       - id: AC3
         statement: >-
-          AC3: each host's slice unit is the aggregate for its pools, with MemoryHigh 128G and MemoryMax 144G on h051 and 64G and 68G on h053, the same in both pools' files, and the h051 high limit holds the measured 50.1 GB peak plus sixteen runners at a 3 GiB budget -- falsifier: the slice test in tests/ci/test_ci_pools_hp_hosts_omn25674.py and the three updated pool tests fail when either file keeps the old limits
+          AC3: h051's slice unit is the aggregate for its pools, with MemoryHigh 128G and MemoryMax 144G, the same in both pools' files, and the h051 high limit holds the measured 50.1 GB peak plus sixteen runners at a 3 GiB budget -- falsifier: the slice test in tests/ci/test_ci_pools_hp_hosts_omn25674.py and the updated pool tests fail when either file keeps the old limits
 evidence_requirements:
   - kind: "tests"
     description: "The shipped deploy path against a modeled host: the pause bind source goes from uid 0 mode 755 to uid 1001 mode 755, one install for it, no install for other binds, a VERIFY refusal before registration."
     command: "env -u OMNI_HOME uv run --frozen pytest tests/unit/scripts/test_deploy_runners_tmp_dirs_omn19998.py -q -n 0 --no-cov"
   - kind: "tests"
-    description: "The pool declaration, slice and installer-resolution tests pass at the pushed head and fail at the merge base, which declares neither pool."
+    description: "The pool declaration, slice and installer-resolution tests pass at the pushed head and fail at the merge base, which declares no such pool."
     command: "uv run --frozen pytest tests/ci/test_ci_pools_hp_hosts_omn25674.py tests/ci/test_hp051_pool_omn17232.py tests/ci/test_h202_pool_slice_swap_omn24186.py tests/ci/test_hp053_pool_in_memory_omn19998.py tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q --no-cov"
 dod_evidence:
   - id: "dod-omn25674-pause-dir-test"
@@ -63,7 +63,7 @@ dod_evidence:
         check_value: "env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha \"$(git rev-parse HEAD)\" --lane dod-integration-proof-25674 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/handlers/test_runner_pause_directory_omn25674.py -q -n 0 --no-cov"
         cwd: "."
   - id: "dod-omn25674-ac2-pools"
-    description: "AC2: the pool declarations, compose files, labels, NVMe job directories and the action total pass at the head; the base declares neither pool"
+    description: "AC2: the pool declarations, compose files, labels, NVMe job directories and the action total pass at the head; the base declares no such pool"
     source: "manual"
     binds_ac: ["AC2"]
     checks:
@@ -85,14 +85,6 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: "bash -o pipefail -c 'gh api \"repos/OmniNode-ai/omnibase_infra/contents/config/runner_fleet.yaml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F -- \"runner_name_prefix: hp051-omnibase-ci-runner\" > /dev/null'"
-        cwd: "."
-  - id: "dod-omn25674-ac2-avx2-declaration"
-    description: "AC2 deploy scope: the h053 compose file at the pushed head carries only the avx2 label, read from GitHub at that commit"
-    source: "manual"
-    binds_ac: ["AC2"]
-    checks:
-      - check_type: "command"
-        check_value: "bash -o pipefail -c 'gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-hp053-avx2-ci-runner.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F -- \"RUNNER_LABELS: self-hosted,omnibase-ci-avx2,linux,x64,arch-amd64\" > /dev/null'"
         cwd: "."
 emergency_bypass:
   enabled: false

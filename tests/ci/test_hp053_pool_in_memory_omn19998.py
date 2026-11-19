@@ -100,11 +100,8 @@ def test_the_limits_are_the_ones_the_host_memory_reads_allow() -> None:
     # The slice read from disk must admit every runner at its limit, and cap it with headroom for job containers.
     assert total <= _slice_limit("MemoryHigh") <= _slice_limit("MemoryMax")
     assert _slice_limit("MemoryMax") - total >= 1 * GIB
-    # OMN-25674: the shared slice unit now also carries the avx2 pool's three 8 GiB runners. Read on 2026-11-19T17:15Z the
-    # host showed 106 GiB available (it was 49 GiB on 2026-11-04) and the old 45G slice at a 47.0 GB peak with 2,029,063
-    # `max` events, so the cap is 68G, which leaves at least 38 GiB of that to the lab-work units.
-    assert _slice_limit("MemoryMax") <= 68 * GIB
-    assert 106 * GIB - _slice_limit("MemoryMax") >= 38 * GIB
+    # The slice cap stays under the 49 GiB the host showed as its lowest available memory on 2026-11-04.
+    assert _slice_limit("MemoryMax") <= 49 * GIB
 
 
 def _size_bytes_of_limit(value: str) -> int:

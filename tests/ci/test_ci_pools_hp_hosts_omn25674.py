@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-25674: the CI pools that take over the second amd64 host's capacity are declared on the HP hosts, sized from measurement.
+"""OMN-25674: the CI pool that takes over the second amd64 host's capacity is declared on h051, sized from measurement.
 
 Measured on the second amd64 host on 2026-11-19T17:04Z with 16 runners busy: the pool's slice sat at its 20 GiB MemoryHigh (memory.current
 21.45 GB, `high` events 545,431,572), memory pressure `full` avg10 94.8 percent, host load 135, and the required `ci` jobs of
-two repositories reached their 10 minute step limit there. The pools below move that capacity to h051 (the general
-`omnibase-ci` pool, no AVX2) and h053 (the `omnibase-ci-avx2` pool), with job directories on each host's NVMe.
+two repositories reached their 10 minute step limit there. The pool below moves that capacity to h051 (the general
+`omnibase-ci` pool, no AVX2), with job directories on the host's NVMe.
 """
 
 from __future__ import annotations
@@ -38,17 +38,8 @@ CASES = [
         16,
         "/mnt/h051-nvme",
         {"omnibase-ci", "omnibase-ci-multiarch", "arch-amd64"},
-        {"hp-canary", "omnibase-ci-avx2", "omnibase-ci-mq"},
+        {"hp-canary", "omnibase-ci-mq"},
         ("action", "action-multiarch"),
-    ),
-    (
-        "h053",
-        "hp053-avx2-ci-runner",
-        3,
-        "/mnt/h053-nvme",
-        {"omnibase-ci-avx2", "arch-amd64"},
-        {"omnibase-ci", "omnibase-ci-multiarch", "omnibase-ci-mq"},
-        ("action-avx2",),
     ),
 ]
 
@@ -140,7 +131,7 @@ def test_job_directories_are_nvme_binds_not_tmpfs(
         )
 
 
-def test_each_pool_slice_is_the_hosts_aggregate_and_holds_the_measured_peak() -> None:
+def test_the_pool_slice_is_the_hosts_aggregate_and_holds_the_measured_peak() -> None:
     # h051 shared unit: all three pools install the same limits.
     h051 = [
         _limits(POOLS / name / "omnirunners.slice")
@@ -153,16 +144,6 @@ def test_each_pool_slice_is_the_hosts_aggregate_and_holds_the_measured_peak() ->
     # Measured peak of the shared slice before this pool (2026-11-19T17:15Z) was 50.1 GB with eight runners; the
     # sixteen new ones are budgeted 3 GiB a job (the the second amd64 host pool measured about 2.1 GiB).
     assert _gib(h051[0]["MemoryHigh"]) >= 51 + 16 * 3
-    h053 = [
-        _limits(POOLS / name / "omnirunners.slice")
-        for name in ("hp053-ci-runner", "hp053-avx2-ci-runner")
-    ]
-    assert {k: v for k, v in h053[0].items() if k != "Description"} == {
-        k: v for k, v in h053[1].items() if k != "Description"
-    }
-    assert (h053[0]["MemoryHigh"], h053[0]["MemoryMax"]) == ("64G", "68G")
-    # Measured peak 47.0 GB (it had `max` events at the old 45G): the peak plus the three new runners' 8 GiB each fits.
-    assert _gib(h053[0]["MemoryHigh"]) >= 47
 
 
 def test_the_action_fleet_does_not_drop_when_the_second_host_pool_is_drained() -> None:
@@ -179,15 +160,11 @@ def test_the_action_fleet_does_not_drop_when_the_second_host_pool_is_drained() -
     # make before break: the replacement is declared before the second amd64 host's pool is removed, and the total after the removal is
     # the 21 the router's degraded floor was sized on.
     assert config.declared_total("action") - drained == 21
-    # the avx2 class is counted in no other class
-    assert config.declared_total("action-avx2") == 3
 
 
-@pytest.mark.parametrize(
-    ("host", "prefix"),
-    [("h051", "hp051-omnibase-ci-runner"), ("h053", "hp053-avx2-ci-runner")],
-)
-def test_the_declared_installer_resolves_each_pool(host: str, prefix: str) -> None:
+def test_the_declared_installer_resolves_the_pool() -> None:
+    host = "h051"
+    prefix = "hp051-omnibase-ci-runner"
     result = subprocess.run(
         [
             "bash",
@@ -206,7 +183,5 @@ def test_the_declared_installer_resolves_each_pool(host: str, prefix: str) -> No
     assert result.returncode == 0, result.stderr
     assert f"Targets: {prefix}-1" in result.stdout
     assert f"pools/{prefix}/omnirunners.slice" in result.stdout
-    # the installer's own readback list carries the limits in bytes: 128 GiB and 64 GiB
-    assert re.search(
-        rf"MemoryHigh={128 * GIB if host == 'h051' else 64 * GIB}\b", result.stdout
-    )
+    # the installer's own readback list carries the limit in bytes: 128 GiB
+    assert re.search(rf"MemoryHigh={128 * GIB}\b", result.stdout)

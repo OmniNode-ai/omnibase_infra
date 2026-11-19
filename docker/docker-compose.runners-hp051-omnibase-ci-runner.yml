@@ -15,9 +15,8 @@
 # (config/runner_fleet.yaml, classes `action` and `action-multiarch`), so every workflow label keeps resolving. The
 # pool deliberately drops the sibling pool's `hp-canary` pin. THIS CPU HAS NO AVX2: a job that imports an AVX2 wheel
 # died here with SIGILL (exit 132 on the `pedalboard` import, measured 2026-10-29), and the one repository whose unit suite
-# does that is the one the host table lists under `unit_needs` with `needs: [avx2]`. That repository's job must ask for
-# `omnibase-ci-avx2`, the label of the h053 pool declared beside this one (docker-compose.runners-hp053-avx2-ci-runner.yml),
-# BEFORE this pool is registered; until its workflow names that label it can still be assigned here and die.
+# does that is the one the host table lists under `unit_needs` with `needs: [avx2]`. That repository runs its CI on
+# GitHub-hosted runners, so no job that needs AVX2 asks for this pool; its workflow must not name `omnibase-ci` again.
 #
 # SIZE, MEASURED. 16 runners (2.0 CPUs and 6 GiB each, memswap 12 GiB). On 2026-11-19T17:15Z this host showed load 14 to 20
 # on 80 threads, 284 GiB available, memory pressure 0, and the shared omnirunners.slice (four hp051-ci-runner and four
