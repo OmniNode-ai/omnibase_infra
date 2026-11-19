@@ -17,18 +17,16 @@ this script exists and the one thing no single existing tool gets right:
     one BREAKS the second.
 
 ``omnimarket`` is deliberately absent from ``omnibase_infra``'s
-``pyproject.toml`` and ``uv.lock`` (the layer graph is compat -> core -> spi ->
+``pyproject.toml`` and ``uv.lock`` (the layer graph is core -> spi ->
 infra and omnimarket sits above infra), so a bare ``uv sync --frozen``
 UNINSTALLS it and every ``onex skill`` / ``onex delegate`` dispatch then dies on
 the OMN-14060 drift guard. ``--inexact`` is what makes the two layers coexist:
 it applies every locked pin without removing what the lock does not mention.
 
 Given that, the ORDER is chosen for a second reason and is asserted directly
-here: PROVIDER FIRST, LOCK SECOND. The co-install carries a hardcoded
-``COMPAT_PIN`` that downgrades the locked ``omnibase-compat`` (OMN-16262) --
-reproduced live on 2026-08-30, where the downgrade broke the ``occ`` CLI
-extension badly enough that the ``onex`` binary would not start at all. Ending
-on the lock pass is what undoes it.
+here: PROVIDER FIRST, LOCK SECOND. In OMN-16262, a hardcoded co-install
+pin downgraded a dependency and broke the ``onex`` CLI at startup. The
+final lock pass restores governed pins.
 
 The provider co-install must pin to the LOCAL clone's ``HEAD``, never to
 ``origin/dev``: the guard compares against the local clone, so installing from
@@ -1229,13 +1227,9 @@ def test_reconcile_applies_the_lock_without_removing_the_provider_layer(
 def test_provider_coinstall_runs_before_the_lock_pass(ws: _Workspace) -> None:
     """OMN-16262: the co-install downgrades a locked pin, so the lock pass ends the run.
 
-    ``install-node-skill-package.sh`` carries a hardcoded
-    ``COMPAT_PIN="omnibase-compat==0.5.5"`` and installs it ``--no-deps``,
-    silently downgrading the locked 0.5.6. Reproduced live on this Mac
-    2026-08-30 by this very reconciler: the downgrade removed
-    ``omnibase_compat.contracts.pr_occ_stamp``, the ``occ`` CLI extension failed
-    to load, and the ``onex`` binary would not start at all. Ending on the lock
-    pass repairs it structurally instead of inheriting the bug.
+    A hardcoded co-install pin used to downgrade a dependency with
+    ``--no-deps``, causing ``onex`` to fail at startup. The final lock
+    pass restores governed pins.
     """
     ws.set_installed_commit("0" * _SHA_LEN)
     assert ws.run().returncode == _EXIT_OK

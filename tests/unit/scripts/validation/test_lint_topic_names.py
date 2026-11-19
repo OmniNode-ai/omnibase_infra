@@ -264,10 +264,15 @@ def test_scan_contracts_accepts_projection_snapshot_publish_topic(
     assert violations == []
 
 
+def _example_topic(kind: str = "evt", version: str | None = "v1") -> str:
+    segments = ("onex", kind, "platform", "foo")
+    return ".".join(segments if version is None else (*segments, version))
+
+
 @pytest.mark.unit
 def test_invalid_kind_caught() -> None:
     """A topic with an invalid kind segment returns a violation."""
-    result = lint_topic("onex.badkind.platform.foo.v1")
+    result = lint_topic(_example_topic(kind="badkind"))
     assert result.is_valid is False
     assert len(result.violations) >= 1
     assert any("kind" in v.lower() for v in result.violations)
@@ -276,7 +281,7 @@ def test_invalid_kind_caught() -> None:
 @pytest.mark.unit
 def test_missing_version_caught() -> None:
     """A topic missing the version suffix returns a violation."""
-    result = lint_topic("onex.evt.platform.foo")
+    result = lint_topic(_example_topic(version=None))
     assert result.is_valid is False
     assert len(result.violations) >= 1
 
@@ -308,7 +313,7 @@ def test_scan_invalid_contracts_returns_violations(tmp_path: Path) -> None:
     contracts_dir.mkdir()
     node_dir = contracts_dir / "bad-node"
     node_dir.mkdir()
-    _write_contract(node_dir, ["onex.badkind.platform.foo.v1"], "contract.yaml")
+    _write_contract(node_dir, [_example_topic(kind="badkind")], "contract.yaml")
 
     violations = scan_contracts(contracts_dir)
     assert len(violations) >= 1
@@ -322,7 +327,7 @@ def test_scan_missing_version_returns_violations(tmp_path: Path) -> None:
     contracts_dir.mkdir()
     node_dir = contracts_dir / "bad-node"
     node_dir.mkdir()
-    _write_contract(node_dir, ["onex.evt.platform.foo"], "contract.yaml")
+    _write_contract(node_dir, [_example_topic(version=None)], "contract.yaml")
 
     violations = scan_contracts(contracts_dir)
     assert len(violations) >= 1
@@ -410,7 +415,6 @@ def test_known_producers_allowlist_complete() -> None:
         "omniintelligence",
         "omnimemory",
         "omninode",
-        "omnibase-compat",
         "github",
         "platform",
         "ui",
@@ -418,6 +422,13 @@ def test_known_producers_allowlist_complete() -> None:
     assert expected.issubset(_KNOWN_PRODUCERS), (
         f"Missing producers: {expected - _KNOWN_PRODUCERS}"
     )
+
+
+@pytest.mark.unit
+def test_retired_producer_is_rejected() -> None:
+    result = lint_topic("onex.evt.omnibase-compat.test-event.v1")
+    assert not result.is_valid
+    assert any("unknown producer" in violation for violation in result.violations)
 
 
 @pytest.mark.unit
@@ -456,7 +467,7 @@ def test_the_deploy_agents_three_live_topics_are_accepted() -> None:
 def test_lint_result_is_valid_false_when_violations() -> None:
     """LintResult.is_valid is False when violations list is non-empty."""
     result = LintResult(
-        topic="onex.badkind.platform.foo.v1", violations=["invalid kind"]
+        topic=_example_topic(kind="badkind"), violations=["invalid kind"]
     )
     assert result.is_valid is False
 
@@ -464,5 +475,5 @@ def test_lint_result_is_valid_false_when_violations() -> None:
 @pytest.mark.unit
 def test_lint_result_is_valid_true_when_no_violations() -> None:
     """LintResult.is_valid is True when violations list is empty."""
-    result = LintResult(topic="onex.evt.platform.foo.v1", violations=[])
+    result = LintResult(topic=_example_topic(), violations=[])
     assert result.is_valid is True

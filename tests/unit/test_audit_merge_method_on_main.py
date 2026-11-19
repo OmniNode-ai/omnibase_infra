@@ -145,7 +145,7 @@ def test_skip_message_surfaces_real_gh_stderr(tmp_path: Path) -> None:
     """OMN-16107: a failed `gh api` call must surface its actual stderr in the
     SKIP line, not the previous blanket "token scope or repo missing" guess
     that swallowed the real diagnostic (`2>/dev/null`). This is the audit
-    blind spot found live in the omnibase_compat GraphQL SKIP on the
+    blind spot found in a GraphQL SKIP on the
     Merge Queue Bypass Audit workflow, where the true cause was
     undiagnosable from the log."""
     failing_shim = tmp_path / "gh"

@@ -79,8 +79,8 @@
 #
 #   Selecting NOTHING is equally wrong and is NOT what this does. Workflow
 #   files break the ENFORCEMENT of tests rather than the tests themselves --
-#   OMN-15541 is the live counterexample, where ci.yml hardcoded
-#   `pytest src/omnibase_compat/tests/` while the selector and pyproject named
+#   OMN-15541 is the live counterexample, where ci.yml hardcoded a path
+#   under the package while the selector and pyproject named
 #   different roots, so full-suite escalation collected ZERO of the top-level
 #   tests/ tree: a fail-OPEN safety net produced by a workflow edit. The class
 #   is therefore positively named, always non-empty, and asserted to be

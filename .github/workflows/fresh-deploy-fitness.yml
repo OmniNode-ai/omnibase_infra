@@ -126,10 +126,8 @@ jobs:
 
   pinned-wheel-skew:
     name: pinned-wheel-skew
-    # ADVISORY (continue-on-error) — NOT yet a blocking required gate. A baseline
-    # run on origin/dev flags PRE-EXISTING build-provenance drift this PR did not
-    # author: OMNIBASE_COMPAT_REF is pinned to a commit while a newer compat
-    # release exists, and ONEX_CHANGE_CONTROL_REF is a floating `main` ref. Wiring
+    # ADVISORY (continue-on-error). The original baseline flagged build-provenance drift,
+    # including a stale release pin and a floating branch ref. Wiring
     # this as blocking would ship a gate that is red on day one over pins owned by
     # separate platform-debt tickets — Rule 5 prohibits detection without a clean
     # baseline (same discipline as the actionlint carve-out in
