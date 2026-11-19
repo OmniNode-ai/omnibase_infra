@@ -1,0 +1,66 @@
+schema_version: 1.0.0
+ticket_id: OMN-24559
+title: A runtime that cannot send its heartbeat is shown as not healthy, never silent
+summary: >-
+  The merged mandatory heartbeat (OMN-24496) still let a runtime run silent: started meant only that the heartbeat task was created, a failed or missing bus made the heartbeat publish return False and the loop ran on, a missing service or disabled introspection skipped the heartbeat, no refusal event reached the bus, and a refusal after the running flag was set left the runtime marked running. The heartbeat publish is now accounted for (consecutive failures, last error, published once), the mixin reports a typed ModelRuntimeHeartbeatHealth, the startup handler refuses a required heartbeat that has no service, is disabled, or cannot publish its startup introspection or first heartbeat within the attempts set in runtime_timeouts.yaml, every refusal and one failing outage is published as a runtime-error event, a kernel runtime registers a heartbeat readiness row that is false with the reason, and RuntimeHostProcess.start() rolls the running flag back and stops the heartbeat task on a refusal.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn24559-heartbeat-visible
+    statement: A runtime that cannot publish its heartbeat is visibly not healthy, with its reason, and never runs on silent.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a kernel runtime with no heartbeat service, or with introspection switched off, refuses to start with a typed counted refusal and one refusal event on the runtime error topic -- falsifier: the new handler tests fail on dev, where both cases skip the heartbeat and start"
+      - id: AC2
+        statement: "AC2: a runtime whose first heartbeat cannot be published after the configured attempts refuses to start, reports not running afterwards, and has stopped its heartbeat task -- falsifier: the new runtime test fails on dev, where start() leaves the running flag true and the task running"
+      - id: AC3
+        statement: "AC3: a running runtime whose heartbeats keep failing reports not ready with the reason on its readiness check, and publishes exactly one refusal event for the outage -- falsifier: the new loop test fails on dev, where the loop runs on silent and readiness stays true"
+      - id: AC4
+        statement: "AC4: integrated: on the dev runtime running this revision, every runtime's heartbeat events appear on the heartbeat topic at their interval, and a forced publish failure on a branch-image runtime shows not ready with reason heartbeat_publish_failing on its readiness check and one runtime-error event on the bus -- falsifier: a runtime with no heartbeat event in five minutes, or a forced failure that still reads ready, read on the running dev runtime"
+evidence_requirements:
+  - kind: tests
+    description: The new handler, mixin and runtime unit tests; the visible-heartbeat tests fail on the merge base.
+    command: uv run --frozen pytest tests/unit/handlers/test_handler_runtime_introspection_startup_heartbeat_visible.py tests/unit/mixins/test_mixin_node_introspection_heartbeat_health.py tests/unit/runtime/test_runtime_host_process_heartbeat_required.py -q --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24559-ac1
+    description: 'AC1: heartbeat_required with service None or introspection disabled raises RuntimeHeartbeatRequiredError with the counted reason and publishes one runtime-error event; the same calls without heartbeat_required still skip (control).'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_runtime_introspection_startup_heartbeat_visible.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24559-ac2
+    description: 'AC2: a runtime whose first heartbeat never publishes refuses with HEARTBEAT_PUBLISH_FAILED after exactly the configured attempts, reads not running, and its heartbeat task is stopped.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_runtime_host_process_heartbeat_required.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24559-ac3
+    description: 'AC3: the real heartbeat loop on a bus that rejects heartbeats flips heartbeat_health() to unhealthy at the configured failure count, publishes exactly one runtime-error event for the outage, and the readiness row reads false with the reason; a healthy bus publishes no refusal event (control).'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/mixins/test_mixin_node_introspection_heartbeat_health.py tests/unit/runtime/test_runtime_host_process_heartbeat_required.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24559-ac4
+    description: 'hosted proxy for AC4: the new heartbeat and runtime-error seam tests pass here; the heartbeat events per runtime id and the forced-failure not-ready reading are read on the dev runtime after the branch image or the next roll and posted as a pull request comment naming the running revision.'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_runtime_heartbeat_seams_omn24559.py -q --no-cov -p no:cacheprovider
+        cwd: .

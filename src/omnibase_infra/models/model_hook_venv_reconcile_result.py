@@ -11,6 +11,6 @@ class ModelHookVenvReconcileResult(BaseModel):
     """A refusal or a revision-verified sync, with the package tool's output."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
-    status: Literal["already_in_sync", "reconciled", "refused"]
+    status: Literal["already_in_sync", "reconciled", "refused", "outdated"]
     detail: str
     output: str = ""
