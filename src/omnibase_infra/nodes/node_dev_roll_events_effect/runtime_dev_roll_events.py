@@ -16,7 +16,7 @@ import json
 import logging
 import sys
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Protocol
@@ -162,11 +162,13 @@ def recreate_gate_at(
             "models/model_dev_recreate_request.py",
             "models/model_dev_recreate_decision.py",
             "models/model_dev_recreate_announcement.py",
-            "handlers/handler_dev_recreate_window.py",
+            "handlers/dev_recreate_window/handler_dev_recreate_window.py",
         ):
             events._load_sibling(relative)
         window = sys.modules["omnibase_infra.models.model_dev_recreate_policy"]
-        handler = sys.modules["omnibase_infra.handlers.handler_dev_recreate_window"]
+        handler = sys.modules[
+            "omnibase_infra.handlers.dev_recreate_window.handler_dev_recreate_window"
+        ]
         env: dict[str, str] = {}
         policy_env = repo_root / "docker" / "runtime-policy.env"
         for line in policy_env.read_text(encoding="utf-8").splitlines():
@@ -176,6 +178,7 @@ def recreate_gate_at(
         return handler.DevRecreateWindowGate(
             window.ModelDevRecreatePolicy.from_env(env),
             build_events_at(repo_root).recreate_announced,
+            clock=lambda: datetime.now(UTC),
             last_recreate_at=last_recreate_at,
             announced_for=announced_for,
         )

@@ -18,7 +18,7 @@ from deploy_agent import agent as agent_mod
 from deploy_agent.job_state import JobStore
 
 from omnibase_infra.enums.enum_dev_recreate_reason import EnumDevRecreateReason
-from omnibase_infra.handlers.handler_dev_recreate_window import (
+from omnibase_infra.handlers.dev_recreate_window.handler_dev_recreate_window import (
     DevRecreateWindowGate,
     RecreateNotAnnouncedError,
 )
@@ -56,7 +56,7 @@ class _Log:
 
 def test_recreate_announce_precedes_the_recreate() -> None:
     log = _Log()
-    gate = DevRecreateWindowGate(POLICY, log.announce)
+    gate = DevRecreateWindowGate(POLICY, log.announce, clock=lambda: OPEN)
     assert gate.run_recreate("agent/idle-converge", OPEN, log.recreate) is True
     assert log.events == ["announce", "recreate"]
     assert log.sent[0].immediate is True
@@ -65,7 +65,7 @@ def test_recreate_announce_precedes_the_recreate() -> None:
 
 def test_recreate_announce_a_recreate_with_no_announcement_is_refused() -> None:
     log = _Log(accepts=False)
-    gate = DevRecreateWindowGate(POLICY, log.announce)
+    gate = DevRecreateWindowGate(POLICY, log.announce, clock=lambda: OPEN)
     with pytest.raises(RecreateNotAnnouncedError):
         gate.run_recreate("agent/idle-converge", OPEN, log.recreate)
     assert "recreate" not in log.events
@@ -79,7 +79,7 @@ def test_recreate_announce_a_publisher_that_raises_is_a_refusal() -> None:
         raise OSError("bus down")
 
     ran: list[str] = []
-    gate = DevRecreateWindowGate(POLICY, broken)
+    gate = DevRecreateWindowGate(POLICY, broken, clock=lambda: OPEN)
     with pytest.raises(RecreateNotAnnouncedError):
         gate.run_recreate("agent/idle-converge", OPEN, lambda: ran.append("recreate"))
     assert ran == []
@@ -87,7 +87,7 @@ def test_recreate_announce_a_publisher_that_raises_is_a_refusal() -> None:
 
 def test_recreate_announce_a_hold_names_the_next_recreate_once() -> None:
     log = _Log()
-    gate = DevRecreateWindowGate(POLICY, log.announce)
+    gate = DevRecreateWindowGate(POLICY, log.announce, clock=lambda: OPEN)
     for _ in range(3):
         assert gate.permit("agent/idle-converge", CLOSED) is False
     assert len(log.sent) == 1
@@ -139,7 +139,8 @@ def test_recreate_announce_topic_is_declared_in_the_node_contract() -> None:
 
 def test_recreate_announce_no_topic_string_is_typed_in_code() -> None:
     for path in (
-        REPO_ROOT / "src/omnibase_infra/handlers/handler_dev_recreate_window.py",
+        REPO_ROOT
+        / "src/omnibase_infra/handlers/dev_recreate_window/handler_dev_recreate_window.py",
         NODE / "dev_roll_events.py",
         NODE / "runtime_dev_roll_events.py",
     ):

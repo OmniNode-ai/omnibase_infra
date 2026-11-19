@@ -54,6 +54,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolContainerAware": "protocols/protocol_container_aware.py",
     "ProtocolDevPreflightRunner": "protocols/protocol_dev_preflight_runner.py",  # [DI] OMN-24048 what the dev roll's preflight step needs of the deploy executor, so the failure announcement wraps the call without importing the agent. Infra-local, not spi: it narrows this repo's deploy executor
     "ProtocolDevRollEvents": "protocols/protocol_dev_roll_events.py",  # [DI] OMN-24013 the events seam the dev boot guard and the branch-install reapply announce a roll through (manifest, started, incident); tests inject a fake publisher. Infra-local, not spi: it narrows this repo's dev roll events publisher and is not a cross-repo contract
+    "ProtocolRecreateGate": "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",  # [NODE] OMN-25912 what the dev recreate window gate offers its callers (allow); node-internal seam so the roll events runtime and its tests inject a fake gate. Infra-local, not spi: it narrows this repo's recreate window handler
     # ProtocolDispatchEngine relocated to omnibase_spi.protocols.runtime (OMN-12549).
     "ProtocolEventBusLike": "protocols/protocol_event_bus_like.py",
     "ProtocolIntrospectionEventBus": "protocols/protocol_introspection_event_bus.py",  # [RUNTIME] OMN-16979 consumer-owned Pattern B publish/subscribe contract plus envelope publishing, kept infra-local because it uses infra event-header and receipt models.

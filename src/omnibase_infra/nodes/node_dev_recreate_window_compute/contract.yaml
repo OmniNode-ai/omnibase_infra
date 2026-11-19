@@ -25,7 +25,7 @@ handler_routing:
     - operation: dev_recreate.decide
       handler:
         name: HandlerDevRecreateWindow
-        module: omnibase_infra.handlers.handler_dev_recreate_window
+        module: omnibase_infra.handlers.dev_recreate_window.handler_dev_recreate_window
       event_model:
         name: ModelDevRecreateRequest
         module: omnibase_infra.models.model_dev_recreate_request

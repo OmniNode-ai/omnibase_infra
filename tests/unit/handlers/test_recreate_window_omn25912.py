@@ -22,7 +22,7 @@ from deploy_agent.job_state import JobStore
 
 from omnibase_infra.enums.enum_dev_recreate_reason import EnumDevRecreateReason
 from omnibase_infra.enums.enum_dev_recreate_verdict import EnumDevRecreateVerdict
-from omnibase_infra.handlers.handler_dev_recreate_window import (
+from omnibase_infra.handlers.dev_recreate_window.handler_dev_recreate_window import (
     DevRecreateWindowGate,
     HandlerDevRecreateWindow,
 )
@@ -41,7 +41,12 @@ FIXTURE = (
 )
 POLICY_ENV = REPO_ROOT / "docker" / "runtime-policy.env"
 HANDLER_SOURCE = (
-    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_dev_recreate_window.py"
+    REPO_ROOT
+    / "src"
+    / "omnibase_infra"
+    / "handlers"
+    / "dev_recreate_window"
+    / "handler_dev_recreate_window.py"
 )
 MERGE = "gha/omnibase_infra/pr-1"
 IDLE = "agent/idle-converge"
@@ -75,7 +80,7 @@ def test_recreate_window_two_hour_simulation_with_a_merge_every_four_minutes() -
     """AC2: a merge every four minutes for two hours recreates at most once an hour, on the hour."""
     policy = _declared_policy()
     bus = _Bus()
-    gate = DevRecreateWindowGate(policy, bus)
+    gate = DevRecreateWindowGate(policy, bus, clock=lambda: _at("2026-11-19T06:00:20Z"))
     first = datetime(2026, 11, 19, 4, 0, 1, tzinfo=UTC)
     pending = False
     recreates: list[datetime] = []
@@ -135,7 +140,10 @@ def test_recreate_window_a_pinned_fix_recreates_immediately_off_the_hour() -> No
     requester = policy.pinned_fix_requester_prefixes[0] + "omn-1"
     bus = _Bus()
     gate = DevRecreateWindowGate(
-        policy, bus, last_recreate_at=datetime(2026, 11, 19, 5, 0, 5, tzinfo=UTC)
+        policy,
+        bus,
+        clock=lambda: datetime(2026, 11, 19, 5, 33, tzinfo=UTC),
+        last_recreate_at=datetime(2026, 11, 19, 5, 0, 5, tzinfo=UTC),
     )
     assert gate.permit(requester, datetime(2026, 11, 19, 5, 33, tzinfo=UTC)) is True
     assert bus.sent[-1].immediate is True
@@ -206,7 +214,12 @@ def test_recreate_window_four_recorded_starts_are_held_to_the_window() -> None:
         if job["accepted_at"] < starts[0]["at"]
     )
     bus = _Bus()
-    gate = DevRecreateWindowGate(_declared_policy(), bus, last_recreate_at=seeded)
+    gate = DevRecreateWindowGate(
+        _declared_policy(),
+        bus,
+        last_recreate_at=seeded,
+        clock=lambda: _at("2026-11-19T06:00:20Z"),
+    )
     held_until = []
     for item, stamp in zip(starts, stamps, strict=True):
         assert gate.permit(item["requested_by"], stamp) is False, item["at"]

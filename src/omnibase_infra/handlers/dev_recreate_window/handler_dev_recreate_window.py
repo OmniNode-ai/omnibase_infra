@@ -110,8 +110,8 @@ class DevRecreateWindowGate:
         policy: ModelDevRecreatePolicy,
         announce: Callable[[ModelDevRecreateAnnouncement], bool],
         *,
+        clock: Callable[[], datetime],
         last_recreate_at: datetime | None = None,
-        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         announced_for: datetime | None = None,
     ) -> None:
         self._clock = clock
