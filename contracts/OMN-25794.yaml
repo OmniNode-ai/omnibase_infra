@@ -47,8 +47,7 @@ dod_evidence:
           printf "%s\n" "## v1.0.0 (2026-11-18)" "" "### Included Since v0.9.0" "- fix: example-hidden-repo remains (#4610)" > "$probe/entry.md";
           printf "%s\n" "private_repo_names: [example-hidden-repo]" > "$probe/vocabulary.yaml";
           printf "{\"clone_path\":\"%s\",\"entry_file\":\"%s/entry.md\",\"repository_visibility\":\"public\",\"hygiene_vocabulary_file\":\"%s/vocabulary.yaml\"}\n" "$probe" "$probe" "$probe" > "$probe/request.json";
-          uv sync --frozen --no-dev;
-          "${UV_PROJECT_ENVIRONMENT:-.venv}/bin/onex" node node_release_notes_apply_effect --input "$probe/request.json" --state-root "$probe/state" --output receipt;
+          uv run --frozen onex node node_release_notes_apply_effect --input "$probe/request.json" --state-root "$probe/state" --output receipt;
           grep -Fxq -- "- fix: … remains (#4610)" "$probe/CHANGELOG.md"'
         cwd: .
   - id: dod-omn25794-private-release-notes
@@ -65,13 +64,15 @@ dod_evidence:
     binds_ac: [AC3]
     execution_scope: local_done_gate
     checks:
-      - check_type: disposition
-        check_value: dod-omn25794-live-release-refresh
+      - check_type: command
+        check_value: onex scm pr-checks OmniNode-ai/omnimarket#6444
+        cwd: .
   - id: dod-omn25794-writer-handoff
     description: Record the writer PR's full-head Lab comment and the single landing-controller ledger message. The train owns the release update and the landing controller owns merging.
     source: manual
     binds_ac: [AC4]
     execution_scope: local_done_gate
     checks:
-      - check_type: disposition
-        check_value: dod-omn25794-writer-handoff
+      - check_type: command
+        check_value: onex scm pr-view OmniNode-ai/omnibase_infra#6076
+        cwd: .
