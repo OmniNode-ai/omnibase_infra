@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_restart_on_merge_effect
+contract_name: node_restart_on_merge_effect
+node_name: node_restart_on_merge_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Host-local decision on whether a merge may sync and restart one deploy-agent unit (verify), and the per-host reading over every agent installed on a host, the prod-fenced unit and each launchd instance included (check_host). Nothing in the merge path calls check_host: it is run by the operator on each lab host before a merge that touches the agent units or the settings they require, and a gap it names is a restart the agent would not survive. The restart set is the declared agent units whose own tracked fence does not name prod and whose tracked unit or env files (EnvironmentFile= and DEPLOY_AGENT_ENV_FILE, read when the check runs) assign the deploy-source settings the new code refuses to start without.
+input: "omnibase_infra.models.model_restart_on_merge.ModelRestartOnMerge"
+input_model:
+  name: ModelRestartOnMerge
+  module: omnibase_infra.models.model_restart_on_merge
+  description: The operation, the unit (verify) or the host home (check_host), and the repository root holding the tracked units and the unit-drift manifest.
+output_model:
+  name: ModelRestartOnMerge
+  module: omnibase_infra.models.model_restart_on_merge
+  description: The same request with the decision, each unit's settings gap and, when refused, the reason.
+handler_routing:
+  routing_strategy: operation_match
+  default_handler: "omnibase_infra.handlers.handler_restart_on_merge:HandlerRestartOnMerge"
+  handlers:
+    - operation: verify
+      handler: {name: HandlerRestartOnMerge, module: omnibase_infra.handlers.handler_restart_on_merge}
+    - operation: check_host
+      handler: {name: HandlerRestartOnMerge, module: omnibase_infra.handlers.handler_restart_on_merge}
+capabilities:
+  - name: restart_on_merge.verify
+    description: Keep a merge from restarting a prod agent or an agent whose new code would refuse to start.
+  - name: restart_on_merge.check_host
+    description: List every agent installed on a host, prod-fenced unit and launchd instances included, whose env files lack a required setting (names only). Run by the operator before the merge; nothing calls it automatically.
+metadata:
+  ticket: OMN-24677
+  author: OmniNode Team
+  description: Host-local effect. No runtime bus dependency and no prod or customer runner admission.
+  tags: [effect, deployment]

@@ -1,0 +1,48 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25697
+title: "omnibase_infra#6027 merged with its base so it no longer conflicts"
+summary: >-
+  omnibase_infra#6027 conflicted with dev in contracts/OMN-24562.yaml (the acceptance ids AC8, AC9 and AC10 were taken by the alarm requirement that landed on dev) and in scripts/deploy-agent/deploy_agent/agent.py (a deploy-source read and the job reading constant). The branch merges dev, keeps the alarm requirement as dev has it, renumbers its own-clone criteria to AC15 to AC18, and repoints the one dev test that patched the removed REPO_DIR constant.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25697-conflict-free
+    statement: >-
+      The branch of omnibase_infra#6027 merges its base without a conflict and the deploy-agent own-clone tests and the dev job-reading chain test it touches pass.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: omnibase_infra#6027 no longer conflicts with dev and its required contexts read success at the new head, named in a comment starting `Lab: head=<full head sha>` -- falsifier: the own-clone test file fails or the pull request reads DIRTY at the new head
+      - id: AC2
+        statement: >-
+          AC2: the merge widens, skips or bypasses no check -- falsifier: the merge changes a file under .github/ or .pre-commit-config.yaml against dev
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The own-clone tests of the pull request, which fail on dev where the deploy-source handler does not exist.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn25697-ac1-own-clone-tests
+    description: >-
+      The own-clone tests of the branch pass after the merge of dev.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0
+        cwd: .
+    binds_ac: [AC1]
+  - id: dod-omn25697-ac2-no-check-changed
+    description: >-
+      The branch changes no workflow and no hook configuration against dev. Runs where the lane has the dev ref, not on the hosted runner.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: test -z "$(git diff --name-only origin/dev...HEAD -- .github .pre-commit-config.yaml)"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]

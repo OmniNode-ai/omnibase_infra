@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[4]
 
 @pytest.fixture
 def policy_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setattr(executor, "REPO_DIR", str(ROOT))
+    monkeypatch.setattr(executor, "deploy_repo_dir", lambda: str(ROOT))
     monkeypatch.setattr(
         executor, "operator_store_overlay", lambda: {"DEV_REDPANDA_MEMORY": "24G"}
     )

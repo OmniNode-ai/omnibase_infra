@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import importlib.util
 import json
 import logging
@@ -29,7 +30,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
-from deploy_agent import recreate_supervisor
+from deploy_agent import recreate_supervisor, unit_drift
 from deploy_agent.build_budget import (
     EnumBuildOutcome,
     LaneBuilderError,
@@ -115,11 +116,6 @@ from deploy_agent.tracking_ref import (
     load_tracking_ref_from_env,
     load_tracking_remote_ref_from_env,
 )
-from deploy_agent.unit_drift import (
-    load_manifest,
-    own_unit_name_from_cgroup,
-    sync_own_unit,
-)
 
 # Maps deploy scope to catalog bundle names used by compose_gen.
 # Scope.FULL regenerates both core and runtime bundles.
@@ -131,6 +127,7 @@ SCOPE_BUNDLES: dict[Scope, list[str]] = {
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers.handler_dev_boot_guard import HandlerDevBootGuard
+    from omnibase_infra.models.model_deploy_source_clone import ModelDeploySourceClone
     from omnibase_infra.models.model_dev_boot_report_config import (
         ModelDevBootReportConfig,
     )
@@ -184,6 +181,12 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/model_dev_boot_result.py",
         "handlers/handler_dev_boot_guard.py",
         "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",
+        "models/model_deploy_source_clone.py",
+        "handlers/handler_deploy_source_clone.py",
+        "models/model_agent_unit.py",
+        "models/model_unit_settings_gap.py",
+        "models/model_restart_on_merge.py",
+        "handlers/handler_restart_on_merge.py",
         "models/model_dev_lane_code_ref_pin.py",
         "handlers/handler_dev_lane_code_ref_pin.py",
         "nodes/node_deploy_job_reading_effect/runtime_deploy_job_reading.py",
@@ -233,7 +236,7 @@ def dev_boot_report_config() -> ModelDevBootReportConfig:
     registry_root = Path(
         os.environ.get("UNIT_DRIFT_REGISTRY_ROOT")
         or os.environ.get("OMNI_HOME")
-        or Path(REPO_DIR).parent
+        or deploy_source().canonical_root
     ).expanduser()
     plugin_setting = os.environ.get("DEPLOY_AGENT_REPORT_PLUGIN_DIR") or os.environ.get(
         "CLAUDE_PLUGIN_ROOT"
@@ -275,20 +278,50 @@ def deliver_dev_boot_reports(root: Path) -> None:
 
 logger = logging.getLogger(__name__)
 
-REPO_DIR = os.environ.get(
-    "DEPLOY_AGENT_REPO_DIR", "/data/omninode/omni_home/omnibase_infra"
-)
+
+@functools.cache
+def deploy_source() -> ModelDeploySourceClone:
+    """The agent's OWN deploy-source settings (OMN-24562), read on first use, never at import."""
+    declared = _clone_handler().settings(os.environ)
+    bound = {"timeout_seconds": 5 * PHASE_TIMEOUTS[Phase.GIT]}
+    return cast("ModelDeploySourceClone", declared.model_copy(update=bound))
+
+
+def deploy_repo_dir() -> str:
+    return deploy_source().clone_dir
+
+
+def _clone_handler() -> ModuleType:
+    return load_dev_boot_guard("handler_deploy_source_clone")
+
+
+def _in_clone(*parts: str) -> Path:
+    return Path(deploy_repo_dir(), *parts)
+
+
+def compose_file() -> str:
+    return f"{deploy_repo_dir()}/docker/docker-compose.infra.yml"
+
+
+def compose_gen_output_file() -> str:
+    return f"{deploy_repo_dir()}/docker/docker-compose.generated.yml"
+
+
+def runtime_policy_env_file() -> Path:
+    return _in_clone("docker", "runtime-policy.env")
+
+
+def repoint_onex_api_script() -> Path:
+    return _in_clone("scripts", "runtime_build", "repoint_dev_lane_onex_api.py")
+
+
+def runtime_health_wait_helpers() -> Path:
+    return _in_clone("scripts", "runtime_build", "runtime_health_wait.sh")
+
+
 DEPLOY_AGENT_DIR = os.environ.get(
     "DEPLOY_AGENT_DIR", "/data/omninode/omnibase_infra/scripts/deploy-agent"
 )
-# The TRACKED compose base every deploy path layers its lane overlay on:
-# this agent, onex-runtime-deploy, and
-# scripts/runtime_build/refresh_stability_lane.sh alike. Its only writer is git.
-COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.infra.yml"
-# OMN-17291: where the catalog render lands. A BUILD ARTIFACT, gitignored, never
-# the tracked file above -- see compose_gen() for why that distinction is the
-# whole point.
-COMPOSE_GEN_OUTPUT_FILE = f"{REPO_DIR}/docker/docker-compose.generated.yml"
 # OMN-19376: paths, relative to the agent clone's repo root, of committed
 # PLACEHOLDER files that a deploy job's own build/provenance steps rewrite as a
 # byproduct of every run (scripts/runtime_build/compute_workspace_provenance.py,
@@ -311,12 +344,6 @@ COMPOSE_PROJECT = "omnibase-infra"
 # must never become the reason a deploy is slow. Three read-only commands,
 # each bounded well under the phase it precedes.
 CONFIG_HASH_TIMEOUT_SECONDS = 60
-RUNTIME_POLICY_ENV_FILE = Path(REPO_DIR) / "docker" / "runtime-policy.env"
-#: The governed repoint the agent shells out to, resolved against the deploy
-#: clone rather than written out a second time.
-REPOINT_ONEX_API_SCRIPT = (
-    Path(REPO_DIR) / "scripts" / "runtime_build" / "repoint_dev_lane_onex_api.py"
-)
 #: The one service a pin advance is allowed to recreate. Named rather than
 #: derived: a scope that could widen is a scope that will.
 ONEX_API_SERVICE = "onex-api"
@@ -330,7 +357,10 @@ def _reconcile_lock_roots() -> list[str]:
     """Return distinct agent and build-context trees, preserving their paths."""
     roots: list[str] = []
     seen: set[str] = set()
-    for root in (os.environ.get("OMNI_HOME", "").strip(), str(Path(REPO_DIR).parent)):
+    for root in (
+        os.environ.get("OMNI_HOME", "").strip(),
+        deploy_source().canonical_root,
+    ):
         if not root.strip():
             continue
         normalized = os.path.realpath(root)
@@ -412,7 +442,7 @@ def _hold_build_context(purpose: str) -> Iterator[None]:
         try:
             yield
         finally:
-            _restore_build_byproducts(REPO_DIR)
+            _restore_build_byproducts(deploy_repo_dir())
 
 
 PHASE_TIMEOUTS = {
@@ -518,21 +548,11 @@ VERIFY_RECREATE_POLL_SECONDS = 10
 # number, so the subprocess ceiling and the client's own ceiling cannot drift.
 RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS = 10
 
-# OMN-19374: the helpers onex-runtime-deploy already uses to honour a runtime
-# container's DECLARED start budget (OMN-18349). Verification sources the same
-# file rather than restating the budget arithmetic and the state vocabulary in
-# Python, so the two deploy paths cannot disagree about when a runtime is still
-# starting. Resolved against the deploy clone, like every other script this
-# executor shells out to.
-RUNTIME_HEALTH_WAIT_HELPERS = (
-    Path(REPO_DIR) / "scripts" / "runtime_build" / "runtime_health_wait.sh"
-)
-
 
 def _run_runtime_health_helper(
     function: str, *args: str
 ) -> subprocess.CompletedProcess[str] | None:
-    """Call one function from ``RUNTIME_HEALTH_WAIT_HELPERS`` (OMN-19374).
+    """Call one function from ``runtime_health_wait_helpers()`` (OMN-19374).
 
     The file is SOURCED, never executed, so each call is one ``bash -c`` that
     sources it and runs the named function with its arguments as positional
@@ -547,7 +567,7 @@ def _run_runtime_health_helper(
                 "-c",
                 'source "$1" && shift && "$@"',
                 "runtime_health_wait",
-                str(RUNTIME_HEALTH_WAIT_HELPERS),
+                str(runtime_health_wait_helpers()),
                 function,
                 *args,
             ],
@@ -603,14 +623,14 @@ MIGRATION_TREE_PATHS: tuple[str, ...] = (
 )
 
 
-def read_checkout_migration_fingerprint(repo_dir: str = REPO_DIR) -> str | None:
+def read_checkout_migration_fingerprint(repo_dir: str | None = None) -> str | None:
     """Read the content identities of the checkout's migration tree and runner."""
     try:
         result = _run(
             [
                 "git",
                 "-C",
-                repo_dir,
+                repo_dir or deploy_repo_dir(),
                 "rev-parse",
                 *[f"HEAD:{path}" for path in MIGRATION_TREE_PATHS],
             ],
@@ -663,10 +683,12 @@ _BUILD_PROVENANCE_BY_SOURCE: dict[BuildSource, tuple[str, str]] = {
     BuildSource.RELEASE: ("clean-main", "false"),
 }
 
+
 # Promotion-lineage guard (OMN-12626, R1). Loaded from scripts/ by file path
 # because scripts/ is not an importable package. The guard refuses to build a
 # prod-bound (release-mode) image from a dirty or non-promoted source tree.
-_PROMOTION_GUARD_PATH = Path(REPO_DIR) / "scripts" / "check_prod_promotion_lineage.py"
+def _promotion_guard_path() -> Path:
+    return _in_clone("scripts", "check_prod_promotion_lineage.py")
 
 
 def _load_optional_tracking_remote_ref_from_env() -> str | None:
@@ -688,16 +710,15 @@ def _load_promotion_guard() -> ModuleType:
     mod_name = "check_prod_promotion_lineage"
     if mod_name in sys.modules:
         return sys.modules[mod_name]
-    if not _PROMOTION_GUARD_PATH.is_file():
+    guard = _promotion_guard_path()
+    if not guard.is_file():
         raise RuntimeError(
             "prod promotion-lineage guard not found at "
-            f"{_PROMOTION_GUARD_PATH}; cannot verify clean+promoted build source."
+            f"{guard}; cannot verify clean+promoted build source."
         )
-    spec = importlib.util.spec_from_file_location(mod_name, _PROMOTION_GUARD_PATH)
+    spec = importlib.util.spec_from_file_location(mod_name, guard)
     if spec is None or spec.loader is None:
-        raise RuntimeError(
-            f"could not load prod promotion-lineage guard from {_PROMOTION_GUARD_PATH}"
-        )
+        raise RuntimeError(f"could not load prod promotion-lineage guard from {guard}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[mod_name] = module
     spec.loader.exec_module(module)
@@ -707,7 +728,7 @@ def _load_promotion_guard() -> ModuleType:
 def assert_release_build_promoted(
     build_source: BuildSource,
     *,
-    repo_dir: str = REPO_DIR,
+    repo_dir: str | None = None,
     runtime_lane: EnumRuntimeLane = EnumRuntimeLane.PROD,
 ) -> None:
     """Enforce clean + promoted source for prod-bound (release-mode) builds.
@@ -717,14 +738,11 @@ def assert_release_build_promoted(
     ancestor-of/equal-to origin/main. Workspace builds (local dev iteration) are
     exempt by design — they never reach prod.
 
-    OMN-16442: the assertion is also scoped to the lanes whose artifacts can
-    reach prod. It used to be applied lane-blind, which made it unsatisfiable
-    on the dev lane rather than merely strict: a dev head is by construction
-    NOT an ancestor of a release-synced ``origin/main``, so the ancestry half
-    refused every dev release-mode build on every day, and the clean-tree half
-    refused on any stray file in the deploy-source clone. Measured live
-    2026-09-08 on command c73cc38a: DIRTY_TREE first, then NOT_PROMOTED for
-    HEAD e42519c5b against origin/main 276d69383.
+    OMN-16442: the assertion is scoped to the lanes whose artifacts can reach
+    prod. Applied lane-blind it was unsatisfiable on the dev lane: a dev head is
+    never an ancestor of a release-synced ``origin/main``, and the clean-tree
+    half refused on any stray file in the deploy-source clone (measured live
+    2026-09-08, command c73cc38a: DIRTY_TREE, then NOT_PROMOTED).
 
     The exemption is the DEV lane and only the DEV lane, named rather than
     derived from a negation, because the stability lane is where the
@@ -738,6 +756,7 @@ def assert_release_build_promoted(
     """
     if build_source != BuildSource.RELEASE:
         return
+    repo_dir = repo_dir or deploy_repo_dir()
     if runtime_lane == EnumRuntimeLane.DEV:
         logger.info(
             "assert_release_build_promoted: lane %s is exempt from the prod "
@@ -831,22 +850,6 @@ class ModelLaneConfig(BaseModel):
         return self.runtime_container or self.runtime_health_targets[0][0]
 
 
-_STABILITY_OVERLAY = f"{REPO_DIR}/docker/docker-compose.stability-test.yml"
-_PROD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.prod.yml"
-# OMN-15379: the dev/lab lane's own overlay. Its only content is
-# ``ONEX_MIGRATION_LANE=dev`` on forward-migration -- the lane indicator that
-# releases the node_projection_registration trio (0000/0001/0002, CREATE +
-# heartbeat + ENABLE/FORCE ROW LEVEL SECURITY) from the operator fence, per
-# operator ruling 15 which makes the lab the FORCE proving ground. It is a
-# SEPARATE file, not a line in the base compose, so that no non-dev lane can
-# inherit it: every lane overlay merges the base, and stability-test's
-# forward-migration override inherits the base ``environment:`` block wholesale.
-# Unset indicator = FULL fence, so this list is fail-closed on omission.
-# Must stay matched with ``resolve_compose_file_args`` in
-# ``onex-runtime-deploy``.
-_DEV_LANE_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-lane.yml"
-_DEV_TENANT_FOLD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-tenant-fold.yml"
-
 # OMN-15181 round 3 (Finding 9): maps each prod runtime service to the compose
 # env var that repoints its `image:` field (docker-compose.prod.yml). This is
 # the single source mapping consumed by ``_resolve_prod_image_env`` -- no
@@ -856,17 +859,20 @@ PROD_IMAGE_ENV_VAR_FOR_SERVICE: dict[str, str] = {
     "runtime-effects": "PROD_RUNTIME_EFFECTS_IMAGE",
 }
 
-_LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
+
+_D = "docker/docker-compose"
+_BASE = f"{_D}.infra.yml"
+_LANE_TEMPLATES: dict[EnumRuntimeLane, ModelLaneConfig] = {
     EnumRuntimeLane.DEV: ModelLaneConfig(
         lane=EnumRuntimeLane.DEV,
-        compose_files=(COMPOSE_FILE, _DEV_LANE_OVERLAY, _DEV_TENANT_FOLD_OVERLAY),
+        compose_files=(_BASE, f"{_D}.dev-lane.yml", f"{_D}.dev-tenant-fold.yml"),
         compose_project=COMPOSE_PROJECT,
         postgres_container="omnibase-infra-postgres",
         runtime_health_targets=RUNTIME_HEALTH_TARGETS,
     ),
     EnumRuntimeLane.STABILITY_TEST: ModelLaneConfig(
         lane=EnumRuntimeLane.STABILITY_TEST,
-        compose_files=(COMPOSE_FILE, _STABILITY_OVERLAY),
+        compose_files=(_BASE,),
         compose_project="omnibase-infra-stability-test",
         postgres_container="omnibase-infra-stability-test-postgres",
         # The overlay disables these by profile and gives them no container_name of
@@ -883,7 +889,7 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
     ),
     EnumRuntimeLane.PROD: ModelLaneConfig(
         lane=EnumRuntimeLane.PROD,
-        compose_files=(COMPOSE_FILE, _PROD_OVERLAY),
+        compose_files=(_BASE,),
         compose_project="omnibase-infra-prod",
         postgres_container="omnibase-infra-prod-postgres",
         # OMN-15181: must match the container_name: override in
@@ -900,11 +906,29 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
 }
 
 
+@functools.cache
+def _lane_configs() -> dict[EnumRuntimeLane, ModelLaneConfig]:
+    """The lane compositions, compose files resolved against the deploy source.
+
+    A lane other than dev layers the overlay named for it, ``docker-compose.<lane>.yml``.
+    """
+    root = deploy_repo_dir()
+
+    def files(lane: EnumRuntimeLane, config: ModelLaneConfig) -> tuple[str, ...]:
+        extra = () if lane is EnumRuntimeLane.DEV else (f"{_D}.{lane.value}.yml",)
+        return tuple(f"{root}/{path}" for path in (*config.compose_files, *extra))
+
+    return {
+        lane: config.model_copy(update={"compose_files": files(lane, config)})
+        for lane, config in _LANE_TEMPLATES.items()
+    }
+
+
 #: The instance whose composition ``lane_config_for(DEV)`` returns. ``dev-201``
 #: until the agent selects otherwise, so a process with no router (fenced away
 #: from dev) and every caller that predates instances see the .201 lane. It is
 #: also the routing table's pinned default, the one instance that declares no
-#: ``lane:`` block and keeps ``_LANE_CONFIGS[DEV]``.
+#: ``lane:`` block and keeps ``_lane_configs()[DEV]``.
 DEFAULT_DEV_INSTANCE = "dev-201"
 
 
@@ -922,7 +946,7 @@ def lane_with_phases_off(
 
 
 def dev_instance_lane_config(
-    spec: ModelInstanceLane, *, repo_dir: str = REPO_DIR
+    spec: ModelInstanceLane, *, repo_dir: str | None = None
 ) -> ModelLaneConfig:
     """An instance's dev-lane composition, from its routing-table ``lane:`` block.
 
@@ -933,9 +957,8 @@ def dev_instance_lane_config(
     config = ModelLaneConfig(
         lane=EnumRuntimeLane.DEV,
         compose_files=(
-            COMPOSE_FILE,
-            _DEV_LANE_OVERLAY,
-            f"{repo_dir}/{spec.compose_overlay}",
+            *_lane_configs()[EnumRuntimeLane.DEV].compose_files[:2],
+            f"{repo_dir or deploy_repo_dir()}/{spec.compose_overlay}",
         ),
         compose_project=spec.compose_project,
         build_project=spec.compose_project,
@@ -951,7 +974,7 @@ def dev_instance_lane_config(
 
 
 def build_dev_instance_lane_configs(
-    specs: Mapping[str, ModelInstanceLane], *, repo_dir: str = REPO_DIR
+    specs: Mapping[str, ModelInstanceLane], *, repo_dir: str | None = None
 ) -> dict[str, ModelLaneConfig]:
     """Every dev instance's composition: the default's historical one, plus one
     per ``lane:`` block."""
@@ -959,7 +982,7 @@ def build_dev_instance_lane_configs(
         # The default declares no ``lane:`` block, so its phases are the table's
         # ``flags:`` (OMN-21629).
         DEFAULT_DEV_INSTANCE: lane_with_phases_off(
-            _LANE_CONFIGS[EnumRuntimeLane.DEV],
+            _lane_configs()[EnumRuntimeLane.DEV],
             lane_flags_for_instance(
                 AGENT_CLONE_ROOT, DEFAULT_DEV_INSTANCE
             ).disabled_phases,
@@ -977,9 +1000,10 @@ def build_dev_instance_lane_configs(
 #: once at agent start from the instance the routing table resolved
 #: (``select_dev_instance``). Built from the table shipped with this code, the
 #: same copy the router reads identity from, so the two cannot disagree.
-DEV_INSTANCE_LANE_CONFIGS: dict[str, ModelLaneConfig] = build_dev_instance_lane_configs(
-    load_instance_lanes(AGENT_CLONE_ROOT)
-)
+@functools.cache
+def dev_instance_lane_configs() -> dict[str, ModelLaneConfig]:
+    return build_dev_instance_lane_configs(load_instance_lanes(AGENT_CLONE_ROOT))
+
 
 #: OMN-20867. Each dev instance's runtime lane id (its ``verify.receipt_lane``),
 #: the name its env fragment is read under in the deployment overlay clone.
@@ -1002,10 +1026,10 @@ def select_dev_instance(name: str) -> None:
     .202 that fallback would bring up an ``omnibase-infra`` project on a host it
     is not declared for.
     """
-    if name not in DEV_INSTANCE_LANE_CONFIGS:
+    if name not in dev_instance_lane_configs():
         raise ValueError(
             f"deploy-agent instance {name!r} has no dev-lane composition "
-            f"(declared: {', '.join(sorted(DEV_INSTANCE_LANE_CONFIGS))})"
+            f"(declared: {', '.join(sorted(dev_instance_lane_configs()))})"
         )
     _DevInstanceSelection.name = name
 
@@ -1026,9 +1050,9 @@ def _folded_dev_services(lane: EnumRuntimeLane) -> set[str]:
 def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
     if lane is EnumRuntimeLane.DEV:
-        config = DEV_INSTANCE_LANE_CONFIGS[_DevInstanceSelection.name]
+        config = dev_instance_lane_configs()[_DevInstanceSelection.name]
     else:
-        config = _LANE_CONFIGS[lane]
+        config = _lane_configs()[lane]
     if retired := _folded_dev_services(lane):
         config = load_dev_boot_guard().retire_lane_services(
             config, retired, {ONEX_API_SERVICE: EnumInstancePhase.ONEX_API_PIN}
@@ -1063,7 +1087,7 @@ def _without_disabled_services(
 
 # OMN-15181 round 4 (Finding 11): single shared source mapping a canonical
 # requested service name to its position in every lane's ``runtime_health_targets``
-# tuple (see ``_LANE_CONFIGS`` above -- each lane orders its targets
+# tuple (see ``_lane_configs()`` above -- each lane orders its targets
 # (runtime, runtime-effects)). Consumed by both ``resolve_stability_ready_digest``
 # and ``verify_running_image_digest`` so per-service digest resolution never
 # forks a second, independently-drifting copy of "which index is which
@@ -1285,7 +1309,8 @@ def _first_party_audit_args(lane: EnumRuntimeLane, declared_pr: str) -> list[str
     if not declared_pr:
         return []
     path = (
-        Path(REPO_DIR) / "src/omnibase_infra/validation/checker_first_party_sources.py"
+        Path(deploy_repo_dir())
+        / "src/omnibase_infra/validation/checker_first_party_sources.py"
     )
     spec = importlib.util.spec_from_file_location("first_party_checker", path)
     if spec is None or spec.loader is None:
@@ -1361,31 +1386,10 @@ def _run(
     )
 
 
-def _sync_own_unit_after_pull(agent_dir: str) -> str | None:
-    """Repair only our Linux unit and return its name when restart is needed.
-
-    OMN-20037: pulling the PATH fix left the installed unit stale for two days.
-    A re-exec cannot pick up systemd's changed unit environment; a restart can.
-    """
-    if sys.platform != "linux":
-        return None
-    try:
-        unit_name = own_unit_name_from_cgroup(Path("/proc/self/cgroup").read_text())
-    except OSError:
-        return None
-    if unit_name is None:
-        return None
-    repo_root = Path(agent_dir).resolve().parents[1]
-    changed = sync_own_unit(
-        load_manifest(repo_root / "deploy" / "unit-drift-manifest.yaml"),
-        unit_name=unit_name,
-        repo_root=repo_root,
-        hostname=socket.gethostname(),
-        home=Path.home(),
-        runner=lambda cmd: _run(cmd, timeout=60).returncode,
-        stamp=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
+def _sync_own_unit_after_pull(agent_dir: str, timeout: int) -> Any:
+    return load_dev_boot_guard("handler_restart_on_merge").sync_own_unit_after_pull(
+        sys.modules[__name__], agent_dir, timeout, os.environ
     )
-    return unit_name if changed else None
 
 
 def _uv_sync_after_pull(agent_dir: str, boundary: EnumSelfUpdateBoundary) -> None:
@@ -1533,7 +1537,7 @@ def _rebuild_tracking_branch_from_remote(
 
 def _load_runtime_policy_env(path: Path | None = None) -> dict[str, str]:
     """Load contract-rendered runtime policy env values."""
-    env_path = RUNTIME_POLICY_ENV_FILE if path is None else path
+    env_path = runtime_policy_env_file() if path is None else path
     return _load_dotenv_file(env_path)
 
 
@@ -2036,7 +2040,7 @@ def _dev_broker_policy_env(env: Mapping[str, str]) -> dict[str, str]:
         return {}
     command = [
         sys.executable,
-        f"{REPO_DIR}/scripts/render_runtime_policy_env.py",
+        f"{deploy_repo_dir()}/scripts/render_runtime_policy_env.py",
         "--dev-broker-only",
         "--format",
         "json",
@@ -2084,6 +2088,7 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     # value the operator store holds for them; a key it leaves out keeps
     # whatever the store says, or stays unset.
     env.update(_lane_env_overlay())
+    _clone_handler().declare_agent_overlay_store(env, sys.modules[__name__])
     # OMN-24025: the rendered LLM endpoint env wins over the operator store, like the lane
     # fragment, and the compose mount reads the rewritten lane overlay directory.
     llm_env, rendered_lane_overlay_dir = _llm_endpoint_env_overlay(env)
@@ -2138,7 +2143,7 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
 
 def _env_with_repo_pythonpath(env: Mapping[str, str]) -> dict[str, str]:
     """Return env with this deploy repo's src path first on PYTHONPATH."""
-    repo_src = f"{REPO_DIR}/src"
+    repo_src = f"{deploy_repo_dir()}/src"
     current = env.get("PYTHONPATH", "")
     return {
         **env,
@@ -2146,9 +2151,9 @@ def _env_with_repo_pythonpath(env: Mapping[str, str]) -> dict[str, str]:
     }
 
 
-def _runtime_version_from_pyproject(repo_dir: str = REPO_DIR) -> str:
+def _runtime_version_from_pyproject(repo_dir: str | None = None) -> str:
     """Return the runtime package version stamped into rebuilt images."""
-    pyproject = Path(repo_dir) / "pyproject.toml"
+    pyproject = Path(repo_dir or deploy_repo_dir()) / "pyproject.toml"
     if not pyproject.is_file():
         pyproject = Path(__file__).resolve().parents[3] / "pyproject.toml"
     try:
@@ -3017,26 +3022,22 @@ def _spawn_compose(
 
 
 def runtime_image_build_budget(
-    profile: str, compose_files: tuple[str, ...] = (COMPOSE_FILE,)
+    profile: str, compose_files: tuple[str, ...] | None = None
 ) -> ModelBuildBudget:
     """Derive the ``docker compose --profile <profile> build`` ceiling (OMN-18072).
 
     Reads the SAME compose files the build is about to invoke and the
     Dockerfiles they name, so a new runtime service or a new Dockerfile step
     moves the ceiling with it. See ``deploy_agent.build_budget`` for the
-    measurements and for why a percentile over the recorded history is not
-    derivable from a history whose two longest entries were killed at the flat
-    constant rather than measured.
+    measurements and why a percentile over the recorded history is not derivable.
 
-    ``compose_files`` defaults to the tracked base alone, which is what the
-    lane-agnostic build passes. OMN-18108's DEV-lane addendum build passes the
-    base plus the lane overlay: the ceiling it derives is therefore an
-    over-estimate (it counts the base images too, which that command does not
-    rebuild). Over-estimating a ceiling only delays a kill; under-estimating it
-    kills a healthy build, which is the failure OMN-18072 existed to remove.
+    ``compose_files`` defaults to the tracked base alone (the lane-agnostic
+    build). OMN-18108's DEV-lane addendum build passes base plus overlay, an
+    over-estimate (it counts base images that command does not rebuild); that
+    only delays a kill, where under-estimating kills a healthy build.
     """
     return derive_image_build_budget(
-        compose_files,
+        compose_files or (compose_file(),),
         profile,
         per_step_seconds=RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
         per_image_seconds=RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
@@ -3048,12 +3049,10 @@ def runtime_image_build_budget(
 def preflight_required_compose_env_script() -> str:
     """Path to the stdlib-only required-compose-env preflight in the deploy source.
 
-    A named seam rather than an inline f-string so a test can point it at a
-    checkout that has the script, or at one that does not, without reaching into
-    ``REPO_DIR`` -- the same visible path repoint the compose-up and image-build
-    budget fixtures already take (OMN-18057, OMN-18072).
+    A named seam so a test can point it at a checkout that has the script, or
+    one that does not (the repoint the OMN-18057 and OMN-18072 fixtures take).
     """
-    return f"{REPO_DIR}/scripts/preflight_required_compose_env.py"
+    return f"{deploy_repo_dir()}/scripts/preflight_required_compose_env.py"
 
 
 # =============================================================================
@@ -3091,9 +3090,9 @@ def deploy_gateway_script() -> str:
 
     A named seam, like ``preflight_required_compose_env_script`` above, so a
     test can point it at a checkout that has the script or at one that does not
-    without reaching into ``REPO_DIR``.
+    without reaching into ``deploy_repo_dir()``.
     """
-    return f"{REPO_DIR}/scripts/deploy-gateway.sh"
+    return f"{deploy_repo_dir()}/scripts/deploy-gateway.sh"
 
 
 def gateway_env_file() -> str:
@@ -3255,8 +3254,6 @@ GATEWAY_ENV_PASSTHROUGH_VARS: frozenset[str] = frozenset(
 # replaces (the one live rebuild since #3524 merged was killed at exactly the
 # old flat 900s, ~780s of it spent on a cold build that left the recreate half
 # nothing).
-GATEWAY_COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.gateway.yml"
-GATEWAY_SERVICE_UNIT = f"{REPO_DIR}/docker/gateway/onex-gateway-forwarder.service"
 # A label only: neither gateway service declares a compose ``profiles:`` key,
 # so ``derive_image_build_budget`` selects both regardless of this value (see
 # ``build_budget._buildable_services``) -- named for a readable ``describe()``.
@@ -3288,10 +3285,11 @@ def gateway_deploy_budget() -> ModelGatewayDeployBudget:
     about to invoke, so a change to any of them moves the ceiling with it
     instead of silently re-opening this failure one number later.
     """
+    root = deploy_repo_dir()
     return derive_gateway_deploy_budget(
-        (GATEWAY_COMPOSE_FILE,),
+        (f"{root}/docker/docker-compose.gateway.yml",),
         GATEWAY_BUILD_PROFILE,
-        GATEWAY_SERVICE_UNIT,
+        f"{root}/docker/gateway/onex-gateway-forwarder.service",
         per_step_seconds=RUNTIME_IMAGE_BUILD_PER_STEP_SECONDS,
         per_image_seconds=RUNTIME_IMAGE_BUILD_PER_IMAGE_SECONDS,
         build_floor_seconds=RUNTIME_IMAGE_BUILD_FLOOR_SECONDS,
@@ -3829,6 +3827,9 @@ class DeployExecutor:
 
         disk_sha = head_result.stdout.strip()
         remote_sha = remote_result.stdout.strip()
+        guard = load_dev_boot_guard("handler_restart_on_merge")
+        if guard.skip_refused_revision(sys.modules[__name__], remote_sha, os.environ):
+            return
 
         # STEP 1 -- bring the CLONE up to the remote. This is the only thing the
         # clone-versus-remote comparison decides, and the only thing it ever
@@ -3898,7 +3899,7 @@ class DeployExecutor:
 
         # OMN-20037: even a current clone can have a stale installed unit.
         try:
-            synced_unit = _sync_own_unit_after_pull(agent_dir)
+            synced_unit = _sync_own_unit_after_pull(agent_dir, timeout)
             if synced_unit is not None:
                 logger.info(
                     "self_update[boundary=%s]: synced unit %s; restarting via systemd",
@@ -3907,14 +3908,18 @@ class DeployExecutor:
                 )
                 if on_before_reexec is not None:
                     on_before_reexec()
-                # A transient unit outside this cgroup runs the restart (OMN-22683): run from
-                # inside it, the restart command was killed by the unit stop, which re-execed in
-                # this pid and let systemd SIGKILL the next job. Ending 0 or -SIGTERM is under way.
-                restart = _run([*SELF_RESTART_COMMAND.split(), synced_unit], timeout)
-                if restart.returncode not in (0, -signal.SIGTERM):
-                    raise RuntimeError(f"unit restart exited {restart.returncode}")
+                guard.restart_own_unit(
+                    sys.modules[__name__],
+                    synced_unit,
+                    agent_dir=agent_dir,
+                    loaded_sha=loaded_sha,
+                    timeout=timeout,
+                    env=os.environ,
+                )
                 return
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
+            if isinstance(exc, guard.AgentLeftStoppedError):
+                raise
             logger.warning(
                 "self_update[boundary=%s]: unit sync/restart failed: %s",
                 boundary.value,
@@ -3942,6 +3947,9 @@ class DeployExecutor:
             loaded_sha[:12],
             disk_sha[:12],
         )
+
+        if guard.reexec_blocked_by_settings(sys.modules[__name__], os.environ):
+            return
 
         # Sync deps so new imports are available after re-exec.
         _uv_sync_after_pull(agent_dir, boundary)
@@ -3999,12 +4007,9 @@ class DeployExecutor:
         timeout = PHASE_TIMEOUTS[Phase.PREFLIGHT]
 
         # Check git remote is reachable
-        result = _run(
-            ["git", "-C", REPO_DIR, "ls-remote", "--exit-code", "origin"],
-            timeout=timeout,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Git remote unreachable: {result.stderr}")
+        probe = _clone_handler().probe_deploy_source(sys.modules[__name__], timeout)
+        if probe.returncode != 0:
+            raise RuntimeError(f"Git remote unreachable: {probe.stderr}")
 
         # Check docker is available
         result = _run(["docker", "info"], timeout=timeout)
@@ -4021,19 +4026,17 @@ class DeployExecutor:
         on_phase_update: PhaseCallback,
         lock_timeout: float = DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
     ) -> str:
-        """Fetch and reset the SHARED deploy-source clone to ``git_ref``.
+        """Fetch and reset the agent's OWN deploy-source clone to ``git_ref``.
 
-        OMN-18124: under the lane's per-compose-project host lock, the SAME lock
-        ``scripts/runtime_build/refresh_dev_lane.sh`` has held over its own
-        critical section since OMN-16729. ``REPO_DIR`` is shared with that
-        script and this method took nothing, so the two rewrote the same tree
-        concurrently -- recorded in the clone's reflog at 21:26:37 / 23:06:50 /
-        23:31:49 local on 2026-09-09.
+        OMN-18124: taken under the lane's per-compose-project host lock, the SAME
+        lock ``scripts/runtime_build/refresh_dev_lane.sh`` holds over its critical
+        section. OMN-24562: ``deploy_repo_dir()`` is the agent's own clone, never the
+        canonical clone those tools use; the lock still excludes a concurrent
+        refresh.
 
         ``lane`` is REQUIRED and has no default: it decides WHICH lane's lock is
         taken, and a lock on the wrong lane excludes nobody while looking like
-        protection. Guessing ``dev`` here is the same class of defect as the
-        branch literal OMN-16442 removed from this package (rule 8).
+        protection (rule 8).
 
         The lock wraps the whole method rather than the reset alone, so a
         contended lane is refused with the tree untouched -- not after a fetch
@@ -4058,16 +4061,12 @@ class DeployExecutor:
         timeout = PHASE_TIMEOUTS[Phase.GIT]
 
         # Fetch with 1 retry
-        result = _run(
-            ["git", "-C", REPO_DIR, "fetch", "--all", "--prune"],
-            timeout=timeout,
-        )
+        result = _clone_handler().fetch_deploy_source(sys.modules[__name__], timeout)
         if result.returncode != 0:
             logger.warning("Git fetch failed, retrying in 5s...")
             time.sleep(5)
-            result = _run(
-                ["git", "-C", REPO_DIR, "fetch", "--all", "--prune"],
-                timeout=timeout,
+            result = _clone_handler().fetch_deploy_source(
+                sys.modules[__name__], timeout
             )
             if result.returncode != 0:
                 raise RuntimeError(f"Git fetch failed: {result.stderr}")
@@ -4082,7 +4081,7 @@ class DeployExecutor:
 
         # Reset to ref
         result = _run(
-            ["git", "-C", REPO_DIR, "reset", "--hard", git_ref],
+            ["git", "-C", deploy_repo_dir(), "reset", "--hard", git_ref],
             timeout=timeout,
         )
         if result.returncode != 0:
@@ -4090,7 +4089,7 @@ class DeployExecutor:
 
         # Get SHA
         result = _run(
-            ["git", "-C", REPO_DIR, "rev-parse", "HEAD"],
+            ["git", "-C", deploy_repo_dir(), "rev-parse", "HEAD"],
             timeout=timeout,
         )
         sha = result.stdout.strip()
@@ -4159,7 +4158,7 @@ class DeployExecutor:
 
         argv = [
             "python3",
-            str(REPOINT_ONEX_API_SCRIPT),
+            str(repoint_onex_api_script()),
             "--env-file",
             str(env_file),
             "--omninode-clone",
@@ -4258,8 +4257,9 @@ class DeployExecutor:
         """
         tracking_ref = load_tracking_remote_ref_from_env()
 
+        repo = deploy_repo_dir()
         symbolic = _run(
-            ["git", "-C", REPO_DIR, "rev-parse", "--symbolic-full-name", git_ref],
+            ["git", "-C", repo, "rev-parse", "--symbolic-full-name", git_ref],
             timeout=timeout,
         )
         is_branch_reference = bool(symbolic.stdout.strip())
@@ -4271,7 +4271,7 @@ class DeployExecutor:
                 [
                     "git",
                     "-C",
-                    REPO_DIR,
+                    deploy_repo_dir(),
                     "rev-list",
                     "--left-right",
                     "--count",
@@ -4343,7 +4343,7 @@ class DeployExecutor:
             raise PreflightScriptUnavailableError(
                 f"PREFLIGHT_SCRIPT_UNAVAILABLE for lane {lane.value} -- the "
                 f"required-compose-env preflight could not be run: {script} is "
-                f"not a file. The deploy source directory is {REPO_DIR}; a clone "
+                f"not a file. The deploy source directory is {deploy_repo_dir()}; a clone "
                 "checked out at a commit that predates this script produces "
                 "exactly this. Compose validation was not attempted, and this "
                 "says nothing about whether the compose environment is complete."
@@ -4354,11 +4354,11 @@ class DeployExecutor:
             "--lane",
             lane.value,
             "--runtime-policy-env",
-            f"{REPO_DIR}/docker/runtime-policy.env",
+            f"{deploy_repo_dir()}/docker/runtime-policy.env",
         ]
         for compose_file in compose_files:
             cmd.extend(["--compose-file", compose_file])
-        result = _run(cmd, timeout=timeout, cwd=REPO_DIR, env=_compose_env())
+        result = _run(cmd, timeout=timeout, cwd=deploy_repo_dir(), env=_compose_env())
         if result.returncode != 0:
             raise RuntimeError(
                 "REQUIRED_COMPOSE_ENV_MISSING for lane "
@@ -4377,27 +4377,24 @@ class DeployExecutor:
         """Render the catalog to the build artifact and validate both composes.
 
         Runs ``uv run python -m omnibase_infra.docker.catalog.cli generate
-        <bundles> --output <COMPOSE_GEN_OUTPUT_FILE>``, then validates the render
+        <bundles> --output <compose_gen_output_file()>``, then validates the render
         and the lane's real compose stack.
 
         OMN-17291 -- WHY THE OUTPUT IS NOT THE TRACKED FILE. Until this ticket
-        the ``--output`` here was ``COMPOSE_FILE``, so every deploy overwrote a
+        the ``--output`` here was ``compose_file()``, so every deploy overwrote a
         TRACKED file in place (OMN-8430). Two consequences, both measured on the
         lab deploy-source clone:
 
         1. The clone was permanently dirty. A ``git reset --hard`` in git_pull()
            was undone six seconds later by this method, every deploy, with a
            ~2900-line uncommitted delta that read like a lane edit and was not.
-        2. The two files are not the same stack. The render carries 12 services
-           the tracked file does not -- the ``runtime`` bundle pulls in
-           runtime-integrations (docker/catalog/bundles.yaml) -- and 31 required
-           ``${VAR:?}`` names against the tracked file's 50, nine of which
-           ``onex-runtime-deploy`` and
+        2. The two files are not the same stack: the render carries 12 services
+           the tracked file does not and 31 required ``${VAR:?}`` names against
+           its 50, nine of which ``onex-runtime-deploy`` and
            ``scripts/runtime_build/refresh_stability_lane.sh`` cannot supply. So
-           once the render had replaced the tracked file, the sanctioned deploy
-           scripts failed compose validation and auto-restored -- the dev and
-           stability lanes, the proof surface for beta work, were re-broken by
-           every run of this agent.
+           once the render replaced the tracked file, the sanctioned deploy
+           scripts failed compose validation and auto-restored, re-breaking the
+           dev and stability lanes on every run of this agent.
 
         The catalog CLI's own declared default output is
         ``docker/docker-compose.generated.yml`` and .gitignore already ignores
@@ -4422,20 +4419,20 @@ class DeployExecutor:
             "uv",
             "run",
             "--project",
-            REPO_DIR,
+            deploy_repo_dir(),
             "python",
             "-m",
             "omnibase_infra.docker.catalog.cli",
             "generate",
             *selected,
             "--output",
-            COMPOSE_GEN_OUTPUT_FILE,
+            compose_gen_output_file(),
         ]
 
         result = _run(
             cmd,
             timeout=timeout,
-            cwd=REPO_DIR,
+            cwd=deploy_repo_dir(),
             env=_env_with_repo_pythonpath(_compose_env()),
         )
         if result.returncode != 0:
@@ -4469,7 +4466,7 @@ class DeployExecutor:
                 "docker",
                 "compose",
                 "-f",
-                COMPOSE_GEN_OUTPUT_FILE,
+                compose_gen_output_file(),
                 "--profile",
                 profile,
                 "config",
@@ -4479,13 +4476,13 @@ class DeployExecutor:
             render_result = _run(
                 render_cmd,
                 timeout=timeout,
-                cwd=REPO_DIR,
+                cwd=deploy_repo_dir(),
                 env=_compose_env(),
             )
             if render_result.returncode != 0:
                 raise RuntimeError(
                     "compose_gen produced an invalid catalog render at "
-                    f"{COMPOSE_GEN_OUTPUT_FILE}: "
+                    f"{compose_gen_output_file()}: "
                     f"{render_result.stderr.strip() or render_result.stdout.strip()}"
                 )
 
@@ -4522,7 +4519,7 @@ class DeployExecutor:
             validate_result = _run(
                 validate_cmd,
                 timeout=timeout,
-                cwd=REPO_DIR,
+                cwd=deploy_repo_dir(),
                 env=_compose_env(),
             )
             if validate_result.returncode != 0:
@@ -4562,10 +4559,8 @@ class DeployExecutor:
         on_phase_update(Phase.SEED, PhaseStatus.IN_PROGRESS)
         timeout = 120  # 2 minutes max for seed
 
-        seed_script = f"{REPO_DIR}/scripts/seed-infisical.py"
-        venv_python = f"{REPO_DIR}/.venv/bin/python"
-
-        import shutil
+        seed_script = f"{deploy_repo_dir()}/scripts/seed-infisical.py"
+        venv_python = f"{deploy_repo_dir()}/.venv/bin/python"
 
         # Resolve Python: prefer venv, fall back to uv, then system python3
         python_bin = (
@@ -4578,7 +4573,7 @@ class DeployExecutor:
                 python_bin,
                 seed_script,
                 "--contracts-dir",
-                f"{REPO_DIR}/src/omnibase_infra/nodes",
+                f"{deploy_repo_dir()}/src/omnibase_infra/nodes",
                 "--create-missing-keys",
                 "--execute",
             ]
@@ -4587,11 +4582,11 @@ class DeployExecutor:
                 "uv",
                 "run",
                 "--project",
-                REPO_DIR,
+                deploy_repo_dir(),
                 "python",
                 seed_script,
                 "--contracts-dir",
-                f"{REPO_DIR}/src/omnibase_infra/nodes",
+                f"{deploy_repo_dir()}/src/omnibase_infra/nodes",
                 "--create-missing-keys",
                 "--execute",
             ]
@@ -4599,7 +4594,7 @@ class DeployExecutor:
         result = _run(
             cmd,
             timeout=timeout,
-            env={**_compose_env(), "PYTHONPATH": f"{REPO_DIR}/src"},
+            env={**_compose_env(), "PYTHONPATH": f"{deploy_repo_dir()}/src"},
         )
         if result.returncode != 0:
             logger.warning(
@@ -5091,7 +5086,7 @@ class DeployExecutor:
                 result = _run(
                     cmd,
                     timeout=timeout,
-                    cwd=REPO_DIR,
+                    cwd=deploy_repo_dir(),
                     env=self._gateway_child_env(build_source, git_ref=git_ref),
                 )
             except subprocess.TimeoutExpired as exc:
@@ -5103,8 +5098,8 @@ class DeployExecutor:
         finally:
             if artifact_stage is not None:
                 shutil.rmtree(artifact_stage, ignore_errors=True)
-            # deploy-gateway.sh stages the workspace into REPO_DIR again (OMN-20637).
-            _restore_build_byproducts(REPO_DIR)
+            # deploy-gateway.sh stages the workspace into deploy_repo_dir() again (OMN-20637).
+            _restore_build_byproducts(deploy_repo_dir())
         if result.returncode != 0:
             raise load_dev_boot_guard().DevCompanionLaneFailedError(
                 f"GATEWAY_DEPLOY_FAILED: {' '.join(cmd)} exited "
@@ -5575,7 +5570,7 @@ class DeployExecutor:
         expected_build_source: BuildSource | str | None = None,
         runtime_lane: EnumRuntimeLane = EnumRuntimeLane.PROD,
         git_ref: str = "",
-        compose_files: tuple[str, ...] = (COMPOSE_FILE,),
+        compose_files: tuple[str, ...] | None = None,
         services: tuple[str, ...] = (),
         stage_workspace: bool = True,
     ) -> None:
@@ -5596,6 +5591,7 @@ class DeployExecutor:
         False on that second call: staging already ran for the same refs in this
         deploy, and re-running it would reset ``sibling_source_refs``.
         """
+        compose_files = compose_files or (compose_file(),)
         profile = "core" if scope == Scope.CORE else "runtime"
         # OMN-18072: derived from the build model, never a bare constant. The
         # flat PHASE_TIMEOUTS entry that used to bound this killed two
@@ -5647,7 +5643,7 @@ class DeployExecutor:
             # every CI-triggered rebuild red. Each sibling resolves the declared
             # tracking head instead, and the SHA it lands on is recorded.
             self.sibling_source_refs = self._stage_workspace(
-                REPO_DIR,
+                deploy_repo_dir(),
                 omni_home,
                 git_ref,
                 load_tracking_remote_ref_from_env(),
@@ -5688,8 +5684,8 @@ class DeployExecutor:
         runtime_version = _runtime_version_from_pyproject()
 
         compose_file_args: list[str] = []
-        for compose_file in compose_files:
-            compose_file_args.extend(["-f", compose_file])
+        for path in compose_files:
+            compose_file_args.extend(["-f", path])
         cmd = [
             "docker",
             "compose",
@@ -7211,7 +7207,7 @@ class DeployExecutor:
         from ready, restarted its clock, and swapped the container id under the
         compose-dev receipt's ``probe_generation_bound`` read.
 
-        The readings come from ``RUNTIME_HEALTH_WAIT_HELPERS``, also used by
+        The readings come from ``runtime_health_wait_helpers()``, also used by
         ``onex-runtime-deploy``. Both ``starting`` and ``healthy`` can outlive a
         failed host probe: retry with backoff inside the declared budget. Any
         other state or a spent budget returns the failed check. The caller

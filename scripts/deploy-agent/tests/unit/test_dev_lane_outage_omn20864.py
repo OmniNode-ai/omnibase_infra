@@ -304,7 +304,7 @@ class _Lane:
 def _real_helpers_no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     from deploy_agent import executor as executor_mod
 
-    monkeypatch.setattr(executor_mod, "RUNTIME_HEALTH_WAIT_HELPERS", HELPERS)
+    monkeypatch.setattr(executor_mod, "runtime_health_wait_helpers", lambda: HELPERS)
     monkeypatch.setattr(executor_mod, "_verify_recreate_sleep", lambda _s: None)
 
 

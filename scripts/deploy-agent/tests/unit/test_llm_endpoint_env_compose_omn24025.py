@@ -87,7 +87,7 @@ def dev_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
     lane_dir = _lane_overlays(tmp_path)
     state = tmp_path / "state"
     state.mkdir()
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(REPO_ROOT))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(REPO_ROOT))
     monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(lane_dir))
     monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", "dev")
     monkeypatch.setenv(ENV_STATE_DIR, str(state))

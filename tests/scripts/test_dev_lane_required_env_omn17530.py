@@ -5,7 +5,7 @@
 OMN-17530. The dev lane brings up two compose files, not one --
 ``docker/docker-compose.infra.yml`` plus ``docker/docker-compose.dev-lane.yml``
 (``resolve_compose_file_args`` in ``src/omnibase_infra/handlers/handler_runtime_deploy.sh``, and
-``_LANE_CONFIGS[DEV].compose_files`` in the deploy agent) -- and a ``${VAR:?}``
+``_lane_configs()[DEV].compose_files`` in the deploy agent) -- and a ``${VAR:?}``
 in either file is a hard requirement of the deploy.
 
 Only the base had a declared manifest. The overlay had none, so:
@@ -478,11 +478,12 @@ def test_dev_lane_compose_file_set_matches_both_deploy_paths() -> None:
     assert "docker-compose.dev-lane.yml" in resolver
 
     executor = _EXECUTOR.read_text(encoding="utf-8")
-    assert "_DEV_LANE_OVERLAY = " in executor
     assert "docker-compose.dev-lane.yml" in executor
-    dev_config = executor.split("EnumRuntimeLane.DEV: ModelLaneConfig(", 1)[1][:400]
+    dev_config = executor.split("EnumRuntimeLane.DEV: ModelLaneConfig(", 1)[1][:800]
+    # OMN-24562: the template paths are relative; ``_lane_configs`` resolves them against
+    # the agent's own clone on first use.
     assert (
-        "compose_files=(COMPOSE_FILE, _DEV_LANE_OVERLAY, _DEV_TENANT_FOLD_OVERLAY)"
+        'compose_files=(_BASE, f"{_D}.dev-lane.yml", f"{_D}.dev-tenant-fold.yml")'
         in dev_config
     ), (
         "the deploy agent's DEV lane no longer loads exactly "

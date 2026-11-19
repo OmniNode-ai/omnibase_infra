@@ -644,7 +644,7 @@ def test_agent_never_restores_a_planted_pre_fold_boot_good_image_under_the_fold(
     assert (
         "projection-registration-writer" in policy["DEV_RUNTIME_MAIN_FOLDABLE_SERVICES"]
     )
-    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", repo_policy)
+    monkeypatch.setattr(executor_mod, "runtime_policy_env_file", lambda: repo_policy)
     monkeypatch.setattr(executor_mod, "_load_runtime_policy_env", lambda: policy)
     cmd = ModelRebuildRequested(
         correlation_id=uuid4(),

@@ -56,7 +56,6 @@ from deploy_agent.events import (
 )
 from deploy_agent.executor import (
     DEPLOY_AGENT_DIR,
-    REPO_DIR,
     SCOPE_BUNDLES,
     DeployExecutor,
     DeployRolledBackError,
@@ -68,6 +67,8 @@ from deploy_agent.executor import (
     active_dev_instance,
     assert_prod_request_has_stability_digest,
     capture_rollback_point,
+    deploy_repo_dir,
+    deploy_source,
     lane_config_for,
     lane_runs_phase,
     load_dev_boot_guard,
@@ -276,7 +277,7 @@ def _read_dev_head(repository: str) -> str | None:
         ref: str | None = web.head_ref()
         return ref
     if repository == "omnibase_infra":
-        return read_dev_head(Path(REPO_DIR))
+        return read_dev_head(Path(deploy_repo_dir()))
     if (clone := _sibling_clone(repository)) is None:
         return None
     if repository in DEV_TAG_FOLLOWED_REPOSITORIES:
@@ -335,13 +336,6 @@ BRANCH_INSTALL_CHECK_INTERVAL_SECONDS = 120
 BRANCH_INSTALL_LOCK_TIMEOUT_SECONDS = 120.0
 BRANCH_INSTALL_CHECK_TIMEOUT_SECONDS = 180
 BRANCH_INSTALL_APPLY_TIMEOUT_SECONDS = 900
-#: The entry the declared installs are read, checked and applied through, run by file
-#: path like the agent's other host effects: it runs the branch install handler
-#: unchanged and publishes the dev runtime start event when the apply restarted a
-#: container (OMN-24013). It is run from the deploy-source clone's ``src`` (the same
-#: tree the job just built), so a change to it needs no release of the omnibase_infra
-#: package the agent venv holds.
-BRANCH_INSTALL_ENTRY = f"{REPO_DIR}/src/omnibase_infra/nodes/node_dev_roll_events_effect/runtime_dev_branch_install_reapply.py"
 JOB_READING = "nodes.node_deploy_job_reading_effect.runtime_deploy_job_reading"
 BRANCH_INSTALL_EXIT_NOT_WHOLE = 4
 
@@ -354,15 +348,7 @@ BRANCH_INSTALL_EXIT_NOT_WHOLE = 4
 #: (OMN-19501; before it, the single-flight lock and the dev lane), and a
 #: disabled run says so in the journal rather than being silent.
 LAB_OVERLAY_ENABLED = os.environ.get("DEPLOY_AGENT_LAB_OVERLAY", "on").lower() != "off"
-#: The ``omninode_infra`` clone the overlay is archived from. Derived from
-#: ``REPO_DIR``'s parent rather than written out, because the two are siblings in
-#: the same ``omni_home`` clone by construction and a second literal path is a
-#: second thing to keep in step (rule 6).
-LAB_OVERLAY_SOURCE_DIR = Path(
-    os.environ.get(
-        "DEPLOY_AGENT_LAB_OVERLAY_SOURCE", str(Path(REPO_DIR).parent / "omninode_infra")
-    )
-)
+
 
 # NOTE (OMN-13760): no systemd watchdog. _run_deploy runs minutes-long
 # synchronous subprocess.run() rebuilds — and a background pinger would only
@@ -483,6 +469,9 @@ DEV_LANE_DRIFT_REPUBLISH_AFTER = timedelta(minutes=15)
 
 class DeployAgent:
     def __init__(self, *, skip_self_update: bool = False):
+        load_dev_boot_guard("handler_deploy_source_clone").ensure_clone(
+            deploy_source(), served_sha=_read_running_ref("omnibase_infra") or ""
+        )
         self.job_store = JobStore(state_dir=STATE_DIR)
         self.executor = DeployExecutor(migration_record_dir=STATE_DIR)
         self._state = "idle"
@@ -514,7 +503,7 @@ class DeployAgent:
         # instance this host is (AC2). An agent fenced to other lanes routes
         # nothing.
         self._router = (
-            build_router_from_env(REPO_DIR)
+            build_router_from_env(deploy_repo_dir())
             if self._allowed_lanes & ROUTED_LANES
             else None
         )
@@ -526,7 +515,7 @@ class DeployAgent:
             # OMN-20867: the instance's lane env fragment is read from the
             # clone the lab-overlay apply archives from, so there is one answer
             # to which deployment overlay this host deploys.
-            set_lane_overlay_clone(LAB_OVERLAY_SOURCE_DIR)
+            set_lane_overlay_clone(Path(deploy_source().lab_overlay_source))
         # OMN-19509. The idle converge's state and its reads, each a seam a test
         # replaces. See _maybe_idle_converge.
         self._idle_converge_started_at = datetime.now(UTC)
@@ -883,7 +872,7 @@ class DeployAgent:
             # the terminal event needs a producer, which is this class's. A
             # consumer built without either -- every test that does not ask
             # for coalescing -- folds nothing.
-            ancestry_resolver=GitAncestryResolver(REPO_DIR),
+            ancestry_resolver=GitAncestryResolver(deploy_repo_dir()),
             on_superseded=self._publish_superseded,
             on_rejected=self._publish_rejection_notice,
             # OMN-19270. The lineage fence compares each command with the
@@ -891,7 +880,7 @@ class DeployAgent:
             # job that built it. Infra ancestry asks the resolver above, so it
             # and coalescing share one fetch cooldown.
             running_build=DockerProvenanceReader(_runtime_container_for_lane),
-            ref_resolver=GitRefResolver(REPO_DIR),
+            ref_resolver=GitRefResolver(deploy_repo_dir()),
             tracking_ref=load_tracking_remote_ref_from_env(),
             router=self._router,
             # OMN-19544 AC1: refuse, as busy, while a prover holds the host.
@@ -1189,7 +1178,8 @@ class DeployAgent:
         """The handler's argv; a merge probe gets each declared repository's clone and running ref."""
         argv = [
             sys.executable,
-            BRANCH_INSTALL_ENTRY,
+            # OMN-24013: the entry runs from the deploy-source clone's own src tree.
+            f"{deploy_repo_dir()}/src/omnibase_infra/nodes/node_dev_roll_events_effect/runtime_dev_branch_install_reapply.py",
             command,
             "--state-dir",
             str(STATE_DIR),
@@ -1199,7 +1189,7 @@ class DeployAgent:
         if command in ("apply", "release-due"):
             for repository in _declared_branch_install_repos():
                 clone = (
-                    Path(REPO_DIR)
+                    Path(deploy_repo_dir())
                     if repository == "omnibase_infra"
                     else _sibling_clone(repository)
                 )
@@ -1225,7 +1215,9 @@ class DeployAgent:
         env = {
             **os.environ,
             "PYTHONPATH": ":".join(
-                p for p in (f"{REPO_DIR}/src", os.environ.get("PYTHONPATH", "")) if p
+                p
+                for p in (f"{deploy_repo_dir()}/src", os.environ.get("PYTHONPATH", ""))
+                if p
             ),
         }
         timeout = (
@@ -2519,7 +2511,7 @@ class DeployAgent:
                 runtime_image_build_arg=API_RUNTIME_IMAGE_BUILD_ARG,
                 revision_label=API_REVISION_LABEL,
                 source_label=API_SOURCE_LABEL,
-                source_repo=LAB_OVERLAY_SOURCE_DIR.name,
+                source_repo=Path(deploy_source().lab_overlay_source).name,
                 timeout_seconds=API_BUILD_TIMEOUT_SECONDS,
             )
             result = load_dev_boot_guard(
@@ -2609,7 +2601,7 @@ class DeployAgent:
             ):
                 record = self.executor.deliver_onex_api_pin(
                     sha=manifest_sha,
-                    omninode_clone=LAB_OVERLAY_SOURCE_DIR,
+                    omninode_clone=Path(deploy_source().lab_overlay_source),
                     lane=cmd.runtime_lane,
                 )
         except LaneLockContendedError as exc:
@@ -2771,8 +2763,8 @@ class DeployAgent:
     def _lab_overlay_applier(self) -> LabOverlayApplier:
         return LabOverlayApplier(
             state_dir=STATE_DIR,
-            repo_dir=Path(REPO_DIR),
-            overlay_source_dir=LAB_OVERLAY_SOURCE_DIR,
+            repo_dir=Path(deploy_repo_dir()),
+            overlay_source_dir=Path(deploy_source().lab_overlay_source),
             env=os.environ,
         )
 

@@ -44,7 +44,7 @@ def test_validate_llm_endpoint_env_contract_checks_process_and_env_files(
     (home / ".omnibase" / ".env").write_text(
         "LLM_EMBEDDING_URL=http://192.168.86.201:8100\n"
     )
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(repo))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(repo))
     monkeypatch.setenv("HOME", str(home))
     # No store declared on the unit: the historical ~/.omnibase/.env fallback.
     monkeypatch.delenv("DEPLOY_AGENT_ENV_FILE", raising=False)
@@ -96,7 +96,7 @@ def test_validate_llm_endpoint_env_contract_reads_the_agents_own_env_store(
     workstation.write_text("LLM_EMBEDDING_URL=http://192.168.86.201:8100\n")
     lane_store = home / ".omnibase" / "dev-200.env"
     lane_store.write_text("LLM_EMBEDDING_URL=http://192.168.86.201:8002\n")
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(repo))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(repo))
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("OMNIBASE_ENV_FILE", raising=False)
     monkeypatch.setenv("DEPLOY_AGENT_ENV_FILE", str(lane_store))
@@ -132,7 +132,7 @@ def test_validate_llm_endpoint_env_contract_fails_on_stale_env_file(
     repo.mkdir()
     env_file = repo / ".env"
     env_file.write_text("LLM_EMBEDDING_URL=http://192.168.86.200:8100\n")
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(repo))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(repo))
     monkeypatch.setenv("OMNIBASE_ENV_FILE", str(env_file))
 
     def fake_run(

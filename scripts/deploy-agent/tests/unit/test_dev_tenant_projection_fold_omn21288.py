@@ -35,8 +35,8 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 def _committed_fold_overlay(monkeypatch: pytest.MonkeyPatch) -> None:
     """Read this checkout's fold overlay, not the deploy host's clone path."""
     monkeypatch.setattr(
-        "deploy_agent.executor.RUNTIME_POLICY_ENV_FILE",
-        REPO_ROOT / "docker/runtime-policy.env",
+        "deploy_agent.executor.runtime_policy_env_file",
+        lambda: REPO_ROOT / "docker/runtime-policy.env",
     )
 
 
@@ -99,7 +99,7 @@ def test_primary_dev_disables_the_tenant_carrier_only(
 def test_committed_policy_disables_every_folded_writer() -> None:
     """The committed policy folds the six in-process writers; each container is disabled."""
     policy = Path(__file__).resolve().parents[4] / "docker/runtime-policy.env"
-    with patch("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy):
+    with patch("deploy_agent.executor.runtime_policy_env_file", lambda: policy):
         folded = lane_folded_profiles(EnumRuntimeLane.DEV)
         config = lane_config_for(EnumRuntimeLane.DEV)
     assert set(RUNTIME_WRITERS) <= folded
@@ -299,7 +299,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
     executor = DeployExecutor()
     policy = Path(__file__).resolve().parents[4] / "docker/runtime-policy.env"
     with (
-        patch("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy),
+        patch("deploy_agent.executor.runtime_policy_env_file", lambda: policy),
         patch("deploy_agent.executor._run", side_effect=run),
         patch(
             "deploy_agent.executor.runtime_compose_up_budget",

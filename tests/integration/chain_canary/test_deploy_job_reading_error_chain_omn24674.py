@@ -68,6 +68,15 @@ _COVERED_LANES = (EnumRuntimeLane.DEV.value, EnumRuntimeLane.STABILITY_TEST.valu
 _SETTINGS = yaml.safe_load(_CONTRACT.read_text(encoding="utf-8"))["settings"]
 
 
+def _clear_deploy_source_caches() -> None:
+    for cached in (
+        executor_mod.deploy_source,
+        executor_mod._lane_configs,
+        executor_mod.dev_instance_lane_configs,
+    ):
+        cached.cache_clear()
+
+
 def _row_cells(row: str) -> dict[str, str]:
     parts = [part.strip() for part in row.split(" | ")]
     return dict(part.split("=", 1) for part in parts[2:] if "=" in part)
@@ -75,7 +84,10 @@ def _row_cells(row: str) -> dict[str, str]:
 
 @pytest.mark.parametrize("lane", [EnumRuntimeLane.DEV, EnumRuntimeLane.STABILITY_TEST])
 def test_error_a_failing_preflight_settles_a_failed_job_and_reads_not_working(
-    lane: EnumRuntimeLane, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    lane: EnumRuntimeLane,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     checkout = tmp_path / "deploy-source"
     checkout.mkdir()
@@ -84,8 +96,33 @@ def test_error_a_failing_preflight_settles_a_failed_job_and_reads_not_working(
         check=True,
         env=scrub_git_location_env(os.environ),
     )
-    # No ``origin``: the real ``git ls-remote --exit-code origin`` exits non-zero.
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(checkout))
+    # An ``origin`` that answers nothing: the real ``git ls-remote --exit-code`` exits
+    # non-zero. OMN-24562: the probe reads the clone's origin first, so a clone with no
+    # origin at all is a typed clone error, not an unreachable remote.
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "remote",
+            "add",
+            "origin",
+            str(tmp_path / "no-remote.git"),
+        ],
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    # OMN-24562: the deploy source is the agent's own clone, read from its settings on
+    # first use and cached, so the checkout is declared through the environment and the
+    # caches are dropped before and after the test.
+    monkeypatch.setenv("DEPLOY_AGENT_REPO_DIR", str(checkout))
+    _clear_deploy_source_caches()
+    request.addfinalizer(_clear_deploy_source_caches)
+    monkeypatch.setattr(
+        executor_mod.load_dev_boot_guard("handler_deploy_source_clone"),
+        "ensure_clone",
+        lambda settings, *, served_sha: settings,
+    )
     monkeypatch.setenv("ONEX_LANE_LOCK_DIR", str(tmp_path / "lane-locks"))
     monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:19092")
     monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
@@ -131,7 +168,7 @@ def test_error_a_failing_preflight_settles_a_failed_job_and_reads_not_working(
     job = agent.job_store.load(cmd.correlation_id)
     assert job is not None and job.status == "failed"
     assert job.phase_results["preflight"] == "failed"
-    # The failure is the real ``git ls-remote`` against a checkout with no origin.
+    # The failure is the real ``git ls-remote`` against a checkout whose origin answers nothing.
     assert job.errors and job.errors[0].startswith("Git remote unreachable")
     assert len(results) == 1, "the terminal publish did not run the reading"
     row = results[0].row

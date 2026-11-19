@@ -271,6 +271,15 @@ def _compose_files_the_deploy_agent_runs() -> set[str]:
                 and id(node) not in docstrings
             ):
                 named.update(compose.findall(node.value))
+    # The lane compositions are built from f-string parts; read the resolved tables.
+    sys.path.insert(0, str(DEPLOY_AGENT_PACKAGE.parent))
+    try:
+        from deploy_agent.executor import _lane_configs, deploy_repo_dir
+    finally:
+        sys.path.remove(str(DEPLOY_AGENT_PACKAGE.parent))
+    clone = deploy_repo_dir()
+    for config in _lane_configs().values():
+        named.update(path.removeprefix(f"{clone}/") for path in config.compose_files)
     return named
 
 

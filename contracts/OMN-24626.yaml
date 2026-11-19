@@ -1,0 +1,84 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24626
+title: "Deploy agent own clone: no import-time settings, keep the dev overlay mount, never stop agents on merge"
+summary: >-
+  The review of omnibase_infra#6027 at ffdc98cdb52d is answered: the deploy agent executor reads no settings at import time, the dev overlay store mount is populated, and an agent restart on merge never touches a prod agent and never leaves an agent stopped. The clone is seeded at the served commit and the mirror fallback holds on every fetch.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24626-review-6027
+    statement: >-
+      The review of omnibase_infra#6027 at ffdc98cdb52d is answered with a test per finding.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: Importing the deploy agent executor and agent modules, and the import line of the dev refresh script, reads no deploy-source settings; an unset setting raises naming it where it is first used. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_import_no_settings_omn24626.py -k import_no_settings -q fails on the head ffdc98cdb52d code
+      - id: AC2
+        statement: >-
+          AC2: The compose environment the agent renders for the dev lane names the populated overlay store as the source of the overlay store mount, and an absent or empty store is refused. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_overlay_mount_omn24626.py -k overlay_mount -q fails on the head ffdc98cdb52d code
+      - id: AC3
+        statement: >-
+          AC3: The restart set is the declared agent units whose own fence is not prod; a unit whose three deploy-source settings are neither declared in it nor carried by the running process is not synced and a process lacking them does not re-exec; a failed restart restarts the previous revision and a second failure is raised without touching another agent. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_omn24626.py -k restart_on_merge -q fails on the head ffdc98cdb52d code
+      - id: AC4
+        statement: >-
+          AC4: The agent's clone is created at the commit the agent was serving, never the canonical clone's HEAD, and a mirror that stops answering falls back to origin on a later fetch and on the reachability probe, each fallback counted and logged. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_deploy_source_seed_and_mirror_omn24626.py -q fails on the head ffdc98cdb52d code
+      - id: AC5
+        statement: >-
+          AC5: The new head of the pull request is commented for the orchestrator's re-review. -- falsifier: onex scm pr-view OmniNode-ai/omnibase_infra#6027 --source bus lists a comment naming the new head sha
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Import without settings, overlay store mount, restart on merge, clone seed and mirror fallback.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_import_no_settings_omn24626.py scripts/deploy-agent/tests/unit/test_overlay_mount_omn24626.py scripts/deploy-agent/tests/unit/test_restart_on_merge_omn24626.py scripts/deploy-agent/tests/unit/test_deploy_source_seed_and_mirror_omn24626.py -q -p no:randomly --no-cov -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24626-ac1-import-no-settings
+    description: >-
+      Subprocess imports with the settings scrubbed; the conftest setdefault mask is removed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_import_no_settings_omn24626.py -q -p no:randomly --no-cov -n 0 -k import_no_settings
+        cwd: .
+    binds_ac: [AC1]
+  - id: dod-omn24626-ac2-overlay-mount
+    description: >-
+      The mount source the dev compose file renders under the agent's own clone is the overlay store.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_overlay_mount_omn24626.py -q -p no:randomly --no-cov -n 0 -k overlay_mount
+        cwd: .
+    binds_ac: [AC2]
+  - id: dod-omn24626-ac3-restart-on-merge
+    description: >-
+      The restart set is computed from the unit manifest and each unit's own tracked fence.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_omn24626.py -q -p no:randomly --no-cov -n 0 -k restart_on_merge
+        cwd: .
+    binds_ac: [AC3]
+  - id: dod-omn24626-ac4-seed-and-mirror
+    description: >-
+      The clone is seeded at the served commit while the canonical clone's HEAD differs; the mirror is removed after creation and the next fetch falls back to origin and counts.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_source_seed_and_mirror_omn24626.py -q -p no:randomly --no-cov -n 0
+        cwd: .
+    binds_ac: [AC4]
+  - id: dod-omn24626-ac5-head-commented
+    description: >-
+      Reads the pull request through the bus and finds a comment naming the pushed branch head. Runs where the lane has the bus, not on the hosted runner.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: onex scm pr-view OmniNode-ai/omnibase_infra#6027 --source bus | grep -qF "$(git rev-parse origin/omn-24562-agent-own-clone)"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]

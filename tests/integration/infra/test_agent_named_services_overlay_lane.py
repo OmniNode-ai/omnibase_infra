@@ -73,10 +73,8 @@ def _render(project: str, *compose_files: str) -> dict[str, Any]:
 @pytest.fixture(autouse=True)
 def _committed_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     """Read this checkout's runtime policy, not the deploy host's clone path."""
-    monkeypatch.setattr(
-        "deploy_agent.executor.RUNTIME_POLICY_ENV_FILE",
-        REPO_ROOT / "docker/runtime-policy.env",
-    )
+    policy = REPO_ROOT / "docker/runtime-policy.env"
+    monkeypatch.setattr("deploy_agent.executor.runtime_policy_env_file", lambda: policy)
 
 
 @pytest.mark.integration

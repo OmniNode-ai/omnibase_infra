@@ -51,7 +51,7 @@
     <key>OMNI_HOME</key>
     <string>@LANE_ROOT@/omni_home</string>
     <key>DEPLOY_AGENT_REPO_DIR</key>
-    <string>@LANE_ROOT@/omni_home/omnibase_infra</string>
+    <string>@LANE_ROOT@/state/jobs-@INSTANCE@/deploy-source/omnibase_infra</string>
     <key>DEPLOY_AGENT_ENV_FILE</key>
     <string>@HOME@/.omnibase/@INSTANCE@.env</string>
     <key>DEPLOY_AGENT_PYTHON</key>
