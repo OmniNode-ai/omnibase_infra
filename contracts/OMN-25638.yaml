@@ -43,3 +43,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
+  - id: dod-omn25638-ac1-integration-fold-fixed-point
+    description: The contract the real handler writes to disk is a fixed point of the yamlfmt fold, judged by an independent restatement of the hook's rule.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_release_notes_apply_contract_fold_omn25638.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
