@@ -67,6 +67,11 @@ class FakeHostHandler(HandlerDeployRunners):
         self._rendered = _rendered_compose()
         self._job_root_declared = job_root_declared
 
+    async def _converge_lab_host_table(
+        self, request: ModelDeployRunnersRequest, timeout: int
+    ) -> str | None:
+        return None  # OMN-26098: covered by test_handler_deploy_runners_lab_host_table_omn26098
+
     async def _remote(self, host: str, command: str, timeout: int) -> str:
         if "compose" in command and "config" in command:
             return self._rendered

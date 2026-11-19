@@ -18,6 +18,9 @@ from omnibase_infra.models.model_action_archive_cache_fill_result import (
 )
 from omnibase_infra.models.model_deploy_runners_request import ModelDeployRunnersRequest
 from omnibase_infra.models.model_deploy_runners_result import ModelDeployRunnersResult
+from omnibase_infra.models.model_runner_lab_host_table_policy import (
+    ModelRunnerLabHostTablePolicy,
+)
 from omnibase_infra.models.model_runner_tmp_compose import ModelRunnerTmpCompose
 from omnibase_infra.models.model_runner_tmp_policy import ModelRunnerTmpPolicy
 from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
@@ -165,6 +168,128 @@ class HandlerDeployRunners:
             )
         return tuple(warnings)
 
+    async def _write_remote(
+        self, host: str, path: str, data: str, timeout: int
+    ) -> None:
+        """Overwrite ``path`` in place (inode, owner and mode kept) with ``data`` sent on stdin."""
+        process = await asyncio.create_subprocess_exec(
+            "ssh",
+            "--",
+            host,
+            f"set -eu; test -f {shlex.quote(path)}; cat > {shlex.quote(path)}",
+            stdin=asyncio.subprocess.PIPE,
+        )
+        try:
+            await asyncio.wait_for(process.communicate(data.encode()), timeout)
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+            raise
+        if process.returncode:
+            raise OSError(f"SSH exited {process.returncode}")
+
+    @staticmethod
+    def _home_path(value: str) -> str:
+        """A shell word for ``value``: absolute as is, otherwise under the remote user's home."""
+        if value.startswith("/"):
+            return shlex.quote(value)
+        return f'"$HOME"/{shlex.quote(value)}'
+
+    @staticmethod
+    def with_env_value(content: str, key: str, value: str) -> str:
+        """``content`` with exactly one ``key=value`` line and every other byte untouched.
+
+        The first existing ``key=`` line is replaced in place, later ones are dropped, and a missing key is
+        appended on its own line.
+        """
+        lines = re.findall(r"[^\n]*\n|[^\n]+", content)  # split on LF alone
+        out: list[str] = []
+        placed = False
+        for line in lines:
+            if line.startswith(f"{key}="):
+                if not placed:
+                    ending = "\n" if line.endswith("\n") else ""
+                    out.append(f"{key}={value}{ending}")
+                    placed = True
+                continue
+            out.append(line)
+        if not placed:
+            if out and not out[-1].endswith("\n"):
+                out[-1] += "\n"
+            out.append(f"{key}={value}\n")
+        return "".join(out)
+
+    async def _converge_lab_host_table(
+        self, request: ModelDeployRunnersRequest, timeout: int
+    ) -> str | None:
+        """OMN-26098: copy the overlay projection where the runners can read it and point ``docker/.env`` at it.
+
+        Returns a named refusal, or ``None`` when the copy is verified and the host's env file names it. The
+        projection is never created or replaced by an empty file: a missing or empty projection refuses the deploy.
+        """
+        table = ModelRunnerLabHostTablePolicy()
+        source = self._home_path(
+            request.lab_host_table_projection or table.projection_home_relative
+        )
+        target = self._home_path(table.copy_home_relative)
+        uid = table.reader_uid
+        script = "; ".join(
+            [
+                "set -eu",
+                f"src={source}",
+                f"dst={target}",
+                'if [ ! -s "$src" ]; then printf "MISSING:%s\\n" "$src"; exit 0; fi',
+                'test ! -L "$dst"',
+                'grp="$(id -g)"',
+                f'sudo -n install -d -o {uid} -g "$grp" -m {table.copy_dir_mode} -- "$(dirname "$dst")"',
+                f'if [ ! -e "$dst" ]; then sudo -n install -o {uid} -g "$grp" -m {table.copy_mode} /dev/null "$dst"; fi',
+                'sudo -n sh -c \'cat -- "$1" > "$2"\' sh "$src" "$dst"',
+                f'sudo -n chown {uid}:"$grp" -- "$dst"',
+                f'sudo -n chmod {table.copy_mode} -- "$dst"',
+                'printf "COPIED:%s\\n" "$dst"',
+            ]
+        )
+        try:
+            answer = (await self._remote(request.host, script, timeout)).strip()
+        except (OSError, TimeoutError):
+            return f"RUNNER-LAB-HOST-TABLE-COPY host={request.host}: cannot copy the projection."
+        kind, _, path = answer.partition(":")
+        if kind == "MISSING" and path:
+            return (
+                f"RUNNER-LAB-HOST-TABLE-PROJECTION host={request.host} path={path}: "
+                "the overlay projection is missing or empty."
+            )
+        if kind != "COPIED" or not path.startswith("/"):
+            return f"RUNNER-LAB-HOST-TABLE-COPY host={request.host}: unreadable copy answer."
+        try:
+            actual = await self._remote(
+                request.host,
+                f"LC_ALL=C stat -c '%F:%u:%a' -- {shlex.quote(path)}",
+                timeout,
+            )
+        except (OSError, TimeoutError):
+            actual = ""
+        if actual.strip() != f"regular file:{uid}:{table.copy_mode}":
+            return f"RUNNER-LAB-HOST-TABLE-VERIFY host={request.host} path={path}: owner or mode readback failed."
+        env_path = str(Path(request.host_dir) / "docker" / ".env")
+        try:
+            current = await self._remote(
+                request.host, f"cat -- {shlex.quote(env_path)}", timeout
+            )
+            updated = self.with_env_value(current, table.env_key, path)
+            if updated != current:
+                await self._write_remote(request.host, env_path, updated, timeout)
+        except (OSError, TimeoutError, ValueError):
+            return f"RUNNER-LAB-HOST-TABLE-ENV host={request.host} path={env_path}: cannot update the key."
+        _LOG.info(
+            "RUNNER-LAB-HOST-TABLE-READY host=%s path=%s uid=%s mode=%s",
+            request.host,
+            path,
+            uid,
+            table.copy_mode,
+        )
+        return None
+
     @staticmethod
     def _job_dir_root(request: ModelDeployRunnersRequest) -> str | None:
         """OMN-26093: the host root the pool's job directories are declared under, if any.
@@ -190,16 +315,22 @@ class HandlerDeployRunners:
             return ModelDeployRunnersResult(success=True)
         try:
             policy = ModelRunnerTmpPolicy()
+            compose_text = Path(request.compose_file).read_text()
             # Read only the registration variable names; no credential value
             # leaves the remote Compose stdout -> typed model boundary.
             token_vars = sorted(
-                set(
-                    re.findall(
-                        r"RUNNER_TOKEN:\s*\$\{([A-Z0-9_]+)",
-                        Path(request.compose_file).read_text(),
-                    )
-                )
+                set(re.findall(r"RUNNER_TOKEN:\s*\$\{([A-Z0-9_]+)", compose_text))
             )
+            # OMN-26098: a compose that mounts the lab host table needs the copy and the env key in place before
+            # Compose renders it, here and at the container create that follows.
+            if ModelRunnerLabHostTablePolicy().env_key in compose_text:
+                refusal = await self._converge_lab_host_table(
+                    request, policy.timeout_seconds
+                )
+                if refusal is not None:
+                    return ModelDeployRunnersResult(
+                        success=False, error_message=refusal
+                    )
             exports = " ".join(f"export {name}=preflight;" for name in token_vars)
             compose = shlex.join(
                 [

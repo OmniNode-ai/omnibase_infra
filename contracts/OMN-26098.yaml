@@ -1,0 +1,79 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26098"
+title: "The runner installer writes RUNNER_LAB_HOST_TABLE from the overlay projection and mounts it readable by the runner user, so a runner recreate on h051 and h053 no longer fails on a deleted file"
+summary: >-
+  Every runner compose mounts ${RUNNER_LAB_HOST_TABLE} read-only at /etc/onex/lab_run_hosts.yaml with create_host_path false, and the host docker/.env on h051 and h053 held a hand-set path to a file that a later change deleted (the host table is now the overlay projection), so every container create failed. The deploy effect (node_deploy_runners, HandlerDeployRunners) now copies the host's overlay projection to an installer-owned file (owner uid 1001, the Runner.Worker user the image creates, group of the deploy user, mode 0440, rewritten in place on every deploy) and writes that path to RUNNER_LAB_HOST_TABLE in docker/.env, replacing the line and leaving every other byte as it was. A missing or empty projection refuses the deploy with RUNNER-LAB-HOST-TABLE-PROJECTION naming the path. The branch is stacked on the hp053 NVMe change and contains dev.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26098-lab-host-table"
+    statement: "The runner installer owns RUNNER_LAB_HOST_TABLE and the file it names, so a runner recreate no longer depends on a hand-set path."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the runner installer in omnibase_infra writes RUNNER_LAB_HOST_TABLE on every deploy from the declared overlay projection path (no hard-coded home path), leaves every other line of docker/.env byte-identical, and fails with a typed error naming the path when the projection is missing -- falsifier: `uv run pytest tests/unit/handlers/ -q -k lab_host_table` passes on a handler that keeps the stale value, rewrites another line or proceeds with a missing projection
+      - id: "AC2"
+        statement: >-
+          AC2: the file the compose mounts is read-only and readable by the user the Runner.Worker runs as, with the uid read from the runner image and the mode asserted in a test -- falsifier: the test passes while the mounted copy is mode 0600 owned by a uid that is not the Runner.Worker user
+      - id: "AC3"
+        statement: >-
+          AC3: after the declared deploy is installed from the branch, `ssh h051 grep -E '^RUNNER_LAB_HOST_TABLE=' ~/.omnibase/runners/docker/.env` and the same on h053 name a file that exists and is readable by the runner user -- falsifier: either host prints the deleted /data/omninode/... table path or a path `ssh <host> test -r <path>` reports unreadable
+      - id: "AC4"
+        statement: >-
+          AC4: one runner container created by that install on h051 reads the mounted table, shown by `ssh h051 docker exec -u <runner user> <container> test -r /etc/onex/lab_run_hosts.yaml` exit 0 -- falsifier: the container create fails with "bind source path does not exist" or the exec exits non-zero
+      - id: "AC5"
+        statement: >-
+          AC5: a STATUS row `pr=<repo#n> installed=<host>:<revision> observed=<what ran> read_at=<UTC>` for h051 and one for h053 naming RUNNER_LAB_HOST_TABLE is on the work ledger -- falsifier: `python3 plugins/omni/skills/lane-brief/scripts/lane_brief.py grep 'RUNNER_LAB_HOST_TABLE'` returns no STATUS row with installed=h051 and installed=h053 newer than 2026-11-19T21:00:00Z
+evidence_requirements:
+  - kind: "tests"
+    description: "The deploy effect copies the projection, writes the key byte-exactly, refuses a missing projection, and the copy's owner and mode are the Runner.Worker's; the composes that mount the table are served by it."
+    command: "env -u OMNI_HOME uv run --frozen pytest tests/unit/handlers/test_handler_deploy_runners_lab_host_table_omn26098.py tests/ci/test_runner_lab_host_table_installer_omn26098.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn26098-ac1-key-write"
+    description: "AC1: the effect writes RUNNER_LAB_HOST_TABLE from the projection path, replaces a stale value, leaves every other byte of the env file, and refuses a missing or empty projection naming the path."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u OMNI_HOME uv run --frozen pytest tests/unit/handlers/ -q -n 0 --no-cov -k lab_host_table"
+        cwd: "."
+  - id: "dod-omn26098-ac2-runner-readable-copy"
+    description: "AC2: the copy is owned by uid 1001 (read from the image's Dockerfile and entrypoint in the test), mode 0440, mounted read-only by every compose that names the key."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u OMNI_HOME uv run --frozen pytest tests/unit/handlers/test_handler_deploy_runners_lab_host_table_omn26098.py tests/ci/test_runner_lab_host_table_installer_omn26098.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26098-ac3-host-env"
+    description: "AC3: after the install, h051 and h053 name a copy that exists and is readable. Needs the live hosts, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: ["AC3"]
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'for h in h051 h053; do p=$(ssh $h grep -E \"^RUNNER_LAB_HOST_TABLE=\" ~/.omnibase/runners/docker/.env | cut -d= -f2); ssh $h test -r \"$p\" || exit 1; done'"
+        cwd: "."
+  - id: "dod-omn26098-ac4-container-read"
+    description: "AC4: a runner container on h051 created by the install reads the mounted table as the runner user. Needs the live host, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: ["AC4"]
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'c=$(ssh h051 docker ps --format \"{{.Names}}\" | grep -m1 hp051-omnibase-ci-runner); ssh h051 docker exec -u runner \"$c\" test -r /etc/onex/lab_run_hosts.yaml'"
+        cwd: "."
+  - id: "dod-omn26098-ac5-status-rows"
+    description: "AC5: STATUS rows naming installed=h051 and installed=h053 and RUNNER_LAB_HOST_TABLE are on the ledger."
+    source: "manual"
+    binds_ac: ["AC5"]
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep RUNNER_LAB_HOST_TABLE | grep STATUS | grep installed=h051 && python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep RUNNER_LAB_HOST_TABLE | grep STATUS | grep installed=h053'"
+        cwd: "."
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
