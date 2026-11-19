@@ -95,10 +95,13 @@ services:
       # current; DEV_LANE_OVERLAY_STORE_ROOTS_DIR overrides it.
       - ${DEV_LANE_OVERLAY_STORE_ROOTS_DIR:-../../overlays/overlays}:/etc/onex/skill-overlays-store:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}/../../..:/etc/onex/ticket-guard:ro
-      # The lane declaration folder (OMN-24218): ONEX_LANE_OVERLAY_DIR is the lane
-      # overlay folder under the workspace config root's config/lab, which the infra
-      # compose already requires, so its parent is config/lab. Read-only.
-      - ${ONEX_LANE_OVERLAY_DIR}/..:/etc/onex/workspace-config/config/lab:ro
+      # The lane declaration folder (OMN-24218): the deploy agent sets
+      # ONEX_LANE_DECLARATION_DIR to the real config/lab folder, because it points
+      # ONEX_LANE_OVERLAY_DIR at a rendered copy under its state directory, so the
+      # overlay directory's parent is not it. Required, never a nested default
+      # (tests/ci/test_compose_no_nested_expansion.py); every caller of this file sets
+      # it. Read-only.
+      - ${ONEX_LANE_DECLARATION_DIR:?ONEX_LANE_DECLARATION_DIR must name the config/lab folder that holds ci_bus_lanes.yaml; the deploy agent, the warm refresh and the compose file helpers set it from ONEX_LANE_OVERLAY_DIR}:/etc/onex/workspace-config/config/lab:ro
       # Product clones (OMN-25709): the Done guard's dod_verify finds a ticket's contract only through
       # a canonical clone at $OMNI_HOME/<name> (OMNI_HOME=/app in the runtime image) and returned
       # CONTRACT_MISSING with product_clones=[] for every ticket while /app held none. Each product

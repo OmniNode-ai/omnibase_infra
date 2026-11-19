@@ -953,3 +953,8 @@ fenced_node_migrations:
   # added here.
   - id: "node:node_projection_experiment_result:0002_force_rls_experiment_arm_results.sql"
     ticket: "OMN-24323"
+  # OMN-25505: 0002 enables FORCE ROW LEVEL SECURITY on the eval results tables.
+  # The create and writer grants apply on every lane; only FORCE waits for a
+  # separate operator-sequenced release. No lane release is added here.
+  - id: "node:node_projection_eval_results:0002_force_rls_eval_results_tables.sql"
+    ticket: "OMN-25505"

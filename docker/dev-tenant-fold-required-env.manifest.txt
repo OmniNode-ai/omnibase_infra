@@ -3,3 +3,6 @@ DEV_RUNTIME_EFFECTS_PORT
 DEV_RUNTIME_MAIN_FOLDED_PROFILES
 DEV_RUNTIME_MAIN_FOLD_HANDOVERS
 DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON
+# OMN-24854: the config/lab folder mounted read-only for the commitment ledger source.
+# The deploy agent and the warm refresh set it beside ONEX_LANE_OVERLAY_DIR.
+ONEX_LANE_DECLARATION_DIR
