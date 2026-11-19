@@ -21,9 +21,11 @@ from omnibase_infra.nodes.node_setup_local_provision_effect.runtime_cost_estimat
 )
 
 (COMPOSE,) = sorted(
-    (Path(__file__).resolve().parents[3] / "docker").glob(
+    path
+    for path in (Path(__file__).resolve().parents[3] / "docker").glob(
         "docker-compose.stability*.yml"
     )
+    if "host-broker" not in path.name
 )
 
 

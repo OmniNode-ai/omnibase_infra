@@ -437,7 +437,11 @@ def roll_writers(
             f"for {', '.join(services)}"
         )
     _wait_writers_healthy(
-        execution, lane, services, environment, (wait_seconds, poll_seconds), sleep
+        execution,
+        (lane, services),
+        environment,
+        (wait_seconds, poll_seconds),
+        sleep,
     )
     return services
 
@@ -497,12 +501,12 @@ def _read_writer(
 
 def _wait_writers_healthy(
     execution: ModuleType,
-    lane: str,
-    services: tuple[str, ...],
+    lane_services: tuple[str, tuple[str, ...]],
     environment: dict[str, str],
     waits: tuple[float, float],
     sleep: Callable[[float], None],
 ) -> None:
+    lane, services = lane_services
     wait_seconds, poll_seconds = waits
     deadline = time.monotonic() + wait_seconds
     pending = list(services)
