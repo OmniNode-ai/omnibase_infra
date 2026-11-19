@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import zlib
 from collections.abc import AsyncIterator, Iterator
-from typing import Protocol
+
+from aiohttp import StreamReader
 
 _IDENTITY = "identity"
 _ZLIB_CODINGS = frozenset({"gzip", "x-gzip", "deflate"})
@@ -36,12 +37,6 @@ class MalformedBodyError(Exception):
 
 class UnsupportedCodingError(Exception):
     """The ``Content-Encoding`` names a coding this bridge does not decode."""
-
-
-class ContentStream(Protocol):
-    async def read(self, n: int = -1) -> bytes: ...
-
-    async def readany(self) -> bytes: ...
 
 
 def content_coding(header: str | None) -> str | None:
@@ -118,7 +113,7 @@ class BoundedInflater:
 
 
 async def decoded_chunks(
-    content: ContentStream, inflater: BoundedInflater, raw_limit: int | None
+    content: StreamReader, inflater: BoundedInflater, raw_limit: int | None
 ) -> AsyncIterator[bytes]:
     """Yield decoded chunks, reading at most ``raw_limit + 1`` raw bytes.
 
