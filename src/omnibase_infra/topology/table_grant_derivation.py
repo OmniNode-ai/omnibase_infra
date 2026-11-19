@@ -80,9 +80,7 @@ WRITE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
 # and never TRUNCATE. No contract derives it; a principal that prunes declares
 # it by hand on the one relation it prunes (OMN-17427,
 # node_projection_consumer_flow/0006 for omninode_internal.consumer_flow_windows).
-PRUNE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
-    {EnumDatabasePrivilege.SELECT, EnumDatabasePrivilege.DELETE}
-)
+PRUNE_PRIVILEGES = READ_PRIVILEGES | {EnumDatabasePrivilege.DELETE}
 
 # Relations whose vendored migration also grants DELETE, which no ``access`` mode
 # derives. The reservations table is released or expired by deleting its rows
@@ -165,6 +163,7 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = tuple(
         ("floor_fill_state", "113_create_floor_fill_state.sql"),
         ("code_eval_trial_state", "114_create_code_eval_trial_state.sql"),
         ("branch_deploy_state", "116_create_branch_deploy_state.sql"),
+        ("work_state_panel_state", "118_create_work_state_panel_state.sql"),
         ("infra_routing_decisions", "080_create_infra_routing_decisions.sql"),
     )
 )
