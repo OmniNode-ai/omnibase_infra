@@ -72,7 +72,7 @@ _GUARDED_SCOPES = frozenset({"runtime", "full"})
 _UNGUARDED_LANES = frozenset({"prod", "dev"})
 
 
-class _HealthCheck(Protocol):
+class ProtocolHealthCheck(Protocol):
     @property
     def status(self) -> str: ...
 
@@ -97,10 +97,10 @@ def read_docker_state(container: str) -> str:
     return str(reader("runtime_health_state", container))
 
 
-class _RuntimeProbe(Protocol):
+class ProtocolRuntimeProbe(Protocol):
     def __call__(
         self, *, service: str, port: int
-    ) -> tuple[_HealthCheck, BaseException | None]: ...
+    ) -> tuple[ProtocolHealthCheck, BaseException | None]: ...
 
 
 def classify_readings(
@@ -125,7 +125,7 @@ def classify_readings(
 
 def take_readings(
     targets: Sequence[tuple[str, int]],
-    probe: _RuntimeProbe,
+    probe: ProtocolRuntimeProbe,
     state: Callable[[str], str],
 ) -> list[tuple[str, str]]:
     """Probe every target with the guard's own probe: ``(status, detail)`` each.
@@ -183,7 +183,7 @@ def admit_rollback_point[Point](
     correlation_id: UUID,
     record_dir: Path,
     targets: Sequence[tuple[str, int]],
-    probe: _RuntimeProbe,
+    probe: ProtocolRuntimeProbe,
     capture: Callable[[], Point | None],
     state: Callable[[str], str] | None = None,
 ) -> Point | None:
