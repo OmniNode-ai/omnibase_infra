@@ -27,6 +27,13 @@ class ModelRuntimeIntrospectionStartupRequest(BaseModel):
         default=None,
         description="Monotonic time of the last published introspection, for throttling",
     )
+    heartbeat_required: bool = Field(
+        default=False,
+        description=(
+            "When True the heartbeat is mandatory for this runtime: startup "
+            "refuses instead of skipping when the heartbeat cannot run"
+        ),
+    )
 
 
 __all__ = ["ModelRuntimeIntrospectionStartupRequest"]
