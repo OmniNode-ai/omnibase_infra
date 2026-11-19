@@ -1,0 +1,75 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25826
+title: Unblock omnibase_infra PR 6023
+summary: >-
+  Replay the stability composed-runtime change on its current stack base.
+  Exercise the stability and dev build paths on the lab and record the PR
+  checks and lab comment against the published head.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25826-pr-6023
+    statement: The current stack carries the composed-runtime change and its evidence.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: omnibase_infra#6023 reads a clean merge state (no conflict with its base) and green required checks at a new head sha on its own branch, or a STATUS row `cause=<one line> shared=yes` with evidence names the cause outside the PR -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6023` shows a merge state of DIRTY or a red required check at the head and the ledger holds no such STATUS row
+      - id: AC2
+        statement: >-
+          AC2: the resolution keeps the PR's own change and removes no assertion and adds no skip, xfail, loosened threshold or changed required-check list -- falsifier: `git diff <base> <head> -- tests/ .github/` shows a removed assert, a new skip or xfail marker or a changed required-check list
+      - id: AC3
+        statement: >-
+          AC3: a PR comment starting `Lab: head=<full new head sha>` is on the PR, carrying `installed=<host>:<revision> observed=<what ran>` where the change touches a lab host unit or the plugin -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6023` shows no comment starting `Lab: head=` at the new head
+dod_evidence:
+  - id: dod-omn25826-ac1-pr-state
+    description: The watcher reports a clean merge state and green required checks at the published head.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -e -o pipefail -c '
+            head=$(git rev-parse HEAD)
+            test "$head" != 5d93c3e483744f1b0275665b37ed1080aa144233
+            python3 "${OMNI_PLUGIN_ROOT:?}/skills/merge-drain/scripts/pr_state_local.py" --pr OmniNode-ai/omnibase_infra#6023 --json |
+              jq -e --arg head "$head" ".facts.head_sha == \$head and .facts.head_ref == \"omn-24562-stability-composed-build\" and .review.merge_state == \"CLEAN\" and .ci.sha == \$head and .ci.verdict == \"GREEN\""'
+        cwd: .
+  - id: dod-omn25826-ac2-composed-build
+    description: The stability and dev build tests pass and the replay leaves existing tests and CI workflows intact.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -e -o pipefail -c '
+            docker compose --env-file /dev/null -p omn25826-check -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-test.yml --profile runtime config --no-interpolate --no-env-resolution --no-normalize --format json |
+              jq -e ".services[\"omninode-runtime\"].build.additional_contexts[\"infra-runtime\"] == \"service:composed-runtime-base-image\" and .services[\"composed-runtime-base-image\"].scale == 0"'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_stability_composed_runtime_image_omn24562.py tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py -q --no-cov -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: env PYTHONPATH="$PWD/src:$PWD/scripts/deploy-agent" uv run --frozen --project scripts/deploy-agent --extra dev python -m pytest scripts/deploy-agent/tests/unit/test_stability_composed_build_omn24562.py scripts/deploy-agent/tests/unit/test_dev_lane_composed_build_omn21279.py -q -p no:cacheprovider
+        cwd: .
+      - check_type: command
+        check_value: git diff --exit-code HEAD^ HEAD -- .github/
+        cwd: .
+      - check_type: command
+        check_value: git diff --exit-code --diff-filter=DMRT HEAD^ HEAD -- tests/ scripts/deploy-agent/tests/
+        cwd: .
+  - id: dod-omn25826-ac3-lab-comment
+    description: The PR conversation has a Lab comment whose first line names the published head.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -e -o pipefail -c '
+            head=$(git rev-parse HEAD)
+            test "$head" != 5d93c3e483744f1b0275665b37ed1080aa144233
+            onex scm pr-view OmniNode-ai/omnibase_infra#6023 --source bus --timeout-s 45 |
+              jq -e --arg head "$head" ".result.head_sha == \$head and any(.result.comments[]?; .body | startswith(\"Lab: head=\" + \$head + \" \"))"'
+        cwd: .
