@@ -1,0 +1,65 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-24740"
+title: "The omnibase_infra#6033 memgraph overlay is fenced in every composition that layers the dev lane file and its test skips without docker"
+summary: >-
+  Fixes the two blocking findings of the review of omnibase_infra#6033 at head bed60545bc4a. The dev-lane compose file empties the memgraph profile list for every composition that layers it, and one layering overlay had no entry for the service, so a bring-up there would have started it with ports on every interface; that overlay now fences it, and the unit test enumerates every compose file that layers the dev-lane file and asserts each fences it. The real-compose test skips when there is no docker binary. The test also pins the full-scope core leg, and the PR's contract names the real test path. The change rides on the existing pull request.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn24740-fence-and-guard"
+    statement: "Every compose file that layers the dev-lane overlay fences omnibase-infra-memgraph, and the compose-rendering unit test skips on a host with no docker binary."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the overlay that layered the dev-lane file without an entry for the service fences it, and the unit test enumerates every compose file that layers the dev-lane file and asserts each fences it, written red first so the test fails on the unchanged file -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_lane_memgraph_omn24714.py in omnibase_infra, red on the unchanged head and green on the change
+      - id: "AC2"
+        statement: >-
+          AC2: the compose-rendering test skips when shutil.which("docker") is None and runs otherwise, written red first with a PATH that has no docker binary -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_lane_memgraph_omn24714.py -k no_docker_binary reports a skip-guarded pass and no FileNotFoundError, red on the unchanged head
+      - id: "AC3"
+        statement: >-
+          AC3: the test also pins the full-scope argv (the converge leg without force recreate) and its docstring says a runtime-scope deploy never starts the service, and contracts/OMN-24714.yaml names the real test path and says the deploy starts the service -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_lane_memgraph_omn24714.py passes with the full-scope argv case present
+      - id: "AC4"
+        statement: >-
+          AC4: the required suites of the pull request pass on a lab host at the new head, run in parts when a whole-suite run times out, with the parts named in the pull request comment -- falsifier: uv run pytest tests/integration/test_catalog_roundtrip.py tests/test_compose_profile_teardown_policy.py scripts/deploy-agent/tests/unit -m "not slow" passes on a lab host at the pull request head
+evidence_requirements:
+  - kind: "tests"
+    description: "The fence in every compose file that layers the dev-lane overlay, the docker-binary skip, and the full-scope core leg for omnibase-infra-memgraph."
+    command: "uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_lane_memgraph_omn24714.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn24740-every-layering-overlay-fences"
+    description: "AC1: every compose file that layers the dev-lane file fences the service; red on the unchanged overlay."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_lane_memgraph_omn24714.py -q -n 0 --no-cov -k every_overlay_that_layers"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn24740-skip-without-docker"
+    description: "AC2: the real-compose test skips when PATH holds no docker binary."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_lane_memgraph_omn24714.py -q -n 0 --no-cov -k no_docker_binary"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn24740-full-scope-core-leg"
+    description: "AC3: the full-scope core leg converges without force recreate and the runtime leg never names the service."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_lane_memgraph_omn24714.py -q -n 0 --no-cov -k full_scope"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn24740-required-suites"
+    description: "AC4: the catalog round trip and the compose profile teardown policy pass, with the memgraph test file."
+    source: "manual"
+    binds_ac: ["AC4"]
+    checks:
+      - check_type: "test_passes"
+        check_value: 'uv run --frozen pytest tests/integration/test_catalog_roundtrip.py tests/test_compose_profile_teardown_policy.py scripts/deploy-agent/tests/unit/test_dev_lane_memgraph_omn24714.py -m "not slow" -q -n 0 --no-cov'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
