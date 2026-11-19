@@ -1,0 +1,36 @@
+schema_version: 1.0.0
+ticket_id: OMN-24976
+title: The compose dev lane establishes lane_sync for a release train candidate, so the train gets a lab PASS receipt or names a real failed check
+summary: >-
+  check_lane_sync runs the census report-only. Census exit 8 with findings now yields a failed check, as exit 30 already did, instead of an indeterminate measurement. The fixture retains the original lane_sync checks from both receipt artifacts used by the skipped candidates; both recorded census exit 8 and four findings. The omnimarket candidate inherits the receipt of its runtime-affecting ancestor fccc55217859, rather than having a receipt keyed by the candidate itself. The later census re-run is labelled separately. The regression derives its plan from the original receipt evidence, checks an ambient broker variable is blanked, and checks a newer PASS supersedes an older FAIL for the same receipt sha. This change alone does not cut the releases while lane-a drift remains. The ticket stays open for its remaining criteria.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24976-unpublished-drift-fails
+    statement: A lane census drift that the receipt job does not publish is recorded as a failed lane_sync check, so the release train names it as a failed check instead of lab_receipt_indeterminate.
+    acceptance:
+      - id: AC2
+        statement: "AC2: a regression test built from the recorded receipt or journal data of the skipped candidates (fixture path named in the PR) fails on the broken code and passes on the fix, both runs on the lab -- falsifier: `uv run pytest <the test path in the PR> -q` placed through /omni:lab-run, red on the base revision and green on the head"
+evidence_requirements:
+  - kind: tests
+    description: The recorded-census replay through check_lane_sync and the train's receipt reader.
+    command: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24976-ac2-recorded-drift
+    description: >-
+      The original candidate receipt evidence (both exit 8, four findings on one lab lane), with a census plan derived from those logged findings, replayed through check_lane_sync is a failed lane_sync, and the train's reader names lab_receipt_fail with lane_sync among the checks not passing. At the merge base the same replay is lane_sync indeterminate and the reader names lab_receipt_indeterminate. Controls keep exit 8 with no findings, exit 0 with findings and every other census exit indeterminate, a published drift (exit 30) failed and a clean census passing.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lab_pass_lane_sync_unpublished_drift_omn24976.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lab_pass_census_overlay_omn20934.py tests/ci/test_direct_lab_census_omn20008.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
