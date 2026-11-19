@@ -24,12 +24,12 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: >
-  Writes a rendered release block into a checkout where the repository's documentation policy accepts it, and returns the repo-relative paths to stage. The policy is the checkout's own .readme-only-docs.yaml: absent, or listing CHANGELOG.md under exceptions, keeps the CHANGELOG.md prepend; otherwise the block goes into root README.md above the newest release section, a root CHANGELOG.md is removed, and a checkout carrying contracts/OMN-18595.yaml and tests/ci/test_release_cut_identity_omn18595.py also gets the dod_evidence item and the pinned identity test. Refuses on an unparseable policy file, a missing README, a block in another shape, or a contract that does not end in dod_evidence.
+  Writes a rendered release block into a checkout where the repository's documentation policy accepts it, and returns the repo-relative paths to stage. The policy is the checkout's own .readme-only-docs.yaml: absent, or listing CHANGELOG.md under exceptions, keeps the CHANGELOG.md prepend; otherwise the block goes into root README.md above the newest release section, a root CHANGELOG.md is removed, and a checkout carrying contracts/OMN-18595.yaml and tests/ci/test_release_cut_identity_omn18595.py also gets the dod_evidence item and the pinned identity test. Refuses on an unparseable policy file, a missing README, a block in another shape, or a contract that does not end in dod_evidence. For public repositories, filters private repository names from the new block's commit subjects using the hygiene vocabulary and refuses a missing or invalid vocabulary before writing.
 
 input_model:
   name: "ModelReleaseNotesApplyRequest"
   module: "omnibase_infra.models.model_release_notes_apply_request"
-  description: "The checkout being cut, the file holding the rendered release block, and the repository name used in the contract item's cwd."
+  description: "The checkout and rendered release block, target visibility, the public hygiene vocabulary location, and the repository name used in the contract item's cwd."
 output_model:
   name: "ModelReleaseNotesApplyResult"
   module: "omnibase_infra.models.model_release_notes_apply_result"
