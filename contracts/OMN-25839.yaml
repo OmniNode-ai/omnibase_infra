@@ -1,0 +1,91 @@
+schema_version: 1.0.0
+ticket_id: OMN-25839
+title: Integration coverage for the dispatch venv staging-lock log
+summary: The PR adds an integration test for the staging-lock CLI used by workspace reconcile.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25839-staging-lock-coverage
+    statement: The CLI integration test covers the staging-lock log and satisfies the existing coverage gate.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the required check Integration Test Coverage on omnibase_infra PR 6041 reads success at the new head, read through the declared scm read path -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6041` check-run read at the new head names Integration Test Coverage with a conclusion other than success
+      - id: AC2
+        statement: >-
+          AC2: no check is widened, skipped or bypassed, so the diff removes no assertion and adds no skip, xfail or loosened threshold -- falsifier: `git diff <base> <new head> -- tests/ .github/` shows a removed assert, a new skip or xfail marker or a changed required-check list
+      - id: AC3
+        statement: >-
+          AC3: a comment on the pull request starts `Lab:` and carries `head=<full new head sha>` with the lab run output that proves the red then green at that head -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6041` shows no comment naming the new head with a line starting `Lab:`
+      - id: AC4
+        statement: >-
+          AC4: when the change alters a lab host unit or the plugin, the branch is installed through the declared path and the Lab line carries `installed=<host>:<revision>` and `observed=<what ran>`; otherwise the lane says in its TERMINAL that it changes nothing that runs -- falsifier: the Lab comment names an install but carries no installed= cell, or the TERMINAL carries neither
+      - id: AC5
+        statement: >-
+          AC5: if the cause is outside the pull request, a STATUS row on the lane carries `cause=<one line>` and `shared=yes` with the evidence and no push is made -- falsifier: the ledger holds no STATUS row from the lane carrying cause= and shared=yes while the pull request is unchanged at its old head
+evidence_requirements:
+  - kind: tests
+    description: The staging-lock CLI creates the symlink and prints the log line naming its staging path and holder.
+    command: uv run --frozen pytest tests/integration/test_dispatch_venv_promotion_chain_omn16932.py -q -n 0 --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25839-coverage-diff
+    description: The diff changes the integration test. The check's hosted conclusion requires a watcher read at the pushed head.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'git diff --name-only origin/dev...HEAD -- tests/integration/test_dispatch_venv_promotion_chain_omn16932.py | grep -Fx tests/integration/test_dispatch_venv_promotion_chain_omn16932.py'
+        cwd: .
+  - id: dod-omn25839-test-and-workflow-diff
+    description: The tests have additions only and no added skip or xfail markers. The workflow diff is empty.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -e -o pipefail -c '
+            git diff --exit-code origin/dev...HEAD -- .github/
+            git diff --numstat origin/dev...HEAD -- tests/ |
+              awk '\''$1 > 0 { added = 1 } $2 != "0" { deleted = 1 } END { exit deleted || !added }'\''
+            patch=$(git diff --unified=0 origin/dev...HEAD -- tests/)
+            if grep -E "^\+[^+].*pytest[.](mark[.](skip[[:alpha:]_]*|xfail)|skip[(]|xfail[(])" <<< "$patch"; then
+              exit 1
+            fi
+          '
+        cwd: .
+  - id: dod-omn25839-staging-lock-cli
+    description: The hosted probe runs the staging-lock command in an isolated container and checks its log. The lane's Lab comment is separate evidence at the pushed head.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'docker run --rm --network none --hostname staging-lock-probe --mount "type=bind,src=$PWD/src/omnibase_infra,dst=/app,readonly" python:3.12-slim@sha256:dd29372629eeba2dd003fd9e9d35a5b8236c44727875a0364254b5127af88e65 python -B /app/nodes/node_venv_atomic_install/runtime_venv_atomic_install.py staging-lock-acquire --path /tmp/venv.rebuilding.lock --pid 1 | grep -Fx "[reconcile] dispatch venv: staging lock taken on /tmp/venv.rebuilding (pid 1 on staging-lock-probe)"'
+        cwd: .
+  - id: dod-omn25839-install-scope
+    description: The diff changes no lab host unit or plugin. The lane terminal records whether an installation applied.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: >-
+          git diff --exit-code origin/dev...HEAD -- ':(glob)**/*.service' ':(glob)**/*.timer' ':(glob)**/*.plist' ':(glob)**/plugins/**'
+        cwd: .
+  - id: dod-omn25839-pr-specific-coverage
+    description: The coverage workflow is unchanged and the PR carries an integration regression for its own CLI change.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: command
+        check_value: git diff --exit-code origin/dev...HEAD -- .github/workflows/integration-test-check.yml
+        cwd: .
+      - check_type: test_passes
+        check_value: >-
+          uv run --frozen pytest tests/integration/test_dispatch_venv_promotion_chain_omn16932.py -q -n 0 --no-cov -p no:cacheprovider -k test_staging_lock_acquire_cli_reports_the_staging_path_and_holder
+        cwd: .

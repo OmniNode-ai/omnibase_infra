@@ -69,6 +69,16 @@ def test_live_holder_declines(tmp_path, capsys):
         proc.wait()
 
 
+def test_acquire_writes_a_run_line_naming_the_lock_and_holder(tmp_path, capsys):
+    lock = tmp_path / "staging.lock"
+    rc = ENGINE.staging_lock_acquire(lock, 99999, host="lab-host")
+    out = capsys.readouterr().out
+    assert rc == ENGINE.EXIT_OK
+    assert "staging lock taken" in out
+    assert f"{tmp_path / 'staging'}" in out
+    assert "pid 99999 on lab-host" in out
+
+
 def test_holder_on_another_host_never_reclaimed(tmp_path, capsys):
     lock = tmp_path / "staging.lock"
     _write_record(lock, 424242, "some-other-host")

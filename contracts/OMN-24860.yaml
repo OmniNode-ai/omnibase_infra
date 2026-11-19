@@ -1,0 +1,40 @@
+schema_version: 1.0.0
+ticket_id: OMN-24860
+title: The staging lock the dispatch venv promotion takes leaves a run line
+summary: 'node_venv_atomic_install took the dispatch-venv staging lock silently on success; only a decline or a failure wrote a line, so no run line could name the lock being taken and the integration pass could not read the staging lock running. staging-lock-acquire now writes one run line naming the staging path and the holder when it takes the lock.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24860-staging-lock-run-line
+    statement: A successful take of the dispatch-venv staging lock leaves one run line in the reconcile log, and a declined or failed take is unchanged.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: one run line of a caller of node_venv_atomic_install on h201 is read after its first demand, naming the staging-lock or promote-floor command it ran -- falsifier: no such run line exists in the h201 runtime log after the install time'
+evidence_requirements:
+  - kind: tests
+    description: The staging lock engine tests, including the run line written when the lock is taken, pass at the pushed head.
+    command: uv run pytest tests/scripts/test_dispatch_venv_promotion_omn16932.py tests/integration/test_dispatch_venv_promotion_chain_omn16932.py -q -n 0 --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24860-ac2
+    description: 'AC2: taking the staging lock through the node engine writes one run line naming the staging path and the holder pid and host; the engine at origin/dev writes nothing on a successful take (the injected break).'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_dispatch_venv_promotion_omn16932.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn24860-h201-clone-carries-the-run-line
+    description: After this change merges and h201 moves its deploy-source clone, the clone the reconciler runs from carries the staging lock run line. Red before the clone moves, when the engine there writes nothing on a successful take.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: |-
+          ssh "$DEPLOY_PROBE_HOST" "grep -q 'dispatch venv: staging lock taken on' /data/omninode/omnibase_infra/src/omnibase_infra/handlers/venv_atomic_install/dispatch_venv_promotion.py"
+        cwd: .
