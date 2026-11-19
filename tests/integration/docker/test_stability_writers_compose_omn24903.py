@@ -54,7 +54,7 @@ def test_runtime_main_reads_the_dev_overlay_roots(
     assert isinstance(environment, dict)
     assert (
         environment["ONEX_SKILL_OVERLAY_ROOTS"]
-        == "/etc/onex/skill-overlays-store:/etc/onex/skill-overlays"
+        == "/etc/onex/skill-overlays-branch:/etc/onex/skill-overlays-store:/etc/onex/skill-overlays"
     )
     raw_volumes = runtime["volumes"]
     assert isinstance(raw_volumes, list)

@@ -89,3 +89,13 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -k same_overlay_roots_as_dev -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
+  - id: dod-omn24903-ac2-deploy-render
+    description: >-
+      The stability stack (infra base plus stability overlay) renders omninode-runtime with the dev runtime's ONEX_SKILL_OVERLAY_ROOTS value, read from docker compose config over the declared files. At the merge base the overlay sets no such variable, so the check fails there.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: "bash -c 'docker compose --env-file docker/runtime-policy.env -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-t*.yml config --no-interpolate --format json | jq -e \".services[\\\"omninode-runtime\\\"].environment | index(\\\"ONEX_SKILL_OVERLAY_ROOTS=/etc/onex/skill-overlays-branch:/etc/onex/skill-overlays-store:/etc/onex/skill-overlays\\\") != null\"'"
+        cwd: .
