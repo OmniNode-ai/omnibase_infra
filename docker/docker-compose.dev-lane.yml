@@ -1942,3 +1942,21 @@ services:
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-21481"
       - "autoheal=true"
+  # ==========================================================================
+  # OMN-24714 -- the architecture graph's store runs on the dev lane.
+  # ==========================================================================
+  # docker-compose.infra.yml declares omnibase-infra-memgraph under the profiles
+  # omnimemory and full. The deploy agent starts the runtime family by name
+  # under `--profile runtime` and the dependency set by `--profile core`, which
+  # compose resolves to every service with NO profile; neither reached a service
+  # that sits only in omnimemory and full, so no dev deploy ever started it and
+  # the graph nodes had nothing to answer from.
+  #
+  # Emptying the profile list here makes it a dependency of this lane, started by
+  # the core phase beside postgres and redpanda (config/validation/stack_shape.yaml
+  # already lists it under `dependencies`). It is declared HERE and not in the
+  # base file for the reason this file exists: the base is merged by every lane,
+  # and every other lane must keep starting no graph. Another dev
+  # instance that layers this file turns it off with scale 0 in its own overlay.
+  omnibase-infra-memgraph:
+    profiles: !override []

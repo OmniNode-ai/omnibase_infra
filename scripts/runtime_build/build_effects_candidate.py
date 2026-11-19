@@ -45,10 +45,9 @@ from scoped_effects_deploy import (
     _run_command,
     probe_timeout,
 )
-from scoped_effects_plan import ImageId, ProbeTimeoutSeconds, SourceRepo, SourceSha
+from scoped_effects_plan import SIBLINGS, ImageId, ProbeTimeoutSeconds, SourceSha
 
 CommandRunner = Callable[[list[str], str | None, int], str]
-SIBLINGS = ("omnibase_core", "omnibase_compat", "omnimarket")
 
 
 class ModelEffectsCandidatePlan(BaseModel):
@@ -61,7 +60,7 @@ class ModelEffectsCandidatePlan(BaseModel):
     reason: Annotated[str, Field(min_length=10, max_length=1000)]
     base_image_id: ImageId
     source_root: Path
-    source_pins: dict[SourceRepo, SourceSha]
+    source_pins: dict[str, SourceSha]
     infra_source_root: Path
     infra_source_sha: SourceSha
     probe_timeout_seconds: ProbeTimeoutSeconds | None = None
@@ -69,7 +68,7 @@ class ModelEffectsCandidatePlan(BaseModel):
     @model_validator(mode="after")
     def check_boundary(self) -> Self:
         if set(self.source_pins) != set(SIBLINGS):
-            raise ValueError("source_pins must cover exactly the three staged siblings")
+            raise ValueError("source_pins must cover exactly the staged siblings")
         if len(self.reason.strip()) < 10:
             raise ValueError("reason must contain a concrete build justification")
         for path in (self.source_root, self.infra_source_root):
@@ -139,13 +138,13 @@ def _probe(runner: CommandRunner, image: str, *, timeout: int) -> dict[str, Any]
         Path(__file__).with_name("scoped_image_probe.py").read_text(encoding="utf-8")
     )
     script = (
-        "import importlib.metadata, json\nfrom pathlib import Path\n"
+        "import json\n"
         f"namespace = {{'__name__': 'candidate_image_probe'}}\nexec({probe!r}, namespace)\n"
-        "evidence = namespace['collect_image_evidence']()\n"
+        f"evidence = namespace['collect_image_evidence']({SIBLINGS!r})\n"
         "evidence['package_digests'] = {name: namespace['tree_digest']("
         "namespace['installed_package_root'](name)) "
-        "for name in ('omnibase_core', 'omnibase_compat', 'omnimarket', 'omnibase_infra')}\n"
-        "print(json.dumps(evidence, sort_keys=True))\n"
+        f"for name in {(*SIBLINGS, 'omnibase_infra')!r}"
+        "}\nprint(json.dumps(evidence, sort_keys=True))\n"
     )
     try:
         output = runner(
@@ -407,7 +406,7 @@ def build_candidate(
         raise RuntimeError(
             "baseline infra lineage differs from the selected full source SHA"
         )
-    for name in ("omnibase_core", "omnibase_compat", "omnibase_infra"):
+    for name in (SIBLINGS[0], "omnibase_infra"):
         if baseline["package_digests"].get(name) != digests[name]:
             raise RuntimeError(
                 f"base installed {name} does not match its pinned source"

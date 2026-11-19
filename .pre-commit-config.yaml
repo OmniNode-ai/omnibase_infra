@@ -1200,7 +1200,7 @@ repos:
         files: ^src/.*/contract\.yaml$
         stages: [pre-commit]
       # OMN-13873: dep-provenance gate — forbid first-party git-source overrides.
-      # omnibase-core / omnibase-spi / omnibase-compat must resolve from PyPI, not
+      # omnibase-core and omnibase-spi must resolve from PyPI, not
       # git commits/branches/tags, on dev/main (recurrence guard for PR #2184's
       # UNRELEASED-commit overrides that passed all CI green). Pure static +
       # offline. Escape a single line with '# raw-override-ok: <ticket>'. SYNC
@@ -2351,8 +2351,8 @@ repos:
       # command that was supposed to move the surface -- that makes a repair and a
       # no-op the same observation, which is how a `.201` clone with core.bare=true
       # read as "synced" while `git checkout` failed with exit 128 forever, and how
-      # a venv whose provider co-install silently downgraded omnibase-compat read as
-      # reconciled. Structural half: reconcile-host.sh must invoke the verifier, and
+      # a venv with a silent dependency downgrade was reported as reconciled.
+      # Structural half: reconcile-host.sh must invoke the verifier, and
       # verdict() must take no exit status. Ratchet half: any scripts/reconcile*.sh
       # must invoke the verifier or declare `# movement-proof:` /
       # `# movement-proof-delegated-to:`. Whole-repo by design (a reconciler can be

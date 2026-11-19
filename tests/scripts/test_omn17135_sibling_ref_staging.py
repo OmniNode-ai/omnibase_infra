@@ -8,7 +8,7 @@ The CI path (``runtime-rebuild-trigger.yml`` -> ``scripts/trigger_rebuild_on_mer
 constrains ``git_ref`` to a lowercase hex commit SHA **of omnibase_infra**. The
 deploy agent exports that verbatim as ``DEPLOY_REF``, and RT-1 (OMN-14438) then
 clean-checks-out EVERY sibling at it. An omnibase_infra SHA cannot exist in
-omnibase_core / omnibase_compat / omnimarket, so RT-1 exits 3 and the staging
+any staged sibling, so RT-1 exits 3 and the staging
 script exits 4 -- ``ERROR: omnibase_core: cannot resolve ref '<infra sha>'``.
 Job ``a5b200d5`` died this way 13 seconds after acceptance on 2026-09-09, which
 is why rule 24(a)'s automatic lab pass has never once worked through CI.
@@ -44,7 +44,6 @@ STAGE_SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "stage_workspace.sh"
 _STAGED_SIBLINGS = ("omnibase_core", "omnimarket", "omniintelligence")
 _DIST_NAME = {
     "omnibase_core": "omnibase-core",
-    "omnibase_compat": "omnibase-compat",
     "onex_change_control": "onex-change-control",
     "omnimarket": "omnimarket",
     "omnibase_infra": "omnibase-infra",
