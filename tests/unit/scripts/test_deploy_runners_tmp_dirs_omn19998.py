@@ -325,3 +325,57 @@ async def test_command_and_terminal_event_chain(
             assert result.error_message is None
     finally:
         await bus.close()
+
+
+# OMN-25674: the disk-admission pause directory is a compose bind source too.
+# Docker creates it root-owned mode 755 and the job-started hook writes its
+# pause marker as `runner` (Permission denied on hp051-ci-runner-3.tmp, 12
+# consecutive admission failures against a threshold of 3), so the same effect
+# hands it to the runner user.
+PAUSE_SOURCE = "/srv/runners/docker/state/disk-admission-pause"
+PAUSE_TARGET = "/".join(("", "home", "runner", ".onex-disk-admission-pause"))
+
+
+def _with_pause_bind(state: Path, *, extra_bind: str | None = None) -> None:
+    data = json.loads(state.read_text())
+    for name, service in data["compose"]["services"].items():
+        if name.startswith("hp053-ci-runner-"):
+            service["volumes"].append(
+                {"type": "bind", "source": PAUSE_SOURCE, "target": PAUSE_TARGET}
+            )
+            if extra_bind:
+                service["volumes"].append(
+                    {"type": "bind", "source": extra_bind, "target": "/runner/keys"}
+                )
+    data["dirs"][PAUSE_SOURCE] = {"uid": 0, "mode": "755"}
+    state.write_text(json.dumps(data))
+
+
+def test_deploy_hands_the_root_owned_pause_dir_to_runner(host) -> None:
+    _, state, calls = host
+    _with_pause_bind(state, extra_bind="/etc/hostkeys")
+    result = deploy(host)
+    assert result.returncode == 0, result.stdout + result.stderr
+    after = json.loads(state.read_text())["dirs"]
+    assert after[PAUSE_SOURCE] == {"uid": 1001, "mode": "755"}
+    installs = [
+        line
+        for line in calls.read_text().splitlines()
+        if line.startswith("sudo -n install ")
+    ]
+    # One install per distinct bind source: the pool's TMPDIRs and the one pause dir.
+    assert len(installs) == POOL_COUNT + 1
+    assert sum(PAUSE_SOURCE in line for line in installs) == 1
+    assert "/etc/hostkeys" not in calls.read_text()
+
+
+def test_pause_dir_that_cannot_be_prepared_refuses_before_registration(host) -> None:
+    _, state, calls = host
+    _with_pause_bind(state)
+    data = json.loads(state.read_text())
+    data["ignore_install"] = True
+    state.write_text(json.dumps(data))
+    result = deploy(host)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "RUNNER-TMP-VERIFY" in result.stdout + result.stderr
+    assert "FETCH" not in calls.read_text()

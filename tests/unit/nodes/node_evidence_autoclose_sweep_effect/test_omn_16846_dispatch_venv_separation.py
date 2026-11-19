@@ -185,7 +185,10 @@ async def test_real_runner_execs_the_resolved_argv(
     await handler._run_dod_verify_command_real("OMN-16759", cwd="", timeout=5.0)
 
     assert captured, "the real runner never spawned a subprocess"
-    assert list(captured[0]) == _dod_verify_argv("OMN-16759")
+    # The runner adds one scratch ``--state-root`` of its own (OMN-25667).
+    argv = list(captured[0])
+    assert argv[:-2] == _dod_verify_argv("OMN-16759")
+    assert argv[-2] == "--state-root"
 
 
 # --------------------------------------------------------------------------

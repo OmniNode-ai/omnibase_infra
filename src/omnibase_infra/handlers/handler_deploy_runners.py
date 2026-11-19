@@ -25,6 +25,7 @@ from omnibase_infra.observability.runner_health.model_runner_fleet_config import
 )
 
 _LOG = logging.getLogger(__name__)
+_PAUSE_DIR_TARGET_SUFFIX = "/.onex-disk-admission-pause"
 # The node's runtime entry for the cache fill, run as a file so this handler names no
 # node module (the node-boundary gate keeps handlers from importing their node).
 _FILL_ENTRY = (
@@ -210,21 +211,27 @@ class HandlerDeployRunners:
                 policy.timeout_seconds,
             )
             services = ModelRunnerTmpCompose.model_validate_json(rendered).services
-            directories: set[str] = set()
+            directories: dict[str, str] = {}
             for number in range(1, request.count + 1):
                 service = services[f"{request.prefix}-{number}"]
                 tmpdir = service.environment.get("TMPDIR")
                 for volume in service.volumes:
-                    if (
-                        volume.type is EnumComposeMountType.BIND
-                        and volume.target == tmpdir
+                    # OMN-25674: the disk-admission pause directory is a bind source too;
+                    # Docker creates it root-owned and the hook writes its marker as runner.
+                    if volume.type is EnumComposeMountType.BIND and (
+                        volume.target == tmpdir
+                        or volume.target.endswith(_PAUSE_DIR_TARGET_SUFFIX)
                     ):
                         if (
                             not Path(volume.source).is_absolute()
                             or "\n" in volume.source
                         ):
                             raise ValueError("invalid TMPDIR source")
-                        directories.add(volume.source)
+                        directories[volume.source] = (
+                            policy.mode
+                            if volume.target == tmpdir
+                            else policy.pause_dir_mode
+                        )
         except (OSError, ValueError, KeyError, TimeoutError):
             return ModelDeployRunnersResult(
                 success=False,
@@ -232,7 +239,7 @@ class HandlerDeployRunners:
             )
 
         prepared: list[str] = []
-        for directory in sorted(directories):
+        for directory, mode in sorted(directories.items()):
             quoted = shlex.quote(directory)
             install = shlex.join(
                 [
@@ -243,7 +250,7 @@ class HandlerDeployRunners:
                     "-o",
                     str(policy.uid),
                     "-m",
-                    policy.mode,
+                    mode,
                     "--",
                     directory,
                 ]
@@ -266,7 +273,7 @@ class HandlerDeployRunners:
                     f"LC_ALL=C stat -c '%F:%u:%a' -- {quoted}",
                     policy.timeout_seconds,
                 )
-                if actual.strip() != f"directory:{policy.uid}:{policy.mode}":
+                if actual.strip() != f"directory:{policy.uid}:{mode}":
                     raise ValueError("directory readback differs")
             except (OSError, ValueError, TimeoutError):
                 return ModelDeployRunnersResult(
@@ -280,7 +287,7 @@ class HandlerDeployRunners:
                 request.host,
                 directory,
                 policy.uid,
-                policy.mode,
+                mode,
             )
         warnings = await self._sync_action_archive_cache(
             request, policy.timeout_seconds
