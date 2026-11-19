@@ -165,6 +165,24 @@ class HandlerDeployRunners:
             )
         return tuple(warnings)
 
+    @staticmethod
+    def _job_dir_root(request: ModelDeployRunnersRequest) -> str | None:
+        """OMN-26093: the host root the pool's job directories are declared under, if any.
+
+        Unreadable or absent declarations read as no root, so a pool with no declared root
+        keeps preparing the TMPDIR and pause directories alone, as before.
+        """
+        if not request.fleet_config:
+            return None
+        try:
+            fleet = load_runner_fleet_config(Path(request.fleet_config))
+        except (OSError, ValueError):
+            return None
+        row = next((h for h in fleet.hosts if h.host == request.host), None)
+        if row is None or row.runner_name_prefix != request.prefix:
+            return None
+        return row.job_dir_host_root
+
     async def handle(
         self, request: ModelDeployRunnersRequest
     ) -> ModelDeployRunnersResult:
@@ -211,6 +229,7 @@ class HandlerDeployRunners:
                 policy.timeout_seconds,
             )
             services = ModelRunnerTmpCompose.model_validate_json(rendered).services
+            job_root = self._job_dir_root(request)
             directories: dict[str, str] = {}
             for number in range(1, request.count + 1):
                 service = services[f"{request.prefix}-{number}"]
@@ -218,20 +237,30 @@ class HandlerDeployRunners:
                 for volume in service.volumes:
                     # OMN-25674: the disk-admission pause directory is a bind source too;
                     # Docker creates it root-owned and the hook writes its marker as runner.
+                    # OMN-26093: every other bind whose source is under the pool's declared
+                    # job-directory root (workspace, caches) is created runner-owned too, so a
+                    # runner's first job does not meet a root-owned cache directory.
+                    under_job_root = (
+                        job_root is not None
+                        and Path(volume.source).is_absolute()
+                        and Path(volume.source).is_relative_to(job_root)
+                    )
                     if volume.type is EnumComposeMountType.BIND and (
                         volume.target == tmpdir
                         or volume.target.endswith(_PAUSE_DIR_TARGET_SUFFIX)
+                        or under_job_root
                     ):
                         if (
                             not Path(volume.source).is_absolute()
                             or "\n" in volume.source
                         ):
                             raise ValueError("invalid TMPDIR source")
-                        directories[volume.source] = (
-                            policy.mode
-                            if volume.target == tmpdir
-                            else policy.pause_dir_mode
-                        )
+                        if volume.target == tmpdir:
+                            directories[volume.source] = policy.mode
+                        elif volume.target.endswith(_PAUSE_DIR_TARGET_SUFFIX):
+                            directories[volume.source] = policy.pause_dir_mode
+                        else:
+                            directories[volume.source] = policy.job_dir_mode
         except (OSError, ValueError, KeyError, TimeoutError):
             return ModelDeployRunnersResult(
                 success=False,

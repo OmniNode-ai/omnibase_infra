@@ -87,8 +87,8 @@ def host(tmp_path: Path) -> tuple[Path, Path, Path]:
         tool.write_text(HOST_TOOL)
         tool.chmod(0o755)
 
-    # The shipped h053 pool keeps its job directories in tmpfs (OMN-19998), so
-    # the bind-repair path is modeled with a synthetic pool of the same size.
+    # The bind-repair path is modeled with a synthetic pool of the same size; the
+    # shipped h053 pool's own binds are asserted in test_hp053_pool_in_memory_omn19998.
     services = {}
     dirs = {}
     for number in range(1, POOL_COUNT + 1):

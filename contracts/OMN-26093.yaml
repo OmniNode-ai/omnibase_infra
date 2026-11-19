@@ -1,0 +1,87 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26093"
+title: "hp053 CI runners run their job and temp directories on the NVMe, and h053's lab slot cap leaves the runners their cores"
+summary: >-
+  The five hp053-ci-runner containers bound their job directory and TMPDIR from /data/scratch/runners/N on h053's rotational root volume (93 percent used, io pressure full avg60 35 percent), while the dev compose declared tmpfs and had never been rolled onto them. The pool's compose now binds each runner's workspace, TMPDIR and six caches under /mnt/h053-nvme/runners/hp053-ci-runner/N/, declared once as job_dir_host_root of h053's row in config/runner_fleet.yaml; the deploy's directory effect (node_deploy_runners, HandlerDeployRunners) creates every bind source under that root runner-owned before a container is created. The runner memory limit is 6 GiB because the job directories are no longer charged to it. The overlays repository's host_capacity overlay carries the h053 lab slot ceiling in a separate pull request.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26093-nvme-job-dirs"
+    statement: "The hp053-ci-runner pool keeps its job directory, TMPDIR and caches on the NVMe, declared in the compose and the fleet config, so Repo Scripts Tests fits its budget."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the hp053-ci-runner compose and runner_fleet config in omnibase_infra dev declare each runner's job directory, TMPDIR and caches as bind mounts under /mnt/h053-nvme/runners/hp053-ci-runner/N/ with no job path on the root volume, and the pool's tests assert it -- falsifier: `uv run pytest tests/ci/test_hp053_pool_in_memory_omn19998.py tests/unit/observability/runner_health/test_runner_fleet_config.py -q` passes on a compose that still names /data/scratch/runners or a tmpfs for _work
+      - id: "AC2"
+        statement: "AC2: after the declared deploy rolls the five runners one at a time while idle, `ssh h053 docker exec hp053-ci-runner-N df --output=source,avail ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work` names the NVMe device with at least 100 GB available for N in 1 to 5 -- falsifier: any N prints the ubuntu--vg-ubuntu--lv device or under 100G"
+      - id: "AC3"
+        statement: >-
+          AC3: the overlays repository's host_capacity overlay names h053 under hosts with a slot_ceiling computed from h053's measured load after the runners (arithmetic in the PR body), and a fresh node_host_capacity_compute reading line `capacity host=h053` shows a ceiling no higher than that value -- falsifier: the reading line shows a ceiling above the PR's value or the overlay has no h053 entry
+      - id: "AC4"
+        statement: >-
+          AC4: one Repo Scripts Tests job on an hp053-ci-runner-N, read through `onex scm run-view` and `onex scm job-log` after the roll, completes in under 10 minutes, with `/proc/pressure/io` full avg60 on h053 read before and after -- falsifier: the job duration is 10 minutes or more, or the runner name is not hp053-ci-runner-N
+      - id: "AC5"
+        statement: >-
+          AC5: a STATUS row `pr=<repo#n> installed=h053:<revision> observed=<what ran> read_at=<UTC>` naming the hp053-ci-runner pool is on the work ledger -- falsifier: `python3 plugins/omni/skills/lane-brief/scripts/lane_brief.py grep 'installed=h053'` returns no row newer than 2026-11-19T20:00:00Z that names hp053-ci-runner
+evidence_requirements:
+  - kind: "tests"
+    description: "The pool compose and fleet config declare the NVMe binds; the deploy's directory effect creates every bind under the declared root runner-owned and leaves other binds alone."
+    command: "env -u OMNI_HOME uv run --frozen pytest tests/ci/test_hp053_pool_in_memory_omn19998.py tests/unit/observability/runner_health/test_runner_fleet_config.py tests/unit/handlers/test_handler_deploy_runners_job_dirs_omn26093.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn26093-ac1-declaration-tests"
+    description: "AC1: the compose binds each runner's workspace, TMPDIR and caches under the declared NVMe root with no tmpfs and no /data/scratch path; the fleet config declares the root."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u OMNI_HOME uv run --frozen pytest tests/ci/test_hp053_pool_in_memory_omn19998.py tests/unit/observability/runner_health/test_runner_fleet_config.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26093-ac1-prepare-effect"
+    description: "AC1: the deploy's directory effect creates every bind source under the declared root runner-owned (TMPDIR 1777, others 755), and touches nothing outside it."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u OMNI_HOME uv run --frozen pytest tests/unit/handlers/test_handler_deploy_runners_job_dirs_omn26093.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26093-ac2-nvme-device"
+    description: "AC2: each of the five runner containers on h053 reads the NVMe device with at least 100 GB available at its job directory. Needs the live host, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: ["AC2"]
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'for n in 1 2 3 4 5; do ssh h053 docker exec hp053-ci-runner-$n df --output=source,avail -BG ${RUNNER_USER_HOME:-/home/runner}/actions-runner/_work | tail -1 | awk \"{ if (\\$1 !~ /nvme/ || \\$2+0 < 100) exit 1 }\" || exit 1; done'"
+        cwd: "."
+  - id: "dod-omn26093-ac3-capacity-line"
+    description: "AC3: a fresh capacity reading names h053 with a ceiling the overlay declares. Needs the lab, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: ["AC3"]
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'git -C \"$OMNI_HOME/../overlays\" show origin/main:overlays/host_capacity/overlay.yaml | grep -A3 \"^  h053:\"'"
+        cwd: "."
+  - id: "dod-omn26093-ac4-job-duration"
+    description: "AC4: one Repo Scripts Tests job on an hp053-ci-runner finished in under ten minutes; the read is recorded in the lane report. Needs hosted run records, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: ["AC4"]
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'ssh h053 cat /proc/pressure/io'"
+        cwd: "."
+  - id: "dod-omn26093-ac5-status-row"
+    description: "AC5: a STATUS row naming installed=h053 and hp053-ci-runner is on the ledger newer than 2026-11-19T20:00:00Z."
+    source: "manual"
+    binds_ac: ["AC5"]
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep installed=h053 | grep hp053-ci-runner | grep OMN-26093'"
+        cwd: "."
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""

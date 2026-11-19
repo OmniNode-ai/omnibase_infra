@@ -677,3 +677,21 @@ def test_deploy_ships_healthcheck_script_to_host() -> None:
     assert '"docker/runners/healthcheck.sh"' in deploy_script
     # And in the real rsync invocation that ships into docker/runners/.
     assert '"${REPO_ROOT}/docker/runners/healthcheck.sh" \\' in deploy_script
+
+
+def test_job_dir_host_root_is_an_absolute_path_or_absent() -> None:
+    """OMN-26093: a host row's job-directory root is absolute, and only h053 declares one."""
+    config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
+    declared = {
+        host.host: host.job_dir_host_root
+        for host in config.hosts
+        if host.job_dir_host_root is not None
+    }
+    assert declared == {"h053": "/mnt/h053-nvme/runners/hp053-ci-runner"}
+    document = yaml.safe_load(
+        (REPO_ROOT / "config" / "runner_fleet.yaml").read_text(encoding="utf-8")
+    )
+    row = next(h for h in document["hosts"] if h["host"] == "h053")
+    row["job_dir_host_root"] = "relative/path"
+    with pytest.raises(ValidationError):
+        type(config).model_validate(document)

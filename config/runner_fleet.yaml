@@ -218,7 +218,7 @@ hosts:
   # carries `omnibase-ci` beside the opt-in `omnibase-ci-multiarch`, no
   # workflow changes, and the router's `action` floor counts it. OMN-19998
   # (2026-11-04) resized the pool from eight to FIVE runners at 9 GiB with five
-  # CPUs each and the job directories in memory: 49 to 55 GiB were available
+  # CPUs each and the job directories in memory (OMN-26093 moved them to the NVMe and the limit to 6 GiB): 49 to 55 GiB were available
   # there that morning with the lab-work units running, and the pool's slice
   # (docker/runners/systemd/pools/hp053-ci-runner/) caps all five at 46 GiB. The primary host's share
   # is lowered AFTER one passing job per repository is read from this pool
@@ -233,6 +233,11 @@ hosts:
     # OMN-24299 -- read-only mounted into this host's runner containers at
     # container_path above.
     action_archive_host_root: /var/lib/onex/action-archives
+    # OMN-26093 -- each hp053-ci-runner's job workspace, TMPDIR and caches are bind mounts under
+    # <root>/<N>/{work,tmp,cache/<name>} on this host's NVMe (nvme1n1p1, not rotational), not tmpfs and not the rotational root
+    # volume (read 2026-11-19: ROTA=1, 93 percent used, 96 ms write wait, io pressure full avg60 35 percent).
+    # The compose file binds its sources under this root and the deploy preparation effect creates them runner-owned.
+    job_dir_host_root: /mnt/h053-nvme/runners/hp053-ci-runner
     # OMN-22123 -- the reserved merge-queue pool. A merge_group job of a private repository asks for the label
     # `omnibase-ci-mq`; the runners that carried it lived on another lab host that is in repair and the fleet declared none, so each job
     # waited 14 to 60 minutes. Four runners on h053, labelled `omnibase-ci-mq` alone (no `omnibase-ci`, no
