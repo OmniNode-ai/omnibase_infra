@@ -25,6 +25,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_dev_recreate_reason import EnumDevRecreateReason
 from omnibase_infra.enums.enum_dev_recreate_verdict import EnumDevRecreateVerdict
 from omnibase_infra.models.model_dev_recreate_announcement import (
@@ -55,6 +56,16 @@ def _window_start(policy: ModelDevRecreatePolicy, now: datetime) -> datetime:
 
 class HandlerDevRecreateWindow:
     """Decide whether the dev runtime may be recreated now (contract-bound, pure)."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the pure compute role."""
+        return EnumHandlerType.COMPUTE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the deterministic compute category."""
+        return EnumHandlerTypeCategory.COMPUTE
 
     def handle(self, request: ModelDevRecreateRequest) -> ModelDevRecreateDecision:
         policy = request.policy
