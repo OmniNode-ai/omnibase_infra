@@ -242,6 +242,12 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # HMAC-SHA256 key shared by runtime-effects and deploy-agent. Required for
 # signed rebuild commands; generate once and store in ~/.omnibase/.env.
 # DEPLOY_AGENT_HMAC_SECRET=__REPLACE_WITH_SECURE_RANDOM_SECRET__
+#
+# OMN-24565: the dev deploy agent does not read the key above. Its unit
+# (deploy-agent-dev.service) reads its own dev-only key from a second file,
+# ~/.omnibase/deploy-agent-dev-signing-key.env, one DEPLOY_AGENT_HMAC_SECRET line
+# holding the secret store's DEPLOY_AGENT_DEV_HMAC_SECRET. Never copy the shared
+# key into that file.
 
 # =============================================================================
 # Worker Runtime Service Configuration
