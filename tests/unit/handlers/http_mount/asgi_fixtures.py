@@ -5,8 +5,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable, MutableMapping
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
 
@@ -68,3 +69,43 @@ def create_app_failing_lifespan() -> FastAPI:
 def create_not_an_app() -> object:
     """Factory that returns something that is not an ASGI application."""
     return "not callable"
+
+
+_Message = MutableMapping[str, Any]
+_Receive = Callable[[], Awaitable[_Message]]
+_Send = Callable[[_Message], Awaitable[None]]
+_Scope = MutableMapping[str, Any]
+
+
+def create_receive_probe(
+    calls: list[int], bodies: list[bytes], read_body: bool
+) -> Callable[[_Scope, _Receive, _Send], Awaitable[None]]:
+    """A raw ASGI app that counts its ``receive`` calls and may never read the body."""
+
+    async def app(scope: _Scope, receive: _Receive, send: _Send) -> None:
+        if scope["type"] == "lifespan":
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                else:
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+        if read_body:
+            body = b""
+            more = True
+            while more:
+                calls.append(1)
+                message = await receive()
+                body += message.get("body", b"")
+                more = message.get("more_body", False)
+            bodies.append(body)
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    return app
+
+
+def create_unread_probe() -> Callable[[_Scope, _Receive, _Send], Awaitable[None]]:
+    """A raw ASGI app that never reads its request body."""
+    return create_receive_probe([], [], read_body=False)
