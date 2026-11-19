@@ -2789,9 +2789,6 @@ entries:
   - path: src/omnibase_infra/models/event_bus/model_consumer_retry_config.py
     family: O
     content_sha1: af9667fa9a6215d877d526ba33731e89630b6559
-  - path: src/omnibase_infra/models/model_dev_lane_branch_install_file.py
-    family: F
-    content_sha1: 02ad0993499ad0912108af9214453fc39f95f51e
   - path: src/omnibase_infra/models/model_lane_admin_client_config.py
     family: F
     content_sha1: ceab0347346b9cd3367c2f273fa2623dc08fbcf6

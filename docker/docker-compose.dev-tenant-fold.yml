@@ -41,7 +41,13 @@ services:
       # is relative to this docker/ directory, i.e. <registry root>/overlays/overlays
       # beside the omnibase_infra checkout, the clone the canonical-clone sync keeps
       # current; DEV_LANE_OVERLAY_STORE_ROOTS_DIR overrides it.
-      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-store:/etc/onex/skill-overlays
+      # The branch root comes before both, so an overlay a lane installs from a branch
+      # (the dev branch installer, OMN-25536) wins. It is a plain directory in the
+      # container's writable layer, not a mount: both mounts below are read-only and
+      # docker cp cannot write there. The installer's declared roots name it
+      # (src/omnibase_infra/models/dev_lane_branch_install_roots.yaml); a recreate removes
+      # it, and a reader skips a root that holds no <node>/overlay.yaml.
+      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-branch:/etc/onex/skill-overlays-store:/etc/onex/skill-overlays
       ONEX_CONTEXT_SOURCE_TENANT_ID: ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}
       ONEX_TICKET_GUARD_PATH: /etc/onex/ticket-guard/plugins/onex/hooks/lib/ticket_creation_guard.py
       #

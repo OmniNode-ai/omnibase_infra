@@ -1416,8 +1416,11 @@ _SKILL_OVERLAY_ROOTS_ENV = "ONEX_SKILL_OVERLAY_ROOTS"
 _SKILL_OVERLAY_ROOTS_TARGET = "/etc/onex/skill-overlays"
 _SKILL_OVERLAY_ROOTS_HOST_VAR = "DEV_LANE_SKILL_OVERLAY_ROOTS_DIR"
 _OVERLAY_STORE_ROOT_TARGET = "/etc/onex/skill-overlays-store"
+# OMN-25536: the dev branch installer's root, a writable directory with no mount.
+_OVERLAY_BRANCH_ROOT_TARGET = "/etc/onex/skill-overlays-branch"
 _OVERLAY_STORE_ROOT_HOST_VAR = "DEV_LANE_OVERLAY_STORE_ROOTS_DIR"
 _SKILL_OVERLAY_ROOTS_VALUE = (
+    f"{_OVERLAY_BRANCH_ROOT_TARGET}:"
     f"{_OVERLAY_STORE_ROOT_TARGET}:{_SKILL_OVERLAY_ROOTS_TARGET}"
 )
 
@@ -1477,9 +1480,11 @@ def test_dev_lane_overlay_store_root_is_ahead_of_the_frozen_root() -> None:
     effects = yaml.safe_load(result.stdout)["services"]["runtime-effects"]
 
     assert effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV).split(":") == [
+        _OVERLAY_BRANCH_ROOT_TARGET,
         _OVERLAY_STORE_ROOT_TARGET,
         _SKILL_OVERLAY_ROOTS_TARGET,
     ]
+    assert _mounts_at(effects, _OVERLAY_BRANCH_ROOT_TARGET) == []
 
     store_mounts = _mounts_at(effects, _OVERLAY_STORE_ROOT_TARGET)
     assert len(store_mounts) == 1, (
@@ -1505,6 +1510,8 @@ def _resolve_node_overlay_text(service: dict[str, Any], node_name: str) -> str |
     root to the host directory mounted there, as the reader does inside the runtime.
     """
     for root in service["environment"][_SKILL_OVERLAY_ROOTS_ENV].split(":"):
+        if root == _OVERLAY_BRANCH_ROOT_TARGET:
+            continue  # a writable directory with no host mount; it holds no copy here
         (mount,) = _mounts_at(service, root)
         candidate = Path(mount["source"]) / node_name / "overlay.yaml"
         if candidate.is_file():
@@ -1619,9 +1626,11 @@ def test_tenant_fold_overlay_store_root_is_ahead_of_the_frozen_root() -> None:
     runtime = yaml.safe_load(result.stdout)["services"]["omninode-runtime"]
 
     assert runtime["environment"].get(_SKILL_OVERLAY_ROOTS_ENV).split(":") == [
+        _OVERLAY_BRANCH_ROOT_TARGET,
         _OVERLAY_STORE_ROOT_TARGET,
         _SKILL_OVERLAY_ROOTS_TARGET,
     ]
+    assert _mounts_at(runtime, _OVERLAY_BRANCH_ROOT_TARGET) == []
 
     store_mounts = _mounts_at(runtime, _OVERLAY_STORE_ROOT_TARGET)
     assert len(store_mounts) == 1, (
