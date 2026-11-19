@@ -127,6 +127,37 @@ def test_golden_chain_the_staging_lock_is_taken_seen_and_released(
     )
 
 
+def test_staging_lock_acquire_cli_reports_the_staging_path_and_holder(
+    tmp_path: Path,
+) -> None:
+    lock = tmp_path / "venv.rebuilding.lock"
+    staging = lock.with_suffix("")
+    holder_pid = os.getpid()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_RUNTIME),
+            "staging-lock-acquire",
+            "--path",
+            str(lock),
+            "--pid",
+            str(holder_pid),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert lock.is_symlink()
+    assert result.stdout.splitlines() == [
+        f"[reconcile] dispatch venv: staging lock taken on {staging} "
+        f"(pid {holder_pid} on {socket.gethostname()})"
+    ]
+
+
 def test_error_chain_a_live_holder_declines_the_lock(tmp_path: Path) -> None:
     holder = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True
