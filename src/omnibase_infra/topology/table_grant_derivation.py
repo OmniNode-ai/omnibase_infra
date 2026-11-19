@@ -80,7 +80,7 @@ WRITE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
 # and never TRUNCATE. No contract derives it; a principal that prunes declares
 # it by hand on the one relation it prunes (OMN-17427,
 # node_projection_consumer_flow/0006 for omninode_internal.consumer_flow_windows).
-PRUNE_PRIVILEGES = READ_PRIVILEGES | {EnumDatabasePrivilege.DELETE}
+PRUNE_PRIVILEGES = frozenset({*READ_PRIVILEGES, EnumDatabasePrivilege.DELETE})
 
 # Relations whose vendored migration also grants DELETE, which no ``access`` mode
 # derives. The reservations table is released or expired by deleting its rows
