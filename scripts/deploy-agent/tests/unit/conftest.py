@@ -87,6 +87,26 @@ def _stub_cost_estimator_build_settings(
 
 
 @pytest.fixture(autouse=True)
+def _stub_product_clone_pin_write(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A unit test never writes the dev runtime's pin file under the host's registry root (OMN-25901).
+
+    ``runtime_overlay_revision.apply`` writes it from ``REPO_DIR``, a deploy host path.
+    The pin writer's own suite opts out with the ``product_clone_pin`` marker.
+    """
+    if request.node.get_closest_marker("product_clone_pin") is not None:
+        return
+    monkeypatch.setattr(
+        executor_mod.load_dev_boot_guard(
+            "nodes.node_setup_local_provision_effect.runtime_overlay_revision"
+        ),
+        "write_product_clone_pins",
+        lambda execution: None,
+    )
+
+
+@pytest.fixture(autouse=True)
 def _stub_llm_endpoint_env_render(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:

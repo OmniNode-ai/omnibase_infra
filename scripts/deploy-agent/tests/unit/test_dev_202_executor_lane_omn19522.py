@@ -102,6 +102,9 @@ def _capture_compose_up(
     def fake_run(
         cmd: list[str], timeout: int, **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["docker", "inspect"]:
+            # OMN-25106: the roll reads a service's health before it rolls it.
+            return subprocess.CompletedProcess(cmd, 1, "", "No such object")
         captured.append(cmd)
         return _ok()
 
@@ -121,6 +124,9 @@ def _capture_build(executor: DeployExecutor) -> list[list[str]]:
     def fake_run(
         cmd: list[str], timeout: int, **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["docker", "inspect"]:
+            # OMN-25106: the roll reads a service's health before it rolls it.
+            return subprocess.CompletedProcess(cmd, 1, "", "No such object")
         captured.append(cmd)
         return _ok()
 
@@ -137,6 +143,9 @@ def _capture_migrations(executor: DeployExecutor) -> list[list[str]]:
     def fake_run(
         cmd: list[str], timeout: int, **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["docker", "inspect"]:
+            # OMN-25106: the roll reads a service's health before it rolls it.
+            return subprocess.CompletedProcess(cmd, 1, "", "No such object")
         captured.append(cmd)
         if "to_regclass" in " ".join(cmd):
             # The projection-table probe answers "the table exists".

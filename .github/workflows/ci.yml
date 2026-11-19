@@ -324,6 +324,9 @@ jobs:
       - name: Rolling runner registration preflight (OMN-18877)
         run: uv run --frozen pytest tests/ci/test_deploy_runners_registration_preflight.py -q
 
+      - name: Secondary runner image roll (OMN-25796)
+        run: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -q -n 0 --no-cov
+
       - name: Caller-owned imperative guard regression (OMN-21004)
         run: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
 
