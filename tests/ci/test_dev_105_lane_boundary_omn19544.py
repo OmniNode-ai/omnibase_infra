@@ -126,6 +126,19 @@ DEV_TO_DEV_105 = {
     "omnibase-infra-forward-migration": "omnibase-infra-dev-105-forward-migration",
 }
 
+#: OMN-25753: services the dev lane manifest no longer declares, because they
+#: were folded into the dev main runtime (OMN-23333: no container of them runs
+#: on the dev lane). This lane still runs and declares each one under its own
+#: name, so they stay in the map above and the lane must still declare them;
+#: they leave only the equality against the dev lane's declared set.
+FOLDED_INTO_DEV_RUNTIME = frozenset(
+    {
+        "omnimarket-projection-api",
+        "omninode-runtime-effects",
+        "omnimarket-projection-delegation-writer",
+    }
+)
+
 #: No service is declared but disabled on this lane: the cloud API and its
 #: one-shots were removed from the dev lane (OMN-24476).
 PROFILE_GATED: set[str] = set()
@@ -180,7 +193,8 @@ def test_dev_105_lane_boundary_declares_every_dev_service_under_its_name() -> No
     dev_declared = {
         s["name"] for s in manifest["lanes"]["dev"]["services"]
     } - DEV_ONLY_UNMIRRORED
-    assert dev_declared == set(DEV_TO_DEV_105), (
+    assert set(DEV_TO_DEV_105) >= FOLDED_INTO_DEV_RUNTIME
+    assert dev_declared == set(DEV_TO_DEV_105) - FOLDED_INTO_DEV_RUNTIME, (
         "the .201 dev lane's declared services changed; map the new one to its "
         f"dev-105 name here and in the overlay. dev declares {sorted(dev_declared)}"
     )

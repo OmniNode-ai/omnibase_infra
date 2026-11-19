@@ -1,0 +1,68 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25753
+title: "Shared red omnibase_infra: Lab-overlay parity tests (OMN-20934) fixed at its source"
+summary: The two mirrored-lane boundary tests required the dev lane manifest to declare three services the census removed after they were folded into the dev runtime.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25753-census-fold
+    statement: The mirrored-lane boundary tests state which services were folded out of the dev lane and keep every other assertion.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the shared cause is named from the failure text read on at least three of the 27 PRs, with job ids and quoted lines in the lane STATUS row, or a per-PR table of what each lacks is in a STATUS row -- falsifier: the ledger holds no STATUS row from the lane naming the cause with job ids and quotes for three PRs
+      - id: AC2
+        statement: >-
+          AC2: one pull request on the default branch of the repository that owns the cause fixes it at the source, with a test that fails on the unfixed code and passes on the fix -- falsifier: `uv run pytest <the new test path> -q` run at the unfixed base commit passes, or `onex scm pr-view` shows no such pull request
+      - id: AC3
+        statement: >-
+          AC3: the fix widens or bypasses no check, so the diff removes no assertion and adds no skip, xfail, loosened threshold or changed required-check list -- falsifier: `git diff <base> <head> -- tests/ .github/` shows a removed assert, a new skip or xfail marker or a changed required-check list
+      - id: AC4
+        statement: >-
+          AC4: the pull request is open and ready (not draft) with a Lab line in its body and the lane TERMINAL names the head -- falsifier: `onex scm pr-view` shows the pull request as a draft, or the body carries no line starting `Lab:`
+evidence_requirements:
+  - kind: tests
+    description: The two boundary tests run against the lab census.
+    command: uv run pytest tests/ci/test_dev_105_lane_boundary_omn19544.py tests/ci/test_dev_202_lane_boundary_omn19505.py -m lab_overlay -p no:randomly -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25753-cause-named
+    description: Both boundary tests name the census change that removed the folded services from the dev lane.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -c 'git grep -q OMN-23333 -- tests/ci/test_dev_105_lane_boundary_omn19544.py && git grep -q OMN-23333 -- tests/ci/test_dev_202_lane_boundary_omn19505.py'
+        cwd: .
+  - id: dod-omn25753-fix-at-source
+    description: Both tests subtract the folded set from the expected dev declaration, and the folded names stay mapped so each mirrored lane must still declare them.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -c 'for t in "105 tests/ci/test_dev_105_lane_boundary_omn19544.py" "202 tests/ci/test_dev_202_lane_boundary_omn19505.py"; do set -- $t; git grep -qF "assert dev_declared == set(DEV_TO_DEV_$1) - FOLDED_INTO_DEV_RUNTIME" -- $2 || exit 1; done'
+        cwd: .
+  - id: dod-omn25753-no-widening
+    description: The folded set must be a subset of the mapping and the equality against the dev declaration is kept.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -c 'for t in "105 tests/ci/test_dev_105_lane_boundary_omn19544.py" "202 tests/ci/test_dev_202_lane_boundary_omn19505.py"; do set -- $t; git grep -qF "assert set(DEV_TO_DEV_$1) >= FOLDED_INTO_DEV_RUNTIME" -- $2 || exit 1; done'
+        cwd: .
+  - id: dod-omn25753-pr-ready
+    description: The change is a test-only fix, so the ready and Lab line state is read from the PR; the structural check is that the boundary tests carry the folded set.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -c 'git grep -q "^FOLDED_INTO_DEV_RUNTIME = frozenset" -- tests/ci/test_dev_105_lane_boundary_omn19544.py tests/ci/test_dev_202_lane_boundary_omn19505.py'
+        cwd: .
