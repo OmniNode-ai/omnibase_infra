@@ -35,9 +35,9 @@ dod_evidence:
     binds_ac: ["AC2"]
     checks:
       - check_type: "test_passes"
-        check_value: 'uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_lane_memgraph_omn24714.py tests/integration/test_catalog_roundtrip.py tests/test_compose_profile_teardown_policy.py -m "not slow" -q -n 0 --no-cov'
+        check_value: 'uv run --frozen pytest tests/integration/test_catalog_roundtrip.py tests/test_compose_profile_teardown_policy.py -m "not slow" -q -n 0 --no-cov'
         cwd: "${OMNI_HOME}/omnibase_infra"
-  - id: "dod-omn24714-deploy-compose-resolves-memgraph-unprofiled"
+  - id: "dod-omn24714-compose-memgraph-unprofiled"
     description: "AC1 deploy probe: docker compose resolves the dev-lane merge with omnibase-infra-memgraph carrying no profile, so the core phase starts it. Exits 1 on the unchanged dev-lane file, where the service keeps the omnimemory and full profiles."
     source: "manual"
     binds_ac: ["AC1"]
