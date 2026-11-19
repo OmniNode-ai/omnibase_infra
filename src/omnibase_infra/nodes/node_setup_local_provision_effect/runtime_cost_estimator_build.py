@@ -346,7 +346,7 @@ def writer_roll(
         return {}
     if not git_sha:
         raise RuntimeError(_NO_SHA)
-    return {"after_migrations": _HandedOverRoll(execution, lane, git_sha)}
+    return {"after_migrations": HandedOverRoll(execution, lane, git_sha)}
 
 
 _NO_SHA = "stability lane writer check needs the deploy's git sha"
@@ -356,7 +356,7 @@ _NOT_ROLLED = (
 )
 
 
-class _HandedOverRoll:
+class HandedOverRoll:
     """The ``after_migrations`` step; it records whether ``_compose_up`` ran it."""
 
     def __init__(self, execution: ModuleType, lane: str, git_sha: str) -> None:
@@ -383,7 +383,7 @@ def handed_over(
     def up(*args: object, **kwargs: object) -> None:
         compose_up(*args, **kwargs, **roll)
         step = roll.get("after_migrations")
-        if isinstance(step, _HandedOverRoll) and not step.ran:
+        if isinstance(step, HandedOverRoll) and not step.ran:
             raise RuntimeError(_NOT_ROLLED)
 
     return up
@@ -437,7 +437,7 @@ def roll_writers(
             f"for {', '.join(services)}"
         )
     _wait_writers_healthy(
-        execution, lane, services, environment, wait_seconds, poll_seconds, sleep
+        execution, lane, services, environment, (wait_seconds, poll_seconds), sleep
     )
     return services
 
@@ -500,10 +500,10 @@ def _wait_writers_healthy(
     lane: str,
     services: tuple[str, ...],
     environment: dict[str, str],
-    wait_seconds: float,
-    poll_seconds: float,
+    waits: tuple[float, float],
     sleep: Callable[[float], None],
 ) -> None:
+    wait_seconds, poll_seconds = waits
     deadline = time.monotonic() + wait_seconds
     pending = list(services)
     while pending:
