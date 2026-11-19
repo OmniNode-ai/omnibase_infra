@@ -593,8 +593,13 @@ if ! jq -e . >/dev/null 2>&1 <<<"${ATTRIBUTION_RECORD_JSON}"; then
     ATTRIBUTION_RECORD_JSON="null"
 fi
 
+# Resolve before reading the lane so a bad address fails even in a dry run.
+# Every compose invocation, including rollback, uses this list (OMN-16729).
+INFRA_CLONE="${OMNI_HOME}/omnibase_infra"
+resolve_compose_file_args LANE_COMPOSE_FILE_ARGS "${INFRA_CLONE}" "${COMPOSE_PROJECT}"
 if [[ "${MODE}" != "execute" ]]; then
     log "dry-run: no fetch/checkout/build/restart performed. Re-run with --execute."
+    log "  compose files : ${LANE_COMPOSE_FILE_ARGS[*]}; $(run_python "${REPO_ROOT}/src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_host_broker_layer.py" describe "${REPO_ROOT}/src/omnibase_infra/nodes/node_setup_local_provision_effect/contract.yaml" "$(resolve_lane_overlay_filename "${COMPOSE_PROJECT}")" | tr '\n' ' ')"
     log "would run: OMNI_HOME=${OMNI_HOME} OMNIBASE_INFRA_COMPOSE_PROJECT=${COMPOSE_PROJECT} \\"
     log "  BUILD_SOURCE=workspace DEPLOY_REF=${REF} DEPLOY_SIBLING_REFS=\"${DEPLOY_SIBLING_REFS}\" \\"
     log "  RUNTIME_BUILD_SERVICES_OVERRIDE=\"${REFRESH_BUILD_SERVICES[*]}\" \\"
@@ -691,18 +696,12 @@ fi
 #    pair did.
 # =============================================================================
 log "=== Refresh omnibase_infra ambient clone to ${REF} ==="
-INFRA_CLONE="${OMNI_HOME}/omnibase_infra"
 # OMN-15837: the health gate reads this file's literal KAFKA_CONSUMER_GROUP
 # values as a derivation source for the standalone projection writers'
 # consumer groups. It must be the AMBIENT clone's copy -- the same tree
 # `docker compose` is driven from below -- not this script's own checkout,
 # which may be a different revision.
 LANE_COMPOSE_FILE="${INFRA_CLONE}/docker/docker-compose.stability-test.yml"
-# The lane's compose file list, resolved once from the shared resolver and used
-# by every compose invocation this script makes -- notably the rollback recreate
-# below. Never spell a `-f` path inline (OMN-16729).
-declare -a LANE_COMPOSE_FILE_ARGS
-resolve_compose_file_args LANE_COMPOSE_FILE_ARGS "${INFRA_CLONE}" "${COMPOSE_PROJECT}"
 git_clone "${INFRA_CLONE}" fetch origin --prune
 RESOLVED_REF_SHA="$(git_clone "${INFRA_CLONE}" rev-parse "${REF}^{commit}")"
 git_clone "${INFRA_CLONE}" checkout --force --detach "${RESOLVED_REF_SHA}"

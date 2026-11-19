@@ -1,0 +1,66 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25845
+title: Unblock omnibase_infra PR 6002
+summary: >-
+  Rebase the shared stability broker layer decision onto dev while preserving
+  folded-service retirement and the governed shell interpreter. Read the CI
+  and lab evidence at the resulting PR head.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25845-unblock-pr
+    statement: Resolve the conflict while preserving the existing CI gates.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: omnibase_infra PR 6002 no longer conflicts with its base and its required contexts read success at its new head, with the new head named in a PR comment that starts `Lab: head=<full head sha>` -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6002` shows a merge state of DIRTY or a required context not success at the head, or shows no Lab comment naming that head
+      - id: AC2
+        statement: >-
+          AC2: when the cause lies outside the PR, a STATUS row reads cause=<one line> shared=yes with the evidence and the lane pushes nothing that widens or skips a check -- falsifier: `grep -F 'omnibase_infra#6002' "$ONEX_LEDGER_PATH" | grep -F 'shared=yes'` finds no STATUS row from the lane while the PR head is unchanged and still red
+evidence_requirements:
+  - kind: tests
+    description: Exercise the real shell resolver and deploy-agent configuration together.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stability_layer_file_list_matches_resolver_omn24509.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn25845-ac1-agreement
+    description: >-
+      Exercise broker-layer selection and refusal through both consumers.
+      The required-context verdict and Lab comment are read from the live PR
+      after the push.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stability_layer_file_list_matches_resolver_omn24509.py -q
+        cwd: .
+  - id: dod-omn25845-ac1-deploy-source
+    description: >-
+      Read the hosted executor at the checked-out revision and require the
+      typed broker-layer call. The base executor lacks that call.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=$(git rev-parse HEAD)" --jq .content
+          | base64 -d | grep -Fx '    return cast("ModelLaneConfig", layer.layered(sys.modules[__name__], config))'
+        cwd: .
+  - id: dod-omn25845-ac2-check-integrity
+    description: >-
+      The rebased tree passes the existing governed-helper gate and carries
+      no changes to gate definitions or file-shape baselines. A shared cause,
+      if established, is recorded by the orchestrator in the live ledger.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: >-
+          grep -F 'uv run --frozen --project=' scripts/runtime_build/compose_files.sh
+          && git diff --exit-code HEAD^ -- .github/workflows .pre-commit-config.yaml
+          .onex_ratchets config/governed_helper_policy.json config/governed_helper_baseline.json
+        cwd: .

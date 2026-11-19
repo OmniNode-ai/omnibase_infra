@@ -111,7 +111,9 @@ resolve_lane_overlay_filename() {
         *)
             _compose_files_log_error "Unknown lane '${lane}' derived from compose project '${compose_project}'."
             _compose_files_log_error "  Only the dev / stability-test / prod / judge lanes are known."
-            _compose_files_log_error "  Refusing to deploy: running a non-dev lane on the bare infra.yml config would recreate the DEV-named redpanda and displace this lane's broker (OMN-13581). Add the lane's overlay mapping before deploying it."
+            _compose_files_log_error "  Refusing to deploy: running a non-dev lane on the bare infra.yml config"
+            _compose_files_log_error "  would recreate the DEV-named redpanda and displace this lane's broker"
+            _compose_files_log_error "  (OMN-13581). Add the lane's overlay mapping before deploying it."
             exit 1
             ;;
     esac
@@ -140,13 +142,13 @@ resolve_lane_overlay_dir() {
     dir="$(_lane_overlay_dir_candidate)"
     if [[ -z "${dir}" || ! -f "${dir}/${compose_project}.bifrost.yaml" ]]; then
         _compose_files_log_error "No lane overlay for compose project '${compose_project}'${dir:+ in \"${dir}\"}."
-        _compose_files_log_error "  The lane compose files mount \${ONEX_LANE_OVERLAY_DIR}/\${COMPOSE_PROJECT_NAME}.bifrost.yaml, and this repository ships no lab lane overlay. Set ONEX_LANE_OVERLAY_DIR to the"
+        _compose_files_log_error "  The lane compose files mount \${ONEX_LANE_OVERLAY_DIR}/\${COMPOSE_PROJECT_NAME}.bifrost.yaml,"
+        _compose_files_log_error "  and this repository ships no lab lane overlay. Set ONEX_LANE_OVERLAY_DIR to the"
         _compose_files_log_error "  directory holding ${compose_project}.bifrost.yaml, or ONEX_WORKSPACE_CONFIG_ROOT to a"
         _compose_files_log_error "  config root whose config/lab/lane-overlays/ holds it (OMN-20932)."
         return 1
     fi
-    ONEX_LANE_OVERLAY_DIR="$(cd "${dir}" && pwd -P)"
-    export ONEX_LANE_OVERLAY_DIR
+    export_lane_overlay_dir "${compose_project}"
 }
 
 # Export form, run by resolve_compose_file_args before every lane compose call:
@@ -211,10 +213,12 @@ resolve_compose_file_args() {
     fi
     compose_files_out=(-f "${docker_dir}/docker-compose.infra.yml")
 
-    local overlay_filename
+    local overlay_filename layer project_root="${BASH_SOURCE[0]%/*}/../.."
     overlay_filename="$(resolve_lane_overlay_filename "${compose_project}")"
     if [[ -n "${overlay_filename}" ]]; then
-        compose_files_out+=(-f "${docker_dir}/${overlay_filename}")
+        local node_dir="${project_root}/src/omnibase_infra/nodes/node_setup_local_provision_effect"
+        layer="$(uv run --frozen --project="${project_root}" python "${node_dir}/runtime_host_broker_layer.py" layer "${node_dir}/contract.yaml" "${overlay_filename}")" || return 1
+        compose_files_out+=(-f "${docker_dir}/${overlay_filename}" ${layer:+-f "${docker_dir}/${layer}"})
     else
         # Dev/lab lane (bare omnibase-infra project). OMN-15379: layer the
         # dev-lane overlay, whose content includes ONEX_MIGRATION_LANE=dev for
@@ -225,12 +229,5 @@ resolve_compose_file_args() {
         # separate file precisely so no non-dev lane can inherit it from the
         # base: see the header of docker/docker-compose.dev-lane.yml.
         compose_files_out+=(-f "${docker_dir}/docker-compose.dev-lane.yml" -f "${docker_dir}/docker-compose.dev-tenant-fold.yml")
-    fi
-
-    # OMN-24509: the stability lane's per-host advertised broker layer (OMN-19998) goes AFTER the lane's own overlay when the host
-    # supplies at least one of its two lane-specific address variables; a half declaration still layers it, so compose refuses the
-    # missing one by name. No other lane's overlay name matches, so no other lane gets it. (Two refusal messages were each joined onto one line to keep this file's size.)
-    if [[ "${overlay_filename}" == *stability* && -n "${STABILITY_TEST_REDPANDA_ADVERTISED_KAFKA_ADDR:-}${STABILITY_TEST_REDPANDA_ADVERTISED_PANDAPROXY_ADDR:-}" ]]; then
-        compose_files_out+=(-f "${docker_dir}/docker-compose.stability-host-broker.yml")
     fi
 }
