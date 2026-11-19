@@ -28,6 +28,7 @@ class NodeLocalProvisionEffect(NodeEffect):
         - ``HandlerLocalProvision``: Runs ``docker compose up -d`` and polls ports.
         - ``HandlerLocalTeardown``: Runs ``docker compose down``.
         - ``HandlerLocalStatus``: Queries which services are currently running.
+        - ``HandlerLocalEngineInfo``: Reads the engine's CPU count and memory.
     """
 
     def __init__(self, container: ModelONEXContainer) -> None:

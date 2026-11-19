@@ -562,7 +562,12 @@ def _full_pass_runner():
             return _completed(stdout="15000\n")
         if "topic" in cmd and "list" in cmd:
             return _completed(stdout=_topic_list_output([1] * 1529))
-        if cmd[:3] == ["docker", "exec", "redpanda-container"] and "cluster" in cmd:
+        # OMN-25927: rpk's login NAMES sit between `exec` and the container.
+        if (
+            cmd[:2] == ["docker", "exec"]
+            and "redpanda-container" in cmd
+            and "cluster" in cmd
+        ):
             return _completed(stdout="Healthy:                          true\n")
         if "group" in cmd and "list" in cmd:
             return _completed(
