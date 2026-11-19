@@ -17,15 +17,22 @@
 #   armed set, so arming cannot happen as a side effect of some other change.
 #
 # THE LAB-EVIDENCE FIELD IS A STATEMENT OF FACT, NOT A DIAL
-#   Operator ruling (ROLLING_WORK_LEDGER.md:4258) names a PASS lab-pass receipt
-#   as the cut premise. Measured 2026-09-17, only omnibase_infra and omnimarket
-#   carry a rebuild trigger and emit one at all; the other five repos are
-#   libraries with no lab lane of their own and cannot produce a receipt for any
-#   sha. `lab_evidence: none` records that, with its reason, and the reason is
-#   printed on every decision the train makes for that repo. It is not a way past
-#   the bar: every repo declaring it is also `report_only` today, so nothing is
-#   cut on a weaker premise pending an operator decision on what a library repo's
-#   equivalent premise should be.
+#   What each `lab_evidence` value MEANS is one row of `lab_evidence_modes` below,
+#   read by scripts/ci/release_train.py: which receipt lanes it reads, whether a
+#   receipt is required for a cut, whether a note is mandatory, whether an
+#   instance-routing proof applies and which reason a cut under it carries. A new
+#   value is a row here plus its enum member, never a new code path, and the loader
+#   refuses a table that has a row without a value or a value without a row.
+#   Operator ruling (ROLLING_WORK_LEDGER.md:4258) named a PASS lab-pass receipt as
+#   the cut premise. Measured 2026-09-17, only omnibase_infra and omnimarket carry a
+#   rebuild trigger and emit one at all; the other five repos are libraries with no
+#   lab lane of their own and cannot produce a receipt for any sha. `none` records
+#   that, with its reason, and the reason is printed on every decision the train
+#   makes for that repo. `dev-required-green` (OMN-25646, decision 2 of the
+#   separation plan, RULING 2026-11-18T16:26:04Z) is the premise `classify_ci_green`
+#   already applies to every cut: every required context of the default branch
+#   reported success on the gating commit. The lab-pass receipt is still read and
+#   printed as a signal (found, failed or absent) and is never required.
 #
 # tag_clone_consumed_paths (OMN-20298)
 #   Paths OUTSIDE release_relevant_paths that a downstream repository reads from a
@@ -59,15 +66,44 @@
 #   own required CI. A uv resolution failure keeps the unrefreshed lock and is
 #   reported; it never hides.
 dependency_refresh_first_party_prefixes: [omni, onex]
+lab_evidence_modes:
+  COMPOSE_DEV:
+    read_compose_dev: true
+    read_instance_lanes: false
+    receipt_required: true
+    note_required: false
+    instance_proof_required: false
+    cut_reason: unreleased_work_lab_proven
+  COMPOSE_DEV_OR_INSTANCE:
+    read_compose_dev: true
+    read_instance_lanes: true
+    receipt_required: true
+    note_required: false
+    instance_proof_required: true
+    cut_reason: unreleased_work_lab_proven
+  NONE:
+    read_compose_dev: false
+    read_instance_lanes: false
+    receipt_required: false
+    note_required: true
+    instance_proof_required: false
+    cut_reason: unreleased_work_no_lab_surface_declared
+  DEV_REQUIRED_GREEN:
+    read_compose_dev: true
+    read_instance_lanes: true
+    receipt_required: false
+    note_required: true
+    instance_proof_required: false
+    cut_reason: unreleased_work_dev_required_green
 repos:
   omnibase_infra:
     package: omnibase-infra
     default_branch: dev
     dependency_refresh: locked
     release_relevant_paths: [src, docker/migrations, pyproject.toml]
-    lab_evidence: compose-dev
+    lab_evidence: dev-required-green
     lab_evidence_note: >-
-      the compose dev lane on the lab host. runtime-rebuild-trigger.yml emits a lab-pass-receipt-compose-dev-<sha> artifact in this repo for a RUNTIME-AFFECTING merge only -- its receipt job is gated on published == 'true' and runtime_lane == 'dev' -- so a workflow-only or scripts-only merge has no receipt of its own, at any time, and never will. Measured 2026-09-18: seven of the eight most recent dev merges carried none, by design. The premise therefore asks for the receipt of the nearest runtime-affecting ancestor of the head, and accepts it only when no commit between that ancestor and the head is runtime-affecting by the trigger's own classifier (OMN-18664). One runtime-affecting commit in that gap voids the inheritance and the train refuses, naming it.
+      decision 2 of the separation plan, RULING 2026-11-18T16:26:04Z: the release is signed off on the green-CI premise the train already applies (every required context of dev reported success on the gating commit of the merged pull request), and the dev lane's lab-pass receipt is printed as a signal, never required. runtime-rebuild-trigger.yml emits that receipt for a RUNTIME-AFFECTING merge only, so the signal reads the nearest runtime-affecting ancestor of the head and the inheritance holds only when no commit between is runtime-affecting (OMN-18664). OMN-24976 gives the train a lab PASS; this value does not wait for it.
     mode: cut
     tag_clone_consumed_paths:
       - path: scripts/validation/lint_topic_names.py
@@ -89,12 +125,12 @@ repos:
     default_branch: dev
     dependency_refresh: locked
     release_relevant_paths: [src, pyproject.toml]
-    lab_evidence: compose-dev-or-instance-lanes
+    lab_evidence: dev-required-green
     lab_evidence_note: >-
-      the compose dev lane on .201, or the receipt lane of any deploy-agent instance whose row in config/deploy_lane_routing.yaml proves omnimarket: today dev-202 on .202 (compose-dev-202, OMN-19508) and dev-200 on .200 (compose-dev-200, OMN-19543). The operator ruled on 2026-09-25T00:56:45Z that omnimarket changes may be proven on the .202 lane, and on 2026-09-25T10:22:22Z for one deploy slot per lab host; the loader refuses this value for a repo no instance proves. compose-dev is read first, then each instance lane in table order, and a PASS on any satisfies the premise. This repo carries its own runtime-rebuild-trigger.yml and its receipts are published here, in the repo the sha belongs to. As in omnibase_infra, a receipt exists only for a RUNTIME-AFFECTING merge, so the premise asks for the nearest runtime-affecting ancestor of the head and accepts it only when nothing between that ancestor and the head is runtime-affecting (OMN-18664).
+      decision 2 of the separation plan, RULING 2026-11-18T16:26:04Z: the release is signed off on the green-CI premise the train already applies (every required context of dev reported success on the gating commit of the merged pull request), and the lab-pass receipt is printed as a signal, never required. The signal reads the dev lane first, then the receipt lane of each deploy-agent instance whose row in config/deploy_lane_routing.yaml proves omnimarket, for the nearest runtime-affecting ancestor of the head (OMN-18664). This repo carries its own runtime-rebuild-trigger.yml and its receipts are published here, in the repo the sha belongs to.
     mode: cut
     mode_note: >-
-      the cut premise is the lab_evidence rule above: unreleased source work since the latest tag AND a PASS receipt on the head or its nearest runtime-affecting ancestor. Operator ruling 2026-10-08T03:53:23Z (OMN-20715) moved this repo from report_only to cut. This entry used to say release-on-merge.yml already releases every source-touching merge and that a second cutter would race it. That stopped being true on 2026-09-28: omnimarket#3037 (OMN-18010) retired release-on-merge.yml, and the repo's Release Cut workflow (release-cut.yml) fires only on workflow_dispatch, so nothing releases this repo on a merge and unreleased work sat unreleased (17 release-relevant commits behind v0.4.302 on 2026-10-07). The train now opens the release PR; its title starts with "chore: release", which this repo's auto-tag-on-merge.yml recognises, so merging that PR tags and publishes. Release Cut stays a manual dispatch beside it. The train's duplicate guard is the open-PR check on its own branch name in the cut job of release-train-nightly.yml. A manual Release Cut that publishes first moves the latest tag, and the next decision computes its candidate version from that tag.
+      the cut premise is the lab_evidence rule above: unreleased source work since the latest tag AND green required checks on the gating commit of the merged pull request; the lab receipt is printed as a signal. Operator ruling 2026-10-08T03:53:23Z (OMN-20715) moved this repo from report_only to cut. This entry used to say release-on-merge.yml already releases every source-touching merge and that a second cutter would race it. That stopped being true on 2026-09-28: omnimarket#3037 (OMN-18010) retired release-on-merge.yml, and the repo's Release Cut workflow (release-cut.yml) fires only on workflow_dispatch, so nothing releases this repo on a merge and unreleased work sat unreleased (17 release-relevant commits behind v0.4.302 on 2026-10-07). The train now opens the release PR; its title starts with "chore: release", which this repo's auto-tag-on-merge.yml recognises, so merging that PR tags and publishes. Release Cut stays a manual dispatch beside it. The train's duplicate guard is the open-PR check on its own branch name in the cut job of release-train-nightly.yml. A manual Release Cut that publishes first moves the latest tag, and the next decision computes its candidate version from that tag.
   omnibase_core:
     package: omnibase-core
     default_branch: dev
