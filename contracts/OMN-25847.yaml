@@ -1,0 +1,54 @@
+schema_version: 1.0.0
+ticket_id: OMN-25847
+title: Unblock the stability-follow pull request
+summary: >-
+  Pull request 6020 targets the open composed-build pull request 6023. The
+  stability-follow changes are replayed on the current parent tree. The
+  non-dev-base guard accepts the verified parent declaration in the pull
+  request body. The hosted guard result and the lab comment are read at the
+  published head.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25847-stability-follow-pr
+    statement: The stability-follow pull request has a passing base guard with lab evidence at the same head.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: omnibase_infra PR 6020 reads its required check non-dev-base-guard as success at its new head, with the new head named in a PR comment that starts `Lab: head=<full head sha>` -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6020` shows a required check not success at the head, or shows no Lab comment naming that head'
+      - id: AC2
+        statement: 'AC2: when the cause lies outside the PR, a STATUS row reads cause=<one line> shared=yes with the evidence and the lane pushes nothing that widens or skips a check -- falsifier: `grep -F ''omnibase_infra#6020'' "$ONEX_LEDGER_PATH" | grep -F ''shared=yes''` finds no STATUS row from the lane while the PR head is unchanged and still red'
+evidence_requirements:
+  - kind: tests
+    description: The focused stability-follow regression runs from the checkout without a runtime restart.
+    command: uv run --python 3.12 --frozen --project scripts/deploy-agent --extra dev python -m pytest scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25847-ac1-stability-follow
+    description: >-
+      The hosted deploy check exercises the rebased stability reader and its
+      agent wiring. The base-guard success and lab comment are verified separately
+      at the published pull request head.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --python 3.12 --frozen --project scripts/deploy-agent --extra dev python -m pytest scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py -q -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25847-ac2-unmodified-base-guard
+    description: >-
+      The deployed check verifies the base guard still matches the accepted
+      parent version. For an external cause, the STATUS row and the unchanged
+      pull request head are verified from the ledger and watcher.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import hashlib, pathlib, sys; sys.exit(hashlib.sha256(pathlib.Path(".github/workflows/non-dev-base-guard.yml").read_bytes()).hexdigest() != "a903549a47c2a7f78f11fe1319b07a8801ce7132ba8329daaec6e49f7c6c1d61")'
+        cwd: .

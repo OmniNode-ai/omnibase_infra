@@ -17,6 +17,7 @@ import json
 import logging
 import math
 import re
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
@@ -516,6 +517,66 @@ def lane_runtime_containers(
     if effects_target == main or "runtime-effects" in disabled_services:
         return (main,)
     return (main, f"{main}-effects")
+
+
+def running_ref_if_healthy(
+    container: str,
+    repository: str,
+    read_ref: Callable[[str, str], str | None],
+) -> str | None:
+    """``read_ref``'s answer for a healthy runtime, ``""`` for an unhealthy one (OMN-24562).
+
+    A runtime that failed its boot is parked and still answers ``docker exec`` with
+    the provenance of the image it was built from, so the stability follow read it
+    as running the tag it had just built and never rebuilt it. An unhealthy runtime
+    runs no revision: ``""`` names no tag and no commit that contains one. ``None``
+    stays what docker could not answer.
+    """
+    try:
+        shown = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+                container,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=DOCKER_READ_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if shown.returncode == 0 and shown.stdout.strip() == "unhealthy":
+        return ""
+    return read_ref(container, repository)
+
+
+def healthy_ref_reader(
+    container: Callable[[], str], read_ref: Callable[[str, str], str | None]
+) -> Callable[[str], str | None]:
+    """The repository -> running ref reader of a lane's runtime, unhealthy reading ``""``.
+
+    ``container`` resolves the lane's runtime container at READ time, never when the
+    reader is built: the agent builds this reader in ``__init__`` on every lane, and a
+    lane configuration that cannot resolve (a bad stability fold policy) must stop
+    only the lane that reads it. A resolution failure is logged and reads ``None``,
+    what docker could not answer, so that lane's follow starts no job and every other
+    lane runs on.
+    """
+
+    def read(repository: str) -> str | None:
+        try:
+            name = container()
+        except (OSError, RuntimeError, ValueError) as error:
+            logger.exception(
+                "runtime container of the followed lane unresolved: %s", error
+            )
+            return None
+        return running_ref_if_healthy(name, repository, read_ref)
+
+    return read
 
 
 def read_lane_presence(
