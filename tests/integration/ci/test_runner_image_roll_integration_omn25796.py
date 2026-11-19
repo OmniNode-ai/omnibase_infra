@@ -63,7 +63,7 @@ async def test_dry_run_plans_every_runner_of_a_declared_secondary_pool(
             prefix=pool.runner_name_prefix,
             repo_root=ROOT,
             fleet_config=FLEET,
-            token_file=token,
+            token_path=token,
             dry_run=True,
         )
     )

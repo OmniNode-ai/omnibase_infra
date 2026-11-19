@@ -87,7 +87,7 @@ class HandlerRunnerImageRoll:
         self, request: ModelRunnerImageRollRequest
     ) -> ModelRunnerImageRollResult:
         try:
-            token = self._read_token(request.token_file)
+            token = self._read_token(request.token_path)
             org, targets, token_vars = self._pool_plan(request)
             version, identity = self._image_lock(request.repo_root)
             image_tag = f"omninode-runner-{request.prefix}:v{version}-{identity}"

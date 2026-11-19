@@ -16,7 +16,7 @@ class ModelRunnerImageRollRequest(BaseModel):
     prefix: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     repo_root: Path
     fleet_config: Path
-    token_file: Path
+    token_path: Path
     only: str = ""
     limit: int = Field(default=0, ge=0)
     dry_run: bool = False
