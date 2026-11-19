@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: 1.0.0
+ticket_id: OMN-25692
+title: Unblock the required CI Summary on pull request 6065
+summary: Validate the ticket contract with the locked core schema and the lab receipt model.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25692-pr6065
+    statement: Resolve the required check failure or record evidence of an external cause.
+    acceptance:
+      - id: AC1
+        statement: >-
+          Pull request 6065 has a clean merge state and CI Summary success at a new head,
+          with that full head in a PR comment beginning Lab.
+      - id: AC2
+        statement: >-
+          If the cause is outside the pull request, record it in a ledger STATUS with
+          shared=yes and keep the failing checks intact.
+dod_evidence:
+  - id: dod-omn25692-ac1-pr-readback
+    description: >-
+      Read the new head, CI Summary result and merge state from the PR watcher.
+      Record the URL of the Lab comment and confirm its first line names that same head
+      before marking this evidence verified.
+    source: manual
+    binds_ac: [AC1]
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'python3 "$OMNI_PLUGIN_ROOT/skills/merge-drain/scripts/pr_state_local.py"
+          --pr OmniNode-ai/omnibase_infra#6065 --json |
+          jq -e ".facts.head_sha != \"6d0601a4f27d944159294279e0595b70db5ce67d\"
+          and .ci.sha == .facts.head_sha and .review.merge_state == \"CLEAN\"
+          and any(.ci.runs[]; .[0] == \"CI Summary\" and .[2] == \"success\")"'
+  - id: dod-omn25692-ac2-shared-cause-status
+    description: >-
+      If a shared cause is measured, read the lane's ledger STATUS and verify that
+      it names the cause and its evidence. This check applies only to a shared cause.
+    source: manual
+    binds_ac: [AC2]
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'rg -F " | pr=omnibase_infra#6065 | " "$ONEX_LEDGER_PATH"
+          | rg -F " | STATUS | " | rg -F " | shared=yes | " | rg -F " | cause="'
