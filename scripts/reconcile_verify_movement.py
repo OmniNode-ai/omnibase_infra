@@ -24,9 +24,8 @@ A loop reading HEAD would have caught it on the first tick.
 The venv surface has the same hole. ``reconcile-workspace-venvs.sh`` (OMN-17190)
 runs ``uv sync --frozen --inexact`` and ``install-node-skill-package.sh`` and
 exits 0 when both return 0. Neither result is read back -- and the provider
-co-install is *known* to move pins nobody asked it to move (OMN-16262: a
-hardcoded ``COMPAT_PIN`` downgrading ``omnibase-compat`` 0.5.6 -> 0.5.5, which
-broke the ``occ`` CLI extension so badly the ``onex`` binary would not start).
+co-install can move lock-governed pins. A hardcoded pin caused a downgrade
+that broke ``onex`` at startup in OMN-16262.
 That is precisely a content change no exit code can see.
 
 THE CONTRACT
@@ -86,7 +85,8 @@ from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-FLOOR_SCHEMA = "onex.workspace.floor.v1"
+FLOOR_SCHEMA_VERSION = 1
+FLOOR_SCHEMA = f"onex.workspace.floor.v{FLOOR_SCHEMA_VERSION}"
 GOVERNED_DISTS = ("omnibase-infra", "omnibase-core", "omnibase-spi")
 
 EXIT_OK = 0

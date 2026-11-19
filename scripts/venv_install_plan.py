@@ -5,10 +5,9 @@
 OMN-18675. ``scripts/install-node-skill-package.sh`` mutates a venv that is
 SHARED by every lane on the host (the plugin CLI venv,
 ``$CLAUDE_PLUGIN_DATA/.venv`` — see omni_home/CLAUDE.md rule 11). On
-2026-09-18 it silently downgraded ``omnibase-compat`` 0.5.7 -> 0.5.5 and
-``omninode-memory`` 0.18.0 -> 0.15.0 while repairing an unrelated omnimarket
-pin, which removed ``omnibase_compat.contracts.pr_occ_stamp`` and broke the
-whole ``onex`` CLI for every command and every lane on the machine.
+2026-09-18 it silently downgraded two dependencies while repairing an
+unrelated omnimarket pin. The downgrade removed a required module and broke
+the shared ``onex`` CLI.
 
 The failure was silent because ``uv pip install --no-deps pkg==OLD`` is a
 perfectly successful install: an exact specifier is an instruction, not a
@@ -57,8 +56,8 @@ EXIT_UV_ERROR = 4
 
 # uv renders its install plan as one line per changed distribution, in TWO
 # shapes. A resolved distribution carries its version:
-#   " - omnibase-compat==0.5.7"
-#   " + omnibase-compat==0.5.5"
+#   " - example-package==0.5.7"
+#   " + example-package==0.5.5"
 #   " - omnimarket==0.4.118 (from git+https://github.com/.../omnimarket.git@948be2e1)"
 # A direct reference that has not been built yet carries its SOURCE and no
 # version at all, because uv does not know the version until it builds:

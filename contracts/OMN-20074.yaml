@@ -76,12 +76,12 @@ requirements:
       - id: AC15
         statement: 'AC15: contracts/ holds the 80 ticket contracts moved from onex_change_control in yamlfmt form, each parsing to the change-control blob''s value -- falsifier: uv run pytest tests/ci/test_moved_ticket_contracts_cr0220_omn20074.py -q'
   - id: req-occ-cli-retired-infra
-    statement: omnibase_infra must ship no onex occ CLI, whose only caller was a pre-commit hook in another repository, and with its only omnibase_compat import gone must declare no omnibase-compat dependency.
+    statement: omnibase_infra must ship no onex occ CLI, whose only caller was a pre-commit hook in another repository. The retired dependency and its last import leave with the CLI.
     acceptance:
       - id: AC16
         statement: 'AC16: omnibase_infra.cli.cli_occ is not importable, the occ onex.cli entry point, its baseline line and its unit test file are gone -- falsifier: uv run pytest tests/ci/test_no_occ_cli_omn20074.py -q -k "module_is_gone or test_file_is_gone or entry_point or baseline_line" fails at the merge base'
       - id: AC17
-        statement: 'AC17: pyproject.toml carries no omnibase-compat dependency or override, no module under src imports omnibase_compat, and uv.lock names no omnibase-compat package -- falsifier: uv run pytest tests/ci/test_no_occ_cli_omn20074.py -q -k "no_omnibase_compat or lock_names" fails at the merge base'
+        statement: 'AC17: the retired package has no requirement or override in pyproject.toml, import under src or entry in uv.lock -- falsifier: uv run pytest tests/ci/test_no_occ_cli_omn20074.py -q -k "no_omnibase_compat or lock_names" fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: No workflow calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context.
@@ -117,7 +117,7 @@ evidence_requirements:
     description: Each of the 80 moved ticket contracts exists in contracts/ and names its own ticket.
     command: uv run pytest tests/ci/test_moved_ticket_contracts_cr0220_omn20074.py -q
   - kind: tests
-    description: The onex occ CLI module, entry point, baseline line and test are gone, and no omnibase_compat requirement, import or lock package remains.
+    description: The onex occ CLI module, entry point, baseline line and test are gone, and the retired dependency has no requirement, import or lock entry.
     command: uv run pytest tests/ci/test_no_occ_cli_omn20074.py -q
 emergency_bypass:
   enabled: false
@@ -329,7 +329,7 @@ dod_evidence:
     binds_ac:
       - AC16
   - id: dod-occ-cli-retired-infra-ac17
-    description: The repository test proves no omnibase-compat requirement, no omnibase_compat import under src and no omnibase-compat lock package remain.
+    description: The repository test checks that the retired dependency has no requirement, import under src or lock entry.
     source: manual
     checks:
       - check_type: test_passes

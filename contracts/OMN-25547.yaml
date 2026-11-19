@@ -1,0 +1,66 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25547
+title: "Bound request bodies in the contract-declared HTTP mount"
+summary: >-
+  Listener slice of the ingest door. The runtime enforces a byte cap from the selected HTTP mount contract. Other ingest-door behavior belongs to the door.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25547-http-mount-body-cap
+    statement: "The selected door contract controls the listener's request-body limit."
+    acceptance:
+      - id: AC25547001
+        statement: "An over-cap request returns 413 and the ASGI app receives no more than the cap."
+      - id: AC25547002
+        statement: "The cap is contract-declared, the exact limit is inclusive, and an omitted cap preserves the original body stream."
+dod_evidence:
+  - id: dod-omn25547-reject-oversize
+    description: >-
+      The runtime listener rejects an oversized Content-Length before the app sees a chunk. It also refuses chunked bodies and bodies that exceed the limit after content decoding. The loopback test records bytes the app received.
+    source: manual
+    binds_ac: [AC25547001]
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py -m unit -k 'mount_body_cap and over-cap' -q --no-cov -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          bash -euo pipefail -c '
+            probe_dir=$(mktemp -d)
+            uv run --frozen python -c "import asyncio, sys; from pathlib import Path; from tests.unit.handlers.http_mount.test_asgi_mounts_omn21288 import _serve_body_cap_probe; asyncio.run(_serve_body_cap_probe(Path(sys.argv[1])))" "$probe_dir/port" &
+            server_pid=$!
+            trap "kill $server_pid || true; rm -rf -- \"$probe_dir\"" EXIT
+            for ((attempt = 0; attempt < 300; attempt++)); do
+              if test -s "$probe_dir/port"; then break; fi
+              kill -0 "$server_pid"
+              sleep 0.2
+            done
+            url="http://127.0.0.1:$(cat "$probe_dir/port")/api/v1/echo"
+            test "$(curl -fsS --noproxy "*" --max-time 5 -H "Content-Type: application/json" --data "{}" "$url")" = "{}"
+            status=$(curl -sS --noproxy "*" --max-time 5 -H "Content-Type: application/json" --data "{\"a\":\"b\"}" -o "$probe_dir/rejection" -w "%{http_code}" "$url")
+            test "$status" = 413
+          '
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25547-contract-limit
+    description: >-
+      The same listener mounts from YAML, echoes an exact-cap chunked body and echoes a 2 MiB body byte for byte when no cap is declared.
+    source: manual
+    binds_ac: [AC25547002]
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_omn21288.py -m unit -k 'mount_body_cap and (exact-cap or uncapped)' -q --no-cov -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25547-core-release-readback
+    description: >-
+      On 2026-11-19 the shared ingest contract from omnibase_core#2336 was merged at e9f061dc9b4c86595359ba7036623c72faa711a7. No stable tag contained it. The train recorded the merge as the candidate in its open 0.47.75 release PR, omnibase_core#2338. The local ancestry check compares the stable tag v0.47.74 and the development tag observed during the readback.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: >-
+          sh -c 'git merge-base --is-ancestor e9f061dc9b4c86595359ba7036623c72faa711a7 dev-20261118065911-e9f061dc9b4c || exit 1; git merge-base --is-ancestor e9f061dc9b4c86595359ba7036623c72faa711a7 v0.47.74; test "$?" -eq 1'
+        cwd: ${OMNI_HOME}/omnibase_core

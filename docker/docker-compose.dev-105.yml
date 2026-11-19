@@ -166,6 +166,12 @@ services:
     profiles: !override ["dev-105-disabled"]
   infisical:
     profiles: !override ["dev-105-disabled"]
+  # OMN-24714: docker-compose.dev-lane.yml empties this service's profile list so
+  # the dev lane's core phase starts the architecture graph's store. This lane
+  # layers that file and runs no graph (4 GiB it does not have, ports on every
+  # interface on a host whose overlay publishes loopback only), so it is fenced.
+  omnibase-infra-memgraph:
+    profiles: !override ["graph-store-fenced"]
   forward-migration:
     container_name: omnibase-infra-dev-105-forward-migration
     labels:

@@ -77,7 +77,7 @@ async def test_verifier_receives_owning_repository_contract(
 
     # Exercise the real subprocess boundary with a verifier that reports the
     # exact path and bytes it was given, without a credential or external I/O.
-    def argv(ticket_id, *, contract_path=""):
+    def argv(ticket_id, *, contract_path="", state_root=""):
         return [
             sys.executable,
             "-c",

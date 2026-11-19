@@ -40,7 +40,7 @@ requires-python = ">=3.12"
 
 [manifest]
 overrides = [
-    { name = "omnibase-compat", specifier = "==0.5.6" },
+    { name = "example-package", specifier = "==0.5.6" },
 ]
 
 [[package]]

@@ -15,6 +15,9 @@ from typing import Any
 
 import pytest
 
+from omnibase_core.models.contracts.model_topic_schema_binding import (
+    build_versioned_topic,
+)
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
@@ -63,7 +66,7 @@ def _write_force_included(archive: zipfile.ZipFile, repo: Path) -> None:
 def source_data(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     root = tmp_path_factory.mktemp("candidate-sources")
     pins = {}
-    for name in ("omnibase_core", "omnibase_compat", "omnimarket", "omnibase_infra"):
+    for name in ("omnibase_core", "omnimarket", "omnibase_infra"):
         clone = root / name
         package = clone / "src" / name
         package.mkdir(parents=True)
@@ -170,6 +173,7 @@ class BuildBoundary:
                 and command[command.index("--network") + 1] == "none"
             )
             assert stdin and "package_digests" in stdin
+            compile(stdin, "<candidate-image-probe>", "exec")
             self.probe_timeouts.append(timeout)
             is_candidate = CANDIDATE in command
             result = {
@@ -179,7 +183,7 @@ class BuildBoundary:
                 "infra_source_ref": self.plan.infra_source_sha,
                 "dependency_fingerprint": "d" * 64,
                 "shared_runtime_fingerprint": "e" * 64,
-                "required_topics": ["onex.evt.omnimarket.closeout.v1"],
+                "required_topics": [build_versioned_topic("omnimarket", "closeout", 1)],
             }
             if not is_candidate:
                 result["package_digests"]["omnimarket"] = "0" * 64
@@ -244,7 +248,11 @@ class BuildBoundary:
             assert "--network=none" in recipe and "--mount=type=bind" in recipe
             assert "Dockerfile.runtime" not in recipe
             manifest = json.loads((context / "payload/manifest.json").read_text())
-            assert len(manifest["proofs"]) == 4
+            assert sorted(row["repo"] for row in manifest["proofs"]) == [
+                "omnibase_core",
+                "omnibase_infra",
+                "omnimarket",
+            ]
             assert all(row["status"] == "pending" for row in manifest["proofs"])
             Path(command[command.index("--iidfile") + 1]).write_text(CANDIDATE)
             self.aliases[tag] = CANDIDATE
@@ -493,7 +501,7 @@ def test_source_digest_includes_wheel_force_included_files(
 
     root = tmp_path / "sources"
     pins = {}
-    for name in ("omnibase_core", "omnibase_compat", "omnimarket", "omnibase_infra"):
+    for name in ("omnibase_core", "omnimarket", "omnibase_infra"):
         clone = root / name
         package = clone / "src" / name
         package.mkdir(parents=True)
@@ -534,8 +542,9 @@ def test_source_digest_includes_wheel_force_included_files(
         "data/gitignore-baseline.yaml": b"baseline: []\n",
     }
     assert digests["omnibase_core"] == _digest_files(installed)
-    compat = root / "omnibase_compat" / "src" / "omnibase_compat"
-    assert digests["omnibase_compat"] == _digest_files(_tracked_files(compat))
+    assert set(digests) == {"omnibase_core", "omnimarket", "omnibase_infra"}
+    market = root / "omnimarket" / "src" / "omnimarket"
+    assert digests["omnimarket"] == _digest_files(_tracked_files(market))
 
 
 def test_in_image_proof_resolves_the_editable_project_tree(builder: Any) -> None:

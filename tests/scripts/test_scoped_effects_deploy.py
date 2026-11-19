@@ -24,7 +24,7 @@ ROLLBACK_ID = "e" * 64
 OLD_IMAGE = "sha256:" + "1" * 64
 NEW_IMAGE = "sha256:" + "2" * 64
 INFRA_SOURCE = "7" * 40
-PINS = {"omnibase_core": "3" * 40, "omnibase_compat": "4" * 40, "omnimarket": "5" * 40}
+PINS = {"omnibase_core": "3" * 40, "omnimarket": "5" * 40}
 TOPIC = "onex.evt.omnimarket.closeout-proof-matrix-completed.v1"
 LANE_TOPIC = "onex.evt.runtime.node-graph-ready.v1"
 
@@ -820,14 +820,15 @@ def test_offline_image_probe_needs_no_writable_filesystem(executor: Any) -> None
     assert "--read-only" in image_args
     entrypoint = image_args[image_args.index("--entrypoint") + 1]
     assert entrypoint == "/app/.venv/bin/python"
-    assert image_args[image_args.index(OLD_IMAGE) + 1 :] == ["-"]
+    probe_args = ["-", "omnibase_core", "omnimarket"]
+    assert image_args[image_args.index(OLD_IMAGE) + 1 :] == probe_args
     assert exec_args == [
         "docker",
         "exec",
         "-i",
         CURRENT_ID,
         "/app/.venv/bin/python",
-        "-",
+        *probe_args,
     ]
 
 
@@ -891,12 +892,12 @@ def test_docker_desktop_host_mount_prefix_is_the_same_bind_source(
             "NetworkSettings": {"Networks": {}},
         }
 
-    before = container("/host_mnt/Users/lab/skills")
+    before = container("/host_mnt/srv/fixture/skills")
     assert executor._runtime_settings(before) == executor._runtime_settings(
-        container("/Users/lab/skills")
+        container("/srv/fixture/skills")
     )
     assert executor._runtime_settings(before) != executor._runtime_settings(
-        container("/Users/lab/other")
+        container("/srv/fixture/other")
     )
 
 

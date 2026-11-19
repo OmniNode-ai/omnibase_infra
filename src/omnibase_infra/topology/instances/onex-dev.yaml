@@ -85,6 +85,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - floor_integration_rows
               - gate_store_reservations
             privileges: [DELETE, SELECT]
             schema: omninode_internal
@@ -109,6 +110,8 @@ databases:
               - delegation_lab_jobs
               - demo_readiness_latest
               - dod_verify_runs
+              - done_items
+              - floor_integration_rows
               - gate_store_reservations
               - gate_store_safety
               - gate_store_state
@@ -285,6 +288,10 @@ databases:
               - delegation_routing_tenant_overlay
               - delegation_shadow_comparisons
               - dep_health_findings
+              - eval_item_scores
+              - eval_item_traces
+              - eval_run_closes
+              - eval_run_rates
               - experiment_arm_results
               - hook_events
               - instruction_eval_aggregate_snapshots

@@ -1,16 +1,9 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-20074: the ``onex occ`` CLI is gone, and with it the omnibase_compat dependency.
+"""Guard removal of the old change-control CLI and its retired dependency.
 
-``omnibase_infra.cli.cli_occ`` stamped and validated change-control PR metadata
-(``Evidence-Source: OCC#<n>``). Its only caller was a pre-commit hook in another
-repository that is removed in parallel. It was also this repository's only
-``omnibase_compat`` import, so the dependency, its uv override and the lock entry
-leave with it.
-
-Falsifier: restore the module, the ``occ`` console script, the baseline line, the
-module's test, an ``omnibase_compat`` import under ``src`` or an ``omnibase-compat``
-requirement and the matching test names it.
+Checks cover the CLI module, entry point, baseline, tests, Python imports,
+project dependencies, source overrides and lockfile.
 """
 
 from __future__ import annotations
@@ -47,7 +40,7 @@ def _strings(node: object) -> list[str]:
 
 
 def _compat_requirements(pyproject: dict[str, object]) -> list[str]:
-    """Requirement strings naming omnibase-compat anywhere dependencies live."""
+    """Requirement strings naming the retired dependency."""
     found: list[str] = []
     project = pyproject.get("project", {})
     assert isinstance(project, dict)
@@ -75,7 +68,7 @@ def _compat_requirements(pyproject: dict[str, object]) -> list[str]:
 
 
 def _compat_imports(root: Path) -> list[str]:
-    """``path:line`` of every ``omnibase_compat`` import in the Python files under root."""
+    """``path:line`` of imports of the retired package in Python files under root."""
     hits: list[str] = []
     for path in sorted(root.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

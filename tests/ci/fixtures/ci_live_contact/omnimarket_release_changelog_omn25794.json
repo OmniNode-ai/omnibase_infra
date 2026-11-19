@@ -1,0 +1,15 @@
+{
+  "_provenance": {
+    "source": "onex scm file-read OmniNode-ai/omnimarket at 4000343846ae6919f648ce8c3955b5403de25f71:CHANGELOG.md",
+    "captured_utc": "2026-11-19T01:44:13.390033+00:00",
+    "source_sha256": "aa3c6af325d23bd1a702b173c576e936269a11969d7fb600d6b112e16f4678e4",
+    "projection": "Retained the release heading, Included Since heading, and the affected line. Replaced the matched private slug with a synthetic alias."
+  },
+  "response": {
+    "release_heading": "## v0.4.321 (2026-11-18)",
+    "included_since_heading": "### Included Since v0.4.320",
+    "affected_line": 1307,
+    "subject_line": "- fix: the writer-app workflow pin classifier admits fixture_private_repository's OMNIBASE_CORE_COMMIT env pin bump (#4610)",
+    "private_repo_alias": "fixture_private_repository"
+  }
+}
