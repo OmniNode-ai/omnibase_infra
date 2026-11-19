@@ -47,7 +47,7 @@ import sys
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -70,11 +70,6 @@ _DOWN_STATES = frozenset({"unhealthy", "absent", "not-running"})
 
 _GUARDED_SCOPES = frozenset({"runtime", "full"})
 _UNGUARDED_LANES = frozenset({"prod", "dev"})
-
-
-# Called as ``probe(service=..., port=...)``; returns the check (the guard reads its
-# ``status`` and ``detail`` strings) and any raised error.
-RuntimeProbe = Callable[..., tuple[Any, BaseException | None]]
 
 
 def read_docker_state(container: str) -> str:
@@ -116,7 +111,7 @@ def classify_readings(
 
 def take_readings(
     targets: Sequence[tuple[str, int]],
-    probe: RuntimeProbe,
+    probe: Callable[..., tuple[object, BaseException | None]],
     state: Callable[[str], str],
 ) -> list[tuple[str, str]]:
     """Probe every target with the guard's own probe: ``(status, detail)`` each.
@@ -132,11 +127,13 @@ def take_readings(
     try:
         for container, port in targets:
             check, timed_out = probe(service=container, port=port)
-            detail = f"{container}: {check.detail or 'probe failed'}"
+            # The probe's check carries ``status`` and ``detail`` strings.
+            check_status = str(getattr(check, "status", ""))
+            detail = f"{container}: {getattr(check, 'detail', '') or 'probe failed'}"
             if timed_out is not None:
                 readings.append(("timeout", f"{container}: probe timed out"))
-            elif check.status != "fail":
-                readings.append((check.status, detail))
+            elif check_status != "fail":
+                readings.append((check_status, detail))
             else:
                 docker = state(container)
                 status = {"starting": "starting", "healthy": "serving"}.get(
@@ -174,7 +171,7 @@ def admit_rollback_point[Point](
     correlation_id: UUID,
     record_dir: Path,
     targets: Sequence[tuple[str, int]],
-    probe: RuntimeProbe,
+    probe: Callable[..., tuple[object, BaseException | None]],
     capture: Callable[[], Point | None],
     state: Callable[[str], str] | None = None,
 ) -> Point | None:
