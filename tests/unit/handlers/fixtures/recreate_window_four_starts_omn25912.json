@@ -1,0 +1,83 @@
+{
+ "ticket": "OMN-25912",
+ "read_from": "h201 /data/omninode/deploy-agent/state/jobs-dev (job records), containerd and kernel journal, docker inspect omninode-runtime, read 2026-11-19T06:57Z-07:05Z",
+ "container_inspect_at_read": {
+  "container": "omninode-runtime",
+  "restart_count": 0,
+  "oom_killed": false,
+  "note": "RestartCount stays 0 because docker restart and compose recreate do not count as restart-policy restarts; no OOM kill in the kernel journal 04:00Z-06:30Z"
+ },
+ "jobs": [
+  {
+   "job_id": "a071ca0f-ce27-4729-a5db-66f4549f75a5",
+   "requested_by": "gha/omnibase_infra/pr-6074",
+   "runtime_lane": "dev",
+   "scope": "full",
+   "git_ref": "f2789cb4e0e8",
+   "accepted_at": "2026-11-19T03:50:12.433705Z",
+   "completed_at": "2026-11-19T04:31:30.954511Z",
+   "status": "failed",
+   "runtime_phase": "success"
+  },
+  {
+   "job_id": "46498207-11b6-4e21-a509-a51652ec50ad",
+   "requested_by": "gha/omnibase_infra/pr-6051",
+   "runtime_lane": "dev",
+   "scope": "full",
+   "git_ref": "8391037a553f",
+   "accepted_at": "2026-11-19T04:43:47.770008Z",
+   "completed_at": "2026-11-19T05:16:30.827443Z",
+   "status": "success",
+   "runtime_phase": "success"
+  },
+  {
+   "job_id": "82bdbf33-cde1-4e1a-a91d-fc9359edca88",
+   "requested_by": "gha/omnibase_infra/pr-6072",
+   "runtime_lane": "dev",
+   "scope": "full",
+   "git_ref": "bba614d1c118",
+   "accepted_at": "2026-11-19T05:29:20.011716Z",
+   "completed_at": "2026-11-19T05:57:05.653943Z",
+   "status": "success",
+   "runtime_phase": "success"
+  }
+ ],
+ "starts": [
+  {
+   "at": "2026-11-19T04:33:39Z",
+   "container": "8fa667a6dcf2",
+   "event": "restart of the same container id (containerd shim disconnected and reconnected at the second)",
+   "source_kind": "branch_install_reapply",
+   "requested_by": "agent/branch-install-reapply",
+   "job_record": null,
+   "evidence": "agent journal 04:31:58Z branch installs declared=9 present=0 missing=9; 04:37:40Z branch install container not running and healthy after restart: container=8fa667a6dcf2"
+  },
+  {
+   "at": "2026-11-19T04:54:06Z",
+   "container": "96e6260df600",
+   "event": "8fa667a6dcf2 stopped, 96e6260df600 connected at 04:54:07Z (compose recreate)",
+   "source_kind": "merge_recreate",
+   "requested_by": "gha/omnibase_infra/pr-6051",
+   "job_record": "46498207",
+   "evidence": "job 46498207 accepted 04:43:47Z, runtime compose-up 04:53:32Z"
+  },
+  {
+   "at": "2026-11-19T05:12:28Z",
+   "container": "96e6260df600",
+   "event": "restart of the same container id (shim disconnected and reconnected at the second)",
+   "source_kind": "branch_install_reapply",
+   "requested_by": "agent/branch-install-reapply",
+   "job_record": null,
+   "evidence": "agent journal 05:16:29Z branch install container not running and healthy after restart: container=96e6260df600; no job record has a runtime phase at 05:12Z"
+  },
+  {
+   "at": "2026-11-19T05:38:11Z",
+   "container": "8602c4c46db9",
+   "event": "96e6260df600 stopped at 05:38:10Z, 8602c4c46db9 connected at 05:38:11Z (compose recreate)",
+   "source_kind": "merge_recreate",
+   "requested_by": "gha/omnibase_infra/pr-6072",
+   "job_record": "82bdbf33",
+   "evidence": "job 82bdbf33 accepted 05:29:20Z, runtime compose-up 05:37:19Z"
+  }
+ ]
+}
