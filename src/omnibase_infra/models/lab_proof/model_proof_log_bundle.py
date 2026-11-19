@@ -76,7 +76,7 @@ class ModelProofLogBundle(BaseModel):
     @classmethod
     def from_archive(cls, output: str) -> ModelProofLogBundle:
         """Read the command's output back; an unreadable archive reads as no logs."""
-        match = re.search(rf"^{_BEGIN}\n(.*?)\n?^{_END}$", output, re.M | re.S)
+        match = re.search(rf"(?ms)^{_BEGIN}\n(.*?)\n?^{_END}$", output)
         if match is None:
             return cls()
         try:

@@ -1890,7 +1890,7 @@ def run_proof(
     publish: Callable[[Sequence[MintedReceipt]], list[str]] | None = None,
     overlay: Path | None = None,
     post_up_command: str | None = None,
-    ledger_append: Callable[[str], None] | None = None,
+    ledger_append: Callable[[str], None] = ModelProofLedger.no_append,
 ) -> tuple[int, str]:
     params = read_params(params_path)
     if overlay is not None and not overlay.is_file():
@@ -2070,14 +2070,13 @@ def run_proof(
     if publish is not None and minted:
         text += "\n" + "\n".join(publish(minted))
     # OMN-19998: two INCONCLUSIVE proofs in a row for one repo raise an alarm row
-    alarm = ModelProofLedger(lines=tuple(ledger_lines)).alarm_on_streak(
-        rb.outcome,
-        [f.repo for f in pr_subject_facts(outputs.get("clone", ""))],
-        f"{started}-{holder}",
-        finished_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        ledger_append,
-    )
-    text += alarm
+    if rb.outcome == "INCONCLUSIVE":
+        text += ModelProofLedger(lines=tuple(ledger_lines)).alarm_on_streak(
+            [f.repo for f in pr_subject_facts(outputs.get("clone", ""))],
+            f"{started}-{holder}",
+            finished_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            ledger_append,
+        )
     # the ledger grammar takes PASS, FAIL or ABORTED on a surface RELEASE; an
     # INCONCLUSIVE run is released as ABORTED with the verdict in its text
     release_result = rb.outcome if rb.outcome in ("PASS", "FAIL") else "ABORTED"

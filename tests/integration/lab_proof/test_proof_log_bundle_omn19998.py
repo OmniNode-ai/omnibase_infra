@@ -70,7 +70,7 @@ def test_two_inconclusive_proofs_in_a_row_write_one_alarm_row() -> None:
     )
     rows: list[str] = []
     notes = ledger.alarm_on_streak(
-        "INCONCLUSIVE", ["repo_x"], "h2", "2026-11-15T20:00:00Z", rows.append
+        ["repo_x"], "h2", "2026-11-15T20:00:00Z", rows.append
     )
 
     assert len(rows) == 1

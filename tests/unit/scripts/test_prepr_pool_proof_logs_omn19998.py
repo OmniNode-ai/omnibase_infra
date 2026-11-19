@@ -314,7 +314,7 @@ def test_no_configured_append_says_so_instead_of_staying_quiet() -> None:
         lines=(_release(PROOF_ONE, "INCONCLUSIVE", "omnimarket#3042 head c050011081"),)
     )
     note = ledger.alarm_on_streak(
-        "INCONCLUSIVE", ["omnimarket"], "now-me", "2026-11-15T20:00:00Z", None
+        ["omnimarket"], "now-me", "2026-11-15T20:00:00Z", ModelProofLedger.no_append
     )
     assert "alarm NOT written (no ledger append configured)" in note
 
@@ -328,7 +328,9 @@ def test_the_newest_proof_of_a_repo_decides_not_an_older_one() -> None:
         )
     )
     assert ledger.last_proof_verdicts()["omnimarket"] == ("PASS", "c")
-    assert ledger.alarm_on_streak("PASS", ["omnimarket"], "d", "t", None) == ""
+    rows: list[str] = []
+    assert ledger.alarm_on_streak(["omnimarket"], "d", "t", rows.append) == ""
+    assert rows == []
 
 
 def test_the_alarm_row_is_one_status_row_the_ledger_grammar_reads() -> None:
@@ -364,10 +366,9 @@ def test_the_appender_passes_the_row_as_one_argument(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     append = ModelProofLedger.appender(f"{sys.executable} {fake}", str(ledger))
-    assert append is not None
     append("2026-11-15T20:00:00Z | STATUS | lane=x | a row; with 'quotes' and $vars")
     assert (
         ledger.read_text(encoding="utf-8").strip().endswith("with 'quotes' and $vars")
     )
-    assert ModelProofLedger.appender("", str(ledger)) is None
-    assert ModelProofLedger.appender("x", None) is None
+    assert ModelProofLedger.appender("", str(ledger)) is ModelProofLedger.no_append
+    assert ModelProofLedger.appender("x", None) is ModelProofLedger.no_append

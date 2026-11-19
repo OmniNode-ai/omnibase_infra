@@ -108,15 +108,20 @@ class ModelProofLedger(BaseModel):
         return last
 
     @staticmethod
-    def appender(command: str, ledger: str | None) -> Callable[[str], None] | None:
+    def no_append(_row: str) -> None:
+        """The append of a run with no ledger tool configured: it refuses, so the proof says so."""
+        raise RuntimeError("no ledger append configured")
+
+    @staticmethod
+    def appender(command: str, ledger: str | None) -> Callable[[str], None]:
         """Bind the ledger tool's own append (``<command> <ledger> --timeout 60s --append <row>``).
 
-        The row is one argv element, never a shell string. ``None`` when either
-        the command or the ledger path is unset, so the caller says so.
+        The row is one argv element, never a shell string. :meth:`no_append` when
+        either the command or the ledger path is unset, so the proof says so.
         """
         argv = shlex.split(command)
         if not argv or not ledger:
-            return None
+            return ModelProofLedger.no_append
 
         def append(row: str) -> None:
             done = subprocess.run(
@@ -151,20 +156,19 @@ class ModelProofLedger(BaseModel):
 
     def alarm_on_streak(
         self,
-        outcome: str,
         repos: Sequence[str],
         current: str,
         stamp: str,
-        append: Callable[[str], None] | None,
+        append: Callable[[str], None],
     ) -> str:
         """Write one alarm row per repo whose last proof and this one are both INCONCLUSIVE.
+
+        The caller asks only when this proof ended INCONCLUSIVE.
 
         Returns the lines to append to the proof text, each led by a newline: one per
         row written, and one when a row could not be written or no append was
         configured. Empty when nothing alarms.
         """
-        if outcome != "INCONCLUSIVE":
-            return ""
         last = self.last_proof_verdicts()
         notes: list[str] = []
         for repo in sorted(set(repos)):
@@ -172,11 +176,6 @@ class ModelProofLedger(BaseModel):
             if verdict != "INCONCLUSIVE":
                 continue
             row = self.streak_row(repo, earlier, current, stamp)
-            if append is None:
-                notes.append(
-                    f"  alarm NOT written (no ledger append configured): {row}"
-                )
-                continue
             try:
                 append(row)
             except (OSError, RuntimeError) as exc:
