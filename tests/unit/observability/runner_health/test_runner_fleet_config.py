@@ -310,12 +310,9 @@ def test_runner_fleet_config_git_mirror_is_recorded() -> None:
 
 def test_runner_fleet_config_git_mirror_covers_every_ci_repo() -> None:
     """OMN-16056: the C2 git mirror's original 5-repo set (OMN-16053) left
-    omniweb, omnimemory, omnibase_compat, and knowledge-base doing full remote
-    fetches -- exposed to the same GnuTLS/early-EOF checkout-failure class the
-    mirror exists to remove (one of the 21 pre-mirror OMN-16030 failures was
-    exactly a sibling fetch of one of these: omnimarket's `Clone
-    omnibase_compat` step). This asserts the fix's full coverage, not just
-    membership of one repo.
+    several CI repositories doing full remote fetches. Sibling checkouts
+    saw the same GnuTLS and early-EOF failures as primary checkouts
+    (OMN-16030). This test checks the full mirror set.
 
     OMN-20597: knowledge-base-internal was the largest gap of all. Over
     2026-10-04T18:09Z..10-05T11:05Z its unmirrored depth-1 checkout spent

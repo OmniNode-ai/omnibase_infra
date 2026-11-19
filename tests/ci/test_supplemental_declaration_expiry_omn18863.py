@@ -129,6 +129,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "eval_run_closes": "omnimarket OMN-24171 (node_projection_eval_results)",
     "eval_run_rates": "omnimarket OMN-24171 (node_projection_eval_results)",
     "experiment_arm_results": "omnimarket OMN-24286 (node_projection_experiment_result)",
+    "done_items": "omnimarket OMN-25104 (node_projection_done_items)",
 }
 
 _SKIP_REASON = (

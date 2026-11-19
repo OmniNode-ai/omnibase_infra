@@ -6,7 +6,7 @@ A workspace build's RT-1 step (``stage_workspace.sh`` -> ``deploy_source_ref.py`
 runs ``checkout --force``, ``reset --hard`` and ``clean -ffdx`` on every vendored
 sibling under ``OMNI_HOME``. The dev unit took ``OMNI_HOME`` from the operator env
 store, which names ``/data/omninode/omni_home``: the lanes' canonical tree. Every
-dev-lane job then detached omnimarket, omnibase_core and omnibase_compat there
+dev-lane job then detached the vendored sibling clones there
 (2026-10-01, jobs 3ef8ac17, 7120389d and cc5545bb, each followed about 13 seconds
 later by a detach in that clone's reflog), and the clone guard refused every
 in-process delegate on the host while they stayed detached.

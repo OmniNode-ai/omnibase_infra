@@ -329,14 +329,14 @@ name = "omnibase-core"
 version = "0.46.9"
 
 [[package]]
-name = "omnibase-compat"
+name = "omnibase-example"
 version = "0.5.6"
 """,
         encoding="utf-8",
     )
-    targets = vm.lock_targets(lock, ["omnibase-core", "omnibase-compat", "absent-pkg"])
+    targets = vm.lock_targets(lock, ["omnibase-core", "omnibase-example", "absent-pkg"])
     assert targets["omnibase-core"] == "0.46.9"
-    assert targets["omnibase-compat"] == "0.5.6"
+    assert targets["omnibase-example"] == "0.5.6"
     assert "absent-pkg" not in targets
 
 

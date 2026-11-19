@@ -8,9 +8,7 @@
 #   Single source of truth for pre-commit hook versions across all OmniNode repos.
 #   All repos using astral-sh/ruff-pre-commit or google/yamlfmt MUST pin to these versions.
 #
-# SCOPE:
-#   - omnibase_core, omnimemory, onex_change_control, omnibase_spi
-#   - omniclaude, omnidash, omniweb, omnibase_compat
+# SCOPE: repositories using the pinned hooks below.
 #
 # NOTE (OMN-4833 Epic 6):
 #   pre-commit-versions.yaml is policy documentation + manual reference.
@@ -41,5 +39,4 @@ updated: "2026-03-12"
 #   omniweb:             ruff via local hooks (no astral-sh/ruff-pre-commit)
 #   omniclaude:          ruff via local hooks (no astral-sh/ruff-pre-commit)
 #   omnibase_spi:        ruff via local hooks (no astral-sh/ruff-pre-commit)
-#   omnibase_compat:     yamlfmt to be added (OMN-4862), mypy to be added (OMN-4863)
 #   onex_change_control: yamlfmt to be added (OMN-4862)

@@ -34,3 +34,12 @@
   prefix: ""
   opts: {schema: public}
   tables: [eval_item_scores, eval_item_traces, eval_run_closes, eval_run_rates]
+# OMN-25104: infra vendors done_items (node_projection_done_items 0000-0001)
+# ahead of the omnimarket node contract; 0001 grants omninode_runtime SELECT,
+# INSERT, UPDATE. Retired when the omnimarket pin carries the node.
+- ticket: OMN-25104 # omnimarket OMN-25104
+  node: node_projection_done_items
+  create: 0000_create_done_items.sql
+  prefix: ""
+  opts: {}
+  tables: [done_items]

@@ -101,6 +101,7 @@ databases:
               - delegation_lab_jobs
               - demo_readiness_latest
               - dod_verify_runs
+              - done_items
               - gate_store_reservations
               - gate_store_safety
               - gate_store_state
@@ -494,5 +495,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: c039b4827092f7099e785259e070ad0b5f99b9040b829e2fff0a7a367b9bfeb2
+  sha256: a89c028d9099f7f5288fc1ed060574d0272f53c6cb72b5d44f9da93d577a0aed
 topology_instance: onex-prod

@@ -547,8 +547,7 @@ def test_provenance_emits_pin_comparison_block(tmp_path: Path) -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert "pin_comparison" in manifest
     by_pkg = {e["package"]: e for e in manifest["pin_comparison"]}
-    # omnibase_compat is not staged any more (OMN-21284): it comes from the lock
-    # like any other dependency, so no staged-sibling comparison names it.
+    # A retired package in the fixture lock is excluded from staged-sibling comparisons.
     assert "omnibase-compat" not in by_pkg
     # The host infra self-check appears only when omnibase-infra is installed in
     # the running venv (always true in the build image; not in the deploy-agent

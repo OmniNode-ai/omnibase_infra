@@ -102,6 +102,13 @@ from typing import Any, Protocol
 
 import yaml
 
+from omnibase_infra.models.lab_proof.model_proof_ledger import ModelProofLedger
+from omnibase_infra.models.lab_proof.model_proof_log_bundle import (
+    ARCHIVE_KEY,
+    STACK_BUILT_LINES,
+    ModelProofLogBundle,
+)
+
 
 def _sibling(*parts: str) -> Path:
     return Path(__file__).resolve().parents[2].joinpath(*parts)
@@ -543,14 +550,6 @@ class HostRoutingTransport:
 # --------------------------------------------------------------------------- ledger
 
 
-_ROW = re.compile(r"^(\S+Z) \| (HOLD|RELEASE) \|")
-
-
-def _field(row: str, key: str) -> str | None:
-    m = re.search(rf"(?:^|\| |\s){key}=([^\s|]+)", row)
-    return m.group(1) if m else None
-
-
 def _parse_ts(value: str) -> dt.datetime | None:
     try:
         return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -561,37 +560,8 @@ def _parse_ts(value: str) -> dt.datetime | None:
 def live_surface_holds(
     ledger_lines: Sequence[str], now: dt.datetime
 ) -> dict[str, tuple[str, str, str]]:
-    """Map surface -> (hold id, lane, until) for every HOLD still in force.
-
-    A HOLD is in force until its ``until=`` passes or a RELEASE cites its id
-    (``re=<id>``). Rows without ``surface=`` are not host leases and are ignored.
-    """
-    holds: dict[str, tuple[str, str, str, dt.datetime]] = {}
-    released: set[str] = set()
-    for line in ledger_lines:
-        m = _ROW.match(line)
-        if not m:
-            continue
-        if m.group(2) == "RELEASE":
-            ref = _field(line, "re")
-            if ref:
-                released.add(ref)
-            continue
-        surface = _field(line, "surface")
-        until = _field(line, "until")
-        if not surface or not until:
-            continue
-        until_ts = _parse_ts(until)
-        if until_ts is None:
-            continue
-        hold_id = _field(line, "id") or f"{m.group(1)}-{_field(line, 'lane')}"
-        holds[hold_id] = (surface, _field(line, "lane") or "?", until, until_ts)
-    live: dict[str, tuple[str, str, str]] = {}
-    for hold_id, (surface, lane, until, until_ts) in holds.items():
-        if hold_id in released or until_ts <= now:
-            continue
-        live[surface] = (hold_id, lane, until)
-    return live
+    """Map surface -> (hold id, lane, until) for every HOLD still in force."""
+    return ModelProofLedger(lines=tuple(ledger_lines)).live_surface_holds(now)
 
 
 # --------------------------------------------------------------------------- probe
@@ -1539,7 +1509,7 @@ def _check_map(
         "group_built": ("group_built", _lines(clone, r"^group-commit .*$")),
         "stack_built": (
             "stack_built",
-            _lines(build, r"^(?:build|up) rc=\d+.*$|^slot-migration FAILED$"),
+            _lines(build, STACK_BUILT_LINES),
         ),
         "image_identity": (
             "runtime_image_identity",
@@ -1920,6 +1890,7 @@ def run_proof(
     publish: Callable[[Sequence[MintedReceipt]], list[str]] | None = None,
     overlay: Path | None = None,
     post_up_command: str | None = None,
+    ledger_append: Callable[[str], None] = ModelProofLedger.no_append,
 ) -> tuple[int, str]:
     params = read_params(params_path)
     if overlay is not None and not overlay.is_file():
@@ -2074,6 +2045,13 @@ def run_proof(
     text = render_readback(
         rb, host, params, started, finished_at.strftime("%Y-%m-%dT%H:%M:%SZ")
     )
+    # OMN-19998: the build logs are read back before teardown removes them, and
+    # kept beside the receipts; the receipt's stack_built evidence names them.
+    out_dir = receipt_dir or params_path.parent / "lab-proof-receipts"
+    logs_text, outputs["build"] = ModelProofLogBundle.keep(
+        outputs, out_dir / f"{holder}-{now:%Y%m%dT%H%M%SZ}.logs"
+    )
+    text += "\n" + logs_text
     # OMN-19566: every proof, PASS, FAIL or INCONCLUSIVE, leaves one pr-head
     # receipt per PR it proved, keyed by the exact head, beside its bus event.
     minted, receipt_notes = mint_pr_head_receipts(
@@ -2084,13 +2062,21 @@ def run_proof(
         now,
         max(finished_at, now),
         verifier_identity or default_verifier_identity(),
-        receipt_dir or params_path.parent / "lab-proof-receipts",
+        out_dir,
     )
     receipt_text = render_receipts(minted, receipt_notes)
     if receipt_text:
         text += "\n" + receipt_text
     if publish is not None and minted:
         text += "\n" + "\n".join(publish(minted))
+    # OMN-19998: two INCONCLUSIVE proofs in a row for one repo raise an alarm row
+    if rb.outcome == "INCONCLUSIVE":
+        text += ModelProofLedger(lines=tuple(ledger_lines)).alarm_on_streak(
+            [f.repo for f in pr_subject_facts(outputs.get("clone", ""))],
+            f"{started}-{holder}",
+            finished_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            ledger_append,
+        )
     # the ledger grammar takes PASS, FAIL or ABORTED on a surface RELEASE; an
     # INCONCLUSIVE run is released as ABORTED with the verdict in its text
     release_result = rb.outcome if rb.outcome in ("PASS", "FAIL") else "ABORTED"
@@ -2271,6 +2257,9 @@ def _run_stack(
         log(f"run aborted before teardown: {exc}")
     finally:
         with defer_interrupts():
+            _, outputs[ARCHIVE_KEY] = transport.run(
+                host, ModelProofLogBundle.fetch_command(work), timeout=setup_s
+            )
             for phase in ("teardown", "snap-post"):
                 if "lease-lost" in outputs:
                     break
@@ -3019,6 +3008,9 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
         verifier_identity=args.verifier_identity,
         publish=publisher,
         overlay=args.overlay,
+        ledger_append=ModelProofLedger.appender(
+            os.environ.get("ONEX_LEDGER_APPEND_COMMAND", ""), args.ledger
+        ),
         post_up_command=args.post_up_command,
     )
     print(text)

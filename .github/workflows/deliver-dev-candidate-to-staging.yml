@@ -35,7 +35,7 @@
 #   * the runtime build checks out THIS repo at the caller's commit by default
 #     (a called workflow's `github.sha` is the caller's), so it needs no ref
 #     input. Its `sibling_ref` input is a different axis entirely -- it names
-#     the ref the SIBLING repos (omnibase_core / omnibase_compat / omnimarket)
+#     the ref the sibling repos
 #     are staged at, and must stay a branch name. Passing this repo's commit
 #     SHA there would try to clone omnibase_core at a SHA that does not exist
 #     in omnibase_core and fail the build outright.
@@ -101,7 +101,7 @@ on:
       - '.github/workflows/build-and-push-migrate-image.yml'
   # The documented low-friction manual path (OMN-15796 AC (a)): one dispatch,
   # no YAML hand-editing anywhere. Needed for the case a push cannot cover --
-  # a sibling repo (omnibase_core / omnimarket / omnibase_compat) moved and the
+  # a staged sibling repo moved and the
   # candidate must be restaged against their new dev HEADs without this repo
   # having changed at all.
   workflow_dispatch:
@@ -129,7 +129,7 @@ on:
         type: string
   # OMN-17057: a SIBLING repository's merge, announcing its own revision.
   #
-  # Until this existed, an omnimarket (or omnibase_core, or omnibase_compat)
+  # Until this existed, a sibling repository's
   # merge could not cause a delivery at all. It rode along on whatever the next
   # push to THIS repository happened to build, and the candidate cloned it at
   # branch `dev` at that instant -- so the vendored sibling revision was never

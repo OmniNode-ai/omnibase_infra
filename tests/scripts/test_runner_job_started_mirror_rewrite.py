@@ -433,15 +433,15 @@ def test_exact_sha_present_on_mirror_installs_rewrite(
     mirror_daemon: tuple[str, int, Path], tmp_path: Path
 ) -> None:
     host, port, mirror_root = mirror_daemon
-    pinned_sha = _make_mirror_repo(mirror_root, "omnibase_compat", branch="dev")
+    pinned_sha = _make_mirror_repo(mirror_root, "fixture-sibling", branch="dev")
     workflow = (
         "jobs:\n"
         "  test-job:\n"
         "    steps:\n"
-        "      - name: Checkout compat exact pin\n"
+        "      - name: Checkout fixture sibling exact pin\n"
         "        uses: actions/checkout@pin\n"
         "        with:\n"
-        "          repository: OmniNode-ai/omnibase_compat\n"
+        "          repository: OmniNode-ai/fixture-sibling\n"
         f"          ref: {pinned_sha}\n"
     )
     workspace, sha = _seed_own_repo_workspace(
@@ -458,8 +458,8 @@ def test_exact_sha_present_on_mirror_installs_rewrite(
     assert result.returncode == 0, result.stderr
     count, pairs = _github_env_pairs(Path(env["GITHUB_ENV"]))
     assert count == 2, result.stderr
-    fetch_key = f"url.git://{host}:{port}/omnibase_compat.git.insteadOf"
-    assert (fetch_key, "https://github.com/OmniNode-ai/omnibase_compat") in pairs
+    fetch_key = f"url.git://{host}:{port}/fixture-sibling.git.insteadOf"
+    assert (fetch_key, "https://github.com/OmniNode-ai/fixture-sibling") in pairs
 
 
 def test_exact_sha_absent_from_mirror_fails_open_not_a_silent_fallthrough(
@@ -473,16 +473,16 @@ def test_exact_sha_absent_from_mirror_fails_open_not_a_silent_fallthrough(
     must never receive a rewrite in the first place, because if it did, the
     checkout step would hard-fail with no recovery."""
     host, port, mirror_root = mirror_daemon
-    _make_mirror_repo(mirror_root, "omnibase_compat", branch="dev")
+    _make_mirror_repo(mirror_root, "fixture-sibling", branch="dev")
     missing_sha = "f" * 40  # syntactically valid, guaranteed absent from a fresh repo
     workflow = (
         "jobs:\n"
         "  test-job:\n"
         "    steps:\n"
-        "      - name: Checkout compat exact pin\n"
+        "      - name: Checkout fixture sibling exact pin\n"
         "        uses: actions/checkout@pin\n"
         "        with:\n"
-        "          repository: OmniNode-ai/omnibase_compat\n"
+        "          repository: OmniNode-ai/fixture-sibling\n"
         f"          ref: {missing_sha}\n"
     )
     workspace, sha = _seed_own_repo_workspace(
@@ -691,10 +691,10 @@ def test_unset_rewrite_repos_installs_no_uv_rewrite_for_mirrored_pin(
 ) -> None:
     """Retired defaults must not opt a dependency into uv mirror routing."""
     host, port, mirror_root = mirror_daemon
-    pinned_sha = _make_mirror_repo(mirror_root, "omnibase_compat", branch="dev")
+    pinned_sha = _make_mirror_repo(mirror_root, "fixture-sibling", branch="dev")
     uv_lock = f"""[[package]]
-name = "omnibase-compat"
-source = {{ git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev={pinned_sha}#{pinned_sha}" }}
+name = "fixture-sibling"
+source = {{ git = "https://github.com/OmniNode-ai/fixture-sibling.git?rev={pinned_sha}#{pinned_sha}" }}
 """
     sha = _make_mirror_repo(
         mirror_root,
@@ -730,7 +730,7 @@ def test_shared_accumulator_merges_uv_and_sibling_rewrites_without_clobbering(
     first mechanism's KEY_0/VALUE_0 -- this is the regression the shared
     _c2_rewrite_add_pair/_c2_rewrite_flush accumulator exists to prevent."""
     host, port, mirror_root = mirror_daemon
-    compat_sha = _make_mirror_repo(mirror_root, "omnibase_compat", branch="dev")
+    fixture_sha = _make_mirror_repo(mirror_root, "fixture-sibling", branch="dev")
     _make_mirror_repo(mirror_root, "omnimarket", branch="dev")
 
     workflow = (
@@ -744,8 +744,8 @@ def test_shared_accumulator_merges_uv_and_sibling_rewrites_without_clobbering(
         "          ref: dev\n"
     )
     uv_lock = f"""[[package]]
-name = "omnibase-compat"
-source = {{ git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev={compat_sha}#{compat_sha}" }}
+name = "fixture-sibling"
+source = {{ git = "https://github.com/OmniNode-ai/fixture-sibling.git?rev={fixture_sha}#{fixture_sha}" }}
 """
     mirror_root.mkdir(exist_ok=True)
     sha = _make_mirror_repo(
@@ -763,7 +763,7 @@ source = {{ git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev={compa
 
     env = _base_env(tmp_path, host, port, github_sha=sha)
     del env["OMNI_GIT_MIRROR_REWRITE_DISABLE"]  # opt the uv mechanism back in
-    env["OMNI_GIT_MIRROR_REWRITE_REPOS"] = "omnibase_compat"
+    env["OMNI_GIT_MIRROR_REWRITE_REPOS"] = "fixture-sibling"
     result = _run_functions(
         workspace_dir=workspace,
         env=env,
@@ -779,10 +779,10 @@ source = {{ git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev={compa
     assert count == 4, (
         f"expected 2 pairs (uv + sibling) = 4 entries, got {count}: {result.stderr}"
     )
-    compat_fetch_key = f"url.git://{host}:{port}/omnibase_compat.git.insteadOf"
+    fixture_fetch_key = f"url.git://{host}:{port}/fixture-sibling.git.insteadOf"
     market_fetch_key = f"url.git://{host}:{port}/omnimarket.git.insteadOf"
     keys = [k for k, _ in pairs]
-    assert compat_fetch_key in keys, (
+    assert fixture_fetch_key in keys, (
         "uv-mechanism entry was clobbered by the sibling-checkout flush"
     )
     assert market_fetch_key in keys, (
