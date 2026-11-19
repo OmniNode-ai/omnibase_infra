@@ -309,6 +309,10 @@ databases:
               - delegation_routing_tenant_overlay
               - delegation_shadow_comparisons
               - dep_health_findings
+              - eval_item_scores
+              - eval_item_traces
+              - eval_run_closes
+              - eval_run_rates
               - experiment_arm_results
               - hook_events
               - instruction_eval_aggregate_snapshots
@@ -492,5 +496,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: e00577390c0dde63ad47d66c307126dd93a76f4c57d81e844dd7d0480b8daea2
+  sha256: ea6766b92f7b1893eb19712cdb2f74bbced91c31b0dbdf49250d269067ded206
 topology_instance: onex-dev

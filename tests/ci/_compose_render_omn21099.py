@@ -112,7 +112,9 @@ def docker_compose_available() -> bool:
 
 
 def _compose_environment(
-    stack: tuple[str, ...], overrides: dict[str, str]
+    stack: tuple[str, ...],
+    overrides: dict[str, str],
+    omit: tuple[str, ...] = (),
 ) -> dict[str, str]:
     environment = {name: os.environ[name] for name in ("PATH", "HOME")}
     for name in stack:
@@ -137,26 +139,41 @@ def _compose_environment(
         if key in environment and policy.get(key):
             environment[key] = str(policy[key])
     environment.update(overrides)
+    for name in omit:
+        environment.pop(name, None)
     return environment
+
+
+def compose_config(
+    stack: tuple[str, ...],
+    overrides: dict[str, str] | None = None,
+    omit: tuple[str, ...] = (),
+) -> subprocess.CompletedProcess[str]:
+    """``docker compose config`` over ``stack``, its outcome unchecked.
+
+    ``omit`` names variables left out of the environment even though the stack requires
+    them, so a test can read what compose does when a caller leaves one unset.
+    """
+    command = ["docker", "compose", "--profile", "*"]
+    for name in stack:
+        command += ["-f", str(DOCKER_DIR / name)]
+    command += ["config", "--format", "json"]
+    return subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        env=_compose_environment(stack, overrides or {}, omit),
+    )
 
 
 def render_stack(
     stack: tuple[str, ...], overrides: dict[str, str] | None = None
 ) -> dict[str, Any]:
     """The services ``docker compose config`` renders for ``stack``."""
-    command = ["docker", "compose", "--profile", "*"]
-    for name in stack:
-        command += ["-f", str(DOCKER_DIR / name)]
-    command += ["config", "--format", "json"]
-    result = subprocess.run(
-        command,
-        cwd=REPO_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        env=_compose_environment(stack, overrides or {}),
-    )
+    result = compose_config(stack, overrides)
     assert result.returncode == 0, (
         f"docker compose config failed for {stack}:\n{result.stderr}"
     )

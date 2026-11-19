@@ -71,6 +71,8 @@ def _execution(lane: _Lane | None) -> SimpleNamespace:
         __file__=str(REPO_ROOT / "scripts/deploy-agent/deploy_agent/executor.py"),
         ENV_ALLOWED_LANES=ALLOWED_LANES_ENV,
         LANE_OVERLAY_DIR_ENV="ONEX_LANE_OVERLAY_DIR",
+        # No lane overlay directory is configured here (OMN-25202: render_dev_lane reads it).
+        resolve_lane_overlay_dir=lambda environ: None,
         EnumRuntimeLane=_Lane,
         _ActiveDeployLane=SimpleNamespace(lane=lane),
         parse_allowed_lanes=lambda raw: raw,

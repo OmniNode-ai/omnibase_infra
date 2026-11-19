@@ -286,6 +286,10 @@ databases:
               - delegation_routing_tenant_overlay
               - delegation_shadow_comparisons
               - dep_health_findings
+              - eval_item_scores
+              - eval_item_traces
+              - eval_run_closes
+              - eval_run_rates
               - experiment_arm_results
               - hook_events
               - instruction_eval_aggregate_snapshots
