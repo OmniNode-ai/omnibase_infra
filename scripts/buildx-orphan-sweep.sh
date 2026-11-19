@@ -85,13 +85,14 @@ now_epoch="${BUILDX_ORPHAN_SWEEP_NOW_EPOCH_OVERRIDE:-$(date -u +%s)}"
 #    buildx ls` prints one unindented header line per builder ("NAME/NODE ..."
 #    plus "default*" / "mybuilder") and one or more indented lines per node
 #    under it — the node name is what backs a `buildx_buildkit_<node>`
-#    container, so we collect indented-line first-tokens, not header names.
+#    container, so we collect node names from indented lines, skipping the
+#    optional leading \_ tree marker, not header names.
 # ---------------------------------------------------------------------------
 registered_nodes=()
 while IFS= read -r node; do
   [[ -z "$node" ]] && continue
   registered_nodes+=("$node")
-done < <("$DOCKER_BIN" buildx ls 2>/dev/null | awk '/^[[:space:]]+[^[:space:]]/{print $1}')
+done < <("$DOCKER_BIN" buildx ls 2>/dev/null | awk '/^[[:space:]]+[^[:space:]]/{if ($1 == "\\_") print $2; else print $1}')
 
 is_registered() {
   local candidate="$1" n

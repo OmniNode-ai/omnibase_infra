@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-25145
+title: The buildx orphan sweep reads the node name in current buildx output, so a declared builder is no longer reaped
+summary: >-
+  Follow-up to the lane builder memory cap (OMN-24179, omnibase_infra#5938). On the main lab host the deploy agent created the capped builder onex-lane-buildkit-mem12g through ensure_builder and a lane image build ran under it, but the builder container and its state volume were removed about 68 minutes after that build by the host's buildx orphan sweep timer. scripts/buildx-orphan-sweep.sh collects registered node names with the first token of each indented line of docker buildx ls; current buildx prints a tree marker first, so the token read is the marker and no builder is ever registered. The sweep now skips the marker and reads the node name. A registered builder is never touched; an old idle container that docker buildx ls does not list is still reclaimed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25145-registry
+    statement: The orphan sweep treats a builder node listed by docker buildx ls as registered in both the old and the current output format.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a container whose node is listed by docker buildx ls in the current tree-marker format is never a removal candidate, however old and idle -- falsifier: pytest tests/scripts/test_buildx_orphan_sweep.py -q fails against scripts/buildx-orphan-sweep.sh taken from the base commit"
+      - id: AC2
+        statement: "AC2: the sweep still removes an old idle container that docker buildx ls does not list -- falsifier: test_exited_old_orphan_removed_with_its_volume_in_execute_mode or test_mixed_fleet_only_the_qualifying_orphan_is_removed fails"
+evidence_requirements:
+  - kind: tests
+    description: The sweep tests pass at the pushed head, and the current-format test fails when the script is taken from the base commit.
+    command: uv run --frozen pytest tests/scripts/test_buildx_orphan_sweep.py -q --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25145-ac1
+    description: >-
+      The stub prints the node line in the current buildx format (tree marker, then node name) and the sweep leaves the old running container of that node alone, never sampling it. Against the base script the new test fails: the container is a candidate and is removed.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_buildx_orphan_sweep.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25145-ac2
+    description: >-
+      The existing tests that remove an unregistered old container with its volume, and the mixed-fleet test that removes only the qualifying orphan, still pass.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_buildx_orphan_sweep.py -q --no-cov -p no:cacheprovider
+        cwd: .
