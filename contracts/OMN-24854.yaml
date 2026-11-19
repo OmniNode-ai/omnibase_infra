@@ -37,3 +37,9 @@ dod_evidence:
       - check_type: command
         check_value: grep -qE '^\s+- \$\{ONEX_LANE_DECLARATION_DIR:\?[^}]*\}:/etc/onex/workspace-config/config/lab:ro$' docker/docker-compose.dev-tenant-fold.yml
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: "docker compose -f docker/docker-compose.dev-lane.yml config --no-interpolate | grep -A4 'source: [$][{]ONEX_LANE_DECLARATION_DIR' | grep -q 'target: /etc/onex/workspace-config/config/lab'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: "docker compose -f docker/docker-compose.dev-tenant-fold.yml config --no-interpolate | grep -A4 'source: [$][{]ONEX_LANE_DECLARATION_DIR' | grep -q 'target: /etc/onex/workspace-config/config/lab'"
+        cwd: ${OMNI_HOME}/omnibase_infra
