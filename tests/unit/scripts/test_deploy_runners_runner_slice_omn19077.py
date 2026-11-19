@@ -284,38 +284,13 @@ def test_host_surplus_runners_fails_closed_when_the_host_is_unreadable() -> None
     assert "refusing to decide" in result.stderr
 
 
-def _idle(
-    inspect_answer: str, runner_is_idle_rc: int
-) -> subprocess.CompletedProcess[str]:
-    return _run(
-        [
-            *_PRELUDE,
-            f'runner_is_idle() {{ echo "TWO-SIGNAL-CHECK"; return {runner_is_idle_rc}; }}',
-            _extract_function("container_is_running"),
-            _extract_function("surplus_runner_is_idle"),
-            "surplus_runner_is_idle omninode-runner-41",
-        ],
-        {"ssh": inspect_answer},
-    )
-
-
-def test_a_stopped_surplus_runner_is_idle_without_asking_github() -> None:
-    result = _idle("echo false", runner_is_idle_rc=1)
-    assert result.returncode == 0
-    assert "TWO-SIGNAL-CHECK" not in result.stdout
-
-
-def test_a_running_surplus_runner_needs_the_two_signal_check() -> None:
-    busy = _idle("echo true", runner_is_idle_rc=1)
-    assert busy.returncode != 0
-    assert "TWO-SIGNAL-CHECK" in busy.stdout
-    idle = _idle("echo true", runner_is_idle_rc=0)
-    assert idle.returncode == 0
-
-
-def test_an_uninspectable_surplus_runner_is_treated_as_busy() -> None:
-    assert _idle("exit 1", runner_is_idle_rc=0).returncode != 0
-    assert _idle("echo garbage", runner_is_idle_rc=0).returncode != 0
+def test_surplus_idle_check_judges_on_the_containers_own_evidence() -> None:
+    """OMN-24864: no GitHub read; the check is relabel_container_idle. Its
+    behavior is executed in test_deploy_runners_retire_dead_listener_omn22478."""
+    body = _function_body("surplus_runner_is_idle")
+    assert "relabel_container_idle" in body
+    assert "runner_is_idle" not in body.replace("surplus_runner_is_idle", "")
+    assert "github_runner_state" not in body
 
 
 def test_retire_one_runner_rechecks_before_stopping_and_keeps_volumes() -> None:
@@ -334,7 +309,6 @@ def test_retire_path_never_sweeps_orphans_or_deletes_volumes() -> None:
         _function_body(name)
         for name in (
             "host_surplus_runners",
-            "container_is_running",
             "surplus_runner_is_idle",
             "deregister_retired_runner",
             "retire_one_runner",

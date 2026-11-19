@@ -1146,6 +1146,21 @@ lock_layer_ok_in() {
   fi
 }
 
+# The hook venv's repair AND its drift check run through one contract-bound node
+# (OMN-24524). The repair keeps the optional extras the project's lock lists and
+# that are installed. A plain `uv sync --frozen --check` does not name them, so
+# uv reads every kept extra as a package to uninstall and answers "outdated" for
+# a venv the repair has just made exact: measured on uv 0.12.10, exit 1 without
+# the extra and exit 0 with it, so that check could never clear. The check asks
+# the SAME node with `--check`, which computes the same extras and runs the same
+# check, writes nothing, and exits 0 in sync, 1 outdated, 2 refused; any non-zero
+# is DRIFT. Without the gate interpreter the node cannot run, and that is DRIFT
+# too (the gate venv leg reports it): stricter than before, never a widening.
+hook_venv_node() {
+  local p="$1" n="$_VENV_SCRIPT_DIR/../src"; shift
+  (cd "$p" && as_owner env -u UV_PROJECT_ENVIRONMENT PYTHONPATH="$n" "$INFRA_PYTHON" -m omnibase_infra.nodes.node_reconcile_workspace_venvs.runtime_reconcile_workspace_venvs --contract "$n/omnibase_infra/nodes/node_reconcile_workspace_venvs/contract.yaml" --workspace "$OMNI_HOME" --project "$p" --uv "$UV_BIN" "$@")
+}
+
 # Read from the DISPATCH venv (OMN-17819): that is where the provider layer
 # lives and where `scripts/onex` runs from, so it is the only interpreter whose
 # omnimarket commit answers "which build would a dispatch actually use".
@@ -1639,8 +1654,8 @@ run_check() {
   local project
   while IFS= read -r project; do
     [[ -n "$project" ]] || continue
-    trace "uv sync --frozen --check --project $project"
-    if ! lock_layer_ok "$project"; then
+    trace "hook venv check (lock-listed extras kept) --project $project"
+    if ! hook_venv_node "$project" --check >/dev/null; then
       say "DRIFT: hook venv $project/.venv is outdated against $project/uv.lock"
       drift=1
     fi
@@ -2184,11 +2199,7 @@ run_repair() {
     fi
     # The gate environment was reconciled above. Use that interpreter and the
     # contract-bound handler from this checkout, before dispatch can start.
-    if ! (cd "$project" && as_owner env -u UV_PROJECT_ENVIRONMENT \
-        PYTHONPATH="$_VENV_SCRIPT_DIR/../src" "$INFRA_PYTHON" \
-        -m omnibase_infra.nodes.node_reconcile_workspace_venvs.runtime_reconcile_workspace_venvs \
-        --contract "$_VENV_SCRIPT_DIR/../src/omnibase_infra/nodes/node_reconcile_workspace_venvs/contract.yaml" \
-        --workspace "$OMNI_HOME" --project "$project" --uv "$UV_BIN"); then
+    if ! hook_venv_node "$project"; then
       fail "hook venv reconciliation refused for $project; read the error above."
     fi
   done < <(hook_venv_projects)

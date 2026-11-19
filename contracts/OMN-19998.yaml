@@ -1479,3 +1479,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC1
+  - id: dod-omn19998-baseline-reporter-node
+    description: The dev baseline publisher reports failing clusters through the omnimarket node command given by --report-command and no longer files tracker tickets itself. Five of the tests fail against the old script with an unrecognized --report-command argument
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_test_failure_ratchet.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC1

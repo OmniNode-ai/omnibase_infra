@@ -1,0 +1,41 @@
+{
+  "recorded_by": "OMN-25709",
+  "runtime": {
+    "lane": "dev",
+    "container": "omninode-runtime",
+    "omni_home_in_container": "/app"
+  },
+  "refusals": [
+    {
+      "read_at": "2026-11-18T22:50Z",
+      "command": "onex ticket transition OMN-25709 --state Done --bus-lane dev",
+      "correlation_id": "310f1f13-f2b0-4ad6-8d7a-81573a4344ac",
+      "terminal_topic": "onex.evt.omnimarket.linear-ticket-write-failed.v1",
+      "reason": "done_write_refused",
+      "terminal_failure_cause": "dod_verify for OMN-25709 is not a PASS: status='failed', total_checks=1, verified_count=0, failed_count=1, non_probative_count=0 (OMN-20368).",
+      "finding_codes": ["done_write_gate_refused"]
+    },
+    {
+      "read_at": "2026-11-18T21:51:15Z",
+      "correlation_id": "3cc69c51-902a-4a1a-8af6-2177d5b13d2f",
+      "verdict": "CONTRACT_MISSING",
+      "verdict_message": "CONTRACT_MISSING: no product repository carries contracts/<ticket>.yaml in a merged pull request for <ticket>; onex_change_control is not consulted.",
+      "product_clones": []
+    }
+  ],
+  "reader": {
+    "function": "canonical_clone(repo) in omnimarket node_dod_verify handlers/dod_evidence_local_source.py",
+    "rule": "a clone exists only where $OMNI_HOME/<name>/.git exists",
+    "contract_lookup": "contract_repositories(ticket) walks every directory directly under $OMNI_HOME that holds a .git, skips onex_change_control, and asks each default branch for contracts/<ticket>.yaml"
+  },
+  "governed_repositories": [
+    "omnibase_core",
+    "omnibase_infra",
+    "omnibase_spi",
+    "omniclaude",
+    "omnidash",
+    "omniintelligence",
+    "omnimarket",
+    "omnimemory"
+  ]
+}

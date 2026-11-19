@@ -41,6 +41,7 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -707,6 +708,91 @@ def test_real_uv_hook_sync_keeps_the_installed_branch_revision(
     assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr
     assert "conflicting branch install" in result.stdout + result.stderr
     assert json.loads(direct.read_text())["vcs_info"]["commit_id"] == branch_commit
+
+
+def _real_uv_extra_hook_project(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch, *, lock_lists_extra: bool
+) -> None:
+    """Install an optional extra into the hook venv with real uv, offline (OMN-24524)."""
+    uv = shutil.which("uv")
+    assert uv is not None, "uv is required to run workspace reconciliation"
+    wheel = ws.root / "probe-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("probe/__init__.py", "")
+        archive.writestr(
+            "probe-1.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: probe\nVersion: 1.0\n",
+        )
+        archive.writestr(
+            "probe-1.0.dist-info/WHEEL",
+            "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        archive.writestr("probe-1.0.dist-info/RECORD", "")
+    shutil.rmtree(ws.omniclaude / ".venv")
+    (ws.omniclaude / "uv.lock").unlink()
+    (ws.omniclaude / "pyproject.toml").write_text(
+        '[project]\nname = "hookproj"\nversion = "0.1"\nrequires-python = ">=3.9"\n'
+        "dependencies = []\n\n[project.optional-dependencies]\n"
+        f'probeextra = ["probe @ {wheel.as_uri()}"]\n\n[tool.uv]\npackage = false\n'
+    )
+    env = scrub_git_location_env()
+    for name in ("UV_PROJECT_ENVIRONMENT", "PYTHONPATH"):
+        env.pop(name, None)
+    env["UV_OFFLINE"] = "true"
+    env["UV_LINK_MODE"] = "copy"
+    for args in (["lock"], ["sync", "--frozen", "--extra", "probeextra"]):
+        done = subprocess.run(
+            [uv, *args, "--project", str(ws.omniclaude)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert done.returncode == 0, done.stdout + done.stderr
+    if not lock_lists_extra:
+        lock = ws.omniclaude / "uv.lock"
+        lock.write_text(
+            "\n".join(
+                line
+                for line in lock.read_text().splitlines()
+                if "provides-extras" not in line
+            )
+            + "\n"
+        )
+    monkeypatch.setenv("HOOK_PROJECT", str(ws.omniclaude))
+    monkeypatch.setenv("REAL_UV", uv)
+    monkeypatch.setenv("UV_OFFLINE", "true")
+    monkeypatch.setenv("UV_LINK_MODE", "copy")
+    shim = ws.bin_dir / "uv"
+    shim.write_text(
+        '#!/usr/bin/env bash\nif [[ "$*" == *"--project $HOOK_PROJECT"* ]]; then\n'
+        '  exec "$REAL_UV" "$@"\nfi\n' + shim.read_text()
+    )
+
+
+def test_drift_check_keeps_a_lock_listed_extra_like_the_repair_does(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check and the repair ask uv the same question, so DRIFT can clear (OMN-24524).
+
+    Measured with real uv: a plain frozen check reads an installed extra as a
+    package to uninstall and exits 1, while the repair keeps it and says in sync.
+    """
+    _real_uv_extra_hook_project(ws, monkeypatch, lock_lists_extra=True)
+    result = ws.run("--check")
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    assert "outdated against" not in result.stdout
+
+
+def test_drift_check_still_reads_an_unlocked_extra_as_drift(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control: an extra the lock does not list is not kept, so the check reports it."""
+    _real_uv_extra_hook_project(ws, monkeypatch, lock_lists_extra=False)
+    result = ws.run("--check")
+    assert result.returncode != _EXIT_OK, result.stdout + result.stderr
+    assert "outdated against" in result.stdout
+    assert "extras not kept (not listed in uv.lock): probeextra" in result.stderr
 
 
 def test_proven_installs_the_floor_commit_without_moving_the_clone(

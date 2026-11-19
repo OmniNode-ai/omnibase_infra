@@ -227,7 +227,7 @@ fi
 # too. `-t <prefix>` alone is BSD-only and fails on Linux runners.
 PYPROJECT_TMP="$(mktemp "${TMPDIR:-/tmp}/omnimarket-pyproject.XXXXXX")"
 STAGE_DIR=""
-trap 'rm -f "$PYPROJECT_TMP"; [[ -z "$STAGE_DIR" ]] || rm -rf "$STAGE_DIR"' EXIT
+trap 'rm -f "$PYPROJECT_TMP"; [[ -z "$STAGE_DIR" ]] || env -u PYTHONPATH "$PYTHON_BIN" "$ATOMIC_TOOL" sweep --python "$PYTHON_BIN" --stage-dir "$STAGE_DIR" --lock-held "$VENV_LOCK_PATH" --lock-timeout "$ONEX_VENV_LOCK_TIMEOUT"' EXIT
 git -C "$OMNIMARKET_CLONE" show "${OMNIMARKET_REF}:pyproject.toml" >"$PYPROJECT_TMP"
 
 RESOLVED_PINS="$(env -u PYTHONPATH "$PYTHON_BIN" "$SCRIPT_DIR/resolve_omnimarket_pins.py" \
@@ -327,12 +327,11 @@ if [[ -n "$STAGE_DIR" ]]; then
   # place, read the venv back WITHOUT the overlay, and restore on a failure.
   echo
   echo "== commit: exchanging the staged packages into $PYTHON_BIN =="
-  trap 'rm -f "$PYPROJECT_TMP"' EXIT # the stage now holds the previous packages
-  atomic() { env -u PYTHONPATH "$PYTHON_BIN" "$ATOMIC_TOOL" "$1" --python "$PYTHON_BIN" --stage-dir "$STAGE_DIR"; }
+  atomic() { env -u PYTHONPATH "$PYTHON_BIN" "$ATOMIC_TOOL" "$1" --python "$PYTHON_BIN" --stage-dir "$STAGE_DIR" --lock-held "$VENV_LOCK_PATH" --lock-timeout "$ONEX_VENV_LOCK_TIMEOUT"; }
   atomic commit || { echo "FAIL: the commit did not complete; the previous packages were restored ($STAGE_DIR)." >&2; exit 1; }
   if ! ( verify_install "$PYTHON_BIN" ); then
     echo "FAIL: the venv failed its readback after the commit; rolling back." >&2
-    if atomic rollback >&2; then rm -rf "$STAGE_DIR"; else echo "  rollback incomplete; journal and previous packages are in $STAGE_DIR" >&2; fi
+    if atomic rollback >&2; then :; else echo "  rollback incomplete; journal and previous packages are in $STAGE_DIR" >&2; fi
     exit 1
   fi
   atomic finalize

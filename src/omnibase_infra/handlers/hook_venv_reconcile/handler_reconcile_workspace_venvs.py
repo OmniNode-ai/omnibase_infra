@@ -13,12 +13,14 @@ import json
 import re
 import subprocess
 import tomllib
+from email.parser import Parser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.model_hook_venv_extras import ModelHookVenvExtras
 from omnibase_infra.models.model_hook_venv_reconcile_policy import (
     ModelHookVenvReconcilePolicy,
 )
@@ -43,6 +45,13 @@ _REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 def _normalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _metadata_name(metadata: str) -> str:
+    name = Parser().parsestr(metadata, headersonly=True).get("Name") or ""
+    if not name:
+        raise ValueError("unreadable package metadata name")
+    return name
 
 
 def _requirement_name(requirement: str) -> str:
@@ -105,9 +114,28 @@ class HandlerReconcileWorkspaceVenvs:
         """Plan before writing and verify the selected revisions after writing."""
         project = request.project
         try:
+            extras = self._host.extras(project)
+            if request.mode == "check":
+                code, check_output = self._host.uv(request, "--check", extras.kept)
+                if extras.stray:
+                    check_output += (
+                        "\nextras not kept (not listed in uv.lock): "
+                        + ", ".join(extras.stray)
+                    )
+                return ModelHookVenvReconcileResult(
+                    status="already_in_sync" if code == 0 else "outdated",
+                    detail=(
+                        f"hook venv: already in sync ({project}/.venv)"
+                        if code == 0
+                        else f"hook venv: outdated against uv.lock ({project}/.venv)"
+                    ),
+                    output=check_output,
+                )
             expected = self._host.installed(project)
             if expected:
-                plan_code, plan_output = self._host.uv(request, "--dry-run")
+                plan_code, plan_output = self._host.uv(
+                    request, "--dry-run", extras.kept
+                )
                 if plan_code:
                     return ModelHookVenvReconcileResult(
                         status="refused",
@@ -120,10 +148,10 @@ class HandlerReconcileWorkspaceVenvs:
                     plan_output,
                     self._host,
                 )
-            already = self._host.uv(request, "--check")[0] == 0
+            already = self._host.uv(request, "--check", extras.kept)[0] == 0
             output = ""
             if not already:
-                sync_code, output = self._host.uv(request)
+                sync_code, output = self._host.uv(request, None, extras.kept)
                 if sync_code:
                     return ModelHookVenvReconcileResult(
                         status="refused",
@@ -138,9 +166,18 @@ class HandlerReconcileWorkspaceVenvs:
                         detail="branch install revision changed after sync: " + name,
                         output=output,
                     )
+            detail = (
+                f"hook venv: {'already in sync' if already else 'reconciled'}"
+                f" ({project}/.venv)"
+            )
+            if extras.stray:
+                stray_line = "extras not kept (not listed in uv.lock): " + ", ".join(
+                    extras.stray
+                )
+                output = f"{output}\n{stray_line}" if output else stray_line
             return ModelHookVenvReconcileResult(
                 status="already_in_sync" if already else "reconciled",
-                detail=f"hook venv: {'already in sync' if already else 'reconciled'} ({project}/.venv)",
+                detail=detail,
                 output=output,
             )
         except (
@@ -173,13 +210,7 @@ class HandlerHookVenvReconcileHost:
             if vcs.get("vcs") != "git":
                 continue
             metadata = (path.parent / "METADATA").read_text()
-            name = _normalize(
-                next(
-                    line[6:]
-                    for line in metadata.splitlines()
-                    if line.startswith("Name: ")
-                )
-            )
+            name = _normalize(_metadata_name(metadata))
             commit, url = vcs.get("commit_id", ""), data.get("url", "")
             if (
                 not isinstance(commit, str)
@@ -228,7 +259,10 @@ class HandlerHookVenvReconcileHost:
         return probe.returncode == 0
 
     def uv(
-        self, request: ModelHookVenvReconcileRequest, flag: str | None = None
+        self,
+        request: ModelHookVenvReconcileRequest,
+        flag: str | None = None,
+        extras: tuple[str, ...] = (),
     ) -> tuple[int, str]:
         """Run uv against exactly the requested project as the host owner."""
         env = scrub_git_location_env()
@@ -242,7 +276,7 @@ class HandlerHookVenvReconcileHost:
         if flag != "--dry-run":
             args.append("--frozen")
         args += ["--project", str(request.project)]
-        for extra in self._installed_extras(request.project):
+        for extra in extras:
             args += ["--extra", extra]
         if flag:
             args.append(flag)
@@ -260,27 +294,24 @@ class HandlerHookVenvReconcileHost:
             raise TimeoutError("hook venv package operation timed out") from exc
         return result.returncode, result.stdout + result.stderr
 
-    def _installed_extras(self, project: Path) -> tuple[str, ...]:
-        """List declared extras whose every requirement is already installed."""
+    def extras(self, project: Path) -> ModelHookVenvExtras:
+        """Declare extras whose requirements are installed, then keep only those the lock lists."""
         source = project / "pyproject.toml"
         if not source.is_file():
-            return ()
+            return ModelHookVenvExtras()
         optional = (
             tomllib.loads(source.read_text())
             .get("project", {})
             .get("optional-dependencies")
         )
         if not isinstance(optional, dict):
-            return ()
-        installed = {
-            _normalize(line[6:])
-            for path in (project / ".venv").glob(
-                "lib/python*/site-packages/*.dist-info/METADATA"
-            )
-            for line in path.read_text().splitlines()
-            if line.startswith("Name: ")
-        }
-        return tuple(
+            return ModelHookVenvExtras()
+        installed: set[str] = set()
+        for path in (project / ".venv").glob(
+            "lib/python*/site-packages/*.dist-info/METADATA"
+        ):
+            installed.add(_normalize(_metadata_name(path.read_text())))
+        fully_installed = tuple(
             name
             for name, requirements in sorted(optional.items())
             if isinstance(requirements, list)
@@ -290,3 +321,37 @@ class HandlerHookVenvReconcileHost:
                 for requirement in requirements
             )
         )
+        lock = {_normalize(name) for name in self._lock_extras(project)}
+        return ModelHookVenvExtras(
+            kept=tuple(name for name in fully_installed if _normalize(name) in lock),
+            stray=tuple(
+                name for name in fully_installed if _normalize(name) not in lock
+            ),
+        )
+
+    def _lock_extras(self, project: Path) -> tuple[str, ...]:
+        """Read the lock's extras for the project's own package entry."""
+        lock = project / "uv.lock"
+        if not lock.is_file():
+            return ()
+        source = project / "pyproject.toml"
+        if not source.is_file():
+            return ()
+        name = tomllib.loads(source.read_text()).get("project", {}).get("name")
+        if not isinstance(name, str):
+            return ()
+        package = next(
+            (
+                entry
+                for entry in tomllib.loads(lock.read_text()).get("package", [])
+                if isinstance(entry, dict)
+                and _normalize(str(entry.get("name", ""))) == _normalize(name)
+            ),
+            None,
+        )
+        if package is None:
+            return ()
+        provides = package.get("metadata", {}).get("provides-extras")
+        if not isinstance(provides, list):
+            return ()
+        return tuple(str(extra) for extra in provides)
