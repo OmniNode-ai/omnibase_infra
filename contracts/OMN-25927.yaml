@@ -86,3 +86,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn25927.py tests/integration/infra/test_omn18012_dev_lane_broker_auth_scope.py -k 'base or leak or never_reach' -q -n 0 --no-cov
         cwd: .
+  - id: dod-omn25927-gate-node
+    description: node_verify_stability_refresh's handler builds every rpk argv of the stability refresh health gate; once the gate's password is set the reads go as the declared superuser principal stability-refresh-gate, the value reaches docker only through RPK_PASS, and with no password the reads stay anonymous.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_verify_stability_refresh_omn25927.py tests/unit/docker/test_stability_sasl_omn25927.py -k 'gate or handle or argv or contract' -q -n 0 --no-cov
+        cwd: .
