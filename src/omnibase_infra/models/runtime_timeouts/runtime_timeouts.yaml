@@ -41,3 +41,9 @@ timeouts:
   # Introspection mixin: base of the listener retry backoff, and the heartbeat period.
   introspection_base_backoff_seconds: 1.0
   introspection_heartbeat_interval_seconds: 30.0
+  # Publish attempts at startup before the runtime refuses to start.
+  introspection_heartbeat_start_attempts: 3
+  # Wait between startup publish attempts.
+  introspection_heartbeat_retry_backoff_seconds: 1.0
+  # Consecutive failed heartbeats after which the runtime reports itself not healthy.
+  introspection_heartbeat_unhealthy_after_failures: 3

@@ -74,6 +74,12 @@ class ModelRuntimeTimeouts(BaseModel):
         llm_post_seconds: Wait of one LLM HTTP POST.
         introspection_base_backoff_seconds: Base of the listener retry backoff.
         introspection_heartbeat_interval_seconds: Period of the heartbeat task.
+        introspection_heartbeat_start_attempts: Publish attempts at startup
+            before the runtime refuses to start.
+        introspection_heartbeat_retry_backoff_seconds: Wait between startup
+            publish attempts.
+        introspection_heartbeat_unhealthy_after_failures: Consecutive failed
+            heartbeats after which the runtime reports itself not healthy.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -104,6 +110,11 @@ class ModelRuntimeTimeouts(BaseModel):
     introspection_heartbeat_interval_seconds: float = Field(
         gt=0, strict=True, allow_inf_nan=False
     )
+    introspection_heartbeat_start_attempts: int = Field(gt=0, strict=True)
+    introspection_heartbeat_retry_backoff_seconds: float = Field(
+        gt=0, strict=True, allow_inf_nan=False
+    )
+    introspection_heartbeat_unhealthy_after_failures: int = Field(gt=0, strict=True)
 
     @model_validator(mode="after")
     def _defaults_lie_within_bounds(self) -> ModelRuntimeTimeouts:
