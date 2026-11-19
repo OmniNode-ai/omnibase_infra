@@ -203,6 +203,9 @@ if TYPE_CHECKING:
     from omnibase_infra.event_bus.models import ModelEventMessage
     from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
     from omnibase_infra.handlers.handler_infisical import HandlerInfisical
+    from omnibase_infra.handlers.handler_runtime_introspection_startup import (
+        HandlerRuntimeIntrospectionStartup,
+    )
     from omnibase_infra.idempotency import ModelIdempotencyGuardConfig
     from omnibase_infra.idempotency.protocol_idempotency_store import (
         ProtocolIdempotencyStore,
@@ -865,6 +868,7 @@ class RuntimeHostProcess:
         config_prefetch_status: str = "pending",
         deployment_topology: ModelDeploymentTopology | None = None,
         node_announcements: tuple[ModelNodeAnnouncement, ...] = (),
+        heartbeat_required: bool = False,
     ) -> None:
         """Initialize the runtime host process.
 
@@ -1043,6 +1047,12 @@ class RuntimeHostProcess:
                     - enabled: Whether to enable auto-introspection (default: True)
                     - jitter_max_ms: Max jitter before publishing (default: 5000)
                     - throttle_min_interval_s: Min time between introspections (default: 10)
+
+            heartbeat_required: When True the heartbeat is mandatory (OMN-24559):
+                start() refuses without an introspection service, with introspection
+                disabled, or when the first heartbeat cannot be published, and /ready
+                carries a ``heartbeat`` row that is false while heartbeats fail.
+                Default False leaves embedded and test constructions unchanged.
 
             dispatch_engine: Optional MessageDispatchEngine for category-based routing.
                 Type: MessageDispatchEngine | None
@@ -1504,6 +1514,15 @@ class RuntimeHostProcess:
         )
 
         self._introspection_config: _Config = introspection_config or _Config()
+        self._heartbeat_required = heartbeat_required
+        if heartbeat_required:
+            self.register_readiness_probe(
+                "heartbeat",
+                lambda: self._startup_handler().heartbeat_readiness(
+                    service=self._introspection_service,
+                    config=self._introspection_config,
+                ),
+            )
 
         # Tracks last introspection time for throttling (OMN-1930)
         # Uses time.monotonic() for reliable elapsed time measurement
@@ -2171,9 +2190,15 @@ class RuntimeHostProcess:
         # Announces node presence to the platform after handlers are wired.
         # Jitter prevents thundering herd when many nodes restart together.
         # This runs AFTER _is_running=True so the node is fully operational.
-        await self._publish_introspection_with_jitter(
-            correlation_id=startup_correlation_id
-        )
+        # OMN-24559: a refusal rolls the running flag back; the handler stops the
+        # heartbeat task it started.
+        try:
+            await self._publish_introspection_with_jitter(
+                correlation_id=startup_correlation_id
+            )
+        except Exception:
+            self._is_running = False
+            raise
 
         logger.info(
             "RuntimeHostProcess started successfully",
@@ -3966,65 +3991,14 @@ class RuntimeHostProcess:
         node_name: str,
         correlation_id: UUID,
     ) -> None:
-        """Publish a CAPABILITY_CHANGE introspection event for a live-materialized handler.
-
-        Idempotency: skips if ``node_name`` has already been announced during
-        this runtime boot (prevents introspection spam from Kafka replays).
-
-        Bypasses jitter/throttle: capability changes announce immediately since
-        consumers reacting to CAPABILITY_CHANGE may send traffic right away.
-
-        This is a no-op if:
-        - ``_introspection_service`` is None
-        - introspection is disabled by config
-        - ``node_name`` was already announced
-
-        Args:
-            node_name: Handler node name that was materialized.
-            correlation_id: Correlation ID for distributed tracing.
-
-        .. versionadded:: 0.9.0
-            Added as part of OMN-1989 live contract materialization.
-        """
-        if self._introspection_service is None:
-            return
-
-        if not self._introspection_config.enabled:
-            return
-
-        if node_name in self._announced_capabilities:
-            logger.debug(
-                "CAPABILITY_CHANGE already announced, skipping",
-                extra={
-                    "node_name": node_name,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return
-
-        try:
-            await self._introspection_service.publish_introspection(
-                reason=EnumIntrospectionReason.CAPABILITY_CHANGE,
-                correlation_id=correlation_id,
-            )
-            self._announced_capabilities.add(node_name)
-
-            logger.info(
-                "CAPABILITY_CHANGE introspection published",
-                extra={
-                    "node_name": node_name,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-        except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
-            logger.warning(
-                "Failed to publish CAPABILITY_CHANGE introspection",
-                extra={
-                    "node_name": node_name,
-                    "error": str(e),
-                    "correlation_id": str(correlation_id),
-                },
-            )
+        """Publish a CAPABILITY_CHANGE introspection event (handler owns the rules)."""
+        await self._startup_handler().publish_capability_change(
+            service=self._introspection_service,
+            config=self._introspection_config,
+            announced=self._announced_capabilities,
+            node_name=node_name,
+            correlation_id=correlation_id,
+        )
 
     async def _materialize_dependencies(self) -> None:
         """Materialize infrastructure resources from contract dependencies.
@@ -6718,6 +6692,14 @@ class RuntimeHostProcess:
             self._idempotency_store = None
             self._idempotency_config = None
 
+    def _startup_handler(self) -> HandlerRuntimeIntrospectionStartup:
+        """The startup introspection handler (imported lazily: it imports models)."""
+        from omnibase_infra.handlers.handler_runtime_introspection_startup import (
+            HandlerRuntimeIntrospectionStartup,
+        )
+
+        return HandlerRuntimeIntrospectionStartup()
+
     async def _publish_introspection_with_jitter(
         self,
         correlation_id: UUID,
@@ -6736,19 +6718,16 @@ class RuntimeHostProcess:
         from omnibase_infra.handlers.handler_registration_from_announcement.handler import (
             HandlerRegistrationFromAnnouncement,
         )
-        from omnibase_infra.handlers.handler_runtime_introspection_startup import (
-            HandlerRuntimeIntrospectionStartup,
-        )
         from omnibase_infra.models.model_runtime_introspection_startup_request import (
             ModelRuntimeIntrospectionStartupRequest,
         )
 
-        handler = HandlerRuntimeIntrospectionStartup()
-        result = await handler.handle(
+        result = await self._startup_handler().handle(
             ModelRuntimeIntrospectionStartupRequest(
                 correlation_id=correlation_id,
                 announcements=self._node_announcements,
                 last_introspection_time=self._last_introspection_time,
+                heartbeat_required=self._heartbeat_required,
             ),
             service=self._introspection_service,
             config=self._introspection_config,

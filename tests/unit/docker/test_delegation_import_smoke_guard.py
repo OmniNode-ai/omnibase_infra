@@ -27,8 +27,8 @@ _WORKFLOW_PATH = _PROJECT_ROOT / ".github" / "workflows" / "docker-build.yml"
 
 # Foundation import asserted by the guard (OMN-12658). OMN-21279: the image
 # carries no omnimarket, so the guard no longer imports a market handler.
-# OMN-20074 / OMN-23988: omnibase_compat is retired; neither the Dockerfile
-# smoke nor the docker-build CI step imports it.
+# OMN-20074 / OMN-23988: the Dockerfile and workflow smoke commands
+# import the active foundation packages.
 _FOUNDATION_IMPORT = "import omnibase_core; import omnibase_infra"
 _LOCK_PATH = _PROJECT_ROOT / "uv.lock"
 _SMOKE_MARKER = "foundation import smoke OK"

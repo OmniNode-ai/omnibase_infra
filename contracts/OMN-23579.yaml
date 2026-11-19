@@ -1,7 +1,7 @@
 schema_version: 1.0.0
 ticket_id: OMN-23579
 title: Remove retired repository names from the infrastructure repository's live lists
-summary: The host reconcile unit refuses to run while a registry list, sync script or source constant names a retired repository. Nine files in omnibase_infra held such a name as a live entry (13 of the 16 findings from the retirement scan). Each entry for onex_change_control and omnibase_compat is removed from those lists; every other repository stays. config/lab_proof_profiles.yaml (2 findings) and scripts/deploy-gateway.sh (1 finding) are left for their owners because the lab-proof exemption rules and the runtime image build still depend on the names.
+summary: The host reconcile unit refuses to run while a registry list, sync script or source constant names a retired repository. Nine files in omnibase_infra held such a name as a live entry (13 of the 16 findings from the retirement scan). Entries for the two retired repositories were removed from those lists. config/lab_proof_profiles.yaml (2 findings) and scripts/deploy-gateway.sh (1 finding) are left for their owners because the lab-proof exemption rules and the runtime image build still depend on the names.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []

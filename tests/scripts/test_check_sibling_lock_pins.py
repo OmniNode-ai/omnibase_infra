@@ -338,7 +338,7 @@ def _write_patched_provenance_script(
 
 
 def _make_sibling_dirs(root: Path) -> None:
-    for repo in ("omnibase_compat", "omnimarket"):
+    for repo in ("omnibase_core", "omnimarket"):
         repo_root = root / repo
         repo_root.mkdir(parents=True)
         (repo_root / "pyproject.toml").write_text(

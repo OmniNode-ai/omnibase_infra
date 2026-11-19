@@ -20,6 +20,7 @@ class ModelVenvAtomicInstallRequest(BaseModel):
         "commit",
         "rollback",
         "finalize",
+        "sweep",
         "verify",
         "installed_commit",
         "staging_lock_acquire",
@@ -44,3 +45,12 @@ class ModelVenvAtomicInstallRequest(BaseModel):
     workspace_root: Path | None = Field(default=None, description="the workspace root")
     floor_path: Path | None = Field(default=None, description="the floor marker file")
     changed: bool = Field(default=False, description="whether the venv moved this pass")
+    lock_held_path: str | None = Field(
+        default=None,
+        description="the venv reconcile lock path the caller already holds; the sweep then does not take it again",
+    )
+    lock_timeout_seconds: float = Field(
+        default=0.0,
+        ge=0,
+        description="seconds the sweep waits for the venv reconcile lock; 0 tries once",
+    )

@@ -1,0 +1,82 @@
+# OMN-24765 contract file for omnibase_infra deploy-gate.
+# This change edits one integration test and two ticket contracts; no runtime, container, broker topic or service changes.
+schema_version: "1.0.0"
+ticket_id: "OMN-24765"
+title: "omnibase_infra#6032 passes repo-evidence / dod-verify at its next head and the four non-blocking contract and test findings of the head 52bdc0aa86d1 review are fixed"
+summary: >
+  Fixes the review of head 52bdc0aa86d1 on omnibase_infra#6032: the pull request title cites every ticket whose contract the diff carries, the unfixed-shape case of the real-path test carries the same normalizer spy assertion as the fixed-shape case, and the AC wording and falsifier commands in the OMN-24717 and OMN-24693 contracts name what the test asserts. Test and contract only.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24765-title-cites-contracts
+    statement: The pull request title cites every ticket whose contract the diff carries, so the test-only-diff exemption of the evidence gate admits it.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the pull request title cites OMN-24717 beside OMN-24693 and OMN-24765, and repo-evidence / dod-verify is green at the new head -- falsifier: onex scm commit-check-runs OmniNode-ai/omnibase_infra at the new head lists repo-evidence / dod-verify with conclusion success, and red at head 52bdc0aa86d1"
+  - id: req-omn24765-unfixed-spy
+    statement: The unfixed-shape case asserts the dispatch branch on its own.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the unfixed-shape case in tests/integration/nodes/node_host_table_keys_ingest_effect/test_no_undeliverable_output_integration.py carries the same normalizer spy assertion as the fixed-shape case, so a change of the routing branch turns it red -- falsifier: uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov passes, and with the stand-in routing entry changed to topic_match with event_model removed the unfixed-shape test fails"
+  - id: req-omn24765-contract-wording
+    statement: The OMN-24717 and OMN-24693 contracts name the assertion and the control the test provides.
+    acceptance:
+      - id: AC3
+        statement: "AC3: contracts/OMN-24717.yaml AC1 names the normalizer spy as the branch assertion, its AC5 falsifier uses OmniNode-ai/omnibase_infra#6032 with a read that returns comments, and contracts/OMN-24693.yaml AC2 names test_unfixed_handler_shape_does_route_undeliverable_output as the falsifier -- falsifier: grep -n test_unfixed_handler_shape_does_route_undeliverable_output contracts/OMN-24693.yaml prints the AC2 line, and grep -n OmniNode-ai/omnibase_infra#6032 contracts/OMN-24717.yaml prints the AC5 line"
+  - id: req-omn24765-lab-run
+    statement: The pull request's required suites run on a lab host at the new head.
+    acceptance:
+      - id: AC4
+        statement: "AC4: the pull request's required suites run on a lab host at the new head, in parts if a whole run times out, and the new head and results are commented on the pull request -- falsifier: a read of the comments of OmniNode-ai/omnibase_infra#6032 that returns comments lists one beginning Lab: head=<full new head sha> with the lab results and the parts run"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24765-ac1-hosted-proxy
+    description: "AC1 hosted proxy: the real-path directory the title's contracts bind passes at the pushed head; the dod-verify reading at the new head is recorded in the pull request comment."
+    source: "manual"
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u PYTHONPATH uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov"
+        cwd: .
+  - id: dod-omn24765-ac2
+    description: "AC2: both cases of the real-path test pass, the unfixed-shape case asserting the normalizer spy."
+    source: "manual"
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u PYTHONPATH uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov -k test_unfixed_handler_shape_does_route_undeliverable_output"
+        cwd: .
+  - id: dod-omn24765-ac3
+    description: "AC3: the OMN-24693 contract names the unfixed-shape test as the AC2 falsifier and the OMN-24717 contract AC5 falsifier uses the full OWNER/REPO#NUMBER form."
+    source: "manual"
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: "command"
+        check_value: "grep -n test_unfixed_handler_shape_does_route_undeliverable_output contracts/OMN-24693.yaml"
+        cwd: .
+      - check_type: "command"
+        check_value: "grep -n OmniNode-ai/omnibase_infra#6032 contracts/OMN-24717.yaml"
+        cwd: .
+  - id: dod-omn24765-ac4-hosted-proxy
+    description: "AC4 hosted proxy: the suites of the two sibling real-path directories pass at the pushed head; the lab run ids and the new head are recorded in the pull request comment."
+    source: "manual"
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u PYTHONPATH uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect tests/integration/nodes/node_delegation_chain_ledger_effect -q --no-cov"
+        cwd: .
+  - id: dod-deploy
+    description: "No runtime deploy, restart, broker topic, container image, or live service change is required for this test and contract only change."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "echo 'deploy-gate: OMN-24765 edits one integration test and two ticket contracts in omnibase_infra; no runtime deploy or restart required'"

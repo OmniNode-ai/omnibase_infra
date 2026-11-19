@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: 1
+# OMN-25536: read by no node; installed by the dev branch install to prove the overlay root.
+probe: OMN-25536

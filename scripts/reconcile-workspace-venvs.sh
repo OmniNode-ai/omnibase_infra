@@ -27,7 +27,7 @@
 #                             scripts/install-node-skill-package.sh
 #
 # `omnimarket` is DELIBERATELY absent from omnibase_infra's pyproject.toml and
-# uv.lock. The layer graph is compat -> core -> spi -> infra and omnimarket sits
+# uv.lock. The layer graph is core -> spi -> infra and omnimarket sits
 # ABOVE infra (it depends on omnibase-infra >=0.38.3,<0.39.0); declaring it
 # would invert the graph and publish a cycle in the omnibase-infra wheel. It is
 # composed at runtime through `onex.nodes` entry points instead.
@@ -47,14 +47,9 @@
 #
 # The order is then chosen for a different reason -- PROVIDER FIRST, LOCK
 # SECOND -- because the provider co-install is itself capable of moving
-# lock-governed pins. It carries a hardcoded `COMPAT_PIN="omnibase-compat==0.5.5"`
-# and installs it `--no-deps`, silently downgrading the locked 0.5.6. That is
-# OMN-16262, and it is not theoretical: it was reproduced on this Mac on
-# 2026-08-30 by this very script, and the downgrade broke the `occ` CLI
-# extension so completely that the `onex` binary would not start at all
-# ("No module named 'omnibase_compat.contracts.pr_occ_stamp'"). Ending on the
-# lock pass repairs that downgrade structurally, rather than leaving the
-# reconciler to inherit the bug.
+# lock-governed pins. In OMN-16262, a hardcoded co-install pin downgraded a
+# dependency with `--no-deps` and broke the `onex` CLI at startup. Applying
+# the lock last restores the governed pins after the provider install.
 #
 # ============================================================================
 # ...AND WHY THAT COMPOSED VENV IS NOT THE CLONE'S OWN .venv (OMN-17819)
@@ -257,9 +252,8 @@
 # `install-node-skill-package.sh` and `uv sync --frozen --inexact` return, it
 # exits 0 on their exit STATUS. It never re-reads the venv to confirm the pins
 # actually landed. That is not a small gap -- the provider co-install is known
-# to move pins nobody asked it to move (OMN-16262: a hardcoded COMPAT_PIN
-# downgrading omnibase-compat 0.5.6 -> 0.5.5, which broke the `occ` CLI
-# extension badly enough that the `onex` binary would not start), and no exit
+# to move pins nobody asked it to move (OMN-16262: a dependency downgrade
+# made the `onex` binary fail at startup), and no exit
 # code can see a content change like that.
 #
 # The readback lives one layer up, in `scripts/reconcile-host.sh`, which
@@ -1152,6 +1146,21 @@ lock_layer_ok_in() {
   fi
 }
 
+# The hook venv's repair AND its drift check run through one contract-bound node
+# (OMN-24524). The repair keeps the optional extras the project's lock lists and
+# that are installed. A plain `uv sync --frozen --check` does not name them, so
+# uv reads every kept extra as a package to uninstall and answers "outdated" for
+# a venv the repair has just made exact: measured on uv 0.12.10, exit 1 without
+# the extra and exit 0 with it, so that check could never clear. The check asks
+# the SAME node with `--check`, which computes the same extras and runs the same
+# check, writes nothing, and exits 0 in sync, 1 outdated, 2 refused; any non-zero
+# is DRIFT. Without the gate interpreter the node cannot run, and that is DRIFT
+# too (the gate venv leg reports it): stricter than before, never a widening.
+hook_venv_node() {
+  local p="$1" n="$_VENV_SCRIPT_DIR/../src"; shift
+  (cd "$p" && as_owner env -u UV_PROJECT_ENVIRONMENT PYTHONPATH="$n" "$INFRA_PYTHON" -m omnibase_infra.nodes.node_reconcile_workspace_venvs.runtime_reconcile_workspace_venvs --contract "$n/omnibase_infra/nodes/node_reconcile_workspace_venvs/contract.yaml" --workspace "$OMNI_HOME" --project "$p" --uv "$UV_BIN" "$@")
+}
+
 # Read from the DISPATCH venv (OMN-17819): that is where the provider layer
 # lives and where `scripts/onex` runs from, so it is the only interpreter whose
 # omnimarket commit answers "which build would a dispatch actually use".
@@ -1645,8 +1654,8 @@ run_check() {
   local project
   while IFS= read -r project; do
     [[ -n "$project" ]] || continue
-    trace "uv sync --frozen --check --project $project"
-    if ! lock_layer_ok "$project"; then
+    trace "hook venv check (lock-listed extras kept) --project $project"
+    if ! hook_venv_node "$project" --check >/dev/null; then
       say "DRIFT: hook venv $project/.venv is outdated against $project/uv.lock"
       drift=1
     fi
@@ -1986,10 +1995,8 @@ run_repair() {
   if [[ "$need_lock" -eq 0 && "$need_provider" -eq 0 ]]; then
     say "dispatch venv: already in sync (omnimarket ${head:0:12})"
   else
-    # PROVIDER FIRST. The co-install can move lock-governed pins (OMN-16262:
-    # its hardcoded COMPAT_PIN downgrades omnibase-compat 0.5.6 -> 0.5.5 and
-    # breaks the `occ` CLI extension badly enough that `onex` will not start),
-    # so the lock pass has to come after it to undo that.
+    # PROVIDER FIRST. The co-install can downgrade lock-governed pins
+    # (OMN-16262), so apply the lock after it.
     #
     # ...EXCEPT that a lock layer already BEHIND is applied before it as well
     # (OMN-20154). The co-install's own readback (OMN-18752) refuses when the
@@ -2192,11 +2199,7 @@ run_repair() {
     fi
     # The gate environment was reconciled above. Use that interpreter and the
     # contract-bound handler from this checkout, before dispatch can start.
-    if ! (cd "$project" && as_owner env -u UV_PROJECT_ENVIRONMENT \
-        PYTHONPATH="$_VENV_SCRIPT_DIR/../src" "$INFRA_PYTHON" \
-        -m omnibase_infra.nodes.node_reconcile_workspace_venvs.runtime_reconcile_workspace_venvs \
-        --contract "$_VENV_SCRIPT_DIR/../src/omnibase_infra/nodes/node_reconcile_workspace_venvs/contract.yaml" \
-        --workspace "$OMNI_HOME" --project "$project" --uv "$UV_BIN"); then
+    if ! hook_venv_node "$project"; then
       fail "hook venv reconciliation refused for $project; read the error above."
     fi
   done < <(hook_venv_projects)

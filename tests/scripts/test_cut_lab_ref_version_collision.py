@@ -59,7 +59,6 @@ DEPLOY_RUNTIME_SCRIPT = (
 
 SIBLING_REPOS = (
     "omnibase_core",
-    "omnibase_compat",
     "onex_change_control",
     "omnimarket",
     "omniintelligence",
@@ -67,7 +66,6 @@ SIBLING_REPOS = (
 LAB_REF_REPOS = ("omnibase_infra", *SIBLING_REPOS)
 _DIST_NAME = {
     "omnibase_core": "omnibase-core",
-    "omnibase_compat": "omnibase-compat",
     "onex_change_control": "onex-change-control",
     "omnimarket": "omnimarket",
     "omnibase_infra": "omnibase-infra",
