@@ -89,7 +89,7 @@ _TIMESTAMP_COLUMNS: frozenset[str] = frozenset(
 
 # UUID columns that need str -> UUID conversion for asyncpg.
 _UUID_COLUMNS: frozenset[str] = frozenset(
-    {"entity_id", "last_applied_event_id", "correlation_id"}
+    {"entity_id", "last_applied_event_id", "correlation_id", "runtime_entity_id"}
 )
 
 
@@ -108,9 +108,8 @@ class IntentEffectPostgresUpdate:
     Attributes:
         _pool: asyncpg connection pool for executing UPDATE queries.
         _ALLOWED_COLUMNS: Frozenset of column names permitted in UPDATE SET
-            and WHERE clauses. Any column not in this set is rejected before
-            query construction to prevent SQL injection via identifier
-            interpolation.
+            and WHERE clauses; any other column is rejected before query
+            construction, preventing SQL injection via identifier interpolation.
 
     .. versionadded:: 0.8.0
     """
@@ -160,6 +159,8 @@ class IntentEffectPostgresUpdate:
             "updated_at",
             # Tracing
             "correlation_id",
+            # Runtime parent (OMN-24495)
+            "runtime_entity_id",
         }
     )
 

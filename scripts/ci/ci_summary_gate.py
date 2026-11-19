@@ -613,9 +613,8 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     #                         live readback on 2026-08-28 showed none of the
     #                         three was enforced on any surface.
     #   contract-validation — OMN-13326 claimed "REQUIRED across all 6 repos";
-    #                         it is genuinely required on omnibase_core,
-    #                         omnibase_compat, omnibase_spi, omniintelligence
-    #                         and omnidash, and was wired on neither
+    #                         it was required on omnibase_core, omnibase_spi,
+    #                         omniintelligence and omnidash, and wired on neither
     #                         omnibase_infra nor omniclaude.
     #
     # Admission: measured over the 16 most recent merged `dev` PR heads,
@@ -961,10 +960,10 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         #     path the image gate refused at 21:19Z on 2026-09-19;
         #     omnibase_core at #1710 reds on ['data/gitignore-baseline.yaml']
         #     under pre-#3846 comparison semantics, the same single path the
-        #     image gate refused at 15:37Z; and omnibase_compat before the
-        #     OMN-14636 fix reds on four files under env/.
+        #     image gate refused at 15:37Z. The OMN-14636 replay also refused
+        #     four files under env/ before the fix.
         #   * It is proven able to PASS: the dev heads of omnibase_core,
-        #     omnibase_compat, omnimarket and this repository all exit 0, and
+        #     omnimarket and this repository all exit 0, and
         #     omnibase_core at #1710 exits 0 under CURRENT semantics, which is
         #     the control proving the force-include arm is a narrowing rather
         #     than a blanket tolerance.

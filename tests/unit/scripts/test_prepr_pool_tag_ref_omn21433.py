@@ -98,7 +98,6 @@ def test_clone_fetches_the_selected_ref_into_build_and_test_trees(
     for name in (
         "omnibase_infra",
         "omnimarket",
-        "omnibase_compat",
         "omnibase_core",
         "omnibase_spi",
         "omniintelligence",

@@ -2,7 +2,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-22360"
 title: "Core validator: cross-repository dependency pins follow the declared layer order, form no cycle, and stay at the newest release"
-summary: "omnibase_infra calls omnibase_core's dependency-pins reusable workflow at dev-20261103173624-74e0b0f12767 from ci.yml (job dependency-pins) and registers its context dependency-pins / Dependency Pins in STRICT_GATE_JOBS so CI Summary fails closed on it. Ten of the eleven omnibase_core hook blocks in .pre-commit-config.yaml move to that tag. The public-runner-placement block retains 1c9566e2c249fe54257a4b3ef3ff2e71de027b89 under the core policy's enforced 14-release hook-revision bound, and each CI twin reads its revision from its hook block. omnibase-spi moves to a range that admits the newest release (>=0.23.12,<0.24.0) in the project table and the uv override, with uv.lock and the version-matrix fallback regenerated. The omnibase-compat dependency is already deleted on dev by omnibase_infra#5648, so with dev merged in the validator reports no finding on this tree."
+summary: "omnibase_infra calls omnibase_core's dependency-pins reusable workflow at dev-20261103173624-74e0b0f12767 from ci.yml (job dependency-pins) and registers its context dependency-pins / Dependency Pins in STRICT_GATE_JOBS so CI Summary fails closed on it. Ten of the eleven omnibase_core hook blocks in .pre-commit-config.yaml move to that tag. The public-runner-placement block retains 1c9566e2c249fe54257a4b3ef3ff2e71de027b89 under the core policy's enforced 14-release hook-revision bound, and each CI twin reads its revision from its hook block. omnibase-spi moves to a range that admits the newest release (>=0.23.12,<0.24.0) in the project table and the uv override, with uv.lock and the version-matrix fallback regenerated. The retired dependency is already deleted on dev by omnibase_infra#5648, so with dev merged in the validator reports no finding on this tree."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -30,7 +30,7 @@ dod_evidence:
       - check_type: command
         check_value: 'uv run --frozen pytest tests/ci/test_dependency_pins_wired_omn22360.py tests/ci/test_ci_summary_gate.py -q -p no:cacheprovider'
   - id: dod-002
-    description: "Pin findings fixed at their source: omnibase-spi is a range that admits the newest release in the project table and the uv override, uv.lock resolves it, the version-matrix fallback agrees, and the core validator run over this tree exits 0. The omnibase-compat dependency is deleted on dev by omnibase_infra#5648, so the validator reports nothing on this head."
+    description: "Pin findings fixed at their source: omnibase-spi is a range that admits the newest release in the project table and the uv override, uv.lock resolves it, the version-matrix fallback agrees, and the core validator run over this tree exits 0. The retired dependency is deleted on dev by omnibase_infra#5648, so the validator reports nothing on this head."
     source: generated
     binds_ac: [AC8]
     checks:

@@ -248,10 +248,11 @@ class IntentEffectPostgresUpsert:
     # -------------------------------------------------------------------------
 
     # UUID columns in registration_projections.
-    # Schema reference: entity_id UUID, last_applied_event_id UUID, correlation_id UUID
+    # Schema reference: entity_id UUID, last_applied_event_id UUID,
+    #                   correlation_id UUID, runtime_entity_id UUID
     # Validated by: tests/unit/runtime/test_intent_effect_postgres_upsert.py
     _UUID_COLUMNS: frozenset[str] = frozenset(
-        {"entity_id", "last_applied_event_id", "correlation_id"}
+        {"entity_id", "last_applied_event_id", "correlation_id", "runtime_entity_id"}
     )
 
     # TIMESTAMPTZ columns in registration_projections.

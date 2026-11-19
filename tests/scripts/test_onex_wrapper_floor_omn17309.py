@@ -32,6 +32,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.reconcile_verify_movement import FLOOR_SCHEMA
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -99,7 +101,7 @@ class _Workspace:
         self.floor.write_text(
             json.dumps(
                 {
-                    "schema": "onex.workspace.floor.v1",
+                    "schema": FLOOR_SCHEMA,
                     "generated_at": "2026-08-31T00:00:00Z",
                     "host": "test",
                     "omni_home": str(self.root),
@@ -177,8 +179,8 @@ def test_double_digit_patch_is_not_ordered_lexically(ws: _Workspace) -> None:
 # AC1 -- below floor
 # --------------------------------------------------------------------------- #
 def test_below_floor_refuses_an_evidence_subcommand(ws: _Workspace) -> None:
-    ws.install_dist("omnibase_compat", "0.5.5")  # the OMN-16262 downgrade
-    ws.write_floor({"omnibase_compat": "0.5.6"})
+    ws.install_dist("example_package", "0.5.5")  # the OMN-16262 downgrade
+    ws.write_floor({"example_package": "0.5.6"})
 
     proc = ws.run("delegate", "reply with ok")
 
@@ -189,8 +191,8 @@ def test_below_floor_refuses_an_evidence_subcommand(ws: _Workspace) -> None:
 
 
 def test_below_floor_warns_but_runs_an_ordinary_subcommand(ws: _Workspace) -> None:
-    ws.install_dist("omnibase_compat", "0.5.5")
-    ws.write_floor({"omnibase_compat": "0.5.6"})
+    ws.install_dist("example_package", "0.5.5")
+    ws.write_floor({"example_package": "0.5.6"})
 
     proc = ws.run("info")
 
@@ -208,13 +210,13 @@ def test_below_floor_warns_but_runs_an_ordinary_subcommand(ws: _Workspace) -> No
 def test_delegate_never_runs_a_host_reconciler_that_would_stamp_the_floor(
     ws: _Workspace, has_floor: bool
 ) -> None:
-    ws.install_dist("omnibase_compat", "0.5.5")
+    ws.install_dist("example_package", "0.5.5")
     if has_floor:
-        ws.write_floor({"omnibase_compat": "0.5.6"})
+        ws.write_floor({"example_package": "0.5.6"})
     previous = ws.floor.read_bytes() if has_floor else None
     good_floor = ws.root / "good-floor.json"
     good_floor.write_text(
-        json.dumps({"distributions": {"omnibase_compat": "0.5.5"}}, indent=2),
+        json.dumps({"distributions": {"example_package": "0.5.5"}}, indent=2),
         encoding="utf-8",
     )
     marker = ws.root / "host-reconciler-ran"
@@ -249,7 +251,7 @@ def test_delegate_never_runs_a_host_reconciler_that_would_stamp_the_floor(
 
 def test_missing_distribution_reads_as_below_floor(ws: _Workspace) -> None:
     ws.install_dist("omnibase_core", "0.46.9")
-    ws.write_floor({"omnibase_core": "0.46.9", "omnibase_compat": "0.5.6"})
+    ws.write_floor({"omnibase_core": "0.46.9", "example_package": "0.5.6"})
 
     proc = ws.run("delegate", "x")
 
@@ -349,8 +351,8 @@ def test_venv_with_no_distributions_is_unknown_not_a_pass(ws: _Workspace) -> Non
 def test_every_declared_evidence_subcommand_refuses(
     ws: _Workspace, subcommand: str
 ) -> None:
-    ws.install_dist("omnibase_compat", "0.5.5")
-    ws.write_floor({"omnibase_compat": "0.5.6"})
+    ws.install_dist("example_package", "0.5.5")
+    ws.write_floor({"example_package": "0.5.6"})
     assert ws.run(subcommand, "x").returncode == _EXIT_BELOW_FLOOR
 
 
@@ -358,8 +360,8 @@ def test_every_declared_evidence_subcommand_refuses(
     "subcommand", ["info", "config", "new", "scaffold-channel-adapter"]
 )
 def test_ordinary_subcommands_are_permitted(ws: _Workspace, subcommand: str) -> None:
-    ws.install_dist("omnibase_compat", "0.5.5")
-    ws.write_floor({"omnibase_compat": "0.5.6"})
+    ws.install_dist("example_package", "0.5.5")
+    ws.write_floor({"example_package": "0.5.6"})
     assert ws.run(subcommand).returncode == _SENTINEL_OK
 
 
@@ -374,8 +376,8 @@ def test_an_output_flag_makes_any_invocation_evidence_producing(
     The file outlives the invocation and will be cited, which is the property
     that matters -- not which subcommand happened to produce it.
     """
-    ws.install_dist("omnibase_compat", "0.5.5")
-    ws.write_floor({"omnibase_compat": "0.5.6"})
+    ws.install_dist("example_package", "0.5.5")
+    ws.write_floor({"example_package": "0.5.6"})
     assert ws.run("info", flag, str(ws.root / "x.json")).returncode == _EXIT_BELOW_FLOOR
     assert (
         ws.run("info", f"{flag}={ws.root / 'x.json'}").returncode == _EXIT_BELOW_FLOOR
@@ -384,15 +386,15 @@ def test_an_output_flag_makes_any_invocation_evidence_producing(
 
 def test_leading_global_options_do_not_hide_the_subcommand(ws: _Workspace) -> None:
     """``onex -v delegate ...`` is still a delegate."""
-    ws.install_dist("omnibase_compat", "0.5.5")
-    ws.write_floor({"omnibase_compat": "0.5.6"})
+    ws.install_dist("example_package", "0.5.5")
+    ws.write_floor({"example_package": "0.5.6"})
     assert ws.run("-v", "delegate", "x").returncode == _EXIT_BELOW_FLOOR
 
 
 def test_help_on_an_evidence_subcommand_is_ordinary(ws: _Workspace) -> None:
     """``onex delegate --help`` prints usage and mints nothing (OMN-19709)."""
-    ws.install_dist("omnibase_compat", "0.5.5")
-    ws.write_floor({"omnibase_compat": "0.5.6"})
+    ws.install_dist("example_package", "0.5.5")
+    ws.write_floor({"example_package": "0.5.6"})
     proc = ws.run("delegate", "--help")
     assert proc.returncode == _SENTINEL_OK
     assert "WARNING: this workspace is below the proven floor." in proc.stderr
@@ -402,8 +404,8 @@ def test_help_on_an_evidence_subcommand_is_ordinary(ws: _Workspace) -> None:
 
 def test_bare_invocation_with_no_subcommand_is_ordinary(ws: _Workspace) -> None:
     """``onex --help`` must never be refused -- it is how you find out what to run."""
-    ws.install_dist("omnibase_compat", "0.5.5")
-    ws.write_floor({"omnibase_compat": "0.5.6"})
+    ws.install_dist("example_package", "0.5.5")
+    ws.write_floor({"example_package": "0.5.6"})
     assert ws.run("--help").returncode == _SENTINEL_OK
 
 
@@ -416,8 +418,8 @@ def test_check_works_with_no_python_and_no_uv_on_path(ws: _Workspace) -> None:
     If the floor check ever grows a ``python``/``uv``/``curl`` call, this test
     stops passing -- which is the only durable way to keep a cheap check cheap.
     """
-    ws.install_dist("omnibase_compat", "0.5.5")
-    ws.write_floor({"omnibase_compat": "0.5.6"})
+    ws.install_dist("example_package", "0.5.5")
+    ws.write_floor({"example_package": "0.5.6"})
 
     bin_dir = ws.root / "minimal_bin"
     bin_dir.mkdir()
@@ -453,8 +455,8 @@ def test_the_venvs_own_python_is_never_invoked(ws: _Workspace) -> None:
     broken = ws.venv_bin / "python"
     broken.write_text("#!/usr/bin/env bash\nexit 70\n", encoding="utf-8")
     broken.chmod(0o755)
-    ws.install_dist("omnibase_compat", "0.5.5")
-    ws.write_floor({"omnibase_compat": "0.5.6"})
+    ws.install_dist("example_package", "0.5.5")
+    ws.write_floor({"example_package": "0.5.6"})
 
     assert ws.run("delegate", "x").returncode == _EXIT_BELOW_FLOOR
 
@@ -467,8 +469,8 @@ def test_no_env_var_bypasses_the_refusal(ws: _Workspace) -> None:
 
     Setting it must not become a way to mint a receipt from an unproven build.
     """
-    ws.install_dist("omnibase_compat", "0.5.5")
-    ws.write_floor({"omnibase_compat": "0.5.6"})
+    ws.install_dist("example_package", "0.5.5")
+    ws.write_floor({"example_package": "0.5.6"})
 
     env = dict(os.environ)
     env["OMNIBASE_PATH"] = str(ws.root)

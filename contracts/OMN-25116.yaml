@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25116
+title: "The deployment's provenance overlay can reach the runtime container: compose passes the five variables through and the lane env fragment may set them"
+summary: "omnibase_infra#5963 stamps event provenance from five process variables, but nothing in this repository could put them into the dev runtime container: the compose passthrough anchor did not name them and the lane env fragment allowlist refused them, so a private overlay that set them would have been refused by the deploy agent and an operator-store value would have been dropped by compose. This change names the five in the passthrough anchor and in the runtime_lane_env.v1 allowlist. The overlay values themselves live in the private deployment overlay and are not part of this change; the dev-runtime read-back is not either."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25116-provenance-overlay-reaches-runtime
+    statement: The five provenance variables the envelope publish seam reads are passed through to every runtime service value-less, and a lane env fragment may set them.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: x-runtime-passthrough-env names ONEX_PROVENANCE_LANE, ONEX_PROVENANCE_LANE_KIND, ONEX_PROVENANCE_HOST, ONEX_PROVENANCE_INSTALL_SOURCE and ONEX_PROVENANCE_REVISION value-less, every service that merges x-runtime-env merges it, and the names are the ones ModelEventProvenanceOverlay reads -- falsifier: uv run pytest tests/ci/test_runtime_env_anchor.py -q fails on the merge base compose file and passes on the branch'
+      - id: AC2
+        statement: 'AC2: the runtime_lane_env.v1 fragment allowlist accepts exactly those five names beside the existing keys and still refuses any other ONEX_PROVENANCE name -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q fails on the merge base allowlist and passes on the branch'
+evidence_requirements:
+  - kind: tests
+    description: The passthrough anchor tests and the fragment schema tests pass at the head.
+    command: uv run pytest tests/ci/test_runtime_env_anchor.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25116-ac1
+    description: The passthrough anchor names the five provenance variables value-less and every runtime service merges it; the test fails on the merge base compose file, which lacks them.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runtime_env_anchor.py -q -k "TestRuntimeLaneActSwitchPassthrough"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25116-ac2
+    description: The fragment allowlist accepts the five provenance variables and refuses an unknown ONEX_PROVENANCE name; the schema test fails on the merge base allowlist, which lacks them.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly -k "schema_declares or provenance"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25116-deploy-source-readback
+    description: |-
+      Hosted-runner source-artifact readback: fetch the compose file and the deploy agent's fragment allowlist at the evaluated published commit and confirm each names ONEX_PROVENANCE_REVISION. A missing name fails the command, so it fails at the merge base. No lab service or credentials are required. This checks the published source and does not assert a live runtime rollout.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/docker/docker-compose.infra.yml" | grep -c '^  ONEX_PROVENANCE_REVISION:$' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/scripts/deploy-agent/deploy_agent/instance_lanes.py" | grep -c '^            "ONEX_PROVENANCE_REVISION",$' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra

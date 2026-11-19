@@ -29,7 +29,7 @@
 #   long as it existed, and by 2026-09-01 had deposited root-owned objects into
 #   operator-owned clones:
 #
-#       omnibase_infra 572   omnimarket 261   omnibase_compat 150
+#       omnibase_infra 572   omnimarket 261   retired repository 150
 #       omnibase_core  119   omnibase_spi  16          (1118 total)
 #
 #   The failure mode is nasty because it is INTERMITTENT: a plain operator
