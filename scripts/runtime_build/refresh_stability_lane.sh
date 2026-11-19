@@ -276,7 +276,11 @@ readonly CORE_SERVICES=(omninode-runtime runtime-worker projection-api)
 # docker/Dockerfile.runtime, the same image the four core services build from,
 # not the release-only selector path that is still broken in workspace mode.
 readonly REFRESH_BUILD_SERVICES=(
-    "${CORE_SERVICES[@]}"
+    # OMN-25927 -- this lane's principal one-shot and SASL flip ride on the first
+    # line, in the scope for refresh_dev_lane.sh's OMN-18012 reason: pinned
+    # upstream images that cannot go stale, here so every governed refresh
+    # re-creates the declared principals and re-asserts the flip and its readback.
+    "${CORE_SERVICES[@]}" redpanda-scram-user redpanda-sasl-enable
     projection-tenant-registry-writer
     projection-delegation-writer
     projection-registration-writer
