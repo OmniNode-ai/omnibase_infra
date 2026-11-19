@@ -243,6 +243,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_composed_build_omn24562.py tests/unit/test_dev_lane_composed_build_omn21279.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/docker/test_stability_composed_build_services_omn24562.py -q -p no:cacheprovider --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-ac14-stability-follow-green
     description: Hosted stand-in for AC19, which is read on h201 after the agent is installed from the integration branch. The overlay on the branch carries the composed build anchor; the merge base has none.
     source: manual
