@@ -875,7 +875,6 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
         lane=EnumRuntimeLane.STABILITY_TEST,
         compose_files=(COMPOSE_FILE, _STABILITY_OVERLAY),
         compose_project="omnibase-infra-stability-test",
-        build_project=f"{COMPOSE_PROJECT}-{EnumRuntimeLane.STABILITY_TEST.value}",
         postgres_container="omnibase-infra-stability-test-postgres",
         # The overlay disables these by profile and gives them no container_name of
         # their own, so an explicit start by name would create them under the dev

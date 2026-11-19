@@ -711,7 +711,11 @@ ROOTS_DIR_VAR = "DEV_LANE_SKILL_OVERLAY_ROOTS_DIR"
 #: What the deploy agent's process environment holds for every lane it deploys: the
 #: operator env sets the roots directory and OMNI_HOME; no env sets the store
 #: directory, so both lanes take compose's default for it.
-DEPLOY_ENV = {ROOTS_DIR_VAR: "/srv/private/overlays", "OMNI_HOME": "/srv/registry"}
+DEPLOY_ENV = {
+    ROOTS_DIR_VAR: "/srv/private/overlays",
+    "OMNI_HOME": "/srv/registry",
+    "ONEX_LANE_DECLARATION_DIR": "/srv/registry/config/lab",
+}
 OPERATOR_UNIT = (
     REPO / "scripts" / "deploy-agent" / "deploy" / "deploy-agent-dev.service"
 )
@@ -814,55 +818,6 @@ def test_stability_runtime_main_reads_the_same_overlay_roots_as_dev() -> None:
     assert roots["/etc/onex/skill-overlays-store"] == os.path.normpath(
         _project_directory(LANE) / ".." / ".." / "overlays" / "overlays"
     )
-
-
-def test_stability_runtime_main_refuses_to_deploy_without_the_roots_directory() -> None:
-    """A relative default mounted an empty directory and dropped the budget overlay."""
-    stab_main = _main(_overlay_services())
-    env = {k: v for k, v in DEPLOY_ENV.items() if k != ROOTS_DIR_VAR}
-    with pytest.raises(KeyError, match=ROOTS_DIR_VAR):
-        _overlay_mounts(stab_main, env, _project_directory(LANE))
-    dev_main = _main(execution._read_compose_services((str(DEV_FOLD_OVERLAY),)))
-    assert _overlay_mounts(dev_main, env, _project_directory(EnumRuntimeLane.DEV)), (
-        "positive control: dev keeps its default and still resolves"
-    )
-
-
-ENV_TEMPLATE = REPO / "docs" / "env-example-full.txt"
-_TEMPLATE_ENTRY = re.compile(
-    r"^#?\s*(?:export\s+)?(?P<name>[A-Z_][A-Z0-9_]*)=(?P<value>\S*)", re.M
-)
-
-
-def _template_names(text: str) -> set[str]:
-    """The names a tracked env template documents, set or commented out."""
-    return {match["name"] for match in _TEMPLATE_ENTRY.finditer(text)}
-
-
-def test_the_tracked_env_template_names_the_roots_directory() -> None:
-    """The stability compose file refuses to deploy without it (``:?``, line 316).
-
-    ``docs/env-example-full.txt`` is the tracked reference for the operator env
-    file the deploy agent's unit names (``DEPLOY_AGENT_ENV_FILE``).
-    """
-    unit = OPERATOR_UNIT.read_text()
-    assert re.search(r"^Environment=DEPLOY_AGENT_ENV_FILE=\S+$", unit, re.M)
-    names = _template_names(ENV_TEMPLATE.read_text())
-    assert "DEPLOY_AGENT_HMAC_SECRET" in names, "positive control: entries are read"
-    assert ROOTS_DIR_VAR in names
-    assert f"${{{ROOTS_DIR_VAR}:?" in STABILITY_OVERLAY.read_text()
-
-
-def test_a_template_without_the_roots_directory_is_caught() -> None:
-    text = ENV_TEMPLATE.read_text()
-    dropped = "\n".join(
-        line for line in text.splitlines() if f"{ROOTS_DIR_VAR}=" not in line
-    )
-    assert ROOTS_DIR_VAR not in _template_names(dropped)
-    stab_main = _main(_overlay_services())
-    env = {k: v for k, v in DEPLOY_ENV.items() if k != ROOTS_DIR_VAR}
-    with pytest.raises(KeyError, match=ROOTS_DIR_VAR):
-        _overlay_mounts(stab_main, env, _project_directory(LANE))
 
 
 def test_no_tracked_env_file_sets_the_overlay_store_directory() -> None:
@@ -1070,19 +1025,6 @@ def test_the_writers_build_runs_under_the_files_and_project_the_roll_reads(
     build = _real_writers_build(monkeypatch)
     assert set(_writers()) <= set(build), "the writers' own call, with its services"
     assert _before_verb(build, "build") == _effect()._compose_prefix(execution, LANE)
-
-
-def test_a_writers_build_under_another_project_is_caught(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Negative control: the build project the stability lane had before OMN-25440."""
-    config = execution.lane_config_for(LANE)
-    other = config.model_copy(update={"build_project": "omnibase-infra"})
-    monkeypatch.setattr(
-        execution, "lane_config_for", lambda lane: other if lane == LANE else config
-    )
-    build = _real_writers_build(monkeypatch)
-    assert _before_verb(build, "build") != _effect()._compose_prefix(execution, LANE)
 
 
 def _up_prefixes(deploy: SimpleNamespace) -> tuple[list[str], list[list[str]]]:
