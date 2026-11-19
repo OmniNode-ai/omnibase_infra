@@ -46,6 +46,14 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/docker/test_stability_sasl_omn25927.py -k 'one_shots or flip_waits' -q -n 0 --no-cov
         cwd: .
+  - id: dod-omn25927-deploy-render
+    description: The stability lane's composed deploy declares the SASL flip one-shot; the render lists it at the head and not at the base.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'docker compose -f docker/docker-compose.infra.yml -f docker/docker-compose.stability-t*.yml config --no-interpolate --services | grep -qx redpanda-sasl-enable'
+        cwd: .
   - id: dod-omn25927-password-references
     description: Every stability broker password is a fail-closed reference to one upper-snake variable name and no value is in the compose file.
     source: manual
