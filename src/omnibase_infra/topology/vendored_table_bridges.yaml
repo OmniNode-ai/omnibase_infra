@@ -43,3 +43,12 @@
   prefix: ""
   opts: {}
   tables: [done_items]
+# OMN-25103: infra vendors floor_integration_rows (node_projection_floor_integration
+# 0000-0001) ahead of the omnimarket node contract; 0001 grants omninode_runtime
+# SELECT, INSERT, UPDATE, DELETE. Retired when the omnimarket pin carries the node.
+- ticket: OMN-25103 # omnimarket OMN-25103
+  node: node_projection_floor_integration
+  create: 0000_create_floor_integration_rows.sql
+  prefix: ""
+  opts: {}
+  tables: [floor_integration_rows]
