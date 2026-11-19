@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Migration 117 creates the work state panel reducer's state_io table (OMN-19998).
+"""migration 118 creates the work state panel reducer's state_io table (OMN-19998).
 
 omnimarket's ``node_work_state_panel_reducer`` declares
 ``state_io: {database: omnibase_infra, table: work_state_panel_state,
@@ -18,7 +18,7 @@ This module pins:
 * the table participates in grant derivation through
   ``STATE_IO_TABLE_DECLARATIONS``, and every shipped instance grants it to the
   runtime, so ``--check`` cannot report green while the relation is ungranted;
-* ordinal 117, not the burned 107.
+* ordinal 118, not the burned 107.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from omnibase_infra.topology.table_grant_derivation import (
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FORWARD_DIR = REPO_ROOT / "docker" / "migrations" / "forward"
-MIGRATION = FORWARD_DIR / "117_create_work_state_panel_state.sql"
+MIGRATION = FORWARD_DIR / "118_create_work_state_panel_state.sql"
 SIBLING = FORWARD_DIR / "102_create_session_phase_state.sql"
 SIBLING_108 = FORWARD_DIR / "108_create_pr_landing_workflow_state.sql"
 INSTANCES_DIR = REPO_ROOT / "src" / "omnibase_infra" / "topology" / "instances"

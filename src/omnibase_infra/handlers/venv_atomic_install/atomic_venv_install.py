@@ -27,16 +27,21 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import fcntl
 import importlib.util
 import json
+import operator
 import os
 import re
 import shutil
 import subprocess
 import sys
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
-from typing import TextIO
+from typing import NamedTuple, TextIO
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -95,6 +100,52 @@ print(json.dumps(out))
 def _say(text: str = "", *, file: TextIO | None = None) -> None:
     """One line to stdout, or to ``file``; the tool's output is its interface."""
     (file or sys.stdout).write(text + "\n")
+
+
+class VenvLockBusyError(RuntimeError):
+    """The venv reconcile lock was held by another process past the timeout."""
+
+
+class SweepResult(NamedTuple):
+    """What a sweep of the venv root's ``.atomic-stage.*`` folders did."""
+
+    removed: tuple[Path, ...]
+    kept: tuple[Path, ...]
+    failed: tuple[Path, ...]
+
+
+@contextmanager
+def _hold_venv_lock(
+    venv_root: Path, lock_held: str | None, lock_timeout_s: float
+) -> Iterator[None]:
+    """Hold the venv's reconcile lock; a caller that already holds it is not made to take it twice.
+
+    ``lock_held`` is the lock path the caller reports holding (the installer script
+    passes the one it took); only a byte-identical path skips the acquisition.
+    ``lock_timeout_s`` of 0 tries once and reports busy. Flag masks are combined
+    with ``operator.or_`` because the union validator counts a ``|`` expression
+    as a type union.
+    """
+    lock_path = str(venv_root.resolve() / ".onex-venv-reconcile.lock")
+    if lock_held == lock_path:
+        yield
+        return
+    deadline = time.monotonic() + lock_timeout_s
+    fd = os.open(lock_path, operator.or_(os.O_CREAT, os.O_RDWR), 0o666)
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, operator.or_(fcntl.LOCK_EX, fcntl.LOCK_NB))
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise VenvLockBusyError(
+                        f"the venv reconcile lock {lock_path} is held by another process"
+                    ) from None
+                time.sleep(0.2)
+        yield
+    finally:
+        os.close(fd)
 
 
 def _load_plan_tool() -> ModuleType:
@@ -270,29 +321,61 @@ def prune_git_checkouts(stage_dir: Path) -> list[Path]:
     return removed
 
 
-def sweep_stale_stages(venv_root: Path, *, keep: Path | None = None) -> list[Path]:
+def sweep_stale_stages(
+    venv_root: Path, *, lock_held: str | None = None, lock_timeout_s: float = 0.0
+) -> SweepResult:
     """Remove the earlier installs' `.atomic-stage.*` side folders (OMN-24508).
 
-    Must only run on the success path, under the venv's reconcile lock: the
-    sweep assumes no other install of this venv is using a stage. A symlink or
-    a non-directory is skipped, never followed; ``keep`` is never removed. A stage
-    that holds a journal is removed too: the run that follows it has already
-    verified and read back the live venv, so its previous packages are obsolete.
+    Runs under the venv reconcile lock on every path: the sweep assumes no other
+    install of this venv is using a stage. A symlink or a non-directory is
+    skipped, never followed. A stage that holds a journal is KEPT and listed in
+    ``kept``: it may hold the only copy of the previous packages. Every other
+    stage is removed; a removal that fails is listed in ``failed``.
     """
+    if not venv_root.is_absolute():
+        raise ValueError("refusing a relative venv root")
+    if not (venv_root / "pyvenv.cfg").is_file():
+        raise ValueError("not a venv root: no pyvenv.cfg")
     removed: list[Path] = []
-    if not venv_root.is_dir():
-        return removed
-    for child in sorted(venv_root.iterdir()):
-        if not child.name.startswith(STAGE_DIR_PREFIX):
-            continue
-        if keep is not None and child.name == keep.name:
-            continue
-        if child.is_symlink() or not child.is_dir():
-            continue
-        shutil.rmtree(child, ignore_errors=True)
-        removed.append(child)
-        _say(f"  swept stale stage {child}")
-    return removed
+    kept: list[Path] = []
+    failed: list[Path] = []
+    with _hold_venv_lock(venv_root, lock_held, lock_timeout_s):
+        for child in sorted(venv_root.iterdir()):
+            if not child.name.startswith(STAGE_DIR_PREFIX):
+                continue
+            if child.is_symlink() or not child.is_dir():
+                continue
+            if (child / _JOURNAL_FILE).is_file():
+                kept.append(child)
+                _say(f"  kept stage {child} (holds a journal: previous packages)")
+                continue
+            try:
+                shutil.rmtree(child)
+            except OSError as exc:
+                failed.append(child)
+                _say(f"  cannot remove stage {child}: {exc}", file=sys.stderr)
+                continue
+            removed.append(child)
+            _say(f"  swept stale stage {child}")
+    return SweepResult(removed=tuple(removed), kept=tuple(kept), failed=tuple(failed))
+
+
+def _sweep_and_report(
+    venv_root: Path, lock_held: str | None, lock_timeout_s: float
+) -> int:
+    """Sweep, print what happened, and never let a skipped sweep fail a finished install."""
+    try:
+        result = sweep_stale_stages(
+            venv_root, lock_held=lock_held, lock_timeout_s=lock_timeout_s
+        )
+    except (VenvLockBusyError, ValueError, OSError) as exc:
+        _say(f"ERROR: stale-stage sweep skipped: {exc}", file=sys.stderr)
+        return EXIT_OK
+    _say(
+        f"  swept {len(result.removed)} stale stage dir(s), "
+        f"kept {len(result.kept)}, failed {len(result.failed)}"
+    )
+    return EXIT_OK
 
 
 def stage(
@@ -467,6 +550,7 @@ def commit_stage(python_bin: str, stage_dir: Path) -> int:
         )
         try:
             _undo(journal)
+            (stage_dir / _JOURNAL_FILE).unlink(missing_ok=True)
         except _RESTORE_ERRORS as undo_exc:
             _say(f"ERROR: restore failed too: {undo_exc}", file=sys.stderr)
         return EXIT_COMMIT_FAILED
@@ -501,6 +585,8 @@ def run_command(
     no_deps: bool = False,
     label: str = "install",
     paths: list[str] | None = None,
+    lock_held: str | None = None,
+    lock_timeout_s: float = 0.0,
 ) -> int:
     """Run one subcommand; the runtime CLI and the typed handler both end here."""
     if command == "supported":
@@ -513,11 +599,22 @@ def run_command(
         _say(f"ERROR: {command} needs a stage dir.", file=sys.stderr)
         return EXIT_USAGE
     if command == "finalize":
+        if not stage_dir.is_absolute():
+            _say("ERROR: finalize needs an absolute stage dir.", file=sys.stderr)
+            return EXIT_USAGE
         prune_git_checkouts(stage_dir)
-        shutil.rmtree(stage_dir, ignore_errors=True)
-        swept = sweep_stale_stages(stage_dir.parent)
-        _say(f"  swept {len(swept)} stale stage dir(s)")
-        return EXIT_OK
+        try:
+            shutil.rmtree(stage_dir)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            _say(f"cannot remove {stage_dir}: {exc}", file=sys.stderr)
+        return _sweep_and_report(stage_dir.parent, lock_held, lock_timeout_s)
+    if command == "sweep":
+        if not stage_dir.is_absolute():
+            _say("ERROR: sweep needs an absolute stage dir.", file=sys.stderr)
+            return EXIT_USAGE
+        return _sweep_and_report(stage_dir.parent, lock_held, lock_timeout_s)
     if command == "rollback":
         return rollback_stage(stage_dir)
     if python_bin is None:

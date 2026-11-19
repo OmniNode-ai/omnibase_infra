@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Migration 117 applied to a real Postgres: ``work_state_panel_state`` (OMN-19998).
+"""migration 118 applied to a real Postgres: ``work_state_panel_state`` (OMN-19998).
 
 omnimarket's ``node_work_state_panel_reducer`` declares
 ``state_io: {database: omnibase_infra, table: work_state_panel_state, key: projector}``.
@@ -53,7 +53,7 @@ MIGRATION = (
     / "docker"
     / "migrations"
     / "forward"
-    / "117_create_work_state_panel_state.sql"
+    / "118_create_work_state_panel_state.sql"
 )
 TABLE = "work_state_panel_state"
 KEY = "projector"

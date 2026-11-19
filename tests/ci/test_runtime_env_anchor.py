@@ -459,7 +459,77 @@ class TestRuntimeLaneActSwitchPassthrough:
     LANE_CLASS_KEYS: frozenset[str] = frozenset(
         {"ONEX_RUNTIME_LANE_CLASS", "ONEX_RUNTIME_LANE_CLASS_CONTRACTS"}
     )
-    PASSTHROUGH_KEYS: frozenset[str] = LANE_ACT_SWITCH_KEYS | LANE_CLASS_KEYS
+    # The deployment's provenance overlay (OMN-23981, OMN-25116): the names the
+    # envelope publish seam reads. It stamps when LANE, HOST, INSTALL_SOURCE and
+    # REVISION are all set; LANE_KIND is empty for lane dev or stability and one
+    # of mac_unit, lane_worktree, hand_run for lane other; anything else stamps
+    # nothing, so all five pass. Literals, so this file collects where
+    # omnibase_infra is not installed;
+    # test_provenance_overlay_names_are_the_five_the_stamp_reads pins
+    # them to the model that reads them.
+    PROVENANCE_KEYS: frozenset[str] = frozenset(
+        {
+            "ONEX_PROVENANCE_LANE",
+            "ONEX_PROVENANCE_LANE_KIND",
+            "ONEX_PROVENANCE_HOST",
+            "ONEX_PROVENANCE_INSTALL_SOURCE",
+            "ONEX_PROVENANCE_REVISION",
+        }
+    )
+    PASSTHROUGH_KEYS: frozenset[str] = (
+        LANE_ACT_SWITCH_KEYS | LANE_CLASS_KEYS | PROVENANCE_KEYS
+    )
+
+    @pytest.mark.unit
+    def test_provenance_overlay_names_are_the_five_the_stamp_reads(self) -> None:
+        from omnibase_infra.models.event_bus.model_event_provenance_overlay import (
+            ModelEventProvenanceOverlay,
+        )
+
+        assert (
+            frozenset(name for _, name in ModelEventProvenanceOverlay.VARIABLES)
+            == self.PROVENANCE_KEYS
+        )
+
+    @pytest.mark.unit
+    def test_the_stated_overlay_rule_is_the_rule_the_stamp_applies(self) -> None:
+        # The rule the anchor's comment states, run through the stamp itself:
+        # the four required values stamp with LANE_KIND empty (lane dev), a
+        # LANE_KIND outside the enum is refused, lane other needs a valid kind,
+        # and a missing one of the four stamps nothing.
+        from omnibase_infra.handlers.handler_event_provenance_stamp.handler import (
+            REASON_STAMPED,
+            provenance_from_overlay,
+        )
+        from omnibase_infra.models.event_bus.model_event_provenance_overlay import (
+            ModelEventProvenanceOverlay,
+        )
+
+        four = {
+            "ONEX_PROVENANCE_LANE": "dev",
+            "ONEX_PROVENANCE_HOST": "lab-host",
+            "ONEX_PROVENANCE_INSTALL_SOURCE": "tag",
+            "ONEX_PROVENANCE_REVISION": "0123456789ab",
+        }
+
+        def reason(env: dict[str, str]) -> str:
+            overlay = ModelEventProvenanceOverlay.from_environ(env)
+            return provenance_from_overlay(overlay)[1]
+
+        assert reason(four) == REASON_STAMPED
+        assert reason({**four, "ONEX_PROVENANCE_LANE_KIND": ""}) == REASON_STAMPED
+        assert reason({**four, "ONEX_PROVENANCE_LANE_KIND": "runtime"}).startswith(
+            "overlay refused"
+        )
+        other = {**four, "ONEX_PROVENANCE_LANE": "other"}
+        for kind in ("mac_unit", "lane_worktree", "hand_run"):
+            assert reason({**other, "ONEX_PROVENANCE_LANE_KIND": kind}) == (
+                REASON_STAMPED
+            )
+        assert reason(other).startswith("overlay refused")
+        for name in four:
+            partial = {k: v for k, v in four.items() if k != name}
+            assert reason(partial).startswith("overlay missing")
 
     @pytest.mark.unit
     def test_passthrough_anchor_declares_each_switch_value_less(self) -> None:

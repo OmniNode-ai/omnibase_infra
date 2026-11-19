@@ -3,7 +3,7 @@
 
 """The ``work_state_panel_state`` state_io table derives its shipped GRANT (OMN-19998).
 
-Migration 117 creates ``work_state_panel_state``, the durable ``state_io``
+migration 118 creates ``work_state_panel_state``, the durable ``state_io``
 row omnimarket's ``node_work_state_panel_reducer`` reads and CAS-writes on every
 leg, keyed on ``projector``. ``state_io`` predates
 :class:`~omnibase_core.models.contracts.subcontracts.model_db_table_declaration.ModelDbTableDeclaration`
@@ -12,7 +12,7 @@ in the OMN-15656 grant derivation at all is the checked-in
 ``STATE_IO_TABLE_DECLARATIONS`` entry -- the same seam ``delegation_workflow_state``
 (090), ``session_phase_state`` (102) and ``pr_landing_workflow_state`` (108) already use.
 
-``tests/unit/db/test_migration_117_work_state_panel_state_omn19998.py`` pins
+``tests/unit/db/test_migration_118_work_state_panel_state_omn19998.py`` pins
 the migration shape, the adapter's identifier guard and that the table NAME
 appears in the shipped instance YAML text. None of that runs
 ``derive_table_grants`` itself, so a declaration whose ``database_ref`` or
@@ -55,9 +55,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TABLE = "work_state_panel_state"
 _SIBLING_TABLE = "session_phase_state"
 _DATABASE_REF = "omnibase_infra"
-_MIGRATION = Path("docker/migrations/forward/117_create_work_state_panel_state.sql")
+_MIGRATION = Path("docker/migrations/forward/118_create_work_state_panel_state.sql")
 
-# The profiles the migration-117 unit test itself pins as shipped: the instance files.
+# The profiles the migration-118 unit test itself pins as shipped: the instance files.
 _PROFILES = tuple(
     sorted(
         path.stem
@@ -123,7 +123,7 @@ def test_the_shipped_instance_declares_it(profile: str) -> None:
     declared = yaml.safe_dump(document)
     assert _SIBLING_TABLE in declared
     assert _TABLE in declared, (
-        f"{profile} does not declare {_TABLE}, but migration 117 creates it "
+        f"{profile} does not declare {_TABLE}, but migration 118 creates it "
         "and node_work_state_panel_reducer's state_io seam reads/writes it on "
         "every leg; an ungranted relation fails the runtime's OMN-15418 "
         "privilege check at wiring time"

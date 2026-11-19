@@ -1,7 +1,7 @@
 schema_version: 1.0.0
 ticket_id: OMN-24528
 title: Table and grant for the board panel row
-summary: Forward migration 117 creates public.work_state_panel_state keyed on projector with the StateStoreAdapter column shape, and STATE_IO_TABLE_DECLARATIONS declares it so every shipped topology instance grants it to the runtime role.
+summary: Forward migration 118 creates public.work_state_panel_state keyed on projector with the StateStoreAdapter column shape, and STATE_IO_TABLE_DECLARATIONS declares it so every shipped topology instance grants it to the runtime role.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -10,7 +10,7 @@ requirements:
     statement: The first board panel's row has a table and a grant.
     acceptance:
       - id: AC1
-        statement: 'AC1: forward migration 117 creates work_state_panel_state keyed on projector with the adapter''s columns, its two partial indexes and the updated_at trigger -- falsifier: pytest tests/unit/db/test_migration_117_work_state_panel_state_omn19998.py -q'
+        statement: 'AC1: forward migration 118 creates work_state_panel_state keyed on projector with the adapter''s columns, its two partial indexes and the updated_at trigger -- falsifier: pytest tests/unit/db/test_migration_118_work_state_panel_state_omn19998.py -q'
       - id: AC2
         statement: 'AC2: the runtime role is granted work_state_panel_state in every shipped profile and the rendered catalogs agree -- falsifier: python scripts/generate_application_database_table_grants.py --check'
       - id: AC3
@@ -18,7 +18,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The migration shape test passes at the head; the real-Postgres tests are in CI.
-    command: uv run --frozen pytest tests/unit/db/test_migration_117_work_state_panel_state_omn19998.py -q --no-cov -n 0 -p no:randomly
+    command: uv run --frozen pytest tests/unit/db/test_migration_118_work_state_panel_state_omn19998.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -31,7 +31,7 @@ dod_evidence:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/db/test_migration_117_work_state_panel_state_omn19998.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/unit/db/test_migration_118_work_state_panel_state_omn19998.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn24528-ac2
     description: Grant derivation and catalogs in sync for the new table.
@@ -49,5 +49,5 @@ dod_evidence:
       - AC3
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/integration/migrations/test_117_work_state_panel_state_omn19998.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/migrations/test_118_work_state_panel_state_omn19998.py -q --no-cov -n 0 -p no:randomly
         cwd: .

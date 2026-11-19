@@ -162,7 +162,7 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = tuple(
         ("floor_fill_state", "113_create_floor_fill_state.sql"),
         ("code_eval_trial_state", "114_create_code_eval_trial_state.sql"),
         ("branch_deploy_state", "116_create_branch_deploy_state.sql"),
-        ("work_state_panel_state", "117_create_work_state_panel_state.sql"),
+        ("work_state_panel_state", "118_create_work_state_panel_state.sql"),
         ("infra_routing_decisions", "080_create_infra_routing_decisions.sql"),
     )
 )

@@ -188,16 +188,18 @@ def read_kernel_source() -> str:
 class TestBuildRequiredService:
     """The refusing constructor: no service, no runtime."""
 
-    def test_build_required_service_returns_the_built_service(self) -> None:
+    @pytest.mark.asyncio
+    async def test_build_required_service_returns_the_built_service(self) -> None:
         """A passing ``build`` callable's service is returned unchanged."""
         handler = HandlerRuntimeIntrospectionStartup()
         sentinel = MagicMock(name="introspection_service")
         build = MagicMock(name="build", return_value=sentinel)
 
-        service = handler.build_required_service(
+        service = await handler.build_required_service(
             runtime_name="runtime-a",
             correlation_id=uuid4(),
             build=build,
+            event_bus=None,
         )
 
         assert service is sentinel
@@ -210,16 +212,18 @@ class TestBuildRequiredService:
         )
 
     @pytest.mark.parametrize("runtime_name", ["", "   "])
-    def test_empty_runtime_name_refuses(self, runtime_name: str) -> None:
+    @pytest.mark.asyncio
+    async def test_empty_runtime_name_refuses(self, runtime_name: str) -> None:
         """An empty or whitespace runtime name refuses before building."""
         handler = HandlerRuntimeIntrospectionStartup()
         build = MagicMock(name="build")
 
         with pytest.raises(RuntimeHeartbeatRequiredError) as exc_info:
-            handler.build_required_service(
+            await handler.build_required_service(
                 runtime_name=runtime_name,
                 correlation_id=uuid4(),
                 build=build,
+                event_bus=None,
             )
 
         refusal = exc_info.value.refusal
@@ -234,17 +238,19 @@ class TestBuildRequiredService:
             == 1
         )
 
-    def test_empty_runtime_name_refusals_count_up(self) -> None:
+    @pytest.mark.asyncio
+    async def test_empty_runtime_name_refusals_count_up(self) -> None:
         """Each refused start increments the reason's counter: 1 then 2."""
         handler = HandlerRuntimeIntrospectionStartup()
         build = MagicMock(name="build")
 
         for expected_count in (1, 2):
             with pytest.raises(RuntimeHeartbeatRequiredError) as exc_info:
-                handler.build_required_service(
+                await handler.build_required_service(
                     runtime_name="",
                     correlation_id=uuid4(),
                     build=build,
+                    event_bus=None,
                 )
             assert exc_info.value.refusal.count == expected_count
 
@@ -256,17 +262,19 @@ class TestBuildRequiredService:
         )
         build.assert_not_called()
 
-    def test_unbuildable_service_refuses_with_typed_cause(self) -> None:
+    @pytest.mark.asyncio
+    async def test_unbuildable_service_refuses_with_typed_cause(self) -> None:
         """A ``build`` failure refuses with the cause chained and counted."""
         handler = HandlerRuntimeIntrospectionStartup()
         failure = ValueError("no contract")
         build = MagicMock(name="build", side_effect=failure)
 
         with pytest.raises(RuntimeHeartbeatRequiredError) as exc_info:
-            handler.build_required_service(
+            await handler.build_required_service(
                 runtime_name="runtime-a",
                 correlation_id=uuid4(),
                 build=build,
+                event_bus=None,
             )
 
         refusal = exc_info.value.refusal

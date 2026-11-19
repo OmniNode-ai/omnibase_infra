@@ -150,7 +150,7 @@ from omnibase_infra.handlers.handler_package_announcer import (
     run_boot_step0,
 )
 from omnibase_infra.handlers.handler_runtime_introspection_startup import (
-    HandlerRuntimeIntrospectionStartup,
+    HandlerRuntimeIntrospectionStartup as _Startup,
 )
 from omnibase_infra.handlers.handler_workspace_config_root_resolve import (
     DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH,
@@ -4323,12 +4323,11 @@ async def bootstrap() -> int:
                 environment=environment,
             )
 
-        introspection_service = (
-            HandlerRuntimeIntrospectionStartup().build_required_service(
-                runtime_name=config.name,
-                correlation_id=correlation_id,
-                build=_build_introspection_service,
-            )
+        introspection_service = await _Startup().build_required_service(
+            runtime_name=config.name,
+            correlation_id=correlation_id,
+            build=_build_introspection_service,
+            event_bus=event_bus,
         )
         logger.info(
             "Introspection service created for node '%s' (correlation_id=%s)",
@@ -4359,6 +4358,7 @@ async def bootstrap() -> int:
             # cannot verify structural protocol conformance across mixin chains.
             # Why: Runtime wiring validates and narrows this payload shape before use.
             introspection_service=introspection_service,  # type: ignore[arg-type]
+            heartbeat_required=True,
             # OMN-6334: Pass contract-driven runtime config so RuntimeHostProcess
             # uses contract values instead of DEFAULT_* constants.
             runtime_node_graph_config=node_graph_config,
