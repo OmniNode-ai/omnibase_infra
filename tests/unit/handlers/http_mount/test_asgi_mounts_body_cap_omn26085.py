@@ -190,20 +190,44 @@ async def test_raw_body_over_cap_reads_at_most_the_cap_plus_one(
     probe: _StreamProbe,
     encoding: str | None,
 ) -> None:
-    """AC2: a chunked raw body over the cap is refused after cap + 1 bytes."""
+    """AC2: a chunked raw body over the cap is refused after cap + 1 bytes.
+
+    The client keeps sending after the refusal, so a listener that reads and
+    discards the rest of the body (aiohttp's lingering close) is caught too.
+    """
     raw = bytes((j * 7919) % 251 for j in range(4096))
     body = gzip.compress(raw, mtime=0) if encoding else raw
     assert len(body) > CAP
-
-    async def chunked() -> AsyncIterator[bytes]:
-        for start in range(0, len(body), 64):
-            yield body[start : start + 64]
-
-    status, _, _ = await _post(
-        tmp_path, monkeypatch, chunked(), encoding=encoding, read_body=True
+    monkeypatch.setattr(
+        asgi_fixtures,
+        "create_app",
+        lambda: asgi_fixtures.create_receive_probe([], [], True),
     )
-    assert status == 413
-    assert probe.read <= CAP + 1
+    block = _mount_block("/probe", "create_app") + f"\n  max_body_bytes: {CAP}"
+    server = await _server()
+    try:
+        await _mounted(server, _manifest(tmp_path, block))
+        reader, writer = await asyncio.open_connection("127.0.0.1", _bound_port(server))
+        head = "POST /probe HTTP/1.1\r\nHost: probe\r\nTransfer-Encoding: chunked\r\n"
+        if encoding:
+            head += f"Content-Encoding: {encoding}\r\n"
+        writer.write(head.encode() + b"\r\n")
+        steps = [body[start : start + 200] for start in range(0, len(body), 200)]
+        writer.write(f"{len(steps[0]):x}\r\n".encode() + steps[0] + b"\r\n")
+        status_line = await asyncio.wait_for(reader.readline(), timeout=5)
+        assert b" 413 " in status_line
+        try:
+            for step in steps[1:]:
+                writer.write(f"{len(step):x}\r\n".encode() + step + b"\r\n")
+                await writer.drain()
+                await asyncio.sleep(0.02)
+        except OSError:
+            pass  # the listener closed the connection, as it should
+        await asyncio.sleep(0.1)
+        writer.close()
+        assert probe.read <= CAP + 1
+    finally:
+        await server.stop()
 
 
 @pytest.mark.parametrize("coding", [None, "gzip", "deflate", "raw-deflate"])
