@@ -4,7 +4,7 @@ title: Restore tool-cache Python on the h202 and h053 CI runner pools
 summary: Roll the image bound by the runner image lock through the declared installer, one idle secondary runner at a time.
 is_seam_ticket: true
 interface_change: true
-interfaces_touched: [infrastructure]
+interfaces_touched: []
 requirements:
   - id: req-omn25796-secondary-runner-image-roll
     statement: A secondary CI pool can roll to the declared runner image through the installer with online readback before each subsequent recreate.

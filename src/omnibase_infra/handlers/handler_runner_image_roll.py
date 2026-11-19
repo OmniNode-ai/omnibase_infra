@@ -64,11 +64,11 @@ _ONLINE_POLLS = 20
 _BUSY = 42
 
 
-class _RollError(Exception):
+class RunnerRollError(Exception):
     """An installer refusal safe to show without subprocess output."""
 
 
-class _UncertainRecreateError(_RollError):
+class RunnerUncertainRecreateError(RunnerRollError):
     """The remote recreate may still be running."""
 
 
@@ -105,7 +105,7 @@ class HandlerRunnerImageRoll:
             return await self._run_with_lock(
                 request, org, targets, token_vars, image_tag, token
             )
-        except _RollError as exc:
+        except RunnerRollError as exc:
             return ModelRunnerImageRollResult(success=False, error_message=str(exc))
         except TimeoutError:
             return ModelRunnerImageRollResult(
@@ -125,12 +125,12 @@ class HandlerRunnerImageRoll:
             or not path.is_file()
             or stat.S_IMODE(path.stat().st_mode) != 0o600
         ):
-            raise _RollError(
+            raise RunnerRollError(
                 "Secondary --rolling requires a regular 0600 --token-file."
             )
         token = path.read_bytes().strip()
         if len(token.split()) != 1 or b"\0" in token or token == b"null":
-            raise _RollError(
+            raise RunnerRollError(
                 "--token-file must contain one nonempty registration token."
             )
         return token
@@ -142,7 +142,7 @@ class HandlerRunnerImageRoll:
         fleet = load_runner_fleet_config(request.fleet_config)
         host = next((host for host in fleet.hosts if host.host == request.host), None)
         if host is None or request.host == fleet.runner_host:
-            raise _RollError("Image roll requires a declared secondary host.")
+            raise RunnerRollError("Image roll requires a declared secondary host.")
         pools = {
             host.runner_name_prefix: (host.expected_count, host.classes),
             **{
@@ -152,10 +152,10 @@ class HandlerRunnerImageRoll:
         }
         count, classes = pools.get(request.prefix, (0, ()))
         if not count or "deploy" in classes:
-            raise _RollError("Image roll requires a declared secondary CI pool.")
+            raise RunnerRollError("Image roll requires a declared secondary CI pool.")
         all_targets = tuple(f"{request.prefix}-{i}" for i in range(1, count + 1))
         if request.only and request.only not in all_targets:
-            raise _RollError(
+            raise RunnerRollError(
                 "--only must name a service in the selected host's declared pool."
             )
         compose = (
@@ -169,12 +169,14 @@ class HandlerRunnerImageRoll:
             declaration.get("services") if isinstance(declaration, dict) else None
         )
         if not isinstance(services, dict) or set(services) != set(all_targets):
-            raise _RollError("Compose services disagree with the declared pool.")
+            raise RunnerRollError("Compose services disagree with the declared pool.")
         token_vars = tuple(
             sorted(set(re.findall(r"RUNNER_TOKEN:\s*\$\{([A-Z0-9_]+)", source)))
         )
         if not token_vars:
-            raise _RollError("The declared Compose file has no runner token variable.")
+            raise RunnerRollError(
+                "The declared Compose file has no runner token variable."
+            )
         return (
             fleet.github_org,
             (request.only,) if request.only else all_targets,
@@ -187,7 +189,7 @@ class HandlerRunnerImageRoll:
             (repo_root / "docker/runners/runner-image.lock.json").read_bytes()
         )
         if not isinstance(lock, dict):
-            raise _RollError("Invalid runner image lock.")
+            raise RunnerRollError("Invalid runner image lock.")
         version, identity = (
             str(lock.get("image_version")),
             str(lock.get("identity_digest")),
@@ -195,7 +197,7 @@ class HandlerRunnerImageRoll:
         if not re.fullmatch(r"[1-9][0-9]*", version) or not re.fullmatch(
             r"[a-f0-9]{32}", identity
         ):
-            raise _RollError("Invalid runner image lock version or identity.")
+            raise RunnerRollError("Invalid runner image lock version or identity.")
         return version, identity
 
     @staticmethod
@@ -253,7 +255,7 @@ class HandlerRunnerImageRoll:
             f"/orgs/{org}/actions/runners?per_page=100",
         )
         if rc:
-            raise _RollError(
+            raise RunnerRollError(
                 f"Could not read the organization runner registry (gh exit {rc})."
             )
         try:
@@ -269,7 +271,7 @@ class HandlerRunnerImageRoll:
                     busy, bool
                 ) else None
         except (KeyError, TypeError, ValueError) as exc:
-            raise _RollError(
+            raise RunnerRollError(
                 "Could not decode the organization runner registry."
             ) from exc
         return "unknown", None
@@ -292,7 +294,7 @@ class HandlerRunnerImageRoll:
         lock = f"{_DOCKER_DIR}/.image-roll-{request.prefix}.lock"
         rc, _ = await self._remote(request.host, f"mkdir -- {lock}")
         if rc:
-            raise _RollError(
+            raise RunnerRollError(
                 f"Could not acquire the pool roll lock on {request.host} (exit {rc})."
             )
         release = True
@@ -306,7 +308,7 @@ class HandlerRunnerImageRoll:
                 org=org,
                 token_vars=token_vars,
             )
-        except (_UncertainRecreateError, asyncio.CancelledError):
+        except (RunnerUncertainRecreateError, asyncio.CancelledError):
             release = False
             _LOG.error(
                 "Pool roll lock kept on %s pending recreate inspection: %s",
@@ -318,7 +320,7 @@ class HandlerRunnerImageRoll:
             if release:
                 rc, _ = await self._remote(request.host, f"rmdir -- {lock}")
                 if rc:
-                    raise _RollError(
+                    raise RunnerRollError(
                         f"Could not release the pool roll lock on {request.host} (exit {rc})."
                     )
 
@@ -341,7 +343,7 @@ class HandlerRunnerImageRoll:
             f"{exports} {self._compose(request.prefix)} config --format json | jq -r {shlex.quote(guard)}",
         )
         if rc or not set(targets).issubset(output.splitlines()):
-            raise _RollError(
+            raise RunnerRollError(
                 "Installed Compose could not confirm target names and token wiring."
             )
 
@@ -357,7 +359,9 @@ class HandlerRunnerImageRoll:
                 request.host, f'cd "$HOME/{stage_root}" && mktemp -d build.XXXXXXXX'
             )
             if rc or not re.fullmatch(r"build\.[A-Za-z0-9]{8}", name):
-                raise _RollError("Could not allocate the runner image build directory.")
+                raise RunnerRollError(
+                    "Could not allocate the runner image build directory."
+                )
             stage = f"{stage_root}/{name}"
             try:
                 rc, _ = await self._command(
@@ -370,7 +374,7 @@ class HandlerRunnerImageRoll:
                     timeout=_STAGE_LIMIT_SECONDS,
                 )
                 if rc:
-                    raise _RollError(
+                    raise RunnerRollError(
                         f"Could not stage the runner build inputs (rsync exit {rc})."
                     )
                 rc, _ = await self._remote(
@@ -379,7 +383,9 @@ class HandlerRunnerImageRoll:
                     timeout=_BUILD_LIMIT_SECONDS,
                 )
                 if rc:
-                    raise _RollError(f"Declared runner image build failed (exit {rc}).")
+                    raise RunnerRollError(
+                        f"Declared runner image build failed (exit {rc})."
+                    )
             finally:
                 rc, _ = await self._remote(request.host, f'rm -rf -- "$HOME/{stage}"')
                 if rc:
@@ -390,7 +396,7 @@ class HandlerRunnerImageRoll:
                     )
         image = await self._verified_image_id(request, image_tag)
         if image is None:
-            raise _RollError(
+            raise RunnerRollError(
                 "Host image could not be verified against the declared image lock."
             )
         return image
@@ -464,17 +470,17 @@ printf '%s\n' {shlex.quote(override)} |
                 request.host, script, stdin=token, timeout=_STAGE_LIMIT_SECONDS
             )
         except (OSError, TimeoutError) as exc:
-            raise _UncertainRecreateError(
+            raise RunnerUncertainRecreateError(
                 f"HALT: lost recreate readback for {name}."
             ) from exc
         if rc == _BUSY:
             return False
         if rc == 255:
-            raise _UncertainRecreateError(
+            raise RunnerUncertainRecreateError(
                 f"HALT: SSH lost recreate readback for {name}."
             )
         if rc:
-            raise _RollError(f"HALT: recreate failed for {name} (exit {rc}).")
+            raise RunnerRollError(f"HALT: recreate failed for {name} (exit {rc}).")
         return True
 
     async def _wait_online(
@@ -540,14 +546,16 @@ printf '%s\n' {shlex.quote(override)} |
                     if not await self._wait_online(
                         request, name, previous_id, image, org
                     ):
-                        raise _RollError(
+                        raise RunnerRollError(
                             f"HALT: {name} did not return online on {image_tag}."
                         )
-                except _UncertainRecreateError:
+                except RunnerUncertainRecreateError:
                     raise
-                except (_RollError, OSError, TimeoutError) as exc:
+                except (RunnerRollError, OSError, TimeoutError) as exc:
                     reason = (
-                        str(exc) if isinstance(exc, _RollError) else type(exc).__name__
+                        str(exc)
+                        if isinstance(exc, RunnerRollError)
+                        else type(exc).__name__
                     )
                     return ModelRunnerImageRollResult(
                         success=False,

@@ -6,7 +6,7 @@ node_name: node_runner_image_roll
 node_type: EFFECT_GENERIC
 descriptor:
   node_archetype: effect
-runtime_profiles: [runner-installer]
+runtime_profiles: [local-dev]
 contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 description: Roll a declared secondary runner pool through the local installer.
