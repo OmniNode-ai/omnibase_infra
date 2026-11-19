@@ -348,7 +348,6 @@ def test_stability_release_only_stage_workspace_pins_each_sibling() -> None:
 # ---------------------------------------------------------------------------
 _STAGE_DISTS = {
     "omnibase_core": "omnibase-core",
-    "omnibase_compat": "omnibase-compat",
     "omnimarket": "omnimarket",
     "omnibase_infra": "omnibase-infra",
     "omnibase_spi": "omnibase-spi",

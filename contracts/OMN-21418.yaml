@@ -6,6 +6,33 @@ summary: >-
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn21418-ac1-accepted-20261117t2345z:
+      - label: AC1
+        criterion_hash: 15823d1f44479cec148fa56faf052101f98ad1852819a5f0dea33d2dba0725f7
+        proposed_by: lane=dod-closeout-bind-2026-11-17T2345Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-17T2345Z-c3
+    dod-omn21418-ac2-accepted-20261117t2345z:
+      - label: AC2
+        criterion_hash: c46a56132d820d2abdc8a59e82933bc371e02ac3d62794a5e587c8267e68518a
+        proposed_by: lane=dod-closeout-bind-2026-11-17T2345Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-17T2345Z-c3
+    dod-omn21418-ac3-accepted-20261117t2345z:
+      - label: AC3
+        criterion_hash: 472121076f0af1019668cf132098f0e52c5cb2b27d72a5d6c6f1132ef6cbfe91
+        proposed_by: lane=dod-closeout-bind-2026-11-17T2345Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-17T2345Z-c3
+    dod-omn21418-ac4-accepted-20261117t2345z:
+      - label: AC4
+        criterion_hash: b60411e6771cceea259abbff43e61ed68681455049b33a482910f53d6909e577
+        proposed_by: lane=dod-closeout-bind-2026-11-17T2345Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-17T2345Z-c3
+    dod-omn21418-ac5-accepted-20261117t2345z:
+      - label: AC5
+        criterion_hash: f6a8a605b8b51bc17f52848320d8b3f354f67885620aa3ba216011f2e55bc61b
+        proposed_by: lane=dod-closeout-bind-2026-11-17T2345Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-17T2345Z-c3
 requirements:
   - id: req-omn21418-transcribed-acceptance-criteria
     statement: The acceptance criteria this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy.
@@ -71,6 +98,51 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/formal/test_runtime_primary_election_model.py tests/unit/formal/test_generic_lease_model.py -q -k verdict
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-omn21418-ac1-accepted-20261117t2345z
+    description: 'AC1: the recorded runtime_primary_election Model.cfg TLC result reports no error and is bound to the current spec and cfg digest.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_runtime_primary_election_model.py::test_results_bind_to_current_model_digest tests/unit/formal/test_runtime_primary_election_model.py::test_passing_configs_hold_every_invariant -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21418-ac2-accepted-20261117t2345z
+    description: 'AC2: the recorded TLC results of mut_no_self_fence and mut_unguarded_write report AtMostOneActingPrimary and EpochMonotonic violated, bound to the current digest.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_runtime_primary_election_model.py::test_results_bind_to_current_model_digest tests/unit/formal/test_runtime_primary_election_model.py::test_each_mutation_fails_its_invariant -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21418-ac3-accepted-20261117t2345z
+    description: 'AC3: the recorded generic_lease Model.cfg TLC result reports no error and is bound to the current spec and cfg digest.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_generic_lease_model.py::test_results_bind_to_current_model_digest tests/unit/formal/test_generic_lease_model.py::test_passing_configs_hold_every_invariant -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn21418-ac4-accepted-20261117t2345z
+    description: 'AC4: the recorded TLC results of mut_renew_changes_fence, mut_effect_skips_check and mut_regrant_same_fence report their named violations, bound to the current digest.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_generic_lease_model.py::test_results_bind_to_current_model_digest tests/unit/formal/test_generic_lease_model.py::test_each_mutation_fails_its_invariant -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn21418-ac5-accepted-20261117t2345z
+    description: 'AC5: each model results/ holds design_review_verdict.txt carrying a verdict for OMN-21418.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_runtime_primary_election_model.py::test_design_review_verdict_recorded tests/unit/formal/test_generic_lease_model.py::test_design_review_verdict_recorded -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5

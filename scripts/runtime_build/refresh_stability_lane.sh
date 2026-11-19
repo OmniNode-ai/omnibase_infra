@@ -89,8 +89,7 @@
 #   The stability lane runs a pinned release set and never a dev ref. The
 #   set is the committed pin file, config/lab/lane-overlays/<lane>.release-pin.yaml
 #   under ONEX_WORKSPACE_CONFIG_ROOT (or --pin-file), naming one v<major>.<minor>.<patch>
-#   tag each for omnibase_infra, omnibase_core and omnimarket (omnibase_compat is
-#   retired and no longer staged, OMN-14108; a pin file line for it is ignored)
+#   tag each for omnibase_infra, omnibase_core and omnimarket.
 #   (lines `  <repo>: <tag>` under `pin:`); --ref overrides the omnibase_infra tag.
 #   Before anything is read from the lane, tagged, checked out, built or
 #   restarted, each tag must be a release tag of its clone under OMNI_HOME: a dev

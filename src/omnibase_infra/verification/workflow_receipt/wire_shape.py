@@ -14,13 +14,6 @@ change to the wire shape on either side must land here too. A cross-repo
 seam-drift test (``test_wire_shape_matches_terminal_consumer.py``) pins the
 exact field names/return order against a literal copy of the OMN-15093
 docstring so drift is caught mechanically, not by convention.
-
-Follow-up: this hash/wire duplication is exactly the class of thing
-``omnibase_compat`` (per CLAUDE.md: "Thin shared structural package for
-cross-repo enums, wire DTOs, event envelopes, primitives") exists to solve.
-Moving both this parser and ``workflow_receipt_renderer``'s hash helper into
-``omnibase_compat`` is real follow-up work, tracked separately rather than
-done inline here (out of scope for a replay-verifier ticket).
 """
 
 from __future__ import annotations

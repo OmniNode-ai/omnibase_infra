@@ -165,9 +165,8 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             ModelRegistrationProjection instance
 
         Note:
-            JSON parse errors in capabilities are handled gracefully by returning
-            an empty ModelNodeCapabilities with a warning log. This ensures
-            projections remain readable even if capabilities data is malformed.
+            JSON parse errors in capabilities are handled gracefully: an empty
+            ModelNodeCapabilities and a warning log keep the projection readable.
         """
         # Parse capabilities from JSONB.
         # asyncpg typically returns JSONB as Python dicts, but connection
@@ -220,6 +219,8 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             registered_at=row["registered_at"],
             updated_at=row["updated_at"],
             correlation_id=row["correlation_id"],
+            # .get: rows read before migration 117 have no runtime_entity_id key
+            runtime_entity_id=row.get("runtime_entity_id"),
         )
 
     async def get_entity_state(

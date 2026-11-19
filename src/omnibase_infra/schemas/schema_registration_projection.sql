@@ -93,6 +93,9 @@ CREATE TABLE IF NOT EXISTS registration_projections (
     -- Tracing
     correlation_id UUID,
 
+    -- Runtime that vouches for this node (OMN-24495); NULL for every row that has no runtime parent
+    runtime_entity_id UUID,
+
     -- Constraints
     PRIMARY KEY (entity_id, domain),
     -- UNIQUE constraint on entity_id enables ON CONFLICT (entity_id) upserts.
@@ -112,6 +115,10 @@ CREATE TABLE IF NOT EXISTS registration_projections (
         OR contract_type IN ('effect', 'compute', 'reducer', 'orchestrator')
     )
 );
+
+-- Convergence for tables created before migration 117 (OMN-24495): re-running
+-- this file on an existing table adds the runtime parent column. Idempotent.
+ALTER TABLE registration_projections ADD COLUMN IF NOT EXISTS runtime_entity_id UUID;
 
 -- =============================================================================
 -- INDEXES FOR ORCHESTRATION QUERIES
@@ -197,6 +204,12 @@ CREATE INDEX IF NOT EXISTS idx_registration_ack_timeout_scan
 CREATE INDEX IF NOT EXISTS idx_registration_liveness_timeout_scan
     ON registration_projections (current_state, liveness_deadline, liveness_timeout_emitted_at)
     WHERE current_state = 'active' AND liveness_deadline IS NOT NULL AND liveness_timeout_emitted_at IS NULL;
+
+-- Index for runtime parent lookups (OMN-24495)
+-- Partial index: only rows with non-null runtime_entity_id
+CREATE INDEX IF NOT EXISTS idx_registration_runtime_entity_id
+    ON registration_projections (runtime_entity_id)
+    WHERE runtime_entity_id IS NOT NULL;
 
 -- =============================================================================
 -- TABLE AND COLUMN COMMENTS

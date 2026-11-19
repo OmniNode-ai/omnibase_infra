@@ -65,11 +65,8 @@ on:
         # `fallback_from`. What CI did until now was pass the same branch name
         # as both, throwing that capability away.
         #
-        # Family-general by construction: `omnimarket`, `omnibase_core`,
-        # `omnibase_compat` and `omnibase_spi` are all staged by the same loop,
-        # so each names itself here with no per-repo code anywhere. `omniclaude`
-        # is deliberately outside the family -- it is not in SIBLING_REPOS and
-        # is not vendored into the image, so there is nothing for it to pin.
+        # The staging loop handles every repository in SIBLING_REPOS.
+        # Only a vendored sibling can use this exact-revision input.
         description: >-
           Sibling repository whose revision is pinned exactly (e.g. omnimarket).
           Empty means every sibling takes sibling_ref, which is the pre-OMN-17057
@@ -120,11 +117,8 @@ on:
         # `fallback_from`. What CI did until now was pass the same branch name
         # as both, throwing that capability away.
         #
-        # Family-general by construction: `omnimarket`, `omnibase_core`,
-        # `omnibase_compat` and `omnibase_spi` are all staged by the same loop,
-        # so each names itself here with no per-repo code anywhere. `omniclaude`
-        # is deliberately outside the family -- it is not in SIBLING_REPOS and
-        # is not vendored into the image, so there is nothing for it to pin.
+        # The staging loop handles every repository in SIBLING_REPOS.
+        # Only a vendored sibling can use this exact-revision input.
         description: >-
           Sibling repository whose revision is pinned exactly (e.g. omnimarket).
           Empty means every sibling takes sibling_ref, which is the pre-OMN-17057

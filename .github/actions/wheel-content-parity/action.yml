@@ -13,7 +13,7 @@
 # that checked omnibase_infra out at `github.job_workflow_sha` so one caller
 # pin fixed the workflow and the scripts together. That context is populated
 # for a LOCAL reusable and EMPTY for a cross-repository one: on
-# omnimarket#2696, omnibase_core#1721 and omnibase_compat#212 it resolved to
+# omnimarket#2696 and omnibase_core#1721 it resolved to
 # the empty string, actions/checkout silently fell back to the default branch,
 # and the run failed with `python3: can't open file ... check_wheel_content_
 # parity.py`. It failed CLOSED, which is the only reason that is a story about
