@@ -180,13 +180,19 @@ def test_source_identity_is_explicit_and_has_no_public_default(
     delivery.executor._compose_build.assert_not_called()
 
 
-@pytest.mark.parametrize("lane", [EnumRuntimeLane.PROD, EnumRuntimeLane.STABILITY_TEST])
-def test_non_dev_lane_does_no_estimator_work(
-    delivery: SimpleNamespace, lane: EnumRuntimeLane
-) -> None:
-    build(delivery, lane)
+def test_prod_lane_does_no_estimator_work(delivery: SimpleNamespace) -> None:
+    build(delivery, EnumRuntimeLane.PROD)
     assert not delivery.calls
     delivery.executor._compose_build.assert_not_called()
+
+
+def test_stability_lane_does_no_estimator_work(delivery: SimpleNamespace) -> None:
+    # OMN-24562: the stability lane builds its composed runtime services, and
+    # nothing of the estimator: no docker/git work, no estimator service named.
+    build(delivery, EnumRuntimeLane.STABILITY_TEST)
+    assert not delivery.calls
+    (call,) = delivery.executor._compose_build.call_args_list
+    assert "cost-estimator-web" not in call.kwargs["services"]
 
 
 def test_instance_without_the_page_does_not_build_it(delivery: SimpleNamespace) -> None:

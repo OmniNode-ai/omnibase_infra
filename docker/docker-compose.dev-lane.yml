@@ -1140,6 +1140,13 @@ services:
       ONEX_LEDGER_BUS_READ_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config OMNIBASE_PATH=/app onex ledger query --bus-lane dev --stdin
       ONEX_LEDGER_BUS_APPEND_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config python -m omnimarket.work_ledger_bus.cli append --bus-lane dev --omnibase-path /app
       ONEX_LEDGER_HOST_NAME: ${DEV_LANE_LEDGER_HOST_NAME:-dev-runtime}
+      # OMN-25901: the product clones below are read-only, so the verifier cannot fetch
+      # into them to measure freshness. It reads each clone's boot revision from this
+      # pin file instead, which the deploy agent writes from the clones' own HEAD at the
+      # start of a dev job and mounts below. With no readable file, or a clone that no
+      # longer contains its pin, a check run in the clone stays refused
+      # PRODUCT_CLONE_NOT_FRESH.
+      DOD_VERIFY_PRODUCT_CLONE_PIN_FILE: /etc/onex/product-clone-pin/pins.json
     volumes:
       # Read-only; names OMNIDASH_ANALYTICS_DB_URL, rendered above as role_omnidash.
       - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
@@ -1179,6 +1186,10 @@ services:
       - ../../omniintelligence:/app/omniintelligence:ro
       - ../../omnimarket:/app/omnimarket:ro
       - ../../omnimemory:/app/omnimemory:ro
+      # OMN-25901: the pin file's directory, read-only, so a replaced file shows in a
+      # running container. Relative to docker/ like the clones above: the registry root's
+      # .onex_state, where the deploy agent writes it.
+      - ../../.onex_state/product-clone-pin:/etc/onex/product-clone-pin:ro
     healthcheck:
       test:
         - CMD

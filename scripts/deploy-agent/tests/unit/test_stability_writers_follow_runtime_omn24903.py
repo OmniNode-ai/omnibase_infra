@@ -390,6 +390,7 @@ def test_the_writers_are_staged_built_and_recreated_in_the_rolls_order(
         c
         for c in deploy.executor._compose_build.call_args_list
         if WRITER not in c.kwargs.get("services", ())
+        and "compose_files" not in c.kwargs
     ]
     assert main_calls and all(
         c.kwargs.get("stage_workspace", True) is True for c in main_calls
@@ -893,6 +894,13 @@ def _built_stage(service: dict[str, object], dockerfile_text: str) -> str:
     """The Dockerfile stage compose builds for ``service``: ``target``, else the last."""
     build = service["build"]
     assert isinstance(build, dict)
+    if build["dockerfile"] == "Dockerfile.runtime":
+        # OMN-24562: the composed image layers omnimarket on the infra runtime
+        # stage, so it keeps that stage's revision label.
+        assert build["additional_contexts"] == {
+            "infra-runtime": "service:composed-runtime-base-image"
+        }
+        return "runtime"
     assert build["dockerfile"] == "docker/Dockerfile.runtime"
     assert (REPO / "docker" / str(build["context"])).resolve() == REPO
     target = build.get("target")
