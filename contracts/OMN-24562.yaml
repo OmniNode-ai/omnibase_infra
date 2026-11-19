@@ -68,8 +68,8 @@ requirements:
     acceptance:
       - id: AC18
         statement: 'AC18: the stability overlay renders every runtime-profile service on the composed omnimarket build and the stability build names the overlay and those services, while the dev build argv is unchanged -- falsifier: scripts/deploy-agent/tests/unit/test_stability_composed_build_omn24562.py or tests/unit/docker/test_stability_composed_runtime_image_omn24562.py fails at the merge base'
-      - id: AC22
-        statement: 'AC22: integrated: after the agent is installed from the integration branch, one stability-follow job on h201 ends with outcome success and the stability omninode-runtime container reports healthy -- falsifier: the job record shows another outcome, or the container restarts with BIFROST_BASE_CONTRACT_PATH unset'
+      - id: AC25
+        statement: 'AC25: integrated: after the agent is installed from the integration branch, one stability-follow job on h201 ends with outcome success and the stability omninode-runtime container reports healthy -- falsifier: the job record shows another outcome, or the container restarts with BIFROST_BASE_CONTRACT_PATH unset'
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -278,10 +278,10 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/docker/test_stability_composed_build_services_omn24562.py -q -p no:cacheprovider --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-ac14-stability-follow-green
-    description: Hosted stand-in for AC22, which is read on h201 after the agent is installed from the integration branch. The overlay on the branch carries the composed build anchor; the merge base has none.
+    description: Hosted stand-in for AC25, which is read on h201 after the agent is installed from the integration branch. The overlay on the branch carries the composed build anchor; the merge base has none.
     source: manual
     binds_ac:
-      - AC22
+      - AC25
     checks:
       - check_type: command
         check_value: grep -q 'x-composed-runtime-build' docker/docker-compose.stability-t*.yml
