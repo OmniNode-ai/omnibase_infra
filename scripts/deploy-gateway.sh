@@ -393,8 +393,6 @@ resolve_build_args() {
     # OMN-16296: ONEX_CHANGE_CONTROL_REF was one of these and is now gone --
     # onex_change_control is no longer installed into the runtime image, so the
     # ARG it fed no longer exists and there is no pin left to drift.
-    # OMNIBASE_COMPAT_REF is retired -- omnibase_compat is no longer
-    # installed into the runtime image, so the ARG it fed no longer exists.
     local omni_home="${OMNI_HOME:-}"
     local omnimarket_ref="dev"
     if [[ -n "${omni_home}" ]]; then

@@ -57,10 +57,12 @@ def main() -> int:
     parser.add_argument("--project", required=True, type=Path)
     parser.add_argument("--uv", required=True, type=Path)
     parser.add_argument("--contract", required=True, type=Path)
+    parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     container = asyncio.run(_bootstrap(args.contract))
     result = container.get_service(HandlerReconcileWorkspaceVenvs).handle(
         ModelHookVenvReconcileRequest(
+            mode="check" if args.check else "reconcile",
             workspace_root=args.workspace,
             project=args.project,
             uv_bin=args.uv,
@@ -70,7 +72,10 @@ def main() -> int:
         sys.stderr.write(result.output)
     stream = sys.stderr if result.status == "refused" else sys.stdout
     stream.write("[reconcile] " + result.detail + "\n")
-    return 2 if result.status == "refused" else 0
+    return {
+        "refused": 2,
+        "outdated": 1,
+    }.get(result.status, 0)
 
 
 if __name__ == "__main__":

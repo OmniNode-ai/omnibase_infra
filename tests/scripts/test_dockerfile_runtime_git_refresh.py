@@ -6,10 +6,9 @@ OMN-12424 found that uv keys its git source cache on the resolved commit of a
 moving ref (``@dev`` / ``@main``), so a rebuild under the persistent BuildKit
 cache mount reinstalled a stale wheel. The fix was ``--refresh-package`` on the
 one moving-ref install the image carried. OMN-21279 removed that install (the
-image no longer carries omnimarket). omnibase_compat is retired: it is
-no longer installed into the image at all. This guard keeps it that way: a new
-``git+https://github.com/OmniNode-ai/...`` install in the image would bring the
-staleness bug back, so it is refused rather than refreshed.
+release image no longer carries omnimarket). A moving Git ref in the
+Dockerfile would bring the staleness bug back. The guard rejects those
+installs and any reference to the retired dependency.
 """
 
 from __future__ import annotations
@@ -42,7 +41,6 @@ def test_dockerfile_runtime_exists() -> None:
 
 @pytest.mark.unit
 def test_no_compat_install_in_the_image(dockerfile_text: str) -> None:
-    # omnibase_compat is retired; no install of it may remain.
     assert "omnibase_compat" not in dockerfile_text
     assert "OMNIBASE_COMPAT" not in dockerfile_text
 

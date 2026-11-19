@@ -1,0 +1,7 @@
+Using Python 3.13.3 environment at: /Users/x/.venv
+Resolved 3 packages in 103ms
+Would download 1 package
+Would uninstall 1 package
+Would install 1 package
+ - omnimarket==0.4.118 (from git+https://github.com/OmniNode-ai/omnimarket.git@948be2e1a517a7def9efff96e32ec91b4b17b30a)
+ + omnimarket @ git+https://github.com/OmniNode-ai/omnimarket.git@53d6e4454a554588f0fc104c6a13cf76ade86e8e

@@ -7,23 +7,26 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 ImageId = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 SourceSha = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
-SourceRepo = Literal["omnibase_core", "omnibase_compat", "omnimarket"]
 # An in-image probe bound; unset means scaled to the host's load (OMN-17991).
 ProbeTimeoutSeconds = Annotated[int, Field(ge=30, le=1800)]
 
+SourceName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")]
+_SOURCES = Path(__file__).resolve().parent / "scoped_effects_sources.yaml"
+SIBLINGS = TypeAdapter(tuple[SourceName, Literal["omnimarket"]]).validate_python(
+    yaml.safe_load(_SOURCES.read_bytes())
+)
+if SIBLINGS[0] in ("omnibase_infra", SIBLINGS[1]):
+    raise ValueError("the foundation, replacement and infra sources must be distinct")
+
 
 class ModelEffectsDeployPlan(BaseModel):
-    """An immutable candidate, exact current state, and an image-only boundary.
-
-    Source pins cover the three workspace siblings, not every distribution.
-    The executor additionally compares installed dependency and shared runtime
-    content against the prior image. Unknown or incompatible inputs refuse.
-    """
+    """An immutable effects image replacement with two pinned source siblings."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -38,7 +41,7 @@ class ModelEffectsDeployPlan(BaseModel):
     compose_files: Annotated[tuple[Path, ...], Field(min_length=1)]
     compose_working_dir: Path
     expected_compose_sha256: Sha256
-    source_pins: dict[SourceRepo, SourceSha]
+    source_pins: dict[str, SourceSha]
     infra_source_sha: SourceSha
     source_clones_root: Path
     hotpatch_ledger: Path
@@ -51,19 +54,14 @@ class ModelEffectsDeployPlan(BaseModel):
     # fails or has not settled; health is recorded before and after.
     admit_unhealthy_target: bool = False
 
-    @field_validator("reason")
-    @classmethod
-    def meaningful_reason(cls, value: str) -> str:
-        if len(value.strip()) < 10:
-            raise ValueError("reason must contain a concrete rollout justification")
-        return value
-
     @model_validator(mode="after")
     def validate_boundary(self) -> Self:
+        if len(self.reason.strip()) < 10:
+            raise ValueError("reason must contain a concrete rollout justification")
         if self.expected_image_id == self.candidate_image_id:
             raise ValueError("candidate must differ from the current immutable image")
-        if set(self.source_pins) != {"omnibase_core", "omnibase_compat", "omnimarket"}:
-            raise ValueError("source_pins must name all three workspace siblings")
+        if set(self.source_pins) != set(SIBLINGS):
+            raise ValueError("source_pins must name the scoped workspace siblings")
         paths = (
             *self.compose_files,
             self.compose_working_dir,

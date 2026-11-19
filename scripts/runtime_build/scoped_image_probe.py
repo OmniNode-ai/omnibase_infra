@@ -19,7 +19,6 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-SIBLINGS = ("omnibase_core", "omnibase_compat", "omnimarket")
 TOPIC = re.compile(r"\bonex\.(?:evt|cmd|intent)\.[a-z0-9_-]+\.[a-z0-9_.-]+\.v[0-9]+\b")
 # Dockerfile.runtime installs the image's own project editable from /app
 # (`uv sync`), so its bytes live under /app/src, not in site-packages. That one
@@ -76,12 +75,10 @@ def tree_digest(root: Path) -> str:
 
 
 def dependency_digest(distributions: Iterable[importlib.metadata.Distribution]) -> str:
-    """Hash actual non-Market distribution content, not just version labels.
+    """Hash non-Market payloads and runtime metadata.
 
-    Install-location metadata and bytecode are excluded. Runtime-relevant
-    metadata (including entry points) and all payload files remain included.
-    Unrecorded distributions, and editables other than the image's own
-    project (hashed from its source tree), refuse explicitly.
+    Hash the editable image project from source. Refuse unrecorded
+    distributions and other editable installs.
     """
     digest = hashlib.sha256()
     named = sorted(
@@ -137,11 +134,8 @@ def dependency_digest(distributions: Iterable[importlib.metadata.Distribution]) 
     return digest.hexdigest()
 
 
-def source_pins(app: Path) -> dict[str, str]:
+def source_pins(manifest: dict[str, Any], repos: tuple[str, str]) -> dict[str, str]:
     """Validate existing provenance against current installed package bytes."""
-    manifest: dict[str, Any] = json.loads(
-        (app / "build-provenance.json").read_text(encoding="utf-8")
-    )
     if manifest.get("build_source") == "release":
         return {}
     if manifest.get("build_source") not in {"workspace", "scoped-derived"}:
@@ -149,7 +143,7 @@ def source_pins(app: Path) -> dict[str, str]:
     siblings = manifest["per_repo_vcs_provenance"]["siblings"]
     proofs = manifest["proofs"]
     pins: dict[str, str] = {}
-    for name in SIBLINGS:
+    for name in repos:
         row = siblings[name]
         sha = row["vcs_ref"]
         if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
@@ -171,12 +165,8 @@ def source_pins(app: Path) -> dict[str, str]:
     return pins
 
 
-def shared_evidence(app: Path) -> tuple[str, list[str]]:
-    """Fingerprint shared boot/activation material and declared topic names.
-
-    The declared set is a conservative admission check, not a claim to enumerate
-    every dynamically synthesized topic or every external reader.
-    """
+def shared_evidence(app: Path, source_repos: tuple[str, str]) -> tuple[str, list[str]]:
+    """Fingerprint shared boot material and statically declared topic names."""
     import yaml
 
     digest = hashlib.sha256()
@@ -194,7 +184,8 @@ def shared_evidence(app: Path) -> tuple[str, list[str]]:
             digest.update(content)
             if path.suffix in {".yaml", ".yml", ".json"}:
                 topics.update(TOPIC.findall(content.decode("utf-8")))
-    for name in ("omnibase_core", "omnibase_infra", "omnibase_compat", "omnimarket"):
+    foundation, replacement = source_repos
+    for name in (foundation, "omnibase_infra", replacement):
         dist = importlib.metadata.distribution(name)
         package = installed_package_root(name)
         if name == "omnimarket":
@@ -276,9 +267,11 @@ def _without_descriptions(value: Any) -> Any:
     return value
 
 
-def collect_image_evidence(app: Path = Path("/app")) -> dict[str, object]:
+def collect_image_evidence(
+    source_repos: tuple[str, str], app: Path = IMAGE_PROJECT_ROOT
+) -> dict[str, object]:
     """Collect immutable content evidence; performs no external I/O or imports."""
-    shared, topics = shared_evidence(app)
+    shared, topics = shared_evidence(app, source_repos)
     manifest = json.loads((app / "build-provenance.json").read_text(encoding="utf-8"))
     infra_ref = manifest.get("infra_vcs_ref")
     if not isinstance(infra_ref, str) or not re.fullmatch(
@@ -286,7 +279,7 @@ def collect_image_evidence(app: Path = Path("/app")) -> dict[str, object]:
     ):
         raise ValueError("missing immutable infrastructure source provenance")
     return {
-        "source_pins": source_pins(app),
+        "source_pins": source_pins(manifest, source_repos),
         "dependency_fingerprint": dependency_digest(importlib.metadata.distributions()),
         "shared_runtime_fingerprint": shared,
         "required_topics": topics,
@@ -297,4 +290,12 @@ def collect_image_evidence(app: Path = Path("/app")) -> dict[str, object]:
 
 
 if __name__ == "__main__":
-    print(json.dumps(collect_image_evidence(), sort_keys=True))
+    import sys
+
+    if len(sys.argv) == 1:
+        from scoped_effects_plan import SIBLINGS
+
+        foundation, replacement = SIBLINGS
+    else:
+        foundation, replacement = sys.argv[1:]
+    print(json.dumps(collect_image_evidence((foundation, replacement)), sort_keys=True))

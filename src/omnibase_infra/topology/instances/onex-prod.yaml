@@ -100,6 +100,7 @@ databases:
               - delegation_lab_jobs
               - demo_readiness_latest
               - dod_verify_runs
+              - done_items
               - floor_integration_rows
               - gate_store_reservations
               - gate_store_safety

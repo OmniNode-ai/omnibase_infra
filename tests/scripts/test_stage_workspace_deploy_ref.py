@@ -45,7 +45,6 @@ SIBLING_REPOS = (
 )
 _DIST_NAME = {
     "omnibase_core": "omnibase-core",
-    "omnibase_compat": "omnibase-compat",
     "onex_change_control": "onex-change-control",
     "omnimarket": "omnimarket",
     "omnibase_infra": "omnibase-infra",

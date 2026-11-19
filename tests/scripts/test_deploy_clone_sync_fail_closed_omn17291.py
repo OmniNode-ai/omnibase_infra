@@ -43,7 +43,6 @@ STAGE_SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "stage_workspace.sh"
 
 _DIST_NAME = {
     "omnibase_core": "omnibase-core",
-    "omnibase_compat": "omnibase-compat",
     "omnimarket": "omnimarket",
     "omnibase_infra": "omnibase-infra",
     "omnibase_spi": "omnibase-spi",

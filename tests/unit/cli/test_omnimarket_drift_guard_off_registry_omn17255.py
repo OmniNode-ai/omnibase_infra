@@ -45,7 +45,7 @@ _HEALTHY_ENV: dict[str, tuple[str, tuple[str, ...]]] = {
     "omnimarket": (
         "0.4.121",
         (
-            "omnibase-compat==0.5.7",
+            "omnibase-example==0.5.7",
             "omnibase-core<0.48.0,>=0.47.14",
             "omnibase-infra<0.39.0,>=0.38.31",
             "omnibase-spi<0.24.0,>=0.23.3",
@@ -53,10 +53,13 @@ _HEALTHY_ENV: dict[str, tuple[str, tuple[str, ...]]] = {
             "anthropic>=0.40.0",
         ),
     ),
-    "omnibase-infra": ("0.38.33", ("omnibase-compat==0.5.7", "omnibase-core==0.47.17")),
+    "omnibase-infra": (
+        "0.38.33",
+        ("omnibase-example==0.5.7", "omnibase-core==0.47.17"),
+    ),
     "omnibase-core": ("0.47.17", ()),
     "omnibase-spi": ("0.23.3", ()),
-    "omnibase-compat": ("0.5.7", ()),
+    "omnibase-example": ("0.5.7", ()),
     "omninode-memory": ("0.18.0", ()),
     "anthropic": ("0.40.1", ()),
 }
@@ -329,13 +332,13 @@ def test_an_absent_pinned_distribution_is_drift_not_a_pass(
     cannot be reported as satisfied."""
     _bind_env(
         monkeypatch,
-        {"omnimarket": ("0.4.121", ("omnibase-compat==0.5.7",))},
+        {"omnimarket": ("0.4.121", ("omnibase-example==0.5.7",))},
     )
 
     check = resolve_off_registry_check()
 
     assert check.verdict is EnumOffRegistryVerdict.DRIFTED
-    assert check.pin_name == "omnibase-compat"
+    assert check.pin_name == "omnibase-example"
     assert check.installed is None
     assert "ABSENT" in check.line
 

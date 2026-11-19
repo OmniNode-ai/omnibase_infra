@@ -22,8 +22,8 @@ THE FALSE GREEN BEING REPLACED is an ABSENCE. omnimarket's own CI was fully
 green on #2670 -- nothing in that repository looked at what its wheel
 contained, so the defect was undetectable there and was discovered only on
 the lab, after merge, as somebody else's broken rebuild. This is the second
-occurrence of the class: omnibase_compat's bare ``env/`` did the same thing
-to ``src/omnibase_compat/env/`` under OMN-14636.
+occurrence of the class. In OMN-14636 a bare ``env/`` rule also excluded
+a nested directory that belonged in the wheel.
 
 THE ARTIFACT AND THE DISCRIMINATOR DIFFER BY ONE CHARACTER, which is the
 whole point and the reason both are captured rather than one being described.
