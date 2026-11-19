@@ -256,16 +256,18 @@ def _identity_test_source(parsed: ModelParsedReleaseEntry) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _fold_statements(command: str, width: int = 90) -> list[str]:
-    """Wrap a one-line command at its ``; `` boundaries, never inside a statement."""
+def _fold_command(command: str, width: int = 90) -> list[str]:
+    """Fold a one-line command the way the repository yamlfmt hook folds a ``>-``
+    block scalar (google/yamlfmt, ``max_line_length: 100``, content at indent 10):
+    a row keeps taking words while the row already built is at most ``width``
+    characters (OMN-25638). Any other fold is re-folded by the hook and leaves the
+    release pull request red."""
     rows: list[str] = []
-    statements = command.split("; ")
-    for index, statement in enumerate(statements):
-        piece = statement if index == len(statements) - 1 else statement + ";"
-        if rows and len(rows[-1]) + 1 + len(piece) <= width:
-            rows[-1] += " " + piece
+    for word in command.split(" "):
+        if rows and len(rows[-1]) <= width:
+            rows[-1] += " " + word
         else:
-            rows.append(piece)
+            rows.append(word)
     return rows
 
 
@@ -301,7 +303,7 @@ def _contract_item_source(parsed: ModelParsedReleaseEntry, repo_name: str) -> st
         "        check_value: >-\n"
         + "".join(
             f"          {row}\n"
-            for row in _fold_statements(f"uv run --locked python -c '{body}'")
+            for row in _fold_command(f"uv run --locked python -c '{body}'")
         )
         + f"        cwd: ${{OMNI_HOME}}/{repo_name}\n"
     )

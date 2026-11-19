@@ -184,6 +184,10 @@ projection_schema:
       type: UUID
       source: envelope.metadata.correlation_id
       # Correlation ID for distributed tracing
+    - name: runtime_entity_id
+      type: UUID
+      source: event.payload.runtime_entity_id
+      # Runtime that vouches for this node (OMN-24495); NULL without a runtime parent
   # ============================================================================
   # INDEXES
   # Optimized for orchestrator query patterns per OMN-944
@@ -259,6 +263,12 @@ projection_schema:
         - current_state
         - liveness_deadline
         - liveness_timeout_emitted_at
+      type: btree
+    # Runtime parent lookups (OMN-24495)
+    # Partial index: only rows with non-null runtime_entity_id
+    - name: idx_registration_runtime_entity_id
+      columns:
+        - runtime_entity_id
       type: btree
 # ==============================================================================
 # BEHAVIOR CONFIGURATION
