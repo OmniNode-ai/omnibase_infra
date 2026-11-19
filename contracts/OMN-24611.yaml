@@ -37,25 +37,26 @@ evidence_requirements:
 context:
   # Real readings only, each with the host it was read on, the command that read it and the UTC
   # time. The agent's value and the store's value are two readings on two hosts, so each has its
-  # own host, command and time. They are recorded AFTER the install (key file on h201 first, then
-  # the unit, then a signed no-op from h051), so every check below is red until then. Empty means
-  # not yet read: no reading exists at this head, and none was typed in (the pull request comment
-  # for finding 1 says why none can exist before the install).
+  # own host, command and time. They were recorded AFTER the install on h201 (key file already
+  # delivered, then the unit, then one signed command from h053 that the dev agent accepted), and
+  # none was typed in. The dev agent replaces its own unit with the tracked copy at the next job
+  # boundary (deploy_agent.unit_drift.sync_own_unit), so these readings describe the unit while
+  # this branch's copy was installed; the unit stays installed only once this change is on dev.
   evidence_readings:
-    ac3_agent_check_value: ''
-    ac3_agent_read_host: ''
-    ac3_agent_read_command: ''
-    ac3_agent_read_time: ''
-    ac3_store_check_value: ''
-    ac3_store_read_host: ''
-    ac3_store_read_command: ''
-    ac3_store_read_time: ''
-    ac4_noop_result: ''
-    ac4_live_unit_digest_before: ''
-    ac4_live_unit_digest_after: ''
-    ac4_read_host: ''
-    ac4_read_command: ''
-    ac4_read_time: ''
+    ac3_agent_check_value: 'e30a85fc883bc113'
+    ac3_agent_read_host: 'h201'
+    ac3_agent_read_command: 'curl -s http://127.0.0.1:8098/health on h201 and read hmac_key_check (deploy-agent-dev.service installed from omnibase_infra#6008 head fcffc53667c1)'
+    ac3_agent_read_time: '2026-11-19T15:46:32Z'
+    ac3_store_check_value: 'e30a85fc883bc113'
+    ac3_store_read_host: 'h053'
+    ac3_store_read_command: 'HandlerDeployAgentKeyCheck of node_deploy_agent_key_check_effect, given the store entry that the signing_key_store of the node_branch_deploy_command_effect overlay (overlays#571 at omnimarket#6297 head c07098182063) resolves from /shared/env DEPLOY_AGENT_DEV_HMAC_SECRET on h053'
+    ac3_store_read_time: '2026-11-19T15:46:36Z'
+    ac4_noop_result: 'accepted'
+    ac4_live_unit_digest_before: 'fdeb07f61b6c4feb18dee9008282102173aeefd47e797fb0ee5e36bc0b7a3430'
+    ac4_live_unit_digest_after: 'fdeb07f61b6c4feb18dee9008282102173aeefd47e797fb0ee5e36bc0b7a3430'
+    ac4_read_host: 'h201'
+    ac4_read_command: 'sha256sum of ~/.config/systemd/user/deploy-agent.service on h201 before and after the dev unit install, then GET /job/05bce654-5cf5-4761-a3a8-8f7f56111b21 on the dev agent (node_branch_deploy_command_effect has no no-op route: the signed command sent from h053 was the branch deploy of omnibase_infra#6084 at 8cf5fb31fd03, and the dev agent accepted it at 2026-11-19T15:46:27Z)'
+    ac4_read_time: '2026-11-19T15:46:32Z'
 emergency_bypass:
   enabled: false
   justification: ''
@@ -104,7 +105,7 @@ dod_evidence:
         check_value: grep -q 'DEPLOY_AGENT_DEV_HMAC_SECRET' docker/env-example-full.txt
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24611-ac3-same-key
-    description: The key check value the dev agent serves equals the key check value of the store's entry on the sending lab hosts. Both readings are recorded under context.evidence_readings (16 hex characters each), each with its OWN host, command and UTC time (the agent's value read on h201 by the command that reads the agent's hmac_key_check, the store's value read on a sending lab host by the command that runs node_deploy_agent_key_check_effect). The check requires both values present and equal, the agent's host to be h201, the two commands to name those two readers, and both times to be UTC times from this head's day up to now, so it is red while any is absent, red when they differ, and red for a pair typed with a placeholder host, a foreign command or a date outside that window. No reading is recorded at this head because the key file and the unit are not installed on h201 yet, and the pull request comment for review finding 1 says why none can exist before. The readings are recorded after the unit is installed. The unit-level behaviour (the agent environment carries the unit file's value under the name auth.py reads) is the first check.
+    description: The key check value the dev agent serves equals the key check value of the store's entry on the sending lab hosts. Both readings are recorded under context.evidence_readings (16 hex characters each), each with its OWN host, command and UTC time (the agent's value read on h201 by the command that reads the agent's hmac_key_check, the store's value read on a sending lab host by the command that runs node_deploy_agent_key_check_effect). The check requires both values present and equal, the agent's host to be h201, the two commands to name those two readers, and both times to be UTC times from this head's day up to now, so it is red while any is absent, red when they differ, and red for a pair typed with a placeholder host, a foreign command or a date outside that window. Both readings were recorded after the unit was installed on h201 from this branch. The unit-level behaviour (the agent environment carries the unit file's value under the name auth.py reads) is the first check.
     source: manual
     binds_ac:
       - AC3
