@@ -74,7 +74,7 @@ gates:
     caller_job: repo-evidence
     cross_repo_ref: "OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@fe0d8082717eec6717f138825c0aad71efc27ee0" # dev-20261108023315-fe0d8082717e
     skip_semantics: never
-    rationale: "OMN-20074: repo-owned evidence verdict required through CI Summary's EXPECTED_EXTERNAL_CONTEXTS on pull_request runs only; absent/red/skipped blocks dev's sole required context. Operator ruling 2026-10-08T22:41:24Z admits the pull_request_target caller using the base-branch definition, with no job-level if: or path filter. Merged dev heads #4767, #4765 and #4758 report success. No merge_group assertion is made; every OCC context stays enforced until S6 part 2."
+    rationale: "OMN-20074: CI Summary requires the repo-owned evidence verdict through EXPECTED_EXTERNAL_CONTEXTS on pull_request runs. An absent, red or skipped verdict blocks CI Summary. The caller runs on pull_request with no job-level condition or path filter."
   - name: "Hostile Review Thread Gate"
     mode: RETIRED
     rationale: "OMN-22478, operator RULING 2026-11-05T20:27:56Z: the automated review holds no merge, so this context left CI Summary's EXPECTED_EXTERNAL_CONTEXTS and hostile-reviewer.yml's pull request trigger stopped. Reviews run by hand until the review route is fixed. The workflow, its scripts and its tests stay in place."
