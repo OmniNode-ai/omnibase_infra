@@ -1,0 +1,26 @@
+{
+  "_provenance": {
+    "source": "scripts/ci/check_application_database_sql.py run on lab host h053 with the pinned omnimarket (ebb006955dd0301ecbd29974fa321682c359f5f8) and the service-ownership dependency pinned in the enforcement job (0e156a757bc09af4df28a61d91f86ba5b1bf9cac) ownership manifests, base revision b9cffe877c13638e167db0ec41a174405ba5ed9e",
+    "captured_utc": "2026-11-16T12:48:29Z",
+    "source_sha256": "31b752b709dc636170dd859a0826dde8cc66186dde4a2f396228d1da93a2d551",
+    "note": "source_sha256 is the sha256 of the captured stdout of the after_fix run; the before_fix lines were copied verbatim from the same script's output at head 35c6d872d85cc29b6fa7276eab9d7e2573929099 captured 2026-11-16T12:29Z on the same host"
+  },
+  "before_fix": {
+    "head": "35c6d872d85cc29b6fa7276eab9d7e2573929099",
+    "verdict": "FAIL",
+    "violations": [
+      "docker/migrations/forward/117_add_registration_runtime_entity_id.sql: application target public.registration_projections requires exactly one ownership declaration",
+      "src/omnibase_infra/schemas/schema_registration_projection.sql: application target public.registration_projections requires exactly one ownership declaration",
+      "src/omnibase_infra/schemas/schema_registration_projection.sql: application target public.registration_state requires exactly one ownership declaration",
+      "src/omnibase_infra/schemas/schema_registration_projection.sql: created application object ('public', 'registration_projections', <EnumApplicationInventoryObjectKind.TABLE: 'table'>, None) lacks an authoritative ownership declaration"
+    ]
+  },
+  "after_fix": {
+    "head": "5e4d852e9d07365f4fb8414fbf1d9224b8a8e3fd",
+    "verdict": "PASS",
+    "output_lines": [
+      "application_database_sql_gate grandfathered=0 (frozen baseline application_database_sql_baseline.yaml; shrink-only)",
+      "application_database_sql_gate=PASS"
+    ]
+  }
+}

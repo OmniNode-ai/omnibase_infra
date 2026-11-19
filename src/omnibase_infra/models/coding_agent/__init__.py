@@ -11,8 +11,7 @@ PROMOTION NOTE (memory ``feedback_models_in_core_not_market``): if/when Phase E
 (omnimarket delegation orchestrator) emits ``ModelCodingAgentInvokeCommand`` at
 the code_generation ceiling, the command crosses a second repo boundary
 (>=2 importers) and graduates to ``omnibase_core``. Until that second consumer
-exists, it stays repo-private here. Do NOT bump the ``omnibase_compat`` pin to
-host it — compat is staging for wire DTOs, not a home for business commands.
+exists, it stays repo-private here.
 """
 
 from __future__ import annotations

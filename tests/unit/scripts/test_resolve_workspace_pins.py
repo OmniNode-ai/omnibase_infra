@@ -48,9 +48,9 @@ version = 1
 requires-python = ">=3.12"
 
 [[package]]
-name = "omnibase-compat"
+name = "example-package"
 version = "0.5.1"
-source = { git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev=4d887307aae34d9d40d389ba91070cb411ce3df5#4d887307aae34d9d40d389ba91070cb411ce3df5" }
+source = { git = "https://example.invalid/example-package.git?rev=4d887307aae34d9d40d389ba91070cb411ce3df5#4d887307aae34d9d40d389ba91070cb411ce3df5" }
 
 [[package]]
 name = "omnibase-infra"
@@ -82,8 +82,8 @@ def test_parse_lock_pins_extracts_version_and_rev(tmp_path: Path) -> None:
 
     assert pins["omnibase-infra"].version == "0.38.1"
     assert pins["omnibase-infra"].rev == "e2dbdc950540df8bc59ca4370b2d4a0f5b8d6c59"
-    assert pins["omnibase-compat"].version == "0.5.1"
-    assert pins["omnibase-compat"].rev == "4d887307aae34d9d40d389ba91070cb411ce3df5"
+    assert pins["example-package"].version == "0.5.1"
+    assert pins["example-package"].rev == "4d887307aae34d9d40d389ba91070cb411ce3df5"
     assert pins["onex-change-control"].rev == "4877d3c223517cb0c7e1eca462ba0f4d38916314"
 
 

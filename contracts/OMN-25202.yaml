@@ -1,0 +1,98 @@
+schema_version: 1.0.0
+ticket_id: OMN-25202
+title: Review findings 1 to 11 on omnibase_infra PR 6039 at head 28e3add76aed are fixed or argued
+summary: >-
+  Third review round on the pull request that mounts the real lane declaration folder in the dev runtime compose (OMN-24854). The compose file helper takes the folder from the real overlay directory's parent and stops on a stale pinned folder, the caller scan classifies every file that layers a dev lane compose file and fails when a helper call is removed, the two required-env manifest entries are tested against their consumer, the warm refresh and the agent job take the folder only for the dev lane, the tests drop every ambient lane root, and the OMN-24854 contract check refuses a test_passes string that only names an evidence path. The ticket's seventh criterion (a Lab comment that names the pushed head, the required suites run on the lab in named parts, and the h201 config/lab read) is a state of the pull request and is read there; no repository check can bind it, so this contract declares only the other seven.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25202-review-findings
+    statement: The review findings that block the OMN-24854 pull request are fixed, each with a test that fails at the reviewed head.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the compose file helper takes ONEX_LANE_DECLARATION_DIR from the parent of the real overlay dir when it holds ci_bus_lanes.yaml, for both entries -- falsifier: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -k real_overlay_dir fails at head 28e3add76aed and passes at the new head"
+      - id: AC2
+        statement: "AC2: the strict helper returns 1 naming the folder for a stale pinned folder before any compose call -- falsifier: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -k stale fails at head 28e3add76aed and passes at the new head"
+      - id: AC3
+        statement: "AC3: the caller scan covers scripts, src and the workflows, classifies every file that layers a dev lane compose file, asserts a helper call precedes each compose call and fails when one is removed -- falsifier: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -k caller goes red when a helper call is removed from one caller"
+      - id: AC4
+        statement: "AC4: the consumers of the two required-env manifests are named in tests and the declaration folder entries are enforced by them -- falsifier: uv run --frozen pytest tests/scripts/test_dev_lane_required_env_omn17530.py -q fails with the entry dropped from either manifest"
+      - id: AC5
+        statement: "AC5: the warm refresh and the agent derive and refuse the declaration folder for the dev lane only, and the omn24081 and omn24119 fixtures drop an ambient ONEX_LANE_DECLARATION_DIR -- falsifier: ONEX_LANE_DECLARATION_DIR=/nonexistent uv run --frozen pytest scripts/deploy-agent/tests/unit -q -k omn24081 fails at head 28e3add76aed and passes at the new head"
+      - id: AC6
+        statement: "AC6: the dev_agent fixture drops ONEX_WORKSPACE_CONFIG_ROOT and a control proves the root is a second source of the overlay dir -- falsifier: ONEX_WORKSPACE_CONFIG_ROOT=/nonexistent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q fails when the fixture keeps the root"
+      - id: AC8
+        statement: "AC8: a test_passes check of the OMN-24854 contract must be a pytest run naming an evidence file, not a string that only names a path -- falsifier: uv run --frozen pytest tests/ci/test_contract_omn24854_checks.py -q fails when the check is an echo of an evidence path"
+evidence_requirements:
+  - kind: tests
+    description: The compose file helper, caller scan, manifest consumer, contract check and deploy agent tests of this change; the compose render tests in the first file need the docker compose CLI and run on the lab.
+    command: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py tests/ci/test_contract_omn24854_checks.py tests/scripts/test_dev_lane_required_env_omn17530.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25202-ac1
+    description: A caller holding only the real ONEX_LANE_OVERLAY_DIR gets the folder above it from both compose file helper entries.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -p no:cacheprovider -k real_overlay_dir
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25202-ac2
+    description: The strict helper returns 1 and names the folder for a stale pinned folder, and the export form leaves the variable unset naming it.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -p no:cacheprovider -k stale
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25202-ac3
+    description: Every file that layers a dev lane compose file is classified, each shell or agent caller sets the folder before its compose call, and a caller without its helper call fails the scan.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -p no:cacheprovider -k "caller or classified or workflows"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25202-ac4
+    description: The declaration folder entry of each required-env manifest is enforced by the declaration check and named by the preflight when the environment lacks it.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_dev_lane_required_env_omn17530.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25202-ac5
+    description: The stability refresh and a stability job derive and refuse nothing about the folder, and the refresh fixtures pass with an ambient folder set.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_refresh_llm_endpoint_env_omn24081.py scripts/deploy-agent/tests/unit/test_stability_refresh_llm_endpoint_env_omn24119.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25202-ac6
+    description: The workspace config root is shown to be a second source of the overlay dir, and the dev_agent fixture drops it.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25202-ac8
+    description: The OMN-24854 contract check refuses a test_passes string that only names an evidence path.
+    source: manual
+    binds_ac:
+      - AC8
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_omn24854_checks.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra

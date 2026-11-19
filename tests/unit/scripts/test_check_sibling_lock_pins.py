@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[3]
     / "scripts"
@@ -69,7 +71,7 @@ version = "0.4.3"
 source = { editable = "." }
 dependencies = [
     { name = "omnibase-infra", git = "https://github.com/OmniNode-ai/omnibase_infra.git?rev=e2dbdc950540df8bc59ca4370b2d4a0f5b8d6c59" },
-    { name = "omnibase-compat", git = "https://github.com/OmniNode-ai/omnibase_compat.git?rev=4d887307aae34d9d40d389ba91070cb411ce3df5" },
+    { name = "example-package", git = "https://example.invalid/example-package.git?rev=4d887307aae34d9d40d389ba91070cb411ce3df5" },
 ]
 
 [[package]]
@@ -203,6 +205,7 @@ class TestComparePins:
 def _git(args: list[str], cwd: Path) -> str:
     return subprocess.run(
         ["git", "-C", str(cwd), *args],
+        env=scrub_git_location_env(),
         check=True,
         capture_output=True,
         text=True,
@@ -228,15 +231,15 @@ def _make_repo_with_history(
         f'[project]\nname = "{name}"\nversion = "{version}"\n',
         encoding="utf-8",
     )
-    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    _git(["init", "-q"], root)
     _git(["config", "user.email", "t@t"], root)
     _git(["config", "user.name", "t"], root)
-    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    _git(["add", "-A"], root)
     _git(["commit", "-qm", "init"], root)
     first_sha = _git(["rev-parse", "HEAD"], root)
     for i in range(extra_commits):
         (root / f"receipt_{i}.txt").write_text(f"receipt {i}\n", encoding="utf-8")
-        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        _git(["add", "-A"], root)
         _git(["commit", "-qm", f"receipt {i}"], root)
     head_sha = _git(["rev-parse", "HEAD"], root)
     return root, first_sha, head_sha
@@ -489,30 +492,16 @@ class TestCheckPins:
         return lock
 
     def _make_clone(self, tmp_path: Path, name: str, version: str) -> Path:
-        import subprocess
-
         root = tmp_path / name
         root.mkdir()
         (root / "pyproject.toml").write_text(
             f'[project]\nname = "{name}"\nversion = "{version}"\n',
             encoding="utf-8",
         )
-        subprocess.run(["git", "init", "-q", str(root)], check=True)
-        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(root),
-                "-c",
-                "user.email=t@t",
-                "-c",
-                "user.name=t",
-                "commit",
-                "-qm",
-                "init",
-            ],
-            check=True,
+        _git(["init", "-q"], root)
+        _git(["add", "-A"], root)
+        _git(
+            ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"], root
         )
         return root
 
@@ -600,9 +589,7 @@ class TestCheckPins:
             tmp_path, "onex-change-control", "0.5.1", extra_commits=1
         )
         # Re-point the clone HEAD back to the old commit so it is BEHIND the lock.
-        subprocess.run(
-            ["git", "-C", str(repo), "reset", "-q", "--hard", old_sha], check=True
-        )
+        _git(["reset", "-q", "--hard", old_sha], repo)
         lock = self._write_git_lock(tmp_path, "onex-change-control", "0.5.1", new_sha)
         out = tmp_path / "out.json"
         rc = check_pins(lock, {"onex-change-control": repo}, output_path=out)

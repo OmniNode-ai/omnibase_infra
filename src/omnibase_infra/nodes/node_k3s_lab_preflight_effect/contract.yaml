@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_k3s_lab_preflight_effect
+contract_name: node_k3s_lab_preflight_effect
+node_name: node_k3s_lab_preflight_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Host-local preflight taken before the lab k3s server starts. It refuses the start when node-ip or flannel-iface is unset or unrendered, when the pinned node-ip is not held by a live (UP) interface, or when another interface holds it (the retired cluster ran 188 days unpinned, registered against a NIC that later went down, and CoreDNS and every service-name lookup broke).
+input_model:
+  name: ModelK3sLabPreflightRequest
+  module: omnibase_infra.models.model_k3s_lab_preflight_request
+  description: The YAML text of a k3s server config, an optional `ip -br addr` table (empty reads the host live) and whether the placeholders must already be rendered.
+output_model:
+  name: ModelK3sLabPreflightResult
+  module: omnibase_infra.models.model_k3s_lab_preflight_result
+  description: The verdict (pass or refuse), the refusal reason with its detail, and the pinned node-ip, the pinned flannel-iface and the live interface that holds the node-ip.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: preflight
+      handler: {name: HandlerK3sLabPreflight, module: omnibase_infra.handlers.handler_k3s_lab_preflight}
+capabilities:
+  - name: lab.k3s_preflight
+    description: Refuse a lab k3s server start whose node-ip pin is unset, unrendered, or not held by the pinned live (UP) interface.
+metadata:
+  ticket: OMN-24956
+  author: OmniNode Team
+  description: Host-local effect. No runtime bus dependency and no prod or customer runner admission.
+  tags: [effect, deployment, lab]
