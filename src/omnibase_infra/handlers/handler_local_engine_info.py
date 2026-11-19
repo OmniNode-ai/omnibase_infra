@@ -13,11 +13,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID, uuid4
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.model_local_engine_info_request import (
     ModelLocalEngineInfoRequest,
@@ -80,7 +80,7 @@ async def _read_engine(timeout_seconds: float) -> tuple[int, str, str]:
     """
     # Match setup's command boundary: retain Docker host/context/TLS settings,
     # but do not lend the child ONEX, Python import or Git checkout overrides.
-    environment = os.environ.copy()
+    environment = scrub_git_location_env()
     for name in (
         "PYTHONPATH",
         "OMNI_HOME",
@@ -89,12 +89,6 @@ async def _read_engine(timeout_seconds: float) -> tuple[int, str, str]:
         "ONEX_CONFIG_DIR",
         "ONEX_TENANT_ID",
         "ONEX_TENANT_SLUG",
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_INDEX_FILE",
-        "GIT_COMMON_DIR",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     ):
         environment.pop(name, None)
     try:
