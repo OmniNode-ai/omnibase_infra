@@ -1,0 +1,76 @@
+schema_version: "1.0.0"
+ticket_id: OMN-26085
+title: "The runtime enforces a mount's body cap on the raw and the decompressed request body before the mounted ASGI app is called"
+summary: >-
+  Runtime prerequisite of the cloud gateway door. The runtime listeners stop decoding request bodies themselves, and the mount bridge decodes a compressed body under the mount's cap before it calls the mounted app.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26085-mount-body-cap-before-decode
+    statement: "A mount's declared body cap bounds the raw and the decompressed request stream before the mounted app is dispatched."
+    acceptance:
+      - id: AC26085001
+        statement: "A request whose compressed body is under the mount cap and whose decompressed body is over it is refused with 413 before the app's first receive call and before more than the cap plus one decoded byte is buffered."
+      - id: AC26085002
+        statement: "A request whose raw body is over the mount cap is refused with 413 without reading more than the cap plus one byte from the request stream."
+      - id: AC26085003
+        statement: "A request with no Content-Encoding and a body under the cap reaches the mounted app unchanged."
+      - id: AC26085004
+        statement: "The fix is installed from its branch on the lab and the same 46-byte request read through the runtime on h051 returns 413 with zero application receive calls."
+dod_evidence:
+  - id: dod-omn26085-decoded-cap
+    description: >-
+      Real aiohttp listener and real bridge: a 46-byte gzip body that decodes to 275 bytes against a 128-byte mount cap gets 413, the app records zero receive calls, and the listener's request stream buffered no more than the cap plus one byte. Deflate and a gzip bomb are covered the same way.
+    source: manual
+    binds_ac: [AC26085001]
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_body_cap_omn26085.py -m unit -k 'decoded_body_over_cap or gzip_bomb' -q --no-cov -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26085-raw-cap
+    description: >-
+      A chunked raw body over the cap, plain or gzip, is refused with 413 after the bridge pulled at most the cap plus one byte from the request stream.
+    source: manual
+    binds_ac: [AC26085002]
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_body_cap_omn26085.py -m unit -k 'raw_body_over_cap or decoded_chunks_stops' -q --no-cov -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26085-under-cap
+    description: >-
+      Identity and decoded bodies under the cap reach the app byte for byte, and the mount tests that already existed still pass.
+    source: manual
+    binds_ac: [AC26085003]
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run --frozen pytest tests/unit/handlers/http_mount -m unit -q --no-cov -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26085-listener-probe
+    description: >-
+      A separate runtime listener process mounts an app that never reads its body under a 128-byte cap. The 46-byte gzip request, sent with curl, gets 413. The h051 install readback of the same request is in the lane's STATUS row and the pull request's Lab line.
+    source: manual
+    binds_ac: [AC26085004]
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -euo pipefail -c '
+            probe_dir=$(mktemp -d)
+            uv run --frozen python -c "import asyncio, sys; from pathlib import Path; from tests.unit.handlers.http_mount.test_asgi_mounts_body_cap_omn26085 import serve_decoded_cap_probe; asyncio.run(serve_decoded_cap_probe(Path(sys.argv[1])))" "$probe_dir/port" &
+            server_pid=$!
+            trap "kill $server_pid || true; rm -rf -- \"$probe_dir\"" EXIT
+            for ((attempt = 0; attempt < 300; attempt++)); do
+              if test -s "$probe_dir/port"; then break; fi
+              kill -0 "$server_pid"
+              sleep 0.2
+            done
+            uv run --frozen python -m tests.unit.handlers.http_mount.test_asgi_mounts_body_cap_omn26085 > "$probe_dir/body.gz"
+            test "$(wc -c < "$probe_dir/body.gz")" -eq 46
+            url="http://127.0.0.1:$(cat "$probe_dir/port")/probe"
+            status=$(curl -sS --noproxy "*" --max-time 5 -H "Content-Encoding: gzip" --data-binary "@$probe_dir/body.gz" -o "$probe_dir/rejection" -w "%{http_code}" "$url")
+            test "$status" = 413
+          '
+        cwd: ${OMNI_HOME}/omnibase_infra
