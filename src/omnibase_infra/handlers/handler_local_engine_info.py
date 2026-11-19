@@ -42,7 +42,7 @@ _DOCKER_MISSING = (
 )
 
 
-class _OutputLimitError(Exception):
+class EngineOutputLimitError(Exception):
     """An engine observation exceeded the setup reader's byte limit."""
 
 
@@ -54,7 +54,7 @@ async def _read_output(stream: asyncio.StreamReader | None) -> bytes:
         ):
             output.extend(chunk)
             if len(output) > _MAX_OUTPUT_BYTES:
-                raise _OutputLimitError
+                raise EngineOutputLimitError
     return bytes(output)
 
 
@@ -113,7 +113,7 @@ async def _read_engine(timeout_seconds: float) -> tuple[int, str, str]:
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             _collect_output(proc), timeout=timeout_seconds
         )
-    except _OutputLimitError:
+    except EngineOutputLimitError:
         await _kill_and_reap(proc)
         raise
     except TimeoutError:
@@ -248,7 +248,7 @@ class HandlerLocalEngineInfo:
             returncode, stderr_text, stdout_text = await _read_engine(
                 request.timeout_seconds
             )
-        except _OutputLimitError:
+        except EngineOutputLimitError:
             return _output(
                 corr_id,
                 "malformed",
