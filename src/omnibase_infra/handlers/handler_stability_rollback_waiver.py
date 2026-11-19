@@ -47,7 +47,7 @@ import sys
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -72,16 +72,8 @@ _GUARDED_SCOPES = frozenset({"runtime", "full"})
 _UNGUARDED_LANES = frozenset({"prod", "dev"})
 
 
-class ProtocolHealthCheck(Protocol):
-    @property
-    def status(self) -> str: ...
-
-    @property
-    def detail(self) -> str: ...
-
-
 # Called as ``probe(service=..., port=...)``; returns the check and any raised error.
-RuntimeProbe = Callable[..., tuple[ProtocolHealthCheck, BaseException | None]]
+RuntimeProbe = Callable[..., tuple[Any, BaseException | None]]
 
 
 def read_docker_state(container: str) -> str:
