@@ -101,6 +101,30 @@ _STAGED_FOR_README_ONLY = [
     "tests/ci/test_release_cut_identity_omn18595.py",
 ]
 
+_ENTRY_0_47_75 = """## v0.47.75 (2026-11-18)
+
+### Release
+- Cut omnibase-core from dev at 0.47.75 by the scheduled release train.
+
+### Included Since v0.47.74
+- fix: a ticket-cited advisory annotation is not suppression growth (#2336)
+"""
+
+# The fold the omnibase_core yamlfmt hook (google/yamlfmt v0.21.0,
+# ``max_line_length: 100``) itself produces for the 0.47.75 item's command,
+# recorded from the Pre-commit Suite failure of omnibase_core#2338 at head
+# 88c986ac8332 (job 134644048365, OMN-25638).
+_FOLDED_0_47_75_CHECK = (
+    "      - check_type: command\n"
+    "        check_value: >-\n"
+    "          uv run --locked python -c 'from pathlib import Path;"
+    ' notes = Path("README.md").read_text();\n'
+    '          assert not Path("CHANGELOG.md").exists();'
+    ' assert "## v0.47.75 (2026-11-18)" in notes; assert\n'
+    '          "### Included Since v0.47.74" in notes;'
+    ' assert "(#2336)" in notes\'\n'
+)
+
 
 def _readme_only_clone(tmp_path: Path, *, exceptions: str = "[]") -> Path:
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -227,6 +251,23 @@ class TestApplyReleaseNotes:
         )
         assert "### Included Since v0.47.62" in source
         assert _SUBJECTS[0] in source
+
+    def test_the_written_contract_item_folds_the_way_the_yamlfmt_hook_does(
+        self, tmp_path: Path
+    ) -> None:
+        """The item's ``check_value: >-`` fold is the one yamlfmt wants (OMN-25638).
+
+        The Pre-commit Suite of omnibase_core#2338 (job 134644048365) refused the
+        0.47.75 cut because the writer folded the command at its ``; `` boundaries,
+        which google/yamlfmt re-folds: with ``max_line_length: 100`` and the block
+        content at indent 10, a row takes the next word while the row already built
+        is at most 90 characters. The writer must emit that fold itself, so the
+        contract it writes passes the hook with no hand fix on the release branch.
+        """
+        clone = _readme_only_clone(tmp_path)
+        apply_release_notes(clone, _ENTRY_0_47_75, repo_name="omnibase_core")
+        contract = (clone / "contracts" / "OMN-18595.yaml").read_text("utf-8")
+        assert _FOLDED_0_47_75_CHECK in contract
 
     def test_a_contract_that_does_not_end_in_dod_evidence_refuses_and_writes_nothing(
         self, tmp_path: Path
