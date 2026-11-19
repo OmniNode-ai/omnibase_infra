@@ -20,12 +20,14 @@ import sys
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from omnibase_infra.nodes.node_dev_roll_events_effect.runtime_dev_roll_events import (
     EnumDevStartCause,
     build_events_at,
+    newest_dev_recreate,
+    recreate_gate_at,
 )
 
 if TYPE_CHECKING:
@@ -36,6 +38,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 FRICTION = "friction_type=dev_event_publish_failed"
+#: The requester the recreate window sees for a reapply's restart (OMN-25912).
+REAPPLY_REQUESTER = "agent/branch-install-reapply"
+_ANNOUNCED_MARKER = "branch-installs/recreate-announced-for"
 _ACTIVE_STATUSES = {"accepted", "in_progress"}
 
 
@@ -108,11 +113,40 @@ def announce_reapply_start(
     return True
 
 
+def window_holds_apply(
+    state_dir: Path,
+    *,
+    repo_root: Path,
+    build: Callable[..., Any] = recreate_gate_at,
+) -> bool:
+    """Whether the recreate window holds this reapply: its restart waits for the window.
+
+    A held reapply announces the next recreate once per window (the marker file keeps
+    the announced time across the agent's one-shot runs); a permitted one announces first.
+    """
+    marker = state_dir / _ANNOUNCED_MARKER
+    try:
+        announced_for = datetime.fromisoformat(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        announced_for = None
+    gate = build(repo_root, newest_dev_recreate(state_dir), announced_for)
+    permitted = bool(gate.allow(REAPPLY_REQUESTER, None))
+    after = getattr(gate, "announced_for", None)
+    if after is not None and after != announced_for:
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(after.isoformat(), encoding="utf-8")
+        except OSError:
+            logger.exception("recreate announcement marker %s", FRICTION)
+    return not permitted
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
     handler_main: Callable[[Sequence[str] | None], int] | None = None,
     announce: Callable[..., bool] = announce_reapply_start,
+    window: Callable[..., bool] = window_holds_apply,
 ) -> int:
     """Run the branch-install handler, then announce its restarts."""
     if handler_main is None:
@@ -122,6 +156,18 @@ def main(
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--state-dir", default=None)
     parsed, _ = parser.parse_known_args(argv)
+    mode = (list(argv) if argv is not None else sys.argv[1:])[:1]
+    if (
+        mode == ["apply"]
+        and parsed.state_dir is not None
+        and window(
+            Path(parsed.state_dir), repo_root=Path(__file__).resolve().parents[4]
+        )
+    ):
+        sys.stdout.write(
+            "RECREATE-WINDOW-HOLD the reapply restart waits for the window\n"
+        )
+        return 0
     captured = io.StringIO()
     with contextlib.redirect_stdout(captured):
         exit_code = handler_main(argv)

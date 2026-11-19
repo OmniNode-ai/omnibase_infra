@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_dev_recreate_window_compute
+contract_name: node_dev_recreate_window_compute
+node_name: node_dev_recreate_window_compute
+node_type: COMPUTE_GENERIC
+descriptor:
+  node_archetype: compute
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  The dev runtime was started at 04:33:39Z, 04:54:06Z, 05:12:28Z and 05:38:11Z on 2026-11-19, each start 7 to 14 minutes to ready, so proof reads landed inside a start. This node decides, from the declared window policy (window length, offset, start grace and the requester prefixes of a pinned fix, all read from docker/runtime-policy.env, rendered from contracts/services/runtime_policy.contract.yaml), whether a recreate may start now: at most one per window, at the window's start, unless a pinned fix asks. A hold names the next recreate time; the deploy agent announces it through node_dev_roll_events_effect before any recreate. Pure: no clock, no I/O.
+input_model:
+  name: ModelDevRecreateRequest
+  module: omnibase_infra.models.model_dev_recreate_window
+  description: The policy, the time, the requester and the last recreate.
+output_model:
+  name: ModelDevRecreateDecision
+  module: omnibase_infra.models.model_dev_recreate_window
+  description: Recreate now, or hold until the next recreate time, with the reason.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: dev_recreate.decide
+      handler:
+        name: HandlerDevRecreateWindow
+        module: omnibase_infra.handlers.handler_dev_recreate_window
+      event_model:
+        name: ModelDevRecreateRequest
+        module: omnibase_infra.models.model_dev_recreate_window
+capabilities:
+  - name: dev_recreate.window
+    description: Bound dev runtime recreates to one per declared window, on the window's start.
+metadata:
+  ticket: OMN-25912
+  author: OmniNode Team
+  description: Pure decision called by the deploy agent's idle converge and idle restore paths.
+  tags: [compute, deployment, dev]

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from omnibase_infra.models.contracts.model_dev_broker_memory_policy import (
     ModelDevBrokerMemoryPolicy,
 )
+from omnibase_infra.models.model_dev_recreate_window import ModelDevRecreatePolicy
 from omnibase_infra.runtime.models.model_runtime_profile_policy import (
     ModelRuntimeProfilePolicy,
 )
@@ -50,14 +51,15 @@ class ModelRuntimePolicyContract(BaseModel):
     dev_redpanda_memory: str = Field(min_length=1, max_length=32)
     dev_redpanda_mem_limit: str = Field(min_length=1, max_length=32)
     auxiliary_services_omnimemory_enabled: bool
+    # OMN-25912: the dev runtime recreate window the deploy agent reads from the rendered env.
+    dev_recreate_window: ModelDevRecreatePolicy
     profiles: dict[RuntimeProfileName, ModelRuntimeProfilePolicy]
 
     @field_validator("active_runtime_packages")
     @classmethod
     def _packages_are_unique(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if len(set(value)) != len(value):
-            msg = "active runtime packages must be unique"
-            raise ValueError(msg)
+            raise ValueError("active runtime packages must be unique")
         return value
 
     @field_validator("llm_cloud_endpoint_host_allowlist")
@@ -99,8 +101,7 @@ class ModelRuntimePolicyContract(BaseModel):
         addresses: set[str] = set()
         for profile in self.profiles.values():
             for process in profile.processes.values():
-                if process.runtime_address in addresses:
-                    msg = f"duplicate runtime address {process.runtime_address}"
-                    raise ValueError(msg)
-                addresses.add(process.runtime_address)
+                if (address := process.runtime_address) in addresses:
+                    raise ValueError(f"duplicate runtime address {address}")
+                addresses.add(address)
         return self

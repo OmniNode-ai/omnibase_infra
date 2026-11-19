@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 import logging
 import sys
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from pydantic import JsonValue
@@ -117,6 +119,94 @@ def build_events_at(repo_root: Path) -> ProtocolDevRollEvents:
         agent_send(), {str(k): str(v) for k, v in topics.items()}
     )
     return publisher
+
+
+class RefusingRecreateGate:
+    """The gate when the window policy cannot be read: every recreate waits, none is guessed."""
+
+    def __init__(self, reason: str) -> None:
+        self._reason = reason
+
+    def allow(self, requested_by: str, observed_last: datetime | None = None) -> bool:
+        logger.error(
+            "dev recreate refused for %s: the window policy is unreadable (%s) "
+            "friction_type=dev_recreate_policy_unreadable",
+            requested_by,
+            self._reason,
+        )
+        return False
+
+
+def recreate_gate_at(
+    repo_root: Path,
+    last_recreate_at: datetime | None,
+    announced_for: datetime | None = None,
+) -> object:
+    """The dev recreate window gate: the policy from the checkout's rendered env, announcing
+    through the node's own publisher (OMN-25912). An unreadable policy is a refusing gate,
+    never an open window."""
+    try:
+        for relative in (
+            "enums/enum_dev_recreate_verdict.py",
+            "models/model_dev_recreate_window.py",
+            "handlers/handler_dev_recreate_window.py",
+        ):
+            events._load_sibling(relative)
+        window = sys.modules["omnibase_infra.models.model_dev_recreate_window"]
+        handler = sys.modules["omnibase_infra.handlers.handler_dev_recreate_window"]
+        env: dict[str, str] = {}
+        policy_env = repo_root / "docker" / "runtime-policy.env"
+        for line in policy_env.read_text(encoding="utf-8").splitlines():
+            key, sep, value = line.partition("=")
+            if sep and not key.startswith("#"):
+                env[key.strip()] = value.strip()
+        return handler.DevRecreateWindowGate(
+            window.ModelDevRecreatePolicy.from_env(env),
+            build_events_at(repo_root).recreate_announced,
+            last_recreate_at=last_recreate_at,
+            announced_for=announced_for,
+        )
+    except (OSError, ValueError, KeyError, RuntimeError) as exc:
+        return RefusingRecreateGate(f"{type(exc).__name__}: {exc}")
+
+
+def newest_dev_recreate(state_dir: Path) -> datetime | None:
+    """When the newest dev job that ran the runtime phase was accepted, from the job records."""
+    newest: datetime | None = None
+    for path in state_dir.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            phases = data.get("phase_results") or {}
+            if data["command"]["runtime_lane"] != "dev" or phases.get(
+                "runtime"
+            ) not in (
+                "success",
+                "failed",
+            ):
+                continue
+            accepted = datetime.fromisoformat(data["accepted_at"])
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue
+        if newest is None or accepted > newest:
+            newest = accepted
+    return newest
+
+
+def window_admits(agent: Any, requested_by: str) -> bool:
+    """Whether the dev recreate window admits ``requested_by`` now (OMN-25912).
+
+    The agent holds one gate, built on first use from the checkout's rendered policy;
+    an agent that carries none (a test double) admits. The newest recreate in the job
+    records spends the window, so a merge's recreate counts too.
+    """
+    if not hasattr(agent, "_recreate_gate"):
+        agent._recreate_gate = recreate_gate_at(
+            Path(__file__).resolve().parents[4], None
+        )
+    gate = agent._recreate_gate
+    store = getattr(agent, "job_store", None)
+    observed = newest_dev_recreate(Path(store.state_dir)) if store else None
+    return gate is None or bool(gate.allow(requested_by, observed))
 
 
 def announce_preflight_failure(

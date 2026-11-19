@@ -24,6 +24,8 @@ topics:
   dev_runtime_started: onex.evt.omnimarket.dev-runtime-started.v1
   dev_roll_manifest: onex.evt.omnimarket.dev-roll-manifest.v1
   dev_roll_incident: onex.evt.omnimarket.dev-roll-incident.v1
+  # OMN-25912: published before each dev recreate, naming the next recreate time and the reason.
+  dev_recreate_announced: onex.evt.omnimarket.dev-recreate-announced.v1
 # One incident event carries each failing container's log tail, and a broker message must stay
 # under its size limit.
 settings:
@@ -38,6 +40,13 @@ handler_routing:
       event_model:
         name: ModelDevRuntimeStarted
         module: omnibase_infra.models.model_dev_runtime_started
+    - operation: dev_roll.announce_recreate
+      handler:
+        name: DevRollEventsPublisher
+        module: omnibase_infra.nodes.node_dev_roll_events_effect.dev_roll_events
+      event_model:
+        name: ModelDevRecreateAnnouncement
+        module: omnibase_infra.models.model_dev_recreate_window
 capabilities:
   - name: dev_roll.announce
     description: Announce each dev runtime start, each accepted dev roll with its issuer, and each failed roll with its evidence.

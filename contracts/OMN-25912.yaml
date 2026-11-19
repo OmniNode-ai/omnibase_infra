@@ -1,0 +1,83 @@
+schema_version: 1.0.0
+ticket_id: OMN-25912
+title: The dev runtime recreates at most once an hour on the hour, and the next recreate is announced on the bus
+summary: A declared recreate window (docker/runtime-policy.env, rendered from the runtime policy contract) bounds the deploy agent's idle converge, idle restore and branch install reapply to one recreate per window, on the window's start, unless a pinned fix asks; each recreate is announced first on a topic declared in node_dev_roll_events_effect.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25912-recreate-window
+    statement: The dev runtime recreates at most once per declared window, on the window's start, and every recreate is announced on the dev bus first.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: each of the four starts (04:33:39Z, 04:54:05Z, 05:12:28Z, 05:38:11Z) is traced to its source, and the lane''s TERMINAL names for each the deploy agent job id or the docker event, the container restart count and any OOM or healthcheck kill read on h201, and says why dev recreates per merge -- falsifier: the TERMINAL cites no reading for one of the four starts, or names a source that the deploy agent job record or docker events at that time contradict'
+      - id: AC2
+        statement: 'AC2: the declared policy (the deploy agent policy, the dev lane manifest and runtime-policy.env) lets the dev runtime recreate at most once an hour on the hour, unless a pinned fix asks for an immediate recreate, with the hour value read from the declared policy and never written in code -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit -q -k recreate_window` run in omnibase_infra fails on a two-hour simulation with a dev merge every four minutes that shows more than one recreate in an hour, a recreate off the hour with no pinned fix, or a window value written in the handler code'
+      - id: AC3
+        statement: 'AC3: a regression test built from the recorded deploy agent job records and docker events of the four starts (fixture path named in the pull request) fails on dev and passes on the fix -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit -q -k recreate_window` exits 0 on the fix branch and non-zero on omnibase_infra dev'
+      - id: AC4
+        statement: 'AC4: before each recreate the deploy agent publishes one event on the dev bus naming the time of the next recreate and its reason, and the r8 and r9 scenario units and the proof reads leave that window instead of failing -- falsifier: a pytest case that stubs a recreate with no announcement published first and asserts the refusal, run by `uv run pytest scripts/deploy-agent/tests/unit -q -k recreate_announce`, passes on dev or a recreate in the deploy agent job records has no announcement event before it'
+      - id: AC5
+        statement: 'AC5: integrated: the branch is installed on h201 through the declared deploy agent path (a dev restart, never prod) with installed=h201:<revision> recorded, and over the next three hours the deploy agent job records show at most one recreate in each hour, each on the hour and each announced -- falsifier: `ssh h201` read of the deploy agent job records for those three hours shows two recreates in one hour, a recreate off the hour with no pinned fix, or a recreate with no earlier announcement event'
+evidence_requirements:
+  - kind: tests
+    description: recreate_window and recreate_announce tests of the deploy agent.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_recreate_window_omn25912.py scripts/deploy-agent/tests/unit/test_recreate_announce_omn25912.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn25912-ac1-four-starts
+    description: The four recorded starts (fixture read from h201 job records and containerd events) are each classified by source and held to the window by the declared policy.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_recreate_window_omn25912.py -q --no-cov -n 0 -p no:randomly -k recreate_window_four_recorded
+        cwd: .
+  - id: dod-omn25912-ac2-window
+    description: A two-hour simulation with a merge every four minutes recreates at most once an hour, on the hour; the window value is read from the declared policy and no window literal is in the handler.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit -q --no-cov -n 0 -p no:randomly -k recreate_window
+        cwd: .
+  - id: dod-omn25912-ac3-regression
+    description: The regression from the recorded starts passes on the branch and fails at the merge base, where the handler does not exist.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_recreate_window_omn25912.py -q --no-cov -n 0 -p no:randomly -k recreate_window_four_recorded
+        cwd: .
+  - id: dod-omn25912-ac4-announce
+    description: A recreate whose announcement the bus did not accept is refused and the recreate is not run; every permitted recreate is announced first.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit -q --no-cov -n 0 -p no:randomly -k recreate_announce
+        cwd: .
+  - id: dod-omn25912-ac5-integrated
+    description: The integrated proof reads the dev lane's deploy agent job records on h201 for the last three hours and fails when any hour holds two recreates; the on-the-hour start and the announcement before each are read from the agent journal and the announcement topic in the lane's TERMINAL. It needs the host, so it binds no criterion and the local Done gate runs it.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh h201 'cd /data/omninode/deploy-agent/state/jobs-dev && python3 -c "import glob,json,sys,collections as C;c=C.Counter(d[\"accepted_at\"][:13] for d in (json.load(open(p)) for p in glob.glob(\"*.json\")) if d.get(\"command\",{}).get(\"runtime_lane\")==\"dev\" and (d.get(\"phase_results\") or {}).get(\"runtime\") in (\"success\",\"failed\") and d[\"accepted_at\"]>sys.argv[1]);print(dict(c));sys.exit(int(any(v>1 for v in c.values())))" $(date -u -d "-3 hours" +%FT%T)'
+        cwd: .
+  - id: dod-omn25912-ac5-wiring
+    description: 'The hosted structural proof of the install: the rendered policy declares the window, and the deploy agent''s idle converge, idle restore and branch install reapply restart each wait for it and announce first. The integrated read of the job records on h201 is the local-gate entry above.'
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_recreate_window_omn25912.py -q --no-cov -n 0 -p no:randomly -k recreate_window_install_path
+        cwd: .
