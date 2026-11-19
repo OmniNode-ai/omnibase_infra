@@ -620,7 +620,7 @@
 ### Release
 - Cut omnibase_infra from dev at 0.38.30 for the OMN-18565 kernel-injected tenant path.
 - PyPI currently has 0.38.29 as the latest published omnibase-infra release; dev is already versioned at 0.38.30, so this release intentionally does not edit dependency pins or downgrade the package version.
-- Declared dependency floor is unchanged from dev: `omnibase-core==0.47.16`, `omnibase-spi==0.23.3`, `omnibase-compat==0.5.7`, all published.
+- The release kept the published dependency pins from dev, including `omnibase-core==0.47.16` and `omnibase-spi==0.23.3`.
 - Why now: `fix(OMN-18565)` (#3679) merged at 11:26:12Z, after v0.38.29 was cut at 09:42Z, so the kernel projection seam that carries the envelope tenant is on dev and in no release. omnimarket's deployed delegation writer refuses every quality-gate verdict until its omnibase-infra pin carries it.
 
 ### Included Since v0.38.29
@@ -638,7 +638,7 @@
 ### Release
 - Cut omnibase_infra from dev at 0.38.29 for the OMN-16976 tenant-authority delivery path and the 116 commits merged since v0.38.27.
 - PyPI currently has 0.38.27 as the latest published omnibase-infra release; dev is already versioned at 0.38.29, so this release intentionally does not edit dependency pins or downgrade the package version.
-- Declared dependency floor is unchanged from dev: `omnibase-core==0.47.16`, `omnibase-spi==0.23.3`, `omnibase-compat==0.5.7`, all published.
+- The release kept the published dependency pins from dev, including `omnibase-core==0.47.16` and `omnibase-spi==0.23.3`.
 
 ### Included Since v0.38.27
 - fix(OMN-18443): anchor the release-identity published set to the evaluated tree (#3655).

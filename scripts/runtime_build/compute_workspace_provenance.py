@@ -551,9 +551,7 @@ def main() -> int:
     pin_violation: str | None = None
     lock_path = SIBLING_REPOS_DIR / CONSUMING_REPO / "uv.lock"
     try:
-        # omnibase_compat was the one staged sibling compared here; it is no
-        # longer staged (OMN-21284, compat is being retired) and comes from the
-        # lock itself, so only the host self-check below remains.
+        # Only the host self-check below remains (OMN-21284).
         comparisons = build_comparisons(lock_path=lock_path, siblings={})
         # Host self-check (OMN-12989): the runtime image's OWN omnibase_infra is
         # built from the build context, NOT from sibling-repos — that is exactly

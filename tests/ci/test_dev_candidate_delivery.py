@@ -200,8 +200,8 @@ class TestSingleSourceRevBundle:
     ) -> None:
         """``sibling_ref`` is a different axis from the bundle revision.
 
-        It names the ref that omnibase_core / omnibase_compat / omnimarket are
-        CLONED at, so it has to be a ref those repos have. Wiring
+        It names the ref used to clone the staged siblings, so it has to
+        exist in those repositories. Wiring
         ``github.sha`` into it — the natural-looking mistake, since every other
         ref in this workflow is that commit — makes the build clone
         omnibase_core at an omnibase_infra SHA and fail outright.

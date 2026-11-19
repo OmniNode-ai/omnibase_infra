@@ -47,6 +47,13 @@ requirements:
     acceptance:
       - id: AC15
         statement: 'AC15: deploy/systemd/cpu-boost-off.service carries After=sysinit.target and WantedBy=multi-user.target -- falsifier: grep -F After=sysinit.target deploy/systemd/cpu-boost-off.service'
+  - id: req-omn24562-stability-build-project
+    statement: The stability job of the dev-fenced deploy agent builds the runtime images under the stability compose project that its runtime up runs, and does not name autoheal, which the stability overlay disables.
+    acceptance:
+      - id: AC16
+        statement: 'AC16: the build command of a stability job runs under the stability compose project and the stability lane configuration disables autoheal -- falsifier: scripts/deploy-agent/tests/unit/test_stability_build_project_omn24562.py fails at the merge base'
+      - id: AC17
+        statement: 'AC17: integrated: after the agent is installed from the integration branch, one stability-follow job on h201 builds the omninode-runtime image of the stability project at the job time and names no autoheal -- falsifier: the image list of h201 shows that image older than the job, or the job record errors name autoheal'
   - id: req-omn24562-stability-start-wait
     statement: verify() waits out a stability runtime's declared start the way it does on dev, reading the budget from the container's own compose healthcheck, so a runtime that takes about five minutes to start is not failed on its first probe and rolled back. A spent budget still fails the job, no lane but dev may recreate, and dev and prod behave as before.
     acceptance:
@@ -208,6 +215,27 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_cpu_boost_off_unit_omn24562.py -q -p no:randomly --no-cov
         cwd: .
+  - id: dod-omn24562-ac16-stability-build-project
+    description: The build command of a stability job runs under the stability compose project, dev still builds under its own, the stability lane disables autoheal and keeps the services it runs by name, and the executor builds under the lane's compose project.
+    source: manual
+    binds_ac:
+      - AC16
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_build_project_omn24562.py tests/unit/test_stability_retires_folded_effects_omn24562.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -q 'lane_config_for(runtime_lane).compose_project,' scripts/deploy-agent/deploy_agent/executor.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac17-stability-follow-readback
+    description: Hosted stand-in for AC17, which is read on h201 after the agent is installed from the integration branch. The executor on the branch no longer carries the build_project field, so the lane build runs under the lane's compose project; the merge base still names build_project.
+    source: manual
+    binds_ac:
+      - AC17
+    checks:
+      - check_type: command
+        check_value: "! grep -q 'build_project' scripts/deploy-agent/deploy_agent/executor.py"
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-ac15-ac17-stability-start-wait
     description: A stability runtime is waited for within its declared start budget and passes, fails and is not recreated past it, and dev, the two fences and prod behave as before.
     source: manual

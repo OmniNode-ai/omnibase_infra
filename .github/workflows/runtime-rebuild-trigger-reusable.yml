@@ -765,7 +765,7 @@ jobs:
   # omnibase_infra commit merged.
   #
   # WHY IT LIVES HERE AND NOT IN A CALLER. Every repository the runtime image
-  # vendors -- omnimarket, omnibase_core, omnibase_compat, omnibase_spi --
+  # vendors -- omnimarket, omnibase_core, omnibase_spi --
   # calls this one file, so each acquires the delivery path with no per-repo
   # code and no per-repo configuration. A copy in each caller is how the org
   # ended up with two divergent trigger_rebuild_on_merge.py, which this file's

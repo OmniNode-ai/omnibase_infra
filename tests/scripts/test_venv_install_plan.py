@@ -2,11 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Tests for scripts/venv_install_plan.py (OMN-18675).
 
-The defect these cover: on 2026-09-18 a venv-drift repair ran
-``uv pip install --no-deps omnibase-compat==0.5.5`` against a venv that already
-carried 0.5.7, uv did exactly as instructed, and the resulting downgrade
-removed a module the installed ``omnibase_infra`` imports from an ``onex.cli``
-entry point — taking the whole ``onex`` CLI down for every lane on the host.
+On 2026-09-18 a venv repair downgraded a dependency from 0.5.7 to 0.5.5
+and removed a module needed by an ``onex.cli`` entry point. The CLI failed
+at startup for every lane on the host.
 
 Fully hermetic: ``uv`` is a fake shell script on PATH that records its argv and
 prints a canned change plan, so the refusal is driven end-to-end without
@@ -68,15 +66,9 @@ _NOOP_PLAN = "Resolved 3 packages in 90ms\nAudited 3 packages in 1ms\n"
 # module parsed only the `name==version` shape, saw the `-` line unpaired, and
 # refused the ref bump as a REMOVE -- a false refusal of the one operation the
 # installer exists to perform, which blocked every lane on the host.
-_VCS_REF_BUMP_PLAN = """\
-Using Python 3.13.3 environment at: /Users/x/.venv
-Resolved 3 packages in 103ms
-Would download 1 package
-Would uninstall 1 package
-Would install 1 package
- - omnimarket==0.4.118 (from git+https://github.com/OmniNode-ai/omnimarket.git@948be2e1a517a7def9efff96e32ec91b4b17b30a)
- + omnimarket @ git+https://github.com/OmniNode-ai/omnimarket.git@53d6e4454a554588f0fc104c6a13cf76ade86e8e
-"""
+_VCS_REF_BUMP_PLAN = (
+    _REPO_ROOT / "tests" / "fixtures" / "omn18675" / "uv-vcs-ref-bump.txt.captured"
+).read_text(encoding="utf-8")
 
 
 def _write_fake_uv(tmp_path: Path, plan: str) -> Path:
@@ -116,7 +108,7 @@ def _run(bin_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_normalize_name_follows_pep503() -> None:
-    assert normalize_name("Omnibase_Compat") == "omnibase-compat"
+    assert normalize_name("Example_Package") == "example-package"
     assert normalize_name("omninode.memory") == "omninode-memory"
 
 
@@ -168,11 +160,11 @@ def test_a_vcs_ref_bump_is_applied_not_refused(tmp_path: Path) -> None:
 def test_a_pinned_downgrade_beside_a_source_change_still_refuses() -> None:
     """Allowing SOURCE must not weaken the `==` refusal that is the whole point."""
     mixed = _VCS_REF_BUMP_PLAN + (
-        " - omnibase-compat==0.5.7\n + omnibase-compat==0.5.5\n"
+        " - example-package==0.5.7\n + example-package==0.5.5\n"
     )
     verdicts = {c.name: c.verdict for c in parse_plan(mixed)}
     assert verdicts["omnimarket"] is PlanVerdict.SOURCE
-    assert verdicts["omnibase-compat"] is PlanVerdict.DOWNGRADE
+    assert verdicts["example-package"] is PlanVerdict.DOWNGRADE
 
 
 def test_classify_covers_every_verdict() -> None:
@@ -270,7 +262,7 @@ def test_safe_plan_applies_and_leaves_unrelated_pins_untouched(tmp_path: Path) -
     assert result.returncode == EXIT_OK, result.stdout + result.stderr
     assert "UPGRADE" in result.stdout
     assert "omnimarket  0.4.117 -> 0.4.118" in result.stdout
-    assert "omnibase-compat" not in result.stdout
+    assert "example-package" not in result.stdout
     assert "omninode-memory" not in result.stdout
     invocations = (tmp_path / "uv-argv.log").read_text(encoding="utf-8").splitlines()
     assert len(invocations) == 2, invocations
