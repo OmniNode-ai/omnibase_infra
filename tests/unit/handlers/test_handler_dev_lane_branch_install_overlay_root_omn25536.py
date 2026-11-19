@@ -160,7 +160,7 @@ def test_apply_creates_the_root_directory_then_reads_the_file_back(
     _declare(tmp_path, store, OVERLAY_FILE)
     lane = _Lane()
     handler = HandlerDevLaneBranchInstall(
-        store, PROJECT, run=lane, sleep=lambda _s: None
+        store, PROJECT, run=lane, sleep=lambda _s: None, clock=lambda: NOW
     )
     receipt = handler.apply()
     assert lane.files[OVERLAY_FILE] == BRANCH_COPY
