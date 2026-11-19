@@ -328,6 +328,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_follow_unhealthy_omn24562.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/test_dev_boot_guard_unhealthy_runtime_omn24562.py -q -p no:cacheprovider --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn24562-ac27-stability-config-lazy
     description: 'AC27: an agent with a bad stability fold policy starts and only its stability read fails; the agent''s stability reader is wired to the stability runtime container.'
     source: manual
