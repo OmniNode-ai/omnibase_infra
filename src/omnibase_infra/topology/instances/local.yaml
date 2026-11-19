@@ -75,6 +75,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - floor_integration_rows
               - gate_store_reservations
             privileges: [DELETE, SELECT]
             schema: omninode_internal
@@ -100,6 +101,7 @@ databases:
               - demo_readiness_latest
               - dod_verify_runs
               - done_items
+              - floor_integration_rows
               - gate_store_reservations
               - gate_store_safety
               - gate_store_state
