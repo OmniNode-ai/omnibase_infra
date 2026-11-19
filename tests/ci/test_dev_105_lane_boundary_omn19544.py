@@ -109,15 +109,15 @@ REDPANDA_MEMORY_DEFAULT = "${DEV_105_REDPANDA_MEMORY:-2G}"
 FORBIDDEN_SERVICE_FRAGMENTS = ("keycloak", "infisical")
 
 #: The .201 dev lane's declared service -> its dev-105 name. AC1.
+#: The projection API, the runtime effects role and the delegation writer are
+#: folded into the dev main runtime and no longer declared by the dev lane's
+#: manifest, so the dev lane has nothing of theirs to map here.
 DEV_TO_DEV_105 = {
     "omnibase-infra-postgres": "omnibase-infra-dev-105-postgres",
     "omnibase-infra-redpanda": "omnibase-infra-dev-105-redpanda",
     "omnibase-infra-valkey": "omnibase-infra-dev-105-valkey",
-    "omnimarket-projection-api": "omnimarket-dev-105-projection-api",
     "omninode-runtime": "omninode-dev-105-runtime",
-    "omninode-runtime-effects": "omninode-dev-105-runtime-effects",
     "omnimarket-projection-tenant-registry-writer": "omnimarket-dev-105-projection-tenant-registry-writer",
-    "omnimarket-projection-delegation-writer": "omnimarket-dev-105-projection-delegation-writer",
     "omnimarket-projection-registration-writer": "omnimarket-dev-105-projection-registration-writer",
     "omnimarket-projection-savings-writer": "omnimarket-dev-105-projection-savings-writer",
     "omnimarket-projection-tenant-credentials-writer": "omnimarket-dev-105-projection-tenant-credentials-writer",
