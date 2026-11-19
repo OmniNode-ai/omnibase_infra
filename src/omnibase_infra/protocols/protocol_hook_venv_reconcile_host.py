@@ -5,6 +5,7 @@
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from omnibase_infra.models.model_hook_venv_extras import ModelHookVenvExtras
 from omnibase_infra.models.model_hook_venv_reconcile_request import (
     ModelHookVenvReconcileRequest,
 )
@@ -26,8 +27,15 @@ class ProtocolHookVenvReconcileHost(Protocol):
         """Determine whether the proposed commit preserves the installed one."""
         ...
 
+    def extras(self, project: Path) -> ModelHookVenvExtras:
+        """Split declared extras into lock-listed and lock-omitted."""
+        ...
+
     def uv(
-        self, request: ModelHookVenvReconcileRequest, flag: str | None = None
+        self,
+        request: ModelHookVenvReconcileRequest,
+        flag: str | None = None,
+        extras: tuple[str, ...] = (),
     ) -> tuple[int, str]:
         """Run exact frozen sync, returning its exit status and visible output."""
         ...
