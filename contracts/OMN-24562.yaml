@@ -45,12 +45,12 @@ requirements:
   - id: req-omn24562-stability-rollback-waiver
     statement: The deploy agent runs a stability runtime deploy that has no retained rollback point only when its own probe reads every runtime target of the lane failed with no timeout and Docker reads every target container unhealthy or gone after its declared start window, records that it ran without one, and never applies the waiver to the prod or dev lane.
     acceptance:
-      - id: AC19
-        statement: 'AC19: a stability runtime deploy with no retained rollback point runs when every runtime target fails the guard probe and Docker reads each target container unhealthy or absent, and the job records it ran without one -- falsifier: pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py -k unhealthy_lane_without_point fails at the merge base'
-      - id: AC20
-        statement: 'AC20: the deploy is refused when the lane is degraded-serving (a target passes, or a failing target is Docker-healthy) or still starting (Docker reads a target starting inside its start period), or the probe times out or errors -- falsifier: the degraded_serving and still_starting tests in the same file fail when the waiver ignores the Docker state'
-      - id: AC21
-        statement: 'AC21: the waiver is never granted to the prod or dev lane and probes nothing for them -- falsifier: the prod and dev control test fails at the head'
+      - id: AC22
+        statement: 'AC22: a stability runtime deploy with no retained rollback point runs when every runtime target fails the guard probe and Docker reads each target container unhealthy or absent, and the job records it ran without one -- falsifier: pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py -k unhealthy_lane_without_point fails at the merge base'
+      - id: AC23
+        statement: 'AC23: the deploy is refused when the lane is degraded-serving (a target passes, or a failing target is Docker-healthy) or still starting (Docker reads a target starting inside its start period), or the probe times out or errors -- falsifier: the degraded_serving and still_starting tests in the same file fail when the waiver ignores the Docker state'
+      - id: AC24
+        statement: 'AC24: the waiver is never granted to the prod or dev lane and probes nothing for them -- falsifier: the prod and dev control test fails at the head'
   - id: req-omn24562-boost-unit
     statement: The cpu-boost-off unit is tracked in the repository with After=sysinit.target and WantedBy=multi-user.target.
     acceptance:
@@ -213,12 +213,12 @@ dod_evidence:
         check_value: uv run pytest tests/integration/ci/test_stability_job_overlay_render_integration_omn24562.py -q -p no:randomly --no-cov
         cwd: .
   - id: dod-omn24562-ac19-ac21-rollback-waiver
-    description: 'AC19, AC20 and AC21: an UNHEALTHY lane past its start window is waived and recorded; a degraded-serving, still-starting, HEALTHY or UNKNOWN lane is refused; prod and dev are never waived; the existing rollback tests still pass.'
+    description: 'AC22, AC23 and AC24: an UNHEALTHY lane past its start window is waived and recorded; a degraded-serving, still-starting, HEALTHY or UNKNOWN lane is refused; prod and dev are never waived; the existing rollback tests still pass.'
     source: manual
     binds_ac:
-      - AC19
-      - AC20
-      - AC21
+      - AC22
+      - AC23
+      - AC24
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -p no:randomly --no-cov -p no:cacheprovider
