@@ -1,3 +1,21 @@
+## v0.38.78 (2026-11-19)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.78 by the scheduled release train.
+- 9 release-relevant commit(s) merged since v0.38.77.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.77
+- : Roll images on declared secondary CI runner pools (#6077)
+- : stability runtime services build on the composed omnimarket image (#6023)
+- fix: restore a wedged dev runtime from the deploy agent and leave no ghost DLQConsumer member (#6045)
+- : waive stability-lane rollback guard when lane already down (#6021)
+- fix: stability lane rolls its writers and reads dev's overlay roots (#6047)
+- feat: grant the runtime account the floor_integration_rows table (#6062)
+- : Enforce contract body caps on ASGI mounts (#6079)
+- : the runner deploy prepares the disk-admission pause directory as the runner user (#6078)
+- : log the dispatch venv staging lock take in the node engine (#6041)
+
 ## v0.38.77 (2026-11-19)
 
 ### Release
