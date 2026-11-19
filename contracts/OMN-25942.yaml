@@ -1,0 +1,58 @@
+schema_version: 1.0.0
+ticket_id: OMN-25942
+title: A dev deploy job passes post-deploy verification and dev takes the new image; the stability follow builds a runtime that boots
+summary: The dev boot guard no longer rolls back a verified dev roll because the deploy-source clone moved after up, and the stability overlay builds its runtime and worker from the composed omnimarket image that carries BIFROST_BASE_CONTRACT_PATH.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25942-dev-verify
+    statement: A dev roll that was replaced, verified and Docker healthy stays running when the post-roll capture finds the compose files other than up read, and the stability lane builds a runtime image that boots.
+    acceptance:
+      - id: AC1
+        statement: 'AC-V1: each of the four failed jobs (1f7f39c6, 6ff2c3f5, 914b6b79, 20cf29c6) is traced to its cause from the recorded job records, container readings and log lines, and the fixtures that hold them are replayed -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_compose_settings_match_omn25942.py scripts/deploy-agent/tests/unit/test_stability_verification_probe_omn25942.py -q -k "recorded" exits non-zero'
+      - id: AC2
+        statement: 'AC-V2: the dev boot guard keeps a verified, healthy roll when the compose config hash no longer matches, and the regression built from the recorded job 20cf29c6 readings fails on omnibase_infra dev and passes on the fix -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k compose_settings_match exits 0 on omnibase_infra dev or non-zero on the fix branch'
+      - id: AC3
+        statement: 'AC-V3: the stability lane verification probes only its own containers, and its runtime and worker are built from the composed image, fixture from the recorded stability follow jobs -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k verification_probe exits 0 on omnibase_infra dev or non-zero on the fix branch'
+evidence_requirements:
+  - kind: tests
+    description: Dev boot guard settings-drift tests and stability verification probe tests.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_compose_settings_match_omn25942.py scripts/deploy-agent/tests/unit/test_stability_verification_probe_omn25942.py scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn25942-ac1-recorded-jobs
+    description: The recorded dev job 20cf29c6 and the three recorded stability follow jobs replay from their fixtures.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_compose_settings_match_omn25942.py scripts/deploy-agent/tests/unit/test_stability_verification_probe_omn25942.py -q --no-cov -n 0 -p no:randomly -k recorded
+        cwd: .
+  - id: dod-omn25942-ac2-compose-settings-match
+    description: A verified, healthy dev roll is kept and no incident or restore is written when the rendered compose hash differs from the container's; a failed roll is still restored.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit -q --no-cov -n 0 -p no:randomly -k compose_settings_match
+        cwd: .
+  - id: dod-omn25942-ac3-verification-probe
+    description: The stability lane probes only its own containers and ports, and its runtime and worker build the composed image from the stability overlay.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit -q --no-cov -n 0 -p no:randomly -k verification_probe
+        cwd: .
+  - id: dod-omn25942-ac4-h201-job-record
+    description: 'Unbound local Done gate for AC4 (not a hosted criterion): reads a dev job record on h201 and exits 0 only when its phase verification reads success and its status reads success.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "python3 -c 'import glob, json, sys; hits = glob.glob(\"/data/omninode/deploy-agent/state/jobs-dev/\" + sys.argv[1] + \"*.json\"); rec = json.load(open(hits[0])) if len(hits) == 1 else {}; sys.exit(0 if rec.get(\"phase_results\", {}).get(\"verification\") == \"success\" and rec.get(\"status\") == \"success\" else 1)' DEV_JOB_ID_PREFIX"
+        cwd: ${OMNI_HOME}/omnibase_infra

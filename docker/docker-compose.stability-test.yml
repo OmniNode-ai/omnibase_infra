@@ -115,6 +115,27 @@ x-stability-test-internal-projection-env: &stability_test_internal_projection_en
 # compose refuses when the directory is unset or the file is absent. The deploy
 # paths resolve the directory (scripts/runtime_build/compose_files.sh and the
 # deploy agent's _compose_env).
+# OMN-25942: the stability lane's runtime and worker boot from the COMPOSED image,
+# omnimarket's Dockerfile.runtime built on the infra image, exactly as the dev lane's do
+# (OMN-21279). The infra image carries no omnimarket and no BIFROST_BASE_CONTRACT_PATH;
+# the composed image sets that path. Read on h201 on 2026-11-19: the infra-only images the
+# stability follow built at 05:21Z, 06:00Z and 06:41Z carry no BIFROST_BASE_CONTRACT_PATH,
+# the rolled-back image 53e880e38d5a does, and the infra-only worker image logs
+# `BOOT FAILED 5/5 ... BIFROST_BASE_CONTRACT_PATH is unset or blank` and then
+# `RETRIES EXHAUSTED`. A runtime that exits at boot leaves the published ports 18085 and
+# 18086 resetting connections, which is what every follow verification read.
+# The infra half of the composed image is the plain infra build that
+# projection-tenant-registry-writer already builds under this project, from the same
+# docker/Dockerfile.runtime and build args; the `service:` context reuses it, so this lane
+# declares no build-only service of its own (the stack-shape baseline for
+# `*-infra-runtime-image` only shrinks).
+x-stability-composed-runtime-build: &stability_composed_runtime_build
+  context: ../workspace/sibling-repos/omnimarket
+  dockerfile: Dockerfile.runtime
+  additional_contexts:
+    infra-runtime: "service:projection-tenant-registry-writer"
+  args:
+    INFRA_RUNTIME_IMAGE: infra-runtime
 x-lane-overlay-mount: &lane-overlay-mount
   type: bind
   source: "${ONEX_LANE_OVERLAY_DIR:?ONEX_LANE_OVERLAY_DIR must name the directory holding your COMPOSE_PROJECT_NAME.bifrost.yaml (config/lab/lane-overlays under ONEX_WORKSPACE_CONFIG_ROOT); this repository ships no lab lane overlay}/${COMPOSE_PROJECT_NAME}.bifrost.yaml"
@@ -229,6 +250,7 @@ services:
   intelligence-migration:
     container_name: omnibase-infra-stability-test-intelligence-migration
   omninode-runtime:
+    build: *stability_composed_runtime_build
     container_name: omninode-stability-test-runtime
     restart: unless-stopped
     depends_on:
@@ -464,6 +486,7 @@ services:
       - "com.omninode.ticket=OMN-11542"
       - "com.omninode.service=projection-api"
   runtime-worker:
+    build: *stability_composed_runtime_build
     container_name: omninode-stability-test-runtime-worker
     restart: unless-stopped
     depends_on:

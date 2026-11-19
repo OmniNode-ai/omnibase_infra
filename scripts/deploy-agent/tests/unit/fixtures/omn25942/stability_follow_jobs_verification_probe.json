@@ -1,0 +1,87 @@
+{
+  "_source": "read on h201 at 2026-11-19T08:28Z to 09:00Z by lane devverify2-0840 (OMN-25942); no credential value is held here; the runtime container name in `error` is held as {runtime_container} and filled from the lane configuration",
+  "jobs": [
+    {
+      "id": "1f7f39c6-ec15-460e-b021-a718ce15750a",
+      "accepted_at": "2026-11-19T05:57:56Z",
+      "completed_at": "2026-11-19T06:38:14Z",
+      "built_image": "sha256:37096258ba1e (omninode-runtime, created 2026-11-19T05:21:36Z, revision 925858038b41)"
+    },
+    {
+      "id": "6ff2c3f5-bd80-4693-bf24-8bc54cddaa65",
+      "accepted_at": "2026-11-19T06:39:07Z",
+      "completed_at": "2026-11-19T07:20:13Z",
+      "built_image": "sha256:5ec037e9eaec (omninode-runtime, created 2026-11-19T06:00:19Z, revision 9095c380bd1e)"
+    },
+    {
+      "id": "914b6b79-075e-45a3-93a2-e58877799551",
+      "accepted_at": "2026-11-19T07:21:06Z",
+      "completed_at": "2026-11-19T08:02:08Z",
+      "built_image": "sha256:77570a43636e (omninode-runtime, created 2026-11-19T06:41:49Z, revision 1034acc9b1e2)"
+    }
+  ],
+  "common": {
+    "requested_by": "agent/stability-follow-tag",
+    "runtime_lane": "stability",
+    "scope": "runtime",
+    "git_ref": "origin/dev",
+    "status": "failed",
+    "phase_results": {
+      "preflight": "success",
+      "git": "success",
+      "compose_gen": "success",
+      "seed": "success",
+      "runtime": "success",
+      "verification": "success",
+      "core": "skipped",
+      "publish": "success"
+    },
+    "error": "post-deploy verification failed: http://localhost:18085/health ({runtime_container}): curl exited 56: curl: (56) Recv failure: Connection reset by peer; http://localhost:18086/health ({runtime_container}): curl exited 56: curl: (56) Recv failure: Connection reset by peer; auto-rollback: restored=True verified=True to 53e880e38d5a"
+  },
+  "image_readings": {
+    "rolled_back_image_53e880e38d5a": {
+      "created": "2026-11-15T21:06:31-05:00",
+      "BIFROST_BASE_CONTRACT_PATH_in_image_env": 1,
+      "omnimarket_vcs_ref_label": "unknown"
+    },
+    "follow_built_omninode_runtime_images": [
+      {
+        "id": "37096258ba1e",
+        "BIFROST_BASE_CONTRACT_PATH_in_image_env": 0,
+        "omnimarket_vcs_ref_label": ""
+      },
+      {
+        "id": "5ec037e9eaec",
+        "BIFROST_BASE_CONTRACT_PATH_in_image_env": 0,
+        "omnimarket_vcs_ref_label": ""
+      },
+      {
+        "id": "77570a43636e",
+        "BIFROST_BASE_CONTRACT_PATH_in_image_env": 0,
+        "omnimarket_vcs_ref_label": ""
+      }
+    ],
+    "follow_built_runtime_worker_image": {
+      "id": "1d9699239e75",
+      "created": "2026-11-19T07:23:28Z",
+      "BIFROST_BASE_CONTRACT_PATH_in_image_env": 0
+    }
+  },
+  "worker_container": {
+    "name": "the runtime-worker container of the stability project",
+    "started_at": "2026-11-19T08:01:00Z",
+    "restart_count": 5,
+    "health": "unhealthy",
+    "log_lines": [
+      "[entrypoint] BOOT FAILED 5/5: exit 1: ProtocolConfigurationError: [ONEX_CORE_041_INVALID_CONFIGURATION] BIFROST_BASE_CONTRACT_PATH is unset or blank; there is no default: the deploy (the omnimarket composed image or the lane's compose) provides the base contract. Fail fast.",
+      "[entrypoint] RETRIES EXHAUSTED: 5 consecutive failing boots of unknown (declared bound 5); last exit 1"
+    ]
+  },
+  "stability_runtime_container": {
+    "name": "the runtime container of the stability project",
+    "started_at": "2026-11-19T08:00:07Z",
+    "restart_count": 0,
+    "reading": "the container the rollback recreated from the old image; it publishes 0.0.0.0:18085 and 0.0.0.0:18086, both mapped to its 8085",
+    "image": "53e880e38d5a"
+  }
+}
