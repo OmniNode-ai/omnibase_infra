@@ -6,8 +6,8 @@ The ticket's AC1 to AC3 are lab observations on the h201 dev runtime (the run li
 STATUS row, the integration pass line). No repository check can both pass on the hosted
 runner and read the lab, so the contract binds none of them: a check that passes whatever
 the lab shows would mark them met while the dev runtime still lacks the declaration folder.
-What it does bind is the mount source (AC4), with checks that can fail on the defect they
-guard: a test run and one anchored grep per compose file for the mount line itself.
+What it does bind is the mount source (AC4), with a test run, one anchored grep per
+compose file and a read of the rendered bind from disposable Docker containers.
 """
 
 from __future__ import annotations
@@ -30,7 +30,8 @@ EVIDENCE_TESTS = (
     "scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py",
 )
 LAB_CRITERIA = {"AC1", "AC2", "AC3"}
-MOUNT_TARGET = ":/etc/onex/workspace-config/config/lab:ro"
+MOUNT_DIR = "/etc/onex/workspace-config/config/lab"
+MOUNT_TARGET = f":{MOUNT_DIR}:ro"
 PRE_FIX_MOUNT = "- ${ONEX_LANE_OVERLAY_DIR}/.." + MOUNT_TARGET
 
 
@@ -53,7 +54,7 @@ def _grep_checks() -> list[list[str]]:
 
 
 def _can_fail(check: dict[str, str]) -> bool:
-    """Whether ``check`` reads the repository tree: a test run, or an anchored grep of one file.
+    """Whether ``check`` reads the repository or exercises a rendered bind.
 
     ``test -f``, ``true`` and the like pass whatever the tree or the lab shows.
     """
@@ -64,6 +65,23 @@ def _can_fail(check: dict[str, str]) -> bool:
         # the tests do: it must be a pytest run whose argument list holds an evidence file.
         return argv[:4] == ["uv", "run", "--frozen", "pytest"] and any(
             arg in EVIDENCE_TESTS and (REPO_ROOT / arg).is_file() for arg in argv[4:]
+        )
+    if (
+        check["check_type"] == "command"
+        and len(argv) == 3
+        and argv[:2] == ["bash", "-c"]
+    ):
+        script = argv[2]
+        return bool(
+            re.search(
+                r"^\s*docker run --rm --network none --read-only --cap-drop ALL ",
+                script,
+                re.M,
+            )
+            and f'target={MOUNT_DIR},readonly"' in script
+            and re.search(
+                rf"^\s*test -s {re.escape(MOUNT_DIR)}/ci_bus_lanes\.yaml;", script, re.M
+            )
         )
     return (
         argv[:2] == ["grep", "-qE"]
@@ -98,6 +116,10 @@ def test_every_declared_check_can_fail() -> None:
             "check_value": "test -f docker/docker-compose.dev-lane.yml",
         },
         {"check_type": "command", "check_value": "true"},
+        {
+            "check_type": "command",
+            "check_value": "bash -c 'echo docker run --rm --network none --read-only --cap-drop ALL'",
+        },
         {
             "check_type": "command",
             "check_value": "grep -q ONEX_LANE_DECLARATION_DIR:? docker/docker-compose.dev-lane.yml",

@@ -10,9 +10,9 @@ Two layers, as in tests/ci/test_compose_service_memory_limits.py:
   Docker daemon or CLI.
 * ``render_stack`` runs ``docker compose config --format json`` over an explicit
   lane stack, so compose's own merge semantics decide the effective service. It
-  supplies only ``PATH``, ``HOME``, placeholder values for the stack's required
-  variables and any overrides the caller names. It needs the docker CLI (no
-  daemon); callers skip it only when the CLI is absent.
+  supplies ``PATH``, ``HOME``, the runner's Docker shim routing when set,
+  placeholders for required variables and the caller's overrides. It needs
+  the Docker CLI. Callers skip it only when the CLI is absent.
 """
 
 from __future__ import annotations
@@ -117,6 +117,9 @@ def _compose_environment(
     omit: tuple[str, ...] = (),
 ) -> dict[str, str]:
     environment = {name: os.environ[name] for name in ("PATH", "HOME")}
+    # The lab guard needs its declared delegate to avoid resolving another shim.
+    if docker_delegate := os.environ.get("LANDING_REAL_DOCKER"):
+        environment["LANDING_REAL_DOCKER"] = docker_delegate
     for name in stack:
         contents = (DOCKER_DIR / name).read_text(encoding="utf-8")
         for variable in _REQUIRED_VARIABLE_RE.findall(contents):

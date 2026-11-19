@@ -1,0 +1,154 @@
+schema_version: 1.0.0
+ticket_id: OMN-25838
+title: Recover deploy-gate on omnibase_infra pull request 6039
+summary: >-
+  The pull request changes runtime compose mounts. The validator pinned by the caller rejects the cited contract because a unit test and text checks do not exercise a deployed bind. Add a hosted-runner probe of the rendered binds in disposable containers and replay the pinned validator on the lab. The new head's check, comment, lane terminal and shared-cause status are verified locally. The hosted contract binds the test and workflow diff criterion.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25838-deploy-gate
+    statement: Recover the required deploy check with falsifiable evidence and record the result on the pull request and lane, or report a shared cause without pushing.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: no check is widened, skipped or bypassed, so the diff removes no assertion and adds no skip, xfail or loosened threshold -- falsifier: `git diff <base> <new head> -- tests/ .github/` shows a removed assert, a new skip or xfail marker or a changed required-check list'
+evidence_requirements:
+  - kind: tests
+    description: Check every existing mount-source assertion and the Docker probe declaration.
+    command: uv run --frozen pytest tests/ci/test_contract_omn24854_checks.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25838-ac1-watcher-success
+    description: Compare the hosted deploy-gate result against the exact revision reported by the launching host. Read the result through the local SCM watcher.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          onex scm pr-checks 'OmniNode-ai/omnibase_infra#6039' --source local | jq -e --arg head "${VERIFIED_PR_HEAD:?}" '.result.head_sha == $head and any(.result.runs[]; .[0] == "deploy-gate / deploy-gate" and .[1] == "completed" and .[2] == "success")'
+        cwd: .
+  - id: dod-omn25838-ac2-gate-and-control
+    description: >-
+      Keep the workflow and required checks, and preserve the original test assertions. Exercise the new probe against both Compose bind mounts using Docker containers on the runner.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -c '
+          set -euo pipefail
+          before=b2cb1c9ff1de5850025a89600d317aaa1a443bc4
+          git diff --exit-code "$before" HEAD -- .github/
+          git diff --no-ext-diff --unified=0 "$before" HEAD -- tests/ |
+            awk "/^---|^\+\+\+/ { next }
+                 /^-[[:space:]]*assert[[:space:]]/ || /^\+.*(pytest\.skip|pytest\.mark\.(skip|skipif|xfail)|pytest\.xfail)/ { print; rejected=1 }
+                 END { exit rejected }"
+          '
+        cwd: .
+      - check_type: command
+        check_value: |-
+          bash -c '
+          set -euo pipefail
+          umask 022
+          probe_dir=$(mktemp -d)
+          trap "rm -rf -- \"$probe_dir\"" EXIT
+          mkdir -p "$probe_dir/declaration" "$probe_dir/agent/rendered"
+          printf "lanes: {}\n" > "$probe_dir/declaration/ci_bus_lanes.yaml"
+          sources=$(uv run --frozen python - "$probe_dir" <<"PYTHON"
+          import os
+          import sys
+          from pathlib import Path
+
+          from tests.ci._compose_render_omn21099 import DEV_LANE_STACK, render_stack
+
+          root = Path(sys.argv[1]).resolve()
+          target = "/etc/onex/workspace-config/config/lab"
+          overrides = {
+              "COMPOSE_PROJECT_NAME": "onex-declaration-mount-probe",
+              "ONEX_LANE_DECLARATION_DIR": str(root / "declaration"),
+              "ONEX_LANE_OVERLAY_DIR": str(root / "agent" / "rendered"),
+          }
+          # Forward the runner-provided Docker executable to the isolation shim.
+          if "LANDING_REAL_DOCKER" in os.environ:
+              overrides["LANDING_REAL_DOCKER"] = os.environ["LANDING_REAL_DOCKER"]
+
+          for stack, name in (
+              (DEV_LANE_STACK, "runtime-effects"),
+              ((*DEV_LANE_STACK, "docker-compose.dev-tenant-fold.yml"), "omninode-runtime"),
+          ):
+              volumes = render_stack(stack, overrides)[name]["volumes"]
+              mounts = [volume for volume in volumes if volume["target"] == target]
+              if len(mounts) != 1:
+                  sys.exit(f"{name}: expected one declaration mount at {target}")
+              mount = mounts[0]
+              if mount["type"] != "bind" or mount.get("read_only") is not True:
+                  sys.exit(f"{name}: declaration mount must be a read-only bind")
+              source = Path(mount["source"]).resolve()
+              if not source.is_relative_to(root) or not source.is_dir():
+                  sys.exit(f"{name}: declaration mount source is outside the probe directories")
+              print(source)
+          PYTHON
+          )
+          test -n "$sources"
+          while IFS= read -r source; do
+            docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --user 65534:65534 \
+              --mount "type=bind,source=$source,target=/etc/onex/workspace-config/config/lab,readonly" \
+              alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc \
+              test -s /etc/onex/workspace-config/config/lab/ci_bus_lanes.yaml;
+          done <<< "$sources"
+          printf "%s\n" "Both rendered lane declaration binds are readable in Docker"
+          '
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25838-ac3-comment-readback
+    description: Read the published Lab comment at the exact new head using the SCM comment readback supplied to the verification run.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          jq -e --arg prefix "Lab: head=${VERIFIED_PR_HEAD:?} " 'any(.comments[]; .body | startswith($prefix))' "${PR_COMMENT_READBACK:?}"
+        cwd: .
+  - id: dod-omn25838-ac4-install-or-evidence-only
+    description: Compare the lane diff against the dispatch head. For an evidence-only change, read the runner's terminal report. For an install, require an observation and the installed revision at the new head in the comment readback.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -c '
+          set -euo pipefail
+          before=b2cb1c9ff1de5850025a89600d317aaa1a443bc4
+          head=${VERIFIED_PR_HEAD:?}
+          git cat-file -e "${head}^{commit}"
+          if git diff --quiet "$before" "$head" -- . ":(exclude)contracts/**" ":(exclude)tests/**"; then
+            grep -xF "runtime_changes=none" "${LANE_TERMINAL_REPORT:?}"
+          else
+            jq -e --arg prefix "Lab: head=$head " --arg revision ":$head" "
+              any(.comments[]; (.body | startswith(\$prefix)) and
+              (.body | test(\" installed=[^ :]+\" + \$revision + \" observed=.+\")))" "${PR_COMMENT_READBACK:?}"
+          fi
+          '
+        cwd: .
+  - id: dod-omn25838-ac5-shared-status
+    description: When the dispatch head is still current, require a shared-cause STATUS row for this lane. Compare any changed head with the launching host's revision.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -c '
+          set -euo pipefail
+          head=$(onex scm pr-view "OmniNode-ai/omnibase_infra#6039" --source local | jq -er ".result.head_sha")
+          if [ "$head" != b2cb1c9ff1de5850025a89600d317aaa1a443bc4 ]; then
+            test "$head" = "${VERIFIED_PR_HEAD:?}"
+          else
+            grep -F " | STATUS | lane=unblk6039-0215 |" "${ONEX_LEDGER_PATH:?}" |
+              grep -F " | shared=yes |" | grep -E " [|] cause=[^|]+ [|]"
+          fi
+          '
+        cwd: .

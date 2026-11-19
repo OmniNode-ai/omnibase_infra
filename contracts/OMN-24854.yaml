@@ -23,7 +23,7 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn24854-ac4-mount-source
     description: >-
-      The mount half of the ticket's AC1: the compose render of the dev lane stack and of the folded main service takes the ledger mount source from ONEX_LANE_DECLARATION_DIR and not from the rendered overlay directory, a render with only ONEX_LANE_OVERLAY_DIR set is refused by name, and the deploy agent's compose environment, the warm refresh and the compose file helpers keep that variable on a folder that holds ci_bus_lanes.yaml. This contract binds no check to the ticket's AC1, AC2 or AC3: those are lab observations (the run line naming all five nodes on the h201 dev runtime, the STATUS row, the integration pass line) that exist only after the deploy agent redeploys dev from a revision that carries this change, which is not done at this head, and a check that passes whatever the lab shows is the defect this contract removes. They stay open on the ticket until the h201 run line, the STATUS row and the SEEN RUNNING line are recorded.
+      The mount half of the ticket's AC1: the compose render of the dev lane stack and of the folded main service takes the ledger mount source from ONEX_LANE_DECLARATION_DIR and not from the rendered overlay directory, a render with only ONEX_LANE_OVERLAY_DIR set is refused by name, the two rendered binds deliver the declaration file to disposable runner-local containers, and the deploy agent's compose environment, the warm refresh and the compose file helpers keep that variable on a folder that holds ci_bus_lanes.yaml. This contract binds no check to the ticket's AC1, AC2 or AC3: those are lab observations (the run line naming all five nodes on the h201 dev runtime, the STATUS row, the integration pass line) that exist only after the deploy agent redeploys dev from a revision that carries this change, which is not done at this head, and a check that passes whatever the lab shows is the defect this contract removes. They stay open on the ticket until the h201 run line, the STATUS row and the SEEN RUNNING line are recorded.
     source: manual
     binds_ac:
       - AC4
@@ -36,4 +36,59 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
         check_value: grep -qE '^\s+- \$\{ONEX_LANE_DECLARATION_DIR:\?[^}]*\}:/etc/onex/workspace-config/config/lab:ro$' docker/docker-compose.dev-tenant-fold.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          bash -c '
+          set -euo pipefail
+          umask 022
+          probe_dir=$(mktemp -d)
+          trap "rm -rf -- \"$probe_dir\"" EXIT
+          mkdir -p "$probe_dir/declaration" "$probe_dir/agent/rendered"
+          printf "lanes: {}\n" > "$probe_dir/declaration/ci_bus_lanes.yaml"
+          sources=$(uv run --frozen python - "$probe_dir" <<"PYTHON"
+          import os
+          import sys
+          from pathlib import Path
+
+          from tests.ci._compose_render_omn21099 import DEV_LANE_STACK, render_stack
+
+          root = Path(sys.argv[1]).resolve()
+          target = "/etc/onex/workspace-config/config/lab"
+          overrides = {
+              "COMPOSE_PROJECT_NAME": "onex-declaration-mount-probe",
+              "ONEX_LANE_DECLARATION_DIR": str(root / "declaration"),
+              "ONEX_LANE_OVERLAY_DIR": str(root / "agent" / "rendered"),
+          }
+          # Forward the runner-provided Docker executable to the isolation shim.
+          if "LANDING_REAL_DOCKER" in os.environ:
+              overrides["LANDING_REAL_DOCKER"] = os.environ["LANDING_REAL_DOCKER"]
+
+          for stack, name in (
+              (DEV_LANE_STACK, "runtime-effects"),
+              ((*DEV_LANE_STACK, "docker-compose.dev-tenant-fold.yml"), "omninode-runtime"),
+          ):
+              volumes = render_stack(stack, overrides)[name]["volumes"]
+              mounts = [volume for volume in volumes if volume["target"] == target]
+              if len(mounts) != 1:
+                  sys.exit(f"{name}: expected one declaration mount at {target}")
+              mount = mounts[0]
+              if mount["type"] != "bind" or mount.get("read_only") is not True:
+                  sys.exit(f"{name}: declaration mount must be a read-only bind")
+              source = Path(mount["source"]).resolve()
+              if not source.is_relative_to(root) or not source.is_dir():
+                  sys.exit(f"{name}: declaration mount source is outside the probe directories")
+              print(source)
+          PYTHON
+          )
+          test -n "$sources"
+          while IFS= read -r source; do
+            docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --user 65534:65534 \
+              --mount "type=bind,source=$source,target=/etc/onex/workspace-config/config/lab,readonly" \
+              alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc \
+              test -s /etc/onex/workspace-config/config/lab/ci_bus_lanes.yaml;
+          done <<< "$sources"
+          printf "%s\n" "Both rendered lane declaration binds are readable in Docker"
+          '
         cwd: ${OMNI_HOME}/omnibase_infra
