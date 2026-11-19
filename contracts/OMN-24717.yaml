@@ -1,0 +1,87 @@
+# OMN-24717 contract file for omnibase_infra deploy-gate.
+# This change edits one integration test and its ticket contract; no runtime, container, broker topic or service changes.
+schema_version: "1.0.0"
+ticket_id: "OMN-24717"
+title: "The no-undeliverable-output test for node_host_table_keys_ingest_effect runs the node's own typed dispatch branch and fails when the dispatch fails"
+summary: >
+  Fixes the review findings on the real-path test in tests/integration/nodes/node_host_table_keys_ingest_effect: the stand-in contract takes the payload_type_match branch of the dispatch callback, the fixed-shape case records completion after the handler's checks and fails when the dispatch fails, the stand-in contract_path names a file that exists, and the unfixed case checks the error type with isinstance. Test-only change.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24717-typed-branch
+    statement: The stand-in contract takes the typed payload_type_match dispatch branch the deployed node takes.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the stand-in contract's routing entry sets routing_strategy payload_type_match with event_model ModelHandlerRef(name=ModelFixtureOverlayStoreRecord, module=**name**) and no message_category, and the test asserts through a spy on handler_wiring._normalize_handler_result that the dispatch took the typed event_model branch (the spy is the branch assertion) -- falsifier: uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov in omnibase_infra passes, and with the stand-in routing entry changed to topic_match with event_model removed, both tests fail on the normalizer spy assertion"
+  - id: req-omn24717-fails-on-failed-dispatch
+    statement: A failed dispatch turns the fixed-shape test red.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the fixed-shape case records the received request on the handler class, asserts its type and overlay_id in the test body, and asserts through caplog that the run emits no ERROR log record, so a failed dispatch turns the test red -- falsifier: uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov with the handler body changed to raise fails on test_fixed_handler_shape_never_routes_undeliverable_output, and passes with the handler restored"
+      - id: AC3
+        statement: "AC3: the unfixed-shape case checks the raised error with isinstance against UndeliverableDispatchOutputError imported from handler_wiring, not a class-name string -- falsifier: uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov passes, and grep -n 'type(exc).**name**' tests/integration/nodes/node_host_table_keys_ingest_effect prints nothing"
+      - id: AC4
+        statement: "AC4: the stand-in contract_path points at a contract file written under tmp_path, so a run logs no could-not-read-terminal-declarations FileNotFoundError warning -- falsifier: uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov passes with a caplog assertion that no record contains FileNotFoundError"
+  - id: req-omn24717-lab-run
+    statement: The pull request's required suites run on a lab host at the new head.
+    acceptance:
+      - id: AC5
+        statement: "AC5: the pull request's required suites run on a lab host at the new head, in parts if a whole run times out, and the new head and results are commented on omnibase_infra#6032 -- falsifier: a read of the comments of OmniNode-ai/omnibase_infra#6032 that returns comments (onex scm pr-view OmniNode-ai/omnibase_infra#6032 --source bus returns the pull request record only, with no comments) lists a comment beginning Lab: head=<full new head sha> with the lab suite results and the parts run"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn24717-ac1
+    description: "AC1: the test passes with the typed payload_type_match stand-in and asserts the dispatch took the typed branch; with the old topic_match shape the branch assertion fails."
+    source: "manual"
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u PYTHONPATH uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov"
+        cwd: .
+  - id: dod-omn24717-ac2
+    description: "AC2: the fixed-shape test records completion after the handler's checks and asserts type, overlay_id and no ERROR record; with a handler that raises it fails."
+    source: "manual"
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u PYTHONPATH uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov -k test_fixed_handler_shape_never_routes_undeliverable_output"
+        cwd: .
+  - id: dod-omn24717-ac3
+    description: "AC3: the unfixed-shape test checks the error with isinstance against UndeliverableDispatchOutputError."
+    source: "manual"
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u PYTHONPATH uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov -k test_unfixed_handler_shape_does_route_undeliverable_output"
+        cwd: .
+  - id: dod-omn24717-ac4
+    description: "AC4: both tests write the stand-in contract under tmp_path and assert no log record contains FileNotFoundError."
+    source: "manual"
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u PYTHONPATH uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect -q --no-cov"
+        cwd: .
+  - id: dod-omn24717-ac5-hosted-proxy
+    description: "AC5 hosted proxy: the suites of the two sibling real-path directories pass at the pushed head; the lab run ids and the new head are recorded in the pull request comment."
+    source: "manual"
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u PYTHONPATH uv run pytest tests/integration/nodes/node_host_table_keys_ingest_effect tests/integration/nodes/node_delegation_chain_ledger_effect -q --no-cov"
+        cwd: .
+  - id: dod-deploy
+    description: "No runtime deploy, restart, broker topic, container image, or live service change is required for this test-only change."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "echo 'deploy-gate: OMN-24717 edits one integration test in omnibase_infra; no runtime deploy or restart required'"

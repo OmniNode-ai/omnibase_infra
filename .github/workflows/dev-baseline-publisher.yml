@@ -4,9 +4,10 @@
 # dev-baseline-publisher.yml — OMN-13027 (retro A-8)
 #
 # Scheduled full-suite run on dev that publishes a machine-readable baseline of
-# currently-failing tests. New failure clusters are auto-filed as Urgent Linear
-# tickets. The baseline is committed back to the dev branch so the
-# test-failure-ratchet PR gate can read it.
+# currently-failing tests. Each failing cluster is reported to the cluster-ticket
+# node named by the DEV_BASELINE_REPORT_COMMAND repository variable, which owns
+# the ticket decision for the cluster. The baseline is committed back to the dev
+# branch so the test-failure-ratchet PR gate can read it.
 #
 # Runs: daily at 03:00 UTC (after nightly-tests at 02:00) and on dispatch.
 
@@ -97,7 +98,8 @@ jobs:
 
       - name: Run full test suite and publish baseline
         env:
-          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          BASELINE_REPORT_COMMAND: ${{ vars.DEV_BASELINE_REPORT_COMMAND }}
+          BASELINE_REPORT_LANE: ${{ vars.DEV_BASELINE_REPORT_LANE }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: |
           DRY_FLAG=""

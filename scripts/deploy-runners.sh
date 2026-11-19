@@ -143,13 +143,14 @@
 #      would recreate a removed runner it still believes should exist)
 #   2. Install and read back the runner slice (install_runner_slice)
 #   3. For each ${RUNNER_NAME_PREFIX}-N container on the host with N greater
-#      than expected_count, one at a time: two-signal idle check (the same
-#      runner_is_idle the rolling mode uses; a STOPPED container runs no job
-#      and counts as idle, and so does a RUNNING container that GitHub reports
-#      offline with no Runner.Worker in its process list, OMN-22478), re-checked immediately before stop, then
+#      than expected_count, one at a time: idle on the container's own evidence
+#      (relabel_container_idle, no GitHub read, OMN-24864: a STOPPED container
+#      counts as idle; a RUNNING one needs no Runner.Worker and no unfinished
+#      "Running job:" in its listener log), re-checked immediately before stop, then
 #      `docker stop` + `docker rm` of that ONE container. Never `rm -v`: the
 #      runner's named creds volume is left in place (volumes are data).
-#   4. Once GitHub reports that runner offline, delete ITS registration by id.
+#   4. Once GitHub reports that runner offline, delete ITS registration by id
+#      (best effort: left in place when gh cannot read it).
 #      Only a runner this invocation just removed is deregistered, which is why
 #      this is not the blanket auto-delete the stale report below refuses.
 #   Skips: image build, token fetch, every cron install, --remove-orphans.
@@ -1640,13 +1641,7 @@ runner_is_idle() {
     state=$(github_runner_state "${name}")
     status="${state%% *}"
     busy="${state##* }"
-    # OMN-22478: --retire-surplus sets IDLE_ACCEPTS_OFFLINE=1 so a RUNNING
-    # container whose listener is dead (GitHub "offline", e.g. a listener that
-    # exits "runner version is deprecated" while the entrypoint loops) can read
-    # idle. Only "offline" with busy "false" qualifies; "unknown" never does,
-    # and the Runner.Worker probe below stays mandatory, so an offline runner
-    # with a live job worker still reads busy.
-    if { [[ "${status}" != "online" ]] && [[ "${status}:${IDLE_ACCEPTS_OFFLINE:-0}" != "offline:1" ]]; } || [[ "${busy}" != "false" ]]; then
+    if [[ "${status}" != "online" ]] || [[ "${busy}" != "false" ]]; then
         return 1
     fi
 
@@ -1868,29 +1863,14 @@ host_surplus_runners() {
         | sort -n | cut -d' ' -f2 || true
 }
 
-container_is_running() {
-    # 0 running, 1 not running, 2 unknown (fail closed: callers treat 2 as busy).
-    local state
-    state=$(ssh "${RUNNER_HOST}" "docker inspect -f '{{.State.Running}}' ${1}" 2>/dev/null) || return 2
-    state="${state//[$'\r\n ']/}"
-    case "${state}" in
-        true) return 0 ;;
-        false) return 1 ;;
-        *) return 2 ;;
-    esac
-}
-
 surplus_runner_is_idle() {
-    # A stopped container runs no job. A running one must pass the SAME
-    # two-signal check --rolling uses (runner_is_idle): GitHub online and not
-    # busy, and no Runner.Worker in the container's process list.
-    local rc=0
-    container_is_running "${1}" || rc=$?
-    case "${rc}" in
-        0) IDLE_ACCEPTS_OFFLINE=1 runner_is_idle "${1}" ;;
-        1) return 0 ;;
-        *) return 1 ;;
-    esac
+    # Judged on the container's own evidence (OMN-24864), as --relabel and --add
+    # do: a stopped container runs no job; a running one needs no Runner.Worker
+    # in `docker top` AND no unfinished "Running job:" in its listener log.
+    # No GitHub read, so a caller without org admin read (a lane, a host timer)
+    # can retire a surplus runner, and a dead listener (OMN-22478, GitHub
+    # "offline") reads idle on the same evidence. Unreadable is not idle.
+    relabel_container_idle "${1}"
 }
 
 github_runner_id() {
