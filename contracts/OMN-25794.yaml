@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-25794
 title: Release writer puts a private repository name in a public CHANGELOG
 summary: >-
-  The release train passes target repository visibility and the public hygiene vocabulary to its release-notes effect. The effect filters private repository names from newly generated public release subjects before writing the notes. The live release refresh and writer handoff require separate readbacks.
+  The release train passes target repository visibility and the public hygiene vocabulary to its release-notes effect. The effect filters private repository names from newly generated public release subjects before writing the notes. The live release refresh and writer handoff are post-merge train and landing-controller steps, tracked on the ticket and not bound here because the hosted gate cannot run them.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -14,10 +14,6 @@ requirements:
         statement: A regression test based on the recorded subject fails on the unfixed writer and passes when the public output filters the private names from the configured vocabulary.
       - id: AC2
         statement: The regression's private repository control preserves the generated changelog with the private name intact.
-      - id: AC3
-        statement: The train refreshes omnimarket PR 6444 on its existing branch and the watcher reports the required public hygiene check succeeded at the new head with the offending name absent from the changelog.
-      - id: AC4
-        statement: The writer PR has an exact-head Lab comment followed by one landing ledger handoff, with no manual merge or tag by the lane.
 evidence_requirements:
   - kind: tests
     description: Exercise the same release-notes node the workflow invokes, with public and private test inputs.
@@ -47,7 +43,8 @@ dod_evidence:
           printf "%s\n" "## v1.0.0 (2026-11-18)" "" "### Included Since v0.9.0" "- fix: example-hidden-repo remains (#4610)" > "$probe/entry.md";
           printf "%s\n" "private_repo_names: [example-hidden-repo]" > "$probe/vocabulary.yaml";
           printf "{\"clone_path\":\"%s\",\"entry_file\":\"%s/entry.md\",\"repository_visibility\":\"public\",\"hygiene_vocabulary_file\":\"%s/vocabulary.yaml\"}\n" "$probe" "$probe" "$probe" > "$probe/request.json";
-          uv run --frozen onex node node_release_notes_apply_effect --input "$probe/request.json" --state-root "$probe/state" --output receipt;
+          export PATH="$(uv run --frozen printenv VIRTUAL_ENV)/bin:$PATH";
+          onex node node_release_notes_apply_effect --input "$probe/request.json" --state-root "$probe/state" --output receipt;
           grep -Fxq -- "- fix: … remains (#4610)" "$probe/CHANGELOG.md"'
         cwd: .
   - id: dod-omn25794-private-release-notes
@@ -57,22 +54,4 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/cli/test_release_notes_apply_node_omn17427.py -q -n 0 --no-cov -k private_repository
-        cwd: .
-  - id: dod-omn25794-live-release-refresh
-    description: Record the train run, the updated head of omnimarket PR 6444, the changelog readback and the successful hygiene check at that head after the writer lands.
-    source: manual
-    binds_ac: [AC3]
-    execution_scope: local_done_gate
-    checks:
-      - check_type: command
-        check_value: onex scm pr-checks OmniNode-ai/omnimarket#6444
-        cwd: .
-  - id: dod-omn25794-writer-handoff
-    description: Record the writer PR's full-head Lab comment and the single landing-controller ledger message. The train owns the release update and the landing controller owns merging.
-    source: manual
-    binds_ac: [AC4]
-    execution_scope: local_done_gate
-    checks:
-      - check_type: command
-        check_value: onex scm pr-view OmniNode-ai/omnibase_infra#6076
         cwd: .
