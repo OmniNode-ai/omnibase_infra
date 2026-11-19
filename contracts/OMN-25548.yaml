@@ -1,0 +1,56 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25548
+title: Boot and the contract topic scan keep a tenant-prefixed topic a contract declares
+summary: >-
+  The proof topic of the cloud ingest first slice is tenant-cli-run-h051.onex.evt.omnimarket.pool-usage-verdict-evaluated.v1. The contract topic extractor required the first segment to be onex and the boot provisioner's declared-topic grammar began with onex, so the name was dropped from contract.yaml and topics.yaml declarations and from an unwired contract's declarations outside event_bus, and no declared path could create it. Both now keep tenant-<slug>.<canonical topic> with a 1 to 32 character lowercase slug, exactly one prefix, and a canonical remainder; unprefixed topics and every malformed name behave as before, and the topic enums stay canonical-only.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25548-tenant-prefixed-topic-provisioning
+    statement: A tenant-prefixed topic a contract or topics.yaml declares is kept by the extractor and created by boot, so the proof topic comes from the declared provisioning path and not from the door.
+    acceptance:
+      - id: AC11
+        statement: >-
+          AC11: the extractor keeps tenant-<slug>.<canonical topic> in contract.yaml and topics.yaml beside three unprefixed controls, boot creates it for an unwired contract, and uppercase, over-length slug, hyphen-edge, missing canonical suffix and nested-prefix names are still refused -- falsifier: uv run --frozen pytest tests/unit/tools/test_tenant_prefixed_topic_omn25548.py tests/unit/runtime/auto_wiring/test_provision_unattached_declared_topics_omn25650.py -k tenant -q --no-cov, red on the base commit and green on the branch
+evidence_requirements:
+  - kind: tests
+    description: The tenant-prefix cases pass at the pushed head and fail at the merge base, which drops the tenant-prefixed topic.
+    command: uv run --frozen pytest tests/unit/tools/test_tenant_prefixed_topic_omn25548.py tests/unit/runtime/auto_wiring/test_provision_unattached_declared_topics_omn25650.py -k tenant -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25548-ac11-extractor
+    description: 'AC11: the extractor keeps the tenant-prefixed topic from contract.yaml and topics.yaml with its topic_config, and refuses the malformed names; at the merge base the topic is skipped'
+    source: manual
+    binds_ac: [AC11]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/tools/test_tenant_prefixed_topic_omn25548.py -q --no-cov
+        cwd: .
+  - id: dod-omn25548-ac11-boot
+    description: 'AC11: boot reads the tenant-prefixed topic from an unwired contract and creates it beside its unprefixed control, and refuses the malformed names'
+    source: manual
+    binds_ac: [AC11]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_provision_unattached_declared_topics_omn25650.py -k tenant -q --no-cov
+        cwd: .
+  - id: dod-omn25548-ac11-boot-deploy
+    description: 'AC11 deploy scope: boot_topic_provisioning.py at the pushed head carries the shared tenant slug pattern in its declared-topic grammar, read from GitHub at that commit'
+    source: manual
+    binds_ac: [AC11]
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/boot_topic_provisioning.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F -- "tenant-{TENANT_SLUG_PATTERN}" > /dev/null'
+        cwd: .
+  - id: dod-omn25548-ac11-extractor-deploy
+    description: 'AC11 deploy scope: the contract topic extractor at the pushed head parses the tenant prefix, read from GitHub at that commit'
+    source: manual
+    binds_ac: [AC11]
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/tools/contract_topic_extractor.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F -- "_parse_declared_topic" > /dev/null'
+        cwd: .
