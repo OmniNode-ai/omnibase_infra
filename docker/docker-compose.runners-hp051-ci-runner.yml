@@ -49,7 +49,8 @@
 # (the refresh script is rsynced by deploy-runners.sh to ~/.omnibase/runners/docker/runners/git-mirror-refresh.sh).
 # Before the first recreate, on the host: create /data/scratch/runners/<N>/{work,tmp} and
 # /data/scratch/cache/runners/<N>/{pip,pre-commit,pnpm,ms-playwright,ci-envs,npm}, owned by uid 1001 (tmp mode 1777),
-# and put LOCAL_LLM_SHARED_SECRET, LLM_ENDPOINT_CIDR_ALLOWLIST and RUNNER_LAB_HOST_TABLE in ~/.omnibase/runners/docker/.env (mode 600).
+# and put LOCAL_LLM_SHARED_SECRET and LLM_ENDPOINT_CIDR_ALLOWLIST in ~/.omnibase/runners/docker/.env (mode 600).
+# RUNNER_LAB_HOST_TABLE is not set by hand: every deploy copies the host's overlay projection for the runner user and writes the key (OMN-26098).
 # OMN-18829: the same host-owned declaration is read by native jobs and CI.
 # Refuse container creation when it is absent; never create an empty directory.
 x-lab-host-table: &lab-host-table

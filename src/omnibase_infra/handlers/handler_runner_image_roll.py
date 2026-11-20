@@ -22,6 +22,9 @@ from omnibase_infra.models.model_runner_image_roll_request import (
 from omnibase_infra.models.model_runner_image_roll_result import (
     ModelRunnerImageRollResult,
 )
+from omnibase_infra.models.model_runner_lab_host_table_policy import (
+    ModelRunnerLabHostTablePolicy,
+)
 from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
     load_runner_fleet_config,
 )
@@ -299,6 +302,7 @@ class HandlerRunnerImageRoll:
             )
         release = True
         try:
+            await self._converge_lab_host_table(request)
             await self._verify_compose(request, targets, token_vars)
             return await self._roll(
                 request,
@@ -323,6 +327,50 @@ class HandlerRunnerImageRoll:
                     raise RunnerRollError(
                         f"Could not release the pool roll lock on {request.host} (exit {rc})."
                     )
+
+    async def _converge_lab_host_table(
+        self, request: ModelRunnerImageRollRequest
+    ) -> None:
+        """OMN-26098: the recreate below mounts the lab host table; copy it and write its key first.
+
+        Only a pool whose own Compose file names the key is touched. A refusal halts before any container is stopped.
+        """
+        table = ModelRunnerLabHostTablePolicy()
+        compose = (
+            request.repo_root
+            / "docker"
+            / f"docker-compose.runners-{request.prefix}.yml"
+        )
+        if table.env_key not in compose.read_text():
+            return
+
+        async def run(host: str, command: str, timeout: int) -> str:
+            rc, output = await self._remote(host, command, timeout=timeout)
+            if rc:
+                raise OSError(f"SSH exited {rc}")
+            return output
+
+        async def write(host: str, word: str, data: str, timeout: int) -> None:
+            rc, _ = await self._remote(
+                host,
+                f"set -eu; test -f {word}; cat > {word}",
+                stdin=data.encode(),
+                timeout=timeout,
+            )
+            if rc:
+                raise OSError(f"SSH exited {rc}")
+
+        result = await table.converge(
+            host=request.host,
+            env_file=table.env_file_home_relative,
+            projection=request.lab_host_table_projection,
+            run=run,
+            write=write,
+        )
+        if not result.success:
+            raise RunnerRollError(
+                result.error_message or "The lab host table copy was refused."
+            )
 
     async def _verify_compose(
         self,
