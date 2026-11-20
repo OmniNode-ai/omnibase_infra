@@ -226,6 +226,13 @@ def test_runner_applies_the_grants_file_inside_the_slot_guarded_grant_seam() -> 
     )
 
 
+def test_runner_without_the_grants_file_logs_a_named_skip() -> None:
+    """A harness or lane that does not carry the file must not fail the run."""
+    text = RUNNER.read_text(encoding="utf-8")
+    assert 'if [ -f "$gateway_grants_file" ]; then' in text
+    assert "skip  gateway_runtime grants (no grants file at" in text
+
+
 def test_every_definition_that_runs_the_runner_mounts_the_seams_directory() -> None:
     """The runner applies /migrations/seams/gateway_runtime_grants.sql by absolute path.
 

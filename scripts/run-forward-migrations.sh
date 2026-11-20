@@ -542,10 +542,7 @@ is_fenced_node_migration() {
 # test_fence_is_not_overridable_by_environment's reasoning, mirrored here by
 # test_grandfather_is_not_overridable_by_environment).
 GRANDFATHER_MANIFEST="${MIGRATIONS_DIR}/grandfathered-force-rls-migrations.yaml"
-if [ ! -f "${GRANDFATHER_MANIFEST}" ]; then
-  echo "FATAL: FORCE-RLS grandfather manifest not found: ${GRANDFATHER_MANIFEST}" >&2
-  exit 1
-fi
+[ -f "${GRANDFATHER_MANIFEST}" ] || { echo "FATAL: FORCE-RLS grandfather manifest not found: ${GRANDFATHER_MANIFEST}" >&2; exit 1; }
 GRANDFATHERED_FORCE_RLS_IDS="$(sed -n \
   's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*"\([^"]*\)".*/\1/p' \
   "${GRANDFATHER_MANIFEST}")"
@@ -1058,10 +1055,7 @@ validate_client_file_path() {
       exit 1
       ;;
   esac
-  if [ ! -f "$client_file_path" ]; then
-    echo "[forward-migration] FATAL: psql client file is missing: ${client_file_path}" >&2
-    exit 1
-  fi
+  [ -f "$client_file_path" ] || { echo "[forward-migration] FATAL: psql client file is missing: ${client_file_path}" >&2; exit 1; }
 }
 
 file_sha256() {
@@ -2413,8 +2407,15 @@ else
   # writes on a DIFFERENT database (omninode_cloud), which the column-scoped
   # function above cannot express and its tests forbid it to. The file gates on
   # the role, the database and the seven tables, resets then grants the nine
-  # items, and reads them back (it fails the run on any difference).
-  psql -f /migrations/seams/gateway_runtime_grants.sql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1
+  # items, and reads them back (it fails the run on any difference). A runner
+  # started without the file (a test harness, a lane that does not mount it) logs
+  # a named skip: the role is not provisioned there either.
+  gateway_grants_file=/migrations/seams/gateway_runtime_grants.sql
+  if [ -f "$gateway_grants_file" ]; then
+    psql -f "$gateway_grants_file" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1
+  else
+    echo "[forward-migration]   skip  gateway_runtime grants (no grants file at ${gateway_grants_file})"
+  fi
 fi
 # ---- END login-only role grant seam (OMN-18060) ----
 
