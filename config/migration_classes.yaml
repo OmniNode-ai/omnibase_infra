@@ -509,6 +509,8 @@ migrations:
   forward/nodes/node_projection_work_ledger/0013_work_ledger_seq_provisional.sql: expand-only # ALTER TABLE ADD COLUMN IF NOT EXISTS with a constant default
   forward/nodes/node_projection_overlay_store/0000_create_overlay_store.sql: forward-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the overlay store table
   forward/nodes/node_projection_overlay_store/0001_grant_omninode_runtime_overlay_store.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the overlay store table
+  forward/nodes/node_ticket_hand_edit_alarm_effect/0001_create_ticket_hand_edit_tables.sql: expand-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the three ticket hand edit tables
+  forward/nodes/node_ticket_hand_edit_alarm_effect/0002_grant_omninode_runtime_ticket_hand_edit_tables.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the three ticket hand edit tables
   forward/nodes/node_view_seam_reading_reducer/0001_create_view_seam_readings.sql: forward-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the view seam readings table
   forward/nodes/node_view_seam_reading_reducer/0002_grant_tenant_projection_writer_view_seam_readings.sql: expand-only # GRANT SELECT, INSERT, UPDATE to tenant_projection_writer on the view seam readings table
   forward/nodes/node_projection_work_questions/0000_create_work_questions.sql: forward-only # CREATE TABLE IF NOT EXISTS and ADD COLUMN IF NOT EXISTS for the five work-question tables

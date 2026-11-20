@@ -52,3 +52,9 @@
   prefix: ""
   opts: {}
   tables: [floor_integration_rows]
+- ticket: OMN-20413 # omnimarket OMN-23776
+  node: node_ticket_hand_edit_alarm_effect
+  create: 0001_create_ticket_hand_edit_tables.sql
+  prefix: ticket_hand_edit_
+  opts: {}
+  tables: [written, cursor, open_findings]
