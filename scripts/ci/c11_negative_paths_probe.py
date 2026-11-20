@@ -34,7 +34,7 @@ THE HEADER FORM IS PINNED
 
 THE MALFORMED ARM CARRIES NO CODE, BY OBSERVATION
     Payload refusals on this API are the framework's default 422 envelope --
-    ``{"detail":[{"type":"missing","loc":["body","<field>"],...}]}`` -- and
+    ``{"detail":[{"type":"missing","loc":["query","<field>"],...}]}`` -- and
     carry no ``code`` field at all. The criterion asks for "a typed refusal
     naming the offending field", which that envelope does: ``type`` types it
     and ``loc`` names the field. So this arm is graded on ``type`` and ``loc``.
@@ -82,10 +82,9 @@ HEADER_NAME: Final[str] = "x-api-key"
 # value would make a failing run un-reproducible.
 SYNTHETIC_INVALID_KEY: Final[str] = "onx_c11_probe_never_valid_omn19175"
 
-# The field the malformed body omits, and therefore the field the 422 envelope
-# must name back. Both halves are declared here so they cannot drift apart.
-MALFORMED_BODY: Final[dict[str, Any]] = {"omn19175_not_a_field": True}
-MALFORMED_MISSING_FIELD: Final[str] = "name"
+# The query field the malformed request omits, and therefore the field the 422
+# envelope must name back (the runtime's workflow gateway, RULING 2026-11-10T13:26:22Z).
+MALFORMED_MISSING_FIELD: Final[str] = "runner_identity"
 
 RECORD_VERSION: Final[int] = 1
 
@@ -131,7 +130,7 @@ CASES: Final[tuple[CaseSpec, ...]] = (
     CaseSpec(
         name="wrong_key",
         method="GET",
-        path="/v1/whoami",
+        path="/v1/workflows/contracts",
         credential="invalid",
         expected_status=401,
         expected_code="auth.credential.invalid",
@@ -140,7 +139,7 @@ CASES: Final[tuple[CaseSpec, ...]] = (
     CaseSpec(
         name="absent_key",
         method="GET",
-        path="/v1/whoami",
+        path="/v1/workflows/contracts",
         credential="none",
         expected_status=401,
         expected_code="auth.credential.absent",
@@ -149,8 +148,8 @@ CASES: Final[tuple[CaseSpec, ...]] = (
     CaseSpec(
         name="wrong_tenant",
         method="GET",
-        # Formatted with the other tenant's slug at request time.
-        path="/v1/tenants/{other_tenant_slug}/api-keys",
+        # A workflow id the credential's tenant does not own (the runtime scopes every read to the caller's tenant).
+        path="/v1/workflows/00000000-0000-4000-8000-000000000011/status",
         credential="valid",
         expected_status=403,
         expected_code="auth.tenant.forbidden",
@@ -163,13 +162,12 @@ CASES: Final[tuple[CaseSpec, ...]] = (
     ),
     CaseSpec(
         name="malformed",
-        method="POST",
-        path="/v1/api-keys",
+        method="GET",
+        path="/v1/workflows/00000000-0000-4000-8000-000000000012/receipt",
         credential="valid",
         expected_status=422,
         expected_code=None,
         expected_missing_field=MALFORMED_MISSING_FIELD,
-        body=MALFORMED_BODY,
         why=(
             "A schema-invalid body on an AUTHENTICATED route, so the refusal is "
             "a validation refusal and not an auth one. Request validation runs "
