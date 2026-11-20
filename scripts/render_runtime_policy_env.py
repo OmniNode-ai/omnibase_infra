@@ -182,9 +182,8 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
             env[f"{prefix}_PUBLISH_INTROSPECTION"] = _bool_text(
                 process.publish_introspection
             )
-            env[f"{prefix}_SECRET_RESOLVER_CONFIG_PATH"] = (
-                profile.secret_resolver_config_path
-            )
+            path = profile.secret_resolver_config_path
+            env[f"{prefix}_SECRET_RESOLVER_CONFIG_PATH"] = path
             env[f"{prefix}_SECRET_RESOLVER_CONFIG_JSON"] = secret_resolver_config_json
             if process.boot is not None:
                 env.update(process.boot.render_env(prefix))
@@ -205,6 +204,7 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
                     )
                 )
 
+    env.update(contract.dev_recreate_window.render_env())
     return dict(sorted(env.items()))
 
 

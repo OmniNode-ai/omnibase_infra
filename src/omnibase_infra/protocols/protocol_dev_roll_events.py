@@ -6,13 +6,15 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Protocol
 
-from pydantic import JsonValue
+from pydantic import BaseModel, JsonValue
 
 
 class ProtocolDevRollEvents(Protocol):
     """Publishes dev roll events; every method swallows its own failure."""
 
     def manifest(self, command: Mapping[str, JsonValue]) -> None: ...
+
+    def recreate_announced(self, announcement: BaseModel) -> bool: ...
 
     def started(self, job_id: str, started_at: datetime, cause: str) -> None: ...
 

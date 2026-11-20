@@ -30,6 +30,10 @@ H051 = "hp051-ci-runner"
 COUNT = 5
 # Hosts whose CPU lacks AVX2, read from /proc/cpuinfo (OMN-17232, 2026-11-02).
 NO_AVX2_PREFIXES = (H051,)
+# OMN-25674: the one pool on a no-AVX2 host that carries ``omnibase-ci``. The private repository whose unit suite imported
+# an AVX2 wheel runs its CI on GitHub-hosted runners (RULING 2026-11-19T19:01:11Z), so no workflow asks for AVX2 on a
+# self-hosted runner and the general capacity moves to h051 (RULING 2026-11-19T17:09:34Z).
+NO_AVX2_ACTION_POOLS = ("hp051-omnibase-ci-runner",)
 # The runner image's home. h053 spells it as the primary compose file does, so no machine path is written.
 IMAGE_HOME = "/home/runner"
 RUNNER_HOME = "${RUNNER_USER_HOME:-" + IMAGE_HOME + "}"
@@ -88,7 +92,7 @@ def test_every_h053_runner_carries_the_general_and_the_opt_in_label() -> None:
 
 
 def test_no_runner_that_carries_omnibase_ci_sits_on_a_host_without_avx2() -> None:
-    """The invariant behind OMN-22111: h051 cannot import an AVX2 wheel, so it must never take ``omnibase-ci``."""
+    """The invariant behind OMN-22111: h051 cannot import an AVX2 wheel, so only the pool named in NO_AVX2_ACTION_POOLS takes ``omnibase-ci`` there."""
     for prefix in NO_AVX2_PREFIXES:
         for name, service in _compose(prefix)["services"].items():
             assert "omnibase-ci" not in _labels(service), name
@@ -99,7 +103,11 @@ def test_no_runner_that_carries_omnibase_ci_sits_on_a_host_without_avx2() -> Non
             *(p.runner_name_prefix for p in host.pools),
         ]
         if any(prefix in NO_AVX2_PREFIXES for prefix in prefixes):
-            assert host.declared_count("action") == 0, host.host
+            assert "action" not in host.classes, host.host
+            carrying = {
+                p.runner_name_prefix for p in host.pools if "action" in p.classes
+            }
+            assert carrying <= set(NO_AVX2_ACTION_POOLS), host.host
 
 
 def test_the_fleet_declares_h053_with_the_general_class() -> None:
@@ -132,7 +140,7 @@ def test_the_pool_slice_bounds_the_whole_pool() -> None:
     )
     assert limits["CPUWeight"] == "25"
     assert ram <= _bytes(limits["MemoryHigh"]) <= _bytes(limits["MemoryMax"])
-    # OMN-19998: the job directories are tmpfs, so nothing in the pool may swap to the rotational root volume.
+    # OMN-19998: nothing in the pool may swap to the rotational root volume.
     assert swap == 0
     assert limits["MemorySwapMax"] == "0"
 
@@ -169,10 +177,10 @@ def test_the_h053_service_blocks_are_the_h051_blocks_with_the_h053_names() -> No
     h053 = _compose(H053)["services"][f"{H053}-1"]
     for key in ("image", "restart", "pids_limit"):
         assert h053[key] == h051[key], key
-    # OMN-19998: the limits are h053's own, from the reads of 2026-11-04 (see the compose header).
+    # OMN-19998 and OMN-26093: the limits are h053's own, from the reads of 2026-11-04 and 2026-11-19 (see the compose header).
     assert (h053["mem_limit"], h053["memswap_limit"], h053["cpus"]) == (
-        "9g",
-        "9g",
+        "6g",
+        "6g",
         "5.0",
     )
     assert h053["group_add"] == h051["group_add"] == ["988"]

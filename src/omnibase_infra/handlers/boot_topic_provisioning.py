@@ -29,6 +29,9 @@ import yaml
 
 from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.errors import TopicReplicationPolicyError
+from omnibase_infra.models.event_bus.model_contract_topic_entry import (
+    TENANT_SLUG_PATTERN,
+)
 from omnibase_infra.protocols.protocol_topic_provisioner import (
     ProtocolTopicProvisioner,
 )
@@ -41,9 +44,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# The topic grammar a declared name must match before boot creates it (OMN-25650).
+# The topic grammar a declared name must match before boot creates it (OMN-25650):
+# a canonical topic, or one tenant's ``tenant-<slug>.`` copy of it (OMN-25548).
 _DECLARED_TOPIC = re.compile(
-    r"^onex\.(?:evt|cmd|snapshot)\.[a-z0-9-]+\.[a-z0-9._-]+\.v\d+$"
+    rf"^(?:tenant-{TENANT_SLUG_PATTERN}\.)?"
+    r"onex\.(?:evt|cmd|snapshot)\.[a-z0-9-]+\.[a-z0-9._-]+\.v\d+$"
 )
 
 

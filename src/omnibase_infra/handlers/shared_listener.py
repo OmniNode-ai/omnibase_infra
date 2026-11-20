@@ -27,6 +27,7 @@ from aiohttp.typedefs import Handler, Middleware
 from omnibase_core.types import JsonType
 from omnibase_infra.enums.enum_detach_answer import EnumDetachAnswer
 from omnibase_infra.enums.enum_shared_listener_state import EnumSharedListenerState
+from omnibase_infra.handlers.http_mount import listener_runner
 from omnibase_infra.handlers.shared_listener_broker_client import (
     BrokerSession,
     BrokerUnavailableError,
@@ -201,7 +202,7 @@ class SharedListener:
                 if self._blocked() or not await self._is_ready() or self._blocked():
                     raise AttachAbandonedError
                 self._attach_in_phase2 = True
-                runner = web.AppRunner(
+                runner = listener_runner(
                     self._build_app(self._middleware),
                     shutdown_timeout=self._policy.listener_first_request_seconds,
                 )

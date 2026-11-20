@@ -2014,7 +2014,7 @@ secondary_target_names() {
 
 # OMN-19998: dispatch preparation through the contract-backed effect.
 ensure_runner_tmp_dirs() {
-    jq -n --arg host "${RUNNER_HOST}" --arg host_dir "${RUNNER_HOST_DIR}" --arg compose_file "${REPO_ROOT}/${COMPOSE_FILE}" --arg prefix "${RUNNER_NAME_PREFIX}" --argjson count "${RUNNER_COUNT}" --argjson dry_run "${DRY_RUN}" --argjson secondary "${SECONDARY_HOST}" --arg fleet_config "${RUNNER_FLEET_CONFIG}" --arg clone_root "${OMNI_HOME:-}" '$ARGS.named | with_entries(select(.value != ""))' | uv run --frozen --project "${REPO_ROOT}" python -c 'from omnibase_infra.cli.cli_node import run_node_by_name; run_node_by_name()' node_deploy_runners --contract "${REPO_ROOT}/src/omnibase_infra/nodes/node_deploy_runners/contract.yaml" --input /dev/stdin --backend event_bus=inmemory --state-root "${ONEX_STATE_DIR:-${REPO_ROOT}/.onex_state}/runner-tmp"
+    jq -n --arg host "${RUNNER_HOST}" --arg host_dir "${RUNNER_HOST_DIR}" --arg compose_file "${REPO_ROOT}/${COMPOSE_FILE}" --arg prefix "${RUNNER_NAME_PREFIX}" --argjson count "${RUNNER_COUNT}" --argjson dry_run "${DRY_RUN}" --argjson secondary "${SECONDARY_HOST}" --arg fleet_config "${RUNNER_FLEET_CONFIG}" --arg clone_root "${OMNI_HOME:-}" --arg lab_host_table_projection "${RUNNER_LAB_HOST_TABLE_PROJECTION:-}" '$ARGS.named | with_entries(select(.value != ""))' | uv run --frozen --project "${REPO_ROOT}" python -c 'from omnibase_infra.cli.cli_node import run_node_by_name; run_node_by_name()' node_deploy_runners --contract "${REPO_ROOT}/src/omnibase_infra/nodes/node_deploy_runners/contract.yaml" --input /dev/stdin --backend event_bus=inmemory --state-root "${ONEX_STATE_DIR:-${REPO_ROOT}/.onex_state}/runner-tmp"
 }
 
 # One registry read, then "<name> <status>" per target name ("unknown" when the
@@ -2564,7 +2564,7 @@ main() {
     if "${SECONDARY_HOST}" && "${ROLLING_DEPLOY}"; then
         if "${RELABEL_ROLL}" || "${SOFT_DEPLOY}" || "${RETIRE_SURPLUS}" || "${ARTIFACTS_ONLY}" || [[ -n "${ADD_SERVICES}" ]]; then err "Secondary --rolling is mutually exclusive with every other deploy mode."; fi
         [[ -n "${TOKEN_FILE}" ]] || err "Secondary --rolling requires --token-file, including for --dry-run."
-        jq -n --arg host "${RUNNER_HOST}" --arg prefix "${RUNNER_NAME_PREFIX}" --arg repo_root "${REPO_ROOT}" --arg fleet_config "${RUNNER_FLEET_CONFIG}" --arg token_path "${TOKEN_FILE}" --arg only "${ROLL_ONLY}" --arg limit "${ROLL_LIMIT}" --argjson dry_run "${DRY_RUN}" --argjson skip_build "${SKIP_BUILD}" '$ARGS.named | .limit |= tonumber' |
+        jq -n --arg host "${RUNNER_HOST}" --arg prefix "${RUNNER_NAME_PREFIX}" --arg repo_root "${REPO_ROOT}" --arg fleet_config "${RUNNER_FLEET_CONFIG}" --arg token_path "${TOKEN_FILE}" --arg only "${ROLL_ONLY}" --arg limit "${ROLL_LIMIT}" --arg lab_host_table_projection "${RUNNER_LAB_HOST_TABLE_PROJECTION:-}" --argjson dry_run "${DRY_RUN}" --argjson skip_build "${SKIP_BUILD}" '$ARGS.named | .limit |= tonumber' |
             uv run --frozen --project "${REPO_ROOT}" python -c 'from omnibase_infra.cli.cli_node import run_node_by_name; run_node_by_name()' node_runner_image_roll --contract "${REPO_ROOT}/src/omnibase_infra/nodes/node_runner_image_roll/contract.yaml" --input /dev/stdin --backend event_bus=inmemory --timeout 9600 --state-root "${ONEX_STATE_DIR:-${REPO_ROOT}/.onex_state}/runner-image-roll"
         return
     fi

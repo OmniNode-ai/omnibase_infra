@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_venv_branch_install
+contract_name: node_venv_branch_install
+node_name: node_venv_branch_install
+node_type: EFFECT_GENERIC
+runtime_profiles: [local-dev]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: Install the head of one omnimarket pull request into a host's dispatch venv through the atomic venv install, record the revision it replaced in a receipt, and revert to that revision with one command.
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: false
+input_model:
+  name: ModelVenvBranchInstallRequest
+  module: omnibase_infra.models.model_venv_branch_install_request
+  description: An install (host, venv, pull request, head sha, named units) or a revert.
+output_model:
+  name: ModelVenvBranchInstallResult
+  module: omnibase_infra.models.model_venv_branch_install_result
+  description: The verdict, the installed=<host>:<sha> record, the receipt path and the replaced revision.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: venv.branch_install
+      handler:
+        name: HandlerVenvBranchInstall
+        module: omnibase_infra.handlers.handler_venv_branch_install
+      event_model:
+        name: ModelVenvBranchInstallRequest
+        module: omnibase_infra.models.model_venv_branch_install_request
+      supported_operations: [venv.branch_install]
+io_operations:
+  - operation: venv.branch_install
+    description: Install one omnimarket pull request head for named units, or revert the active install on the host; never moves a shared clone and never restarts a runtime.
+    input_fields: [command, host, venv, state_dir, pr_number, head_sha, units]
+    output_fields: [status, exit_code, installed, receipt_path, replaced_revision, output]
+capabilities:
+  - name: venv.branch_install
+    description: Reversible in-place install of one pull request head into a dispatch venv.
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types: []
+metadata:
+  author: OmniNode Team
+  license: MIT
+  description: Run from a shell on the host that owns the venv, before dispatch can carry the change; it has no broker consumer or publisher.
+  related_tickets: [OMN-26102, OMN-22712]
