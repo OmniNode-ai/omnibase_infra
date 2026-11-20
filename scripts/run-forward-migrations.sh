@@ -542,7 +542,10 @@ is_fenced_node_migration() {
 # test_fence_is_not_overridable_by_environment's reasoning, mirrored here by
 # test_grandfather_is_not_overridable_by_environment).
 GRANDFATHER_MANIFEST="${MIGRATIONS_DIR}/grandfathered-force-rls-migrations.yaml"
-[ -f "${GRANDFATHER_MANIFEST}" ] || { echo "FATAL: FORCE-RLS grandfather manifest not found: ${GRANDFATHER_MANIFEST}" >&2; exit 1; }
+if [ ! -f "${GRANDFATHER_MANIFEST}" ]; then
+  echo "FATAL: FORCE-RLS grandfather manifest not found: ${GRANDFATHER_MANIFEST}" >&2
+  exit 1
+fi
 GRANDFATHERED_FORCE_RLS_IDS="$(sed -n \
   's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*"\([^"]*\)".*/\1/p' \
   "${GRANDFATHER_MANIFEST}")"
@@ -2411,11 +2414,7 @@ else
   # started without the file (a test harness, a lane that does not mount it) logs
   # a named skip: the role is not provisioned there either.
   gateway_grants_file=/migrations/seams/gateway_runtime_grants.sql
-  if [ -f "$gateway_grants_file" ]; then
-    psql -f "$gateway_grants_file" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1
-  else
-    echo "[forward-migration]   skip  gateway_runtime grants (no grants file at ${gateway_grants_file})"
-  fi
+  if [ -f "$gateway_grants_file" ]; then psql -f "$gateway_grants_file" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1; else echo "[forward-migration]   skip  gateway_runtime grants (no grants file at ${gateway_grants_file})"; fi
 fi
 # ---- END login-only role grant seam (OMN-18060) ----
 

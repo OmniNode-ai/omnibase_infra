@@ -352,11 +352,13 @@ def test_shared_base_never_requires_the_gateway_password() -> None:
     """Every lane layers docker-compose.infra.yml.
 
     A fail-closed reference in the base would make their compose render refuse
-    when the operator env carries no gateway password. The DSN lives in the two
-    lane overlays that opted in.
+    when the operator env carries no gateway password. The base only passes the
+    DSN env through, empty by default (the resolver-env anchor requires it); the
+    value lives in the two lane overlays that opted in.
     """
     base = "\n".join(_executable_lines(COMPOSE_INFRA.read_text(encoding="utf-8")))
-    assert DSN_VAR not in base
+    dsn_lines = [line.strip() for line in base.splitlines() if DSN_VAR in line]
+    assert dsn_lines == [f"{DSN_VAR}: ${{{DSN_VAR}:-}}"]
     assert f"${{{PASSWORD_VAR}:?" not in base
 
 
