@@ -36,9 +36,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_dev_runtime_pr_watcher_state_omn26258.py -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
-      - check_type: command
-        check_value: docker exec omninode-runtime test -f /etc/onex/pr-watcher-state/state.json
-        cwd: .
   - id: dod-omn26258-ac2-declared-in-compose-only
     description: 'AC2: the binding is one environment value and one read-only mount in docker/docker-compose.dev-tenant-fold.yml; the mount source is the unit user home through ${HOME}, never a typed home path, and the shared dev-lane overlay carries neither half. The deploy agent job that loads it is read from the agent record and recorded in the ticket comment.'
     source: manual
@@ -54,6 +51,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_dev_runtime_pr_watcher_state_omn26258.py tests/ci/test_dev_runtime_product_clone_pin_omn25901.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26258-integration-proof-live-runtime
+    description: 'Live half on the lab host after the deploy agent job: the declared state file exists inside the dev runtime and the newest closer run line reads candidates. The hosted runner has no omninode-runtime container, so these run at the local done gate only.'
+    source: manual
+    binds_ac: []
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime test -f /etc/onex/pr-watcher-state/state.json
         cwd: .
       - check_type: command
         check_value: bash -c 'docker logs --since 6h omninode-runtime 2>&1 | grep "STATUS ticket-closer" | tail -1 | grep -E "candidates_read=true examined=[1-9]"'
