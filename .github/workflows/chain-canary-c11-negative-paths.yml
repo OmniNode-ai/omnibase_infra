@@ -240,7 +240,7 @@ jobs:
           }
           json.dump(request, open('c11-delegation-legs-input.json', 'w', encoding='utf-8'))
           "
-          uv run --frozen onex node node_c11_delegation_legs_effect \
+          uv run --frozen python -m omnibase_core.cli.cli_commands node node_c11_delegation_legs_effect \
             --input c11-delegation-legs-input.json --backend event_bus=inmemory \
             --state-root .onex_state/c11-delegation-legs
           status=$?

@@ -437,7 +437,7 @@ jobs:
             >"${RUNNER_TEMP}/release-notes-request.json"
           if ! env -u GH_TOKEN -u GITHUB_TOKEN uv run --frozen --no-dev \
             --project "${GITHUB_WORKSPACE}/_train" \
-            onex node node_release_notes_apply_effect \
+            python -m omnibase_core.cli.cli_commands node node_release_notes_apply_effect \
             --input "${RUNNER_TEMP}/release-notes-request.json" \
             --state-root "${RUNNER_TEMP}/release-notes-state" \
             --output receipt >"${RUNNER_TEMP}/release-notes-receipt.json" \
