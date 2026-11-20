@@ -10,52 +10,15 @@ from typing import ClassVar
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_runner_mount_type import EnumRunnerMountType
+from omnibase_infra.models.model_runner_rendered_config import (
+    ModelRunnerRenderedConfig,
+)
+from omnibase_infra.models.model_runner_running_config import (
+    ModelRunnerRunningConfig,
+)
 
 # A volume the daemon made for an image ``VOLUME`` line is named by its 64 hex digit id and appears in no Compose file.
 _ANONYMOUS_VOLUME = re.compile(r"[0-9a-f]{64}")
-
-
-class ModelRunnerRenderedVolume(BaseModel):
-    """One long-form volume of ``docker compose config --format json``."""
-
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    type: EnumRunnerMountType
-    source: str = ""
-    target: str
-    read_only: bool = False
-
-
-class ModelRunnerRenderedConfig(BaseModel):
-    """The synced Compose service, already filtered to the declared env keys on the host."""
-
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    volumes: tuple[ModelRunnerRenderedVolume, ...] = ()
-    tmpfs: tuple[str, ...] = ()
-    environment: dict[str, str | None] = Field(default_factory=dict)
-
-
-class ModelRunnerInspectMount(BaseModel):
-    """One entry of ``docker inspect`` ``.Mounts``."""
-
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    kind: str = Field(alias="Type")
-    name: str = Field(default="", alias="Name")
-    source: str = Field(default="", alias="Source")
-    target: str = Field(alias="Destination")
-    writable: bool = Field(default=True, alias="RW")
-
-
-class ModelRunnerRunningConfig(BaseModel):
-    """The running container, already filtered to the declared env keys on the host."""
-
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    mounts: tuple[ModelRunnerInspectMount, ...] = ()
-    tmpfs: dict[str, str] = Field(default_factory=dict)
-    environment: dict[str, str] = Field(default_factory=dict)
 
 
 # ``kind, bind source, read-only``: the three facts of a mount that a Compose edit can change.
