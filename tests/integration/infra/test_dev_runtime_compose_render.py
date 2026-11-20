@@ -121,6 +121,8 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     "OMNINODE_RUNTIME_PASSWORD": "render-only-omninode-runtime-password",
     # OMN-15425: TENANT-domain counterpart, same `:?` seam in x-runtime-env.
     "TENANT_PROJECTION_WRITER_PASSWORD": "render-only-tenant-projection-writer-password",
+    # OMN-26151: the lab gateway login, fail-closed in the lane overlay. Render-only.
+    "GATEWAY_RUNTIME_PASSWORD": "d" * 64,
     "LINEAR_API_KEY": "test-linear-api-key",
     "GITHUB_TOKEN": "test-github-token",
     "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",
