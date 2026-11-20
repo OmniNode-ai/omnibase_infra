@@ -228,6 +228,16 @@ profiles:
         source:
           source_type: env
           source_path: OMNIDASH_ANALYTICS_DB_URL
+      # OMN-26151: the lab workflow gateway's database (omnimarket
+      # node_workflow_gateway_effect overlay key database.dsn_secret). Unmapped, every
+      # request that needs the database answered 503 "authentication is temporarily
+      # unavailable". The container env carries the DSN (docker-compose.dev-lane.yml,
+      # GATEWAY_DATABASE_DSN, role gateway_runtime on this lane's own omninode_cloud).
+      # The value never appears here.
+      - logical_name: gateway.database.dsn
+        source:
+          source_type: env
+          source_path: GATEWAY_DATABASE_DSN
     services:
       main:
         runtime_id: dev-main
@@ -567,6 +577,16 @@ profiles:
         source:
           source_type: env
           source_path: KEYCLOAK_ADMIN_CLIENT_SECRET
+      # OMN-26151: the lab workflow gateway's database (omnimarket
+      # node_workflow_gateway_effect overlay key database.dsn_secret). Unmapped, every
+      # request that needs the database answered 503 "authentication is temporarily
+      # unavailable". The container env carries the DSN (the stability overlay compose file,
+      # GATEWAY_DATABASE_DSN, role gateway_runtime on this lane's own omninode_cloud).
+      # The value never appears here.
+      - logical_name: gateway.database.dsn
+        source:
+          source_type: env
+          source_path: GATEWAY_DATABASE_DSN
     services:
       main:
         runtime_id: stability-test-main

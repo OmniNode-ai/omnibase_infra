@@ -390,6 +390,11 @@ services:
       # on the lanes that already have the runner, and skip on the one lane that
       # would otherwise apply it.
       CHAIN_CANARY_READER_PASSWORD: ${CHAIN_CANARY_READER_PASSWORD:-}
+      # OMN-26151: the fourth LOGIN_ONLY_ROLE_MAP entry -- gateway_runtime, the lab
+      # workflow gateway's login on omninode_cloud. Empty-means-skip, as above; the
+      # fail-closed `:?` lives on the CONSUMER (GATEWAY_DATABASE_DSN in the dev and
+      # stability overlays, not in x-runtime-env: every lane layers this file).
+      GATEWAY_RUNTIME_PASSWORD: ${GATEWAY_RUNTIME_PASSWORD:-}
       # OMN-18438: role_omninode, and the FIRST entry that is not a
       # LOGIN_ONLY_ROLE_MAP principal. It is a SERVICE_DB_MAP principal in
       # 000_create_multiple_databases.sh -- the MAPPED SERVICE ROLE of
@@ -428,6 +433,7 @@ services:
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
       - ../docker/migrations/forward:/migrations/forward:ro
+      - ../docker/migrations/seams:/migrations/seams:ro
     entrypoint: ["sh", "/run-forward-migrations.sh"]
     networks: !override
       - omnibase-infra-judge-network

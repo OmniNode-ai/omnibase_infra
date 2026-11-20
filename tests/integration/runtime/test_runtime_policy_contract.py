@@ -96,6 +96,7 @@ def test_runtime_policy_contract_controls_logical_secret_resolver_refs() -> None
         "gateway.attach.keycloak.introspection",
         "gateway.attach.keycloak.issuer",
         "gateway.attach.keycloak.jwks",
+        "gateway.database.dsn",
         "llm.openrouter.api_key",
         "llm.glm.api_key",
         "llm.gemini.api_key",
@@ -103,7 +104,9 @@ def test_runtime_policy_contract_controls_logical_secret_resolver_refs() -> None
         "SLACK_BOT_TOKEN",
         "slack.bot_token",
     }
-    assert judge_logical_names == logical_names
+    # OMN-26151: the gateway database DSN is mapped on the dev and stability
+    # profiles only; the judge lane has no gateway_runtime login.
+    assert judge_logical_names == logical_names - {"gateway.database.dsn"}
     assert (
         rendered_env["STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH"]
         == stability_profile.secret_resolver_config_path

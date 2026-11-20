@@ -1366,17 +1366,17 @@ _OTHER_BUNDLE_DIGESTS = {
     "auth": "1bf4de388a77a7d94e7a44cf785c7caba8a051c8aaf5501cc0b082cb5a25d28d",
     "canary": "5ab631eca245b2bdee989982d8e2e7b562e2632c149aadd7297a77dfdbdac76b",
     "core": "6aadec4f0303690e429c3dbe6b4b72fec42b6ee4624d1b84f6941e6f8e09eb55",
-    "fault-injection": "8db0f73d370c5ad02ac45aface9ed797b564d3cdc2dffe31f4acc21890f5f7e9",
+    "fault-injection": "d69d0e820806eed8250407c438511c1f8029439c86afd1f44219b1f3215fc933",
     "memgraph": "d55629512c84083550a018a068c3e394f352e06414192eff5a4f9f0967bd8bc3",
     "observability": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
     "omnidash": "c8ec69a7177b270479e795459ad901c7608bfe5dafee676d83706f0c4ad267ba",
-    "omnimarket-projections": "2dddac4c21e6209ca3c09f04e43dc7a7f56b087e862fc565ed0315db3f5762e0",
+    "omnimarket-projections": "f6552c3c6c749ebda95be31d260d10b37eab5fb0ef3e4b34862ba0f065dcfbe0",
     "omnimemory": "deff725fc3a399734a9052e09823d6f7e2b1c65e4935dd2b9e16d9b275294671",
-    "runtime": "2a29d35947310d7879bac4841de654502c9281957b24e205fae6cfd5b7191252",
-    "runtime-core": "23f329c99668fd6ef4137edee9c07f59e3f73c9a1542f73af12c1d9044db21bf",
-    "runtime-infrastructure": "faf5e4ccaa9f09d9ccc9412a253d614573a865a31f274d6a68056ddd8538a78c",
+    "runtime": "ce33ae0162e23d383ab873d9c45fc000c2ca2abcb69aec65e60f90914707ccb0",
+    "runtime-core": "3949afbb0748a15b509bc769f566af40395a385dcec987fa9e2983358d19268a",
+    "runtime-infrastructure": "2471f0f63f3ff5688d537fcb2bfff2c2914e750b489de0451d4c15aa91a26fcf",
     "runtime-integrations": "becf59c5917d835f5148c9449bcec688b593792c89b1d31d6a62666b31d6b623",
-    "runtime-observability-projections": "843681c597dcf5ba7e0d1fd223c1bae557f8dc8a69c132f0c9376eb8365da052",
+    "runtime-observability-projections": "2f256362cccbea5c6b8c6382c5b026b930df4b78e34f62af3da908bb37e300f0",
     "secrets": "6aadec4f0303690e429c3dbe6b4b72fec42b6ee4624d1b84f6941e6f8e09eb55",
     "tenant-path": "1fb380f0581987d63086c16fd37afe59721c927053e230ef5699324561b82d63",
     "tracing": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
@@ -1402,7 +1402,9 @@ def test_every_bundle_but_local_renders_byte_identically_to_its_pre_sasl_digest_
     # three updated digests. OMN-18087: the four runtime-bearing bundles moved
     # when main's memory limit and the runtime user's home came from the policy.
     # OMN-22391: runtime and runtime-core moved when the intelligence API left
-    # their service lists for the runtime's own HTTP mount.
+    # their service lists for the runtime's own HTTP mount. OMN-26151: the
+    # forward-migration service gained the seams directory mount, so the six
+    # bundles that carry it moved.
     assert sorted(
         set(bundles) - {"local", "local-market", "local-lane-mirror"}
     ) == sorted(_OTHER_BUNDLE_DIGESTS)

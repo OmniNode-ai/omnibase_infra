@@ -24,6 +24,7 @@ from omnibase_infra.topology.physical_schema_mapping import (
     APPLICATION_SEQUENCES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
 )
+from omnibase_infra.validation import validator_physical_public_tables as bridge
 from omnibase_infra.validation.application_relation_ownership import (
     load_service_ownership_manifest,
 )
@@ -2151,9 +2152,7 @@ def load_application_database_ownership_identities(
         # doubled. `session_phase_state`, which IS declared directly as
         # `schema: public` in omninode_infra's k8s manifest, is in neither
         # set and so is untouched by this bridge.
-        bridged_schema_for_family = {
-            "omninode_internal": INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
-        }.get(schema)
+        bridged_schema_for_family = bridge.PHYSICALLY_PUBLIC_TABLES.get(schema)
         if (
             bridged_schema_for_family is not None
             and function_signature is None
