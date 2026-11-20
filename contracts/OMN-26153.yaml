@@ -42,7 +42,7 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests -m "not lab_overlay" -n 4 --dist loadfile -q
+        check_value: bash -c 'DEPLOY_AGENT_REPO_DIR="$PWD" uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests -m "not lab_overlay" -n 4 --dist loadfile -q'
         cwd: .
   - id: dod-omn26153-ac3-ready-and-listed
     description: 'AC3: the READY state, the Lab comment and the STATUS row live on the pull request and the ledger, which the hosted gate cannot read; the check runs the focused tests the Lab comment and the row rest on.'
@@ -50,5 +50,5 @@ dod_evidence:
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py -q
+        check_value: bash -c 'DEPLOY_AGENT_REPO_DIR="$PWD" uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py -q'
         cwd: .
