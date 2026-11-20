@@ -8,7 +8,7 @@ WHAT THIS IS
     against the deployed ``omnimarket`` package and the runtime's contract-owned
     intake mount (``node_inference_credentials``; the route left onex-api).
     ``c12_provider_catalogue_probe.py`` pipes this file to
-    ``docker exec -i -u appuser <container> python -`` and grades what it
+    ``docker exec -i -u omniinfra <container> python -`` and grades what it
     prints. This file GRADES NOTHING: a program that both runs the subject and
     decides whether it passed is a grader grading itself.
 

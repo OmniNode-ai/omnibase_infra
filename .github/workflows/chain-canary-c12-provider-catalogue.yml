@@ -20,7 +20,7 @@
 #
 # HOW IT READS THE SUBJECT
 #   scripts/ci/c12_provider_catalogue_observe.py is piped to
-#   `docker exec -i -u appuser omninode-runtime python - /app` through this runner's
+#   `docker exec -i -u omniinfra omninode-runtime python - /app` through this runner's
 #   docker socket, so it runs in the DEPLOYED interpreter against the DEPLOYED
 #   omnimarket package and the DEPLOYED intake mount, as the container's own
 #   unprivileged user. It writes nothing: every injection of the negative test

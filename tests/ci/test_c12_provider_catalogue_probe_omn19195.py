@@ -462,7 +462,7 @@ def test_the_live_path_grades_what_the_container_printed(tmp_path: Path) -> None
     rc = probe.main(["--docker-bin", docker, "--record", str(record_path)])
     assert rc == probe.EXIT_OK
     calls = argv_log.read_text(encoding="utf-8").splitlines()
-    assert calls[1] == "exec -i -u appuser omninode-runtime python - /app"
+    assert calls[1] == "exec -i -u omniinfra omninode-runtime python - /app"
     written = json.loads(record_path.read_text(encoding="utf-8"))
     assert written["criterion"] == "C12"
     assert written["verdict"] == "pass"

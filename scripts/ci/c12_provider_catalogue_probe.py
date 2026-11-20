@@ -18,7 +18,7 @@ WHAT THIS IS
 
 HOW IT READS THE SUBJECT
     ``c12_provider_catalogue_observe.py`` is piped to
-    ``docker exec -i -u appuser <container> python - /app`` on the lane's host,
+    ``docker exec -i -u omniinfra <container> python - /app`` on the lane's host,
     so it runs in the DEPLOYED runtime's interpreter against the DEPLOYED
     package and intake mount, as the container's own unprivileged user. It
     prints what the deployed code returned and grades nothing; grading is
@@ -71,7 +71,7 @@ OBSERVER: Final[Path] = (
 )
 
 DEFAULT_CONTAINER: Final[str] = "omninode-runtime"
-DEFAULT_USER: Final[str] = "appuser"
+DEFAULT_USER: Final[str] = "omniinfra"
 DEFAULT_APP_ROOT: Final[str] = "/app"
 
 # Must match the observer's constants; pinned by a test.
