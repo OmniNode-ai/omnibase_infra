@@ -86,13 +86,12 @@ class ModelRunnerFleetHost(BaseModel):
 
     pools: tuple[ModelRunnerFleetPool, ...] = Field(
         default=(),
-        description=(
-            "OMN-19895 -- further runner pools on this host, each with its own "
-            "name prefix, count and classes. Empty for a host that carries one "
-            "class of runner, which is every host row written before this field."
-        ),
+        description="OMN-19895 -- further runner pools on this host, each with its own name prefix, count and classes. Empty for a host that carries one class of runner, which is every host row written before this field.",
     )
     action_archive_host_root: str | None = Field(default=None, pattern=r"^/")
+    # OMN-26093 -- host directory holding each runner's job workspace, TMPDIR and caches as bind mounts, one <N>/ directory per
+    # runner of this row's own pool; the deploy preparation effect creates them runner-owned.
+    job_dir_host_root: str | None = Field(default=None, pattern=r"^/")
 
     def all_prefixes(self) -> tuple[str, ...]:
         """This host's own prefix followed by each pool's."""
