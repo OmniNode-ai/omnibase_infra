@@ -121,7 +121,7 @@
 #
 # NO NEW scripts/** FILE
 #   scripts/** is DEFAULT-DENY for new files (OMN-14475 canonical-form
-#   guard). Every step below is a direct `uv run onex ...` invocation of
+#   guard). Every step below is a direct `uv run python -m omnibase_core.cli.cli_commands ...` invocation of
 #   code that already lives under src/.
 
 name: Chain Canary
@@ -571,7 +571,7 @@ jobs:
           echo "projection dsn var: ${CHAIN_CANARY_PROJECTION_DSN_ENV:-<undeclared>}"
           echo "ledger dsn var:     ${CHAIN_CANARY_LEDGER_DSN_ENV:-<undeclared>}"
           echo "deploy agent:       ${DEPLOY_AGENT_URL:-<unresolved>} (wait ${DEPLOY_WAIT_SECONDS}s)"
-          uv run onex skill chain_canary \
+          uv run python -m omnibase_core.cli.cli_commands skill chain_canary \
             --probe-url "${PROBE_URL}" \
             --gateway-url "${GATEWAY_URL}" \
             --gateway-api-key-env CHAIN_CANARY_GATEWAY_API_KEY \

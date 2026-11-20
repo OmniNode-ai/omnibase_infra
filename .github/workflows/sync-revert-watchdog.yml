@@ -56,7 +56,7 @@
 #
 # No new scripts/** file: scripts/** is DEFAULT-DENY for new files
 # (OMN-14475 canonical-form guard). Every step below is a direct
-# `uv run onex ...` invocation of code that already lives under src/.
+# `uv run python -m omnibase_core.cli.cli_commands ...` invocation of code that already lives under src/.
 
 name: Sync Revert Watchdog
 
@@ -130,7 +130,7 @@ jobs:
             echo "::error::LINEAR_API_KEY is not set — refusing to run the watchdog with a missing secret."
             exit 1
           fi
-          uv run onex skill sync_revert_watchdog \
+          uv run python -m omnibase_core.cli.cli_commands skill sync_revert_watchdog \
             --team-key "${{ github.event.inputs.team_key || 'OMN' }}" \
             --lookback-hours "${{ github.event.inputs.lookback_hours || '24' }}" \
             --max-issues "${{ github.event.inputs.max_issues || '1000' }}"

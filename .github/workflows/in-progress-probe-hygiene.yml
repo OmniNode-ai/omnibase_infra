@@ -227,7 +227,7 @@ jobs:
           # a runner temp path holds none.
           contract_roots="$(find "${RUNNER_TEMP}/contract-roots" -mindepth 1 -maxdepth 1 -type d | sort | paste -sd, -)"
 
-          uv run onex skill in_progress_probe_hygiene \
+          uv run python -m omnibase_core.cli.cli_commands skill in_progress_probe_hygiene \
             --contract-root "${contract_roots}" \
             "${budget_args[@]+"${budget_args[@]}"}" \
             "${project_args[@]+"${project_args[@]}"}" \

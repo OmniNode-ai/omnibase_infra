@@ -203,7 +203,7 @@ def build_argv(onex_bin: str = "onex") -> list[str]:
     `--timeout` bounds the consumer rebind wait and includes locus-probe time.
     """
     return [
-        onex_bin,
+        *onex_bin.split(),
         "delegate",
         PROBE_PROMPT,
         "--bus",
