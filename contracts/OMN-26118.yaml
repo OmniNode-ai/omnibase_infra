@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26118"
+title: "The M4 beta board check C12 (probe c12-provider-catalogue) reads green against what exists now, or its real product defect is named with a ticket"
+summary: >-
+  The C12 producer failed at its resolve-lane job because it required gateway_url, the HTTP gateway on port 8090 that the one-runtime rulings removed, and past that it read two things that moved: the catalogue module (omnimarket.routing.byok_provider_backends is now omnimarket.handlers.routing.byok_provider_backends) and the intake route (routers.inference_credentials in the onex-api container is now the contract-owned mount of node_inference_credentials in the runtime). The workflow now resolves the lane on ingress_url and docker_runs_on and reads the omninode-runtime container; the observer reads the route from the mount's contract and the body model from the create handler's own imports; the grader declares the customer-only reflection row the catalogue now offers. Every grader clause is kept.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26118-c12-green"
+    statement: "The C12 probe grades the deployed runtime's catalogue and intake mount, with no retired thing restored and no clause removed."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the cause of the red is named from the probe's newest failure text, with the run id and the failure lines read -- falsifier: the lane report names a cause with no run id or no quoted failure line
+      - id: "AC2"
+        statement: >-
+          AC2: the probe's next run reads green against what exists now, with no retired thing restored and no clause removed unless a ruling retired the fact it graded -- falsifier: the newest c12-provider-catalogue run reads red, or the clause table in the report lists a removed assertion that no ruling retires
+      - id: "AC3"
+        statement: >-
+          AC3: the lane writes one STATUS row `crit=C12 probe=c12-provider-catalogue verdict=<green|red> read_at=<UTC>` -- falsifier: a ledger grep for `crit=C12 probe=c12-provider-catalogue` finds no STATUS row after this ticket's creation
+evidence_requirements:
+  - kind: "tests"
+    description: "The grader keeps every clause, grades the reflection row only because the grader declares it, still fails each negative control, and the observer reads the runtime mount's route and body model."
+    command: "env -u OMNI_HOME uv run --frozen pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn26118-ac1-cause"
+    description: "AC1 (hosted part): the workflow resolves the lane on the runtime's ingress_url and reads omninode-runtime, and the observer reads the moved catalogue module and the runtime mount; the failure text of run 44661210305 is quoted in the pull request."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u OMNI_HOME uv run --frozen pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q -n 0 --no-cov -k 'workflow or runtime_mount or another_model or another_create_path'"
+        cwd: "."
+  - id: "dod-omn26118-ac2-clauses-kept"
+    description: "AC2 (hosted part): the grader still fails each kept clause on a fact it must refuse (undeclared customer-only provider, house rung behind a customer-only row, unbacked and dropped rows)."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u OMNI_HOME uv run --frozen pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26118-ac3-status-row"
+    description: "AC3 (hosted part): the probe still writes its record and exits with the verdict; the STATUS row is read in the integration-proof item."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u OMNI_HOME uv run --frozen pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q -n 0 --no-cov -k 'live_path or workflow_cannot_soften'"
+        cwd: "."
+  - id: "dod-omn26118-integration-proof"
+    description: "The STATUS row for this probe is on the work ledger. Needs the ledger, so only the local Done gate runs it."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep \"crit=C12 | probe=c12-provider-catalogue\" | grep STATUS'"
+        cwd: "."
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
