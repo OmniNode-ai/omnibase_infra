@@ -114,7 +114,7 @@ def layer_for(
     return declared["layer_file"]
 
 
-class _LaneConfig(Protocol):
+class ProtocolLaneConfig(Protocol):
     """The part of the executor's ``ModelLaneConfig`` this module reads and replaces."""
 
     @property
@@ -123,7 +123,9 @@ class _LaneConfig(Protocol):
     def model_copy(self, *, update: Mapping[str, object]) -> Self: ...
 
 
-def layered[ConfigT: _LaneConfig](execution: ModuleType, config: ConfigT) -> ConfigT:
+def layered[ConfigT: ProtocolLaneConfig](
+    execution: ModuleType, config: ConfigT
+) -> ConfigT:
     """``config`` with the layer listed after the lane overlay when the host declares it, else unchanged.
 
     ``execution`` is the deploy agent's executor module (the sibling modules' convention): it names
