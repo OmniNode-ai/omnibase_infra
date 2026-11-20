@@ -85,6 +85,7 @@ def _run(
         ["apply", "--state-dir", str(state_dir)],
         handler_main=_handler_main(stdout, exit_code),
         announce=announce,
+        window=lambda *_args, **_kwargs: False,
     )
     return exit_code, captured[0] if captured else ""
 
