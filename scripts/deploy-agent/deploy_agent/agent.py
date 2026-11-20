@@ -343,6 +343,7 @@ BRANCH_INSTALL_APPLY_TIMEOUT_SECONDS = 900
 #: package the agent venv holds.
 BRANCH_INSTALL_ENTRY = f"{REPO_DIR}/src/omnibase_infra/nodes/node_dev_roll_events_effect/runtime_dev_branch_install_reapply.py"
 JOB_READING = "nodes.node_deploy_job_reading_effect.runtime_deploy_job_reading"
+DEV_ROLL_EVENTS = "nodes.node_dev_roll_events_effect.runtime_dev_roll_events"
 BRANCH_INSTALL_EXIT_NOT_WHOLE = 4
 
 #: OMN-18200 AC5. The k3s ``onex-lab`` overlay re-apply, ON by default.
@@ -549,10 +550,9 @@ class DeployAgent:
         # a lab dev agent whose fence admits it; its seams and its last verdict.
         self._stability_follow_attempted: set[str] = set()
         self._stability_follow_last_verdict: EnumStabilityFollowVerdict | None = None
-        self._stability_read_running_ref: Callable[[str], str | None] = lambda repo: (
-            read_running_ref(
-                _runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST), repo
-            )
+        self._stability_read_running_ref = load_dev_boot_guard().healthy_ref_reader(
+            lambda: _runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST),
+            read_running_ref,
         )
         # OMN-20864: the restore of a lane with no running runtime, and its seams.
         self._idle_restore_last_attempt: datetime | None = None
@@ -1287,6 +1287,7 @@ class DeployAgent:
         settle worker's pin recreate, a rollback). Throttled. Releasing a merged
         or expired install touches no container and runs unlocked; an apply takes
         the dev lane lock and is skipped for this tick when another writer holds it.
+        The apply entry waits for the recreate window before it restarts (OMN-25912).
         """
         if EnumRuntimeLane.DEV not in self._allowed_lanes:
             return
@@ -1343,15 +1344,11 @@ class DeployAgent:
         }
 
     def _maybe_idle_converge(self) -> None:
-        # Converge on a followed repository's dev head when idle (OMN-19509); see
-        # deploy_agent.idle_converge for the rule and the model behind it.
-        # Throttled to one check per interval. Each followed repository is decided
-        # in turn (OMN-20867), the declared web source (OMN-22808) after the
-        # runtime's siblings, and the first that says converge runs; a converge
-        # builds every repository at its dev head, so one is enough. A refusal is
-        # logged once per change of verdict. A converge runs as an ordinary job
-        # through _execute_command, under the same single-flight and lane locks,
-        # with its own job record and terminal event named agent/idle-converge.
+        # Converge on a followed repository's dev head when idle (OMN-19509, rule in
+        # deploy_agent.idle_converge), one check per interval. Each followed repository
+        # (OMN-20867) and the declared web source (OMN-22808) is decided in turn; the
+        # first converge runs, once per verdict change logged, as an ordinary job
+        # through _execute_command (agent/idle-converge), after the recreate window.
         if self._router is None:
             return
         tick = time.monotonic()
@@ -1404,10 +1401,10 @@ class DeployAgent:
         # OMN-19507: a converge is a deploy like any other, so it waits for the
         # load gate too. The head is not marked attempted, so it runs once the
         # gate opens.
-        if not self._idle_converge_gate_open():
+        cmd = converge_command()
+        if not self._idle_converge_gate_open(cmd.requested_by):
             return
         self._idle_converge_attempted.add(decision.head_ref)
-        cmd = converge_command()
         logger.info(
             "idle converge: running %s as %s: %s",
             cmd.correlation_id,
@@ -1502,9 +1499,7 @@ class DeployAgent:
     def _maybe_idle_restore(self, now: datetime) -> bool:
         """Restore the lane when its main runtime is not running (OMN-20864).
 
-        Returns True when the lane is DOWN, whatever the decision, so the
-        converge rule is not evaluated against a container that is not there.
-        See ``deploy_agent.idle_converge`` (decide_restore) for the rule.
+        True when the lane is DOWN, whatever the decision; the rule is decide_restore.
         """
         presence, presence_detail = self._idle_read_runtime_presence()
         decision = decide_restore(
@@ -1534,10 +1529,10 @@ class DeployAgent:
             return False
         if decision.verdict is not EnumIdleRestoreVerdict.RESTORE:
             return True
-        if not self._idle_converge_gate_open():
+        cmd = restore_command()
+        if not self._idle_converge_gate_open(cmd.requested_by):
             return True
         self._idle_restore_last_attempt = now
-        cmd = restore_command()
         logger.warning(
             "idle restore: running %s as %s: %s",
             cmd.correlation_id,
@@ -1824,20 +1819,19 @@ class DeployAgent:
                 exc,
             )
 
-    def _idle_converge_gate_open(self) -> bool:
-        """Whether the load gate lets an idle converge start now (OMN-19507)."""
-        if (gate := getattr(self, "_load_gate", None)) is None:
-            return True
-        decision = gate.check()
-        if decision.verdict is EnumLoadGateVerdict.DEFER:
-            if self._load_gate_last_verdict is not EnumLoadGateVerdict.DEFER:
+    def _idle_converge_gate_open(self, who: str = "") -> bool:
+        """Whether the load gate (OMN-19507) and recreate window (OMN-25912) admit it."""
+        if (gate := getattr(self, "_load_gate", None)) is not None:
+            decision = gate.check()
+            deferred = decision.verdict is EnumLoadGateVerdict.DEFER
+            if deferred and self._load_gate_last_verdict is not decision.verdict:
                 logger.info(
                     "idle converge: deferred by load gate %s", decision.describe()
                 )
             self._load_gate_last_verdict = decision.verdict
-            return False
-        self._load_gate_last_verdict = decision.verdict
-        return True
+            if deferred:
+                return False
+        return bool(load_dev_boot_guard(DEV_ROLL_EVENTS).window_admits(self, who))
 
     def _execute_command(self, cmd: ModelRebuildRequested) -> None:
         """Run one accepted command to its terminal state. BLOCKING, by design.

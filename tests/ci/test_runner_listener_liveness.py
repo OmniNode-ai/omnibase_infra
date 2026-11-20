@@ -1739,13 +1739,15 @@ class TestFleetCanaryFunctional:
         missing and the run failed at 44 of 60. Since OMN-19077 the declared
         pools are 10 on the primary host and 16 on the second, and 8 on h053
         since OMN-22111 (5 since OMN-19998). OMN-22898 cut the primary host's
-        share to 0, so the sum is 16 + 5 = 21 and the primary pool reads 0.
+        share to 0. OMN-25674 declares the 16 runners h051 takes over before
+        the second host's 16 are drained, so the sum is 16 + 16 + 5 = 37 until
+        then (21 after) and the primary pool reads 0.
         """
         pools = _declared_action_pools()
-        assert sum(pools.values()) == 21, pools
+        assert sum(pools.values()) == 37, pools
         assert pools["omninode-runner"] == 0, pools
         result = _run_canary(_multi_pool_payload(pools))
-        assert "expected=21 registered=21" in result.stdout, result.stdout
+        assert "expected=37 registered=37" in result.stdout, result.stdout
         assert "missing=0" in result.stdout, result.stdout
         assert result.returncode == 0, result.stderr
 
@@ -1765,7 +1767,7 @@ class TestFleetCanaryFunctional:
         pools = _declared_action_pools()
         extra = {**pools, "omnipc2-verify-runner": 1, "omninode-verify-runner": 3}
         result = _run_canary(_multi_pool_payload(extra))
-        assert "registered=21" in result.stdout, result.stdout
+        assert "registered=37" in result.stdout, result.stdout
 
     def test_canary_fails_on_incident_shape_fleet(self) -> None:
         """The exact 2026-07-03 incident shape: 11 online / 37 offline."""

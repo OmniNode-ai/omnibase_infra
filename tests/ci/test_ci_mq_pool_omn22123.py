@@ -31,7 +31,8 @@ COUNT = 4
 RESERVED = {"self-hosted", "omnibase-ci-mq", "linux", "x64", "arch-amd64"}
 # host -> (general pool prefix on that host, merge-queue pool prefix, action runners the host declared before OMN-22123)
 POOLS = {
-    "h051": ("hp051-ci-runner", "hp051-ci-mq-runner", 0),
+    # OMN-25674: h051 declares the 16-runner general pool `hp051-omnibase-ci-runner` beside its multiarch-only pool.
+    "h051": ("hp051-ci-runner", "hp051-ci-mq-runner", 16),
     "h053": ("hp053-ci-runner", "hp053-ci-mq-runner", 5),
 }
 

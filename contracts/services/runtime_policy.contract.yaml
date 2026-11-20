@@ -27,6 +27,15 @@ auxiliary_services_omnimemory_enabled: false
 # fields, and the model and preflight accept exactly a 12 GiB arena and a 16 GiB cap.
 dev_redpanda_memory: 12G
 dev_redpanda_mem_limit: 16g
+# OMN-25912: the dev runtime is recreated at most once per window, at the window's start
+# (within the start grace), unless a requester with a pinned-fix prefix asks. The window,
+# its offset and the grace are seconds; the deploy agent reads them, never a literal.
+dev_recreate_window:
+  window_seconds: 3600
+  offset_seconds: 0
+  start_grace_seconds: 300
+  pinned_fix_requester_prefixes:
+    - operator/pinned-fix/
 profiles:
   dev:
     compose_project: omnibase-infra
