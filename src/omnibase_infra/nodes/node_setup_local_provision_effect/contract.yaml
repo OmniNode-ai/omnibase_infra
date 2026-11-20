@@ -138,6 +138,15 @@ config:
     read_timeout_seconds: 30
     description: >-
       The overlay home's runtime_lane_env overlay is a second source of the dev lane's compose environment beside the lane fragment (OMN-22634). The unit names the overlay home's clone in the variable above, which has no default; the overlay is read at the ref, never the working tree, through the fragment allowlist, and a key the two sources set differently is refused.
+  stability_host_broker_layer:
+    lane_overlay_prefix: docker-compose.stability
+    lane_overlay_suffix: -test.yml
+    layer_file: docker-compose.stability-host-broker.yml
+    kafka_addr_env: STABILITY_TEST_REDPANDA_ADVERTISED_KAFKA_ADDR
+    pandaproxy_addr_env: STABILITY_TEST_REDPANDA_ADVERTISED_PANDAPROXY_ADDR
+    address_pattern: '^[a-z]+://[A-Za-z0-9][A-Za-z0-9.-]*:[0-9]{1,5}(,[a-z]+://[A-Za-z0-9][A-Za-z0-9.-]*:[0-9]{1,5})*$'
+    description: >-
+      The one decision of whether a lane's compose file list gains the per-host broker layer (OMN-24509). The shell resolver and the deploy agent's executor both read it through runtime_host_broker_layer, so the two lists cannot differ. The layer is listed after the lane overlay whose file name is the prefix and suffix here joined, and only for that overlay, when a host declares either address variable; a declared variable that is empty, holds whitespace or is not a comma-separated list of listener://host:port entries is refused by name, never read as no layer.
 capabilities:
   - "local_provision.start"
   - "local_provision.stop"
