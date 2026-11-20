@@ -518,7 +518,28 @@ def natural_validation_errors(
     return total, probe, total - probe
 
 
-def grade_boot(rec: Record, boot: dict[str, Any]) -> None:
+def expected_runtime_roles(boot_identity: dict[str, Any] | None) -> list[str]:
+    """The runtime roles the lane's logs must cover, from its own boot identity.
+
+    A lane that folds effects into main runs no effects container, so the roles
+    its identity names are the roles it was expected to run. The main runtime is
+    always one of them; without an identity every role is expected.
+    """
+    roles = sorted(
+        {
+            c.rsplit("-runtime", 1)[-1]
+            for c in boot_identity or {}
+            if c.endswith(("-runtime", "-runtime-effects"))
+        }
+    )
+    return roles if "" in roles else ["", "-effects"]
+
+
+def grade_boot(
+    rec: Record,
+    boot: dict[str, Any],
+    boot_identity: dict[str, Any] | None = None,
+) -> None:
     before, after = boot.get("applied_hwm_before"), boot.get("applied_hwm_after")
     rec.add(
         "boot",
@@ -532,7 +553,8 @@ def grade_boot(rec: Record, boot: dict[str, Any]) -> None:
         "boot",
         "runtime_logs_read",
         # OMN-21485: by runtime role, so any lane's container names grade.
-        sorted(c.rsplit("-runtime", 1)[-1] for c in logs) == ["", "-effects"]
+        sorted(c.rsplit("-runtime", 1)[-1] for c in logs)
+        == expected_runtime_roles(boot_identity)
         and all(_is_int(v.get("lines")) and v["lines"] > 0 for v in logs.values()),
         "log lines read per container: "
         + ", ".join(f"{c}={v.get('lines')}" for c, v in sorted(logs.items())),
@@ -583,7 +605,7 @@ def grade(obs: dict[str, Any]) -> Record:
     grade_kinds(rec, obs.get("kinds", {}).get("samples") or [])
     grade_negative(rec, obs.get("negative") or {})
     grade_cursor(rec, obs.get("cursor") or {})
-    grade_boot(rec, obs.get("boot") or {})
+    grade_boot(rec, obs.get("boot") or {}, obs.get("boot_identity"))
     return rec
 
 
@@ -779,42 +801,6 @@ def run_negative(
 
 def probe_correlation_id() -> str:
     return str(uuid.UUID(hex="c28c28c2c28c" + uuid.uuid4().hex[12:]))
-
-
-def inject(lane: Any) -> dict[str, Any]:
-    """Publish one malformed trigger, envelope copied from the newest real one."""
-    newest = lane.rpk("topic", "consume", APPLIED_TOPIC, "-o", "-1", "-n", "1")
-    try:
-        message = json.loads(newest)
-        envelope = json.loads(message["value"])
-    except (ValueError, KeyError, TypeError) as exc:
-        raise ProbeInputError(
-            f"newest {APPLIED_TOPIC} message is not an envelope"
-        ) from exc
-    marker = f"c28-probe-{uuid.uuid4().hex}"
-    cid = probe_correlation_id()
-    eid = str(uuid.uuid4())
-    now = datetime.datetime.now(datetime.UTC)
-    envelope.update(
-        payload={"c28_probe_marker": marker},
-        envelope_id=eid,
-        correlation_id=cid,
-        envelope_timestamp=now.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-    )
-    headers = {h["key"]: h["value"] for h in message.get("headers") or [] if "key" in h}
-    headers.update(message_id=eid, correlation_id=cid, timestamp=now.isoformat())
-    args = ["topic", "produce", APPLIED_TOPIC, "-z", "none"]
-    for key, value in headers.items():
-        args += ["-H", f"{key}:{value}"]
-    out = lane.rpk(*args, stdin=json.dumps(envelope, separators=(",", ":")) + "\n")
-    m = re.search(r"at offset (\d+)", out)
-    return {
-        "marker": marker,
-        "correlation_id": cid,
-        "published_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "offset": int(m.group(1)) if m else None,
-        "envelope_copied_from_offset": message.get("offset"),
-    }
 
 
 def observe_injection(

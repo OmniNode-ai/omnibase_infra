@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: OMN-26123
+title: The M4 beta board check C28 (probe c28-consumer-flow) reads green against what exists now, or its real product defect is named with a ticket
+summary: >-
+  The C28 consumer-flow probe derived two runtime containers for every lane and read the runtime-effects container of a lane whose own policy folds the effects role into the main runtime. It now takes the folded roles from the shipped docker/runtime-policy.env and reads the containers that lane runs; a lane that folds nothing still needs both, and every clause stays asserted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26123-c28-folded-runtime
+    statement: The C28 probe reads the runtime containers the graded lane's policy leaves running and grades every clause it graded before.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the cause of the red is named from the probe's newest failure text, with the run id and the failure lines read -- falsifier: the lane report names a cause with no run id or no quoted failure line
+      - id: AC2
+        statement: >-
+          AC2: the probe's next run reads green against what exists now, with no retired thing restored and no clause removed unless a ruling retired the fact it graded -- falsifier: the newest c28-consumer-flow run reads red, or the clause table in the report lists a removed assertion that no ruling retires
+      - id: AC3
+        statement: >-
+          AC3: the lane writes one STATUS row `crit=C28 probe=c28-consumer-flow verdict=<green|red> read_at=<UTC>` -- falsifier: a ledger grep for `crit=C28 probe=c28-consumer-flow` finds no STATUS row after this ticket's creation
+evidence_requirements:
+  - kind: tests
+    description: The fold-aware container tests pass at the pushed head; at the merge base the lane model takes no folded_profiles and the policy reader does not exist.
+    command: uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_folded_effects.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26123-ac1-cause
+    description: 'AC1 cause: the graded lane folds effects into main by its shipped policy, so the container the probe demanded is not run; the tests derive the container set from that policy file and name the folded lane.'
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_folded_effects.py -q --no-cov -k "shipped_policy or names_only_the_main"
+        cwd: .
+  - id: dod-omn26123-ac2-clauses
+    description: 'AC2: every clause still grades. A lane that folds nothing still needs the effects container and its logs, a folded lane with no main logs fails, and the script grader and the node grader agree on each case; the recorded observations grade as before.'
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_board_probe_effect tests/ci/test_c28_consumer_flow_probe.py -q --no-cov
+        cwd: .
+  - id: dod-omn26123-ac3-status
+    description: 'AC3: the STATUS row is written by the lane on the ledger, which the hosted gate cannot read; the check runs the grading tests the row rests on.'
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_folded_effects.py -q --no-cov
+        cwd: .
+  - id: dod-omn26123-deploy-folded-reader
+    description: 'Deploy scope: the probe handler at the pushed head carries the policy reader that drops a folded role from the containers C28 reads, read from GitHub at that commit; at the base commit the symbol is absent.'
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_board_probe_effect/handlers/handler_docker_consumer_flow_target.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F -- "def read_folded_profiles" > /dev/null'
+        cwd: .
