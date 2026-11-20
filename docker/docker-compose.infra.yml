@@ -148,9 +148,6 @@ x-runtime-env: &runtime-env
   # localhost:5436 (external port); the container-side value must use postgres:5432.
   # This override ensures containers are never broken by a host-side localhost:5436 URL.
   OMNIBASE_INFRA_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
-  # OMN-26151: the logical secret gateway.database.dsn resolves from this env. Empty here
-  # (every lane layers this file); the dev and stability overlays set the fail-closed value.
-  GATEWAY_DATABASE_DSN: ${GATEWAY_DATABASE_DSN:-}
   # OMN-3431: Local Docker Redpanda — containers use Docker-internal redpanda:9092
   KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
   # Allowlist lets service_kernel.py's denylist accept Docker-internal redpanda: hostname
