@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-26122
+title: The M4 beta board check C16 (probe c16-receipt-identity) reads green against what exists now, or its real product defect is named with a ticket
+summary: >-
+  The C16 probe resolved the stability lane by gateway_url, the address of the separate HTTP API that the one-runtime rulings retired (RULING 2026-11-02T15:02:01Z moved the API inside the runtime; RULING 2026-11-10T13:26:22Z removed the separate service). No lane declares gateway_url, so every scheduled run since 2026-11-03 ended in the lane-resolve step with "does not declare gateway_url". The runtime's own ingress_url serves the tenant route POST /v1/workflows (the stability lane's ingress answers GET /health 200 and POST /v1/workflows 401 without a key), so the workflow now requires ingress_url and bus_lane and sends the probe there. Every clause of the probe script is unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26122-c16-reads-the-runtime-front-door
+    statement: The C16 probe grades the stability lane through the runtime's own ingress_url and keeps every clause it asserted.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the cause of the red is named from the probe''s newest failure text, with the run id and the failure lines read -- falsifier: the lane report names a cause with no run id or no quoted failure line'
+      - id: AC2
+        statement: 'AC2: the probe''s next run reads green against what exists now, with no retired thing restored and no clause removed unless a ruling retired the fact it graded -- falsifier: the newest c16-receipt-identity run reads red, or the clause table in the report lists a removed assertion that no ruling retires'
+      - id: AC3
+        statement: 'AC3: the lane writes one STATUS row `crit=C16 probe=c16-receipt-identity verdict=<green|red> read_at=<UTC>` -- falsifier: a ledger grep for `crit=C16 probe=c16-receipt-identity` finds no STATUS row after this ticket''s creation'
+evidence_requirements:
+  - kind: tests
+    description: The stability lane declaration seam test and the stability proofs workflow pins, including the control that a lane with no ingress_url is refused naming the field.
+    command: uv run --frozen pytest tests/ci/test_stability_proof_lane_declaration_omn24191.py tests/ci/test_proofs_target_stability_lane_omn21485.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26122-ac1-cause-named
+    description: >-
+      The cause is a workflow requirement for a field the declared lane cannot carry: the C16 resolve step required gateway_url, which the stability lane's declaration omits because the separate HTTP API was retired. The failing run id and the quoted log lines are in the pull request body. The check holds the corrected requirement: C16 requires ingress_url and bus_lane and no longer requires gateway_url.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_stability_proof_lane_declaration_omn24191.py -q --no-cov -n 0 -p no:randomly -k "each_workflow_requires_the_spelled_fields"
+        cwd: .
+  - id: dod-omn26122-ac2-resolves-and-keeps-clauses
+    description: >-
+      The declared stability lane satisfies the C16 resolver step, a lane without ingress_url is still refused naming the field, and the probe is driven from LANE_INGRESS_URL. The probe script is not edited, so every clause of R-DELEG-11, R-DELEG-12 and R-DELEG-26 is still asserted. The run id of the first run that reads green is posted as a pull request comment that names the head; no static check claims a run.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_stability_proof_lane_declaration_omn24191.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26122-ac3-status-row
+    description: >-
+      The STATUS row is written by the lane to the rolling ledger, which hosted CI cannot read. The check holds the workflow pin the row's verdict depends on.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_stability_proof_lane_declaration_omn24191.py -q --no-cov -n 0 -p no:randomly -k "c16"
+        cwd: .
