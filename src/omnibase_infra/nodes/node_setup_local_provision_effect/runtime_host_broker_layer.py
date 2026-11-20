@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
 from types import ModuleType
-from typing import Protocol, Self
+from typing import Any
 
 import yaml
 
@@ -114,18 +114,7 @@ def layer_for(
     return declared["layer_file"]
 
 
-class ProtocolLaneConfig(Protocol):
-    """The part of the executor's ``ModelLaneConfig`` this module reads and replaces."""
-
-    @property
-    def compose_files(self) -> tuple[str, ...]: ...
-
-    def model_copy(self, *, update: Mapping[str, object]) -> Self: ...
-
-
-def layered[ConfigT: ProtocolLaneConfig](
-    execution: ModuleType, config: ConfigT
-) -> ConfigT:
+def layered[ConfigT: Any](execution: ModuleType, config: ConfigT) -> ConfigT:
     """``config`` with the layer listed after the lane overlay when the host declares it, else unchanged.
 
     ``execution`` is the deploy agent's executor module (the sibling modules' convention): it names
