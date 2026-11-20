@@ -28,7 +28,7 @@ def test_workflow_measurement_is_only_a_node_invocation() -> None:
     )
     command = measure["run"].replace("\\\n", " ")
     assert command.strip().startswith(
-        "uv run --frozen onex node node_board_probe_effect "
+        "uv run --frozen python -m omnibase_core.cli.cli_commands node node_board_probe_effect "
     )
     assert (
         "--contract" in command

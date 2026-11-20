@@ -167,7 +167,10 @@ jobs:
         uses: ./.github/actions/resolve-lab-lane
         with:
           lanes-json: ${{ vars.LAB_LANES_JSON }}
-          require: gateway_url
+          # OMN-26117: the lane is resolved by the runtime's own ingress. The
+          # separate HTTP API (gateway_url) was removed by the
+          # one-runtime rulings (2026-11-02T15:02:01Z, 2026-11-10T13:26:22Z).
+          require: ingress_url
           # OMN-19811: a lane that does not answer while its deploy agent reports
           # a deploy in progress is waited for, not graded. Idle, unreadable or
           # undeclared agents and an exhausted budget are still RED. The
@@ -176,7 +179,7 @@ jobs:
 
       - name: Drive the four negative paths and grade them
         env:
-          # The lane's address as the overlay declares it (LANE_GATEWAY_URL,
+          # The lane's address as the overlay declares it (LANE_INGRESS_URL,
           # exported by the resolve step), or an explicit dispatch override.
           GATEWAY_URL_OVERRIDE: ${{ github.event.inputs.gateway_url }}
           OTHER_TENANT_SLUG: ${{ github.event.inputs.other_tenant_slug || 'onex-lab-house' }}
@@ -187,7 +190,7 @@ jobs:
           set -uo pipefail
           # NOT `set -e`: a non-zero probe is the verdict and must still write
           # its record before the job ends.
-          GATEWAY_URL="${GATEWAY_URL_OVERRIDE:-${LANE_GATEWAY_URL:-}}"
+          GATEWAY_URL="${GATEWAY_URL_OVERRIDE:-${LANE_INGRESS_URL:-}}"
           echo "lane: ${LANE_NAME:-dispatch override}, gateway ${GATEWAY_URL}"
           python3 scripts/ci/c11_negative_paths_probe.py \
             --base-url "${GATEWAY_URL}" \
@@ -237,7 +240,7 @@ jobs:
           }
           json.dump(request, open('c11-delegation-legs-input.json', 'w', encoding='utf-8'))
           "
-          uv run --frozen onex node node_c11_delegation_legs_effect \
+          uv run --frozen python -m omnibase_core.cli.cli_commands node node_c11_delegation_legs_effect \
             --input c11-delegation-legs-input.json --backend event_bus=inmemory \
             --state-root .onex_state/c11-delegation-legs
           status=$?

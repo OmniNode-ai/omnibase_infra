@@ -39,6 +39,14 @@ handler_routing:
         name: ModelRunnerHookMountDriftRequest
         module: omnibase_infra.models.model_runner_hook_mount_drift_request
       output_events: [ModelRunnerHookMountDriftResult]
+    - operation: runner.cache-ownership.restore
+      handler:
+        name: HandlerRunnerCacheOwnershipRestore
+        module: omnibase_infra.handlers.handler_runner_cache_ownership_restore
+      event_model:
+        name: ModelRunnerCacheOwnershipRestoreRequest
+        module: omnibase_infra.models.model_runner_cache_ownership_restore_request
+      output_events: [ModelRunnerCacheOwnershipRestoreResult]
     - operation: runner.action-archive-cache.fill
       handler:
         name: HandlerActionArchiveCacheFill
@@ -52,6 +60,8 @@ capabilities:
     description: Prepare normalized Compose TMPDIR bind sources and refuse failed readback.
   - name: runner.hook-mount.check
     description: Read the hook path each runner container executes and compare it with the host copy (OMN-22478).
+  - name: runner.cache-ownership.restore
+    description: Restore ownership of each idle runner container's declared cache bind mounts to the runner user; never runs where a Runner.Worker is running (OMN-26113).
   - name: runner.action-archive-cache.fill
     description: Write the runner action archive cache (<owner>_<repo>/<sha>.tar.gz) from the canonical clones and once-per-run source mirrors (OMN-24299).
 metadata:

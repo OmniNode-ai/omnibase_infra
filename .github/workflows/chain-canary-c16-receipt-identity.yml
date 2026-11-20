@@ -86,7 +86,7 @@ on:
   workflow_dispatch:
     inputs:
       gateway_url:
-        description: 'Tenant-bearing API base URL. Empty grades the first stability lane of vars.LAB_PROOF_LANES_JSON whose gateway answers.'
+        description: 'Tenant-bearing base URL (the runtime ingress). Empty grades the first stability lane of vars.LAB_PROOF_LANES_JSON whose ingress_url answers.'
         required: false
         default: ''
       budget_seconds:
@@ -179,7 +179,12 @@ jobs:
         with:
           lanes-json: ${{ vars.LAB_PROOF_LANES_JSON }}
           lanes-var: LAB_PROOF_LANES_JSON
-          require: gateway_url bus_lane
+          # OMN-26122: the lane's front door is the runtime's own ingress_url,
+          # which serves POST /v1/workflows. The separate HTTP API a
+          # gateway_url named was retired (RULING 2026-11-02T15:02:01Z moved
+          # onex-api inside the runtime; RULING 2026-11-10T13:26:22Z removed
+          # the separate service), so no lane declares gateway_url.
+          require: ingress_url bus_lane
           match: lane_role=stability
           # OMN-19811: a lane that does not answer while its deploy agent reports
           # a deploy in progress is waited for, not graded. Idle, unreadable or
@@ -215,8 +220,9 @@ jobs:
 
       - name: Drive the healthy and the dying delegation and grade C16
         env:
-          # The lane's address as the overlay declares it (LANE_GATEWAY_URL,
-          # from the resolve step), or an explicit dispatch override.
+          # The lane's address as the overlay declares it (LANE_INGRESS_URL,
+          # the runtime's own front door, from the resolve step), or an
+          # explicit dispatch override.
           GATEWAY_URL_OVERRIDE: ${{ github.event.inputs.gateway_url }}
           BUDGET_SECONDS: ${{ github.event.inputs.budget_seconds || '240' }}
           RUNNER_IDENTITY: gha-${{ github.run_id }}-${{ github.run_attempt }}
@@ -232,7 +238,7 @@ jobs:
           set -uo pipefail
           # NOT `set -e`: a non-zero probe is the verdict and must still write
           # its record before the job ends.
-          GATEWAY_URL="${GATEWAY_URL_OVERRIDE:-${LANE_GATEWAY_URL:-}}"
+          GATEWAY_URL="${GATEWAY_URL_OVERRIDE:-${LANE_INGRESS_URL:-}}"
           echo "lane: ${LANE_NAME:-dispatch override}, gateway ${GATEWAY_URL}"
           uv run --frozen python scripts/ci/c16_receipt_identity_probe.py \
             --base-url "${GATEWAY_URL}" \
@@ -276,12 +282,12 @@ jobs:
               'config_path': 'c16-pinned-backends.yaml',
               'record_path': 'c16-pinned-backends.json',
               'timeout_seconds': 300,
-              'delegate_argv': ['uv', 'run', '--frozen', 'onex', 'delegate', 'Reply with the single word: alive.', '--task-type', 'test', '--ticket', 'OMN-23176', '--bus', 'kafka', '--lane', os.environ.get('LANE_NAME', ''), '--locus', 'deployed-lane', '--state-root', '.onex_state'],
+              'delegate_argv': ['uv', 'run', '--frozen', 'python', '-m', 'omnibase_core.cli.cli_commands', 'delegate', 'Reply with the single word: alive.', '--task-type', 'test', '--ticket', 'OMN-23176', '--bus', 'kafka', '--lane', os.environ.get('LANE_NAME', ''), '--locus', 'deployed-lane', '--state-root', '.onex_state'],
               'psql_argv': json.loads(os.environ.get('PSQL_ARGV_JSON') or '[]'),
           }
           json.dump(request, open('c16-pinned-backends-input.json', 'w', encoding='utf-8'))
           "
-          uv run --frozen onex node node_c16_pinned_backend_effect \
+          uv run --frozen python -m omnibase_core.cli.cli_commands node node_c16_pinned_backend_effect \
             --input c16-pinned-backends-input.json --backend event_bus=inmemory \
             --state-root .onex_state/c16-pinned-backends
           status=$?

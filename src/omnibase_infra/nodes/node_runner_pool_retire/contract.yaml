@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_runner_pool_retire
+contract_name: node_runner_pool_retire
+node_name: node_runner_pool_retire
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: Retire a declared CI runner pool on one registry host through the local installer.
+input_model:
+  name: ModelRunnerPoolRetireRequest
+  module: omnibase_infra.models.model_runner_pool_retire_request
+output_model:
+  name: ModelRunnerPoolRetireResult
+  module: omnibase_infra.models.model_runner_pool_retire_result
+event_bus:
+  subscribe_topics: ["onex.cmd.platform.runner-pool-retire.v1"]
+  publish_topics: ["onex.evt.platform.runner-pool-retire-completed.v1"]
+terminal_event: "onex.evt.platform.runner-pool-retire-completed.v1"
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: runner.pool.retire
+      handler:
+        name: HandlerRunnerPoolRetire
+        module: omnibase_infra.handlers.handler_runner_pool_retire
+      event_model:
+        name: ModelRunnerPoolRetireRequest
+        module: omnibase_infra.models.model_runner_pool_retire_request
+      output_events: [ModelRunnerPoolRetireResult]
+capabilities:
+  - name: runner.pool.retire
+    description: Drain, deregister and remove one idle runner at a time of a declared CI pool, selected by its exact prefix.
+metadata:
+  ticket: OMN-26105
+  description: Retire a declared CI runner pool; a dry run prints the plan and writes nothing.

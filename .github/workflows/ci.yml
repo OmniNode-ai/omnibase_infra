@@ -327,6 +327,9 @@ jobs:
       - name: Secondary runner image roll (OMN-25796)
         run: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -q -n 0 --no-cov
 
+      - name: Runner roll config drift and pool retire (OMN-26105)
+        run: uv run --frozen pytest tests/unit/handlers/test_handler_runner_config_drift_omn26105.py tests/unit/handlers/test_handler_runner_pool_retire_omn26105.py -q -n 0 --no-cov
+
       - name: Caller-owned imperative guard regression (OMN-21004)
         run: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
 
@@ -1071,7 +1074,7 @@ jobs:
       # whole-tree CI counterpart so the header requirement still holds
       # over the entire tree, not only a developer's staged diff.
       - name: SPDX header check (OMN-19612)
-        run: uv run --frozen onex spdx validate src tests scripts
+        run: uv run --frozen python -m omnibase_core.cli.cli_commands spdx validate src tests scripts
 
       - name: Census health and shared restart bounds (OMN-19416)
         run: |
@@ -2747,7 +2750,7 @@ jobs:
       - name: Check if onex compliance command exists
         id: check-command
         run: |
-          if uv run onex compliance check --help >/dev/null 2>&1; then
+          if uv run python -m omnibase_core.cli.cli_commands compliance check --help >/dev/null 2>&1; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::onex compliance check command not available yet — skipping"
@@ -2759,7 +2762,7 @@ jobs:
         if: steps.check-command.outputs.available == 'true'
         run: |
           mkdir -p .onex_state/compliance
-          if uv run onex compliance check --repo-root . --output .onex_state/compliance/report.yaml; then
+          if uv run python -m omnibase_core.cli.cli_commands compliance check --repo-root . --output .onex_state/compliance/report.yaml; then
             echo "result=pass" >> "$GITHUB_OUTPUT"
           else
             echo "result=fail" >> "$GITHUB_OUTPUT"
