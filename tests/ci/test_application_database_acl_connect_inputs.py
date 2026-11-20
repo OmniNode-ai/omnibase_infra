@@ -168,7 +168,7 @@ _IN_REPO_PROVENANCE: dict[str, str] = {
     # seven more with the dev broker memory-floor note (975 -> 982). OMN-22391
     # moved it one line up with the removed intelligence-api line in the header
     # port comment above it (995 -> 994).
-    "omnibase_infra:docker/docker-compose.infra.yml:1008": "KC_DB_USERNAME: postgres",
+    "omnibase_infra:docker/docker-compose.infra.yml:1017": "KC_DB_USERNAME: postgres",
     "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4": (
         "CREATE DATABASE keycloak"
     ),
@@ -200,7 +200,7 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
             "four-column checksum ledger"
         ),
         provenance=(
-            "omnibase_infra:docker/docker-compose.infra.yml:1008",
+            "omnibase_infra:docker/docker-compose.infra.yml:1017",
             "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4",
             "omninode_infra:k8s/auth/keycloak-values.yaml:32",
             "omninode_infra:scripts/init-databases.sh:603",
