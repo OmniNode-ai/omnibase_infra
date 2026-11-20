@@ -81,9 +81,12 @@ def test_dev_lane_overlay_neither_starts_the_writer_nor_excludes_the_node() -> N
     assert "omninode-runtime" in services  # positive control: the overlay really parsed
     assert WRITER not in services
     for name, service in services.items():
-        rendered = yaml.safe_dump(service)
-        assert "ONEX_RUNTIME_NODE_EXCLUSION" not in rendered, name
-        assert NODE not in rendered, name
+        # OMN-26232: the key is a value-less passthrough a lane overlay may set, so
+        # the assertion is no non-empty value, not no mention.
+        assert not (service.get("environment") or {}).get(
+            "ONEX_RUNTIME_NODE_EXCLUSION"
+        ), name
+        assert NODE not in yaml.safe_dump(service), name
 
 
 def test_fold_overlay_gates_the_writer_under_a_folded_profile() -> None:

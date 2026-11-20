@@ -527,6 +527,14 @@ x-runtime-env: &runtime-env
 # (ONEX_RUNTIME_LANE_CLASS, ONEX_RUNTIME_LANE_CLASS_CONTRACTS; read by the
 # auto-wiring ownership filter). Same rule: the overlay names the instance.
 #
+# The nodes a lane turns off (OMN-26232; ONEX_RUNTIME_NODE_EXCLUSION, a comma
+# list of contract names, read by the auto-wiring ownership filter). No value is
+# set here, in any lane file or in any catalog entry: a lane's overlay names the
+# node, and the deploy agent refuses a name no contract has before it recreates
+# anything. Safe on every service because each kernel service discovers the same
+# contracts (the manifest does not depend on the runtime profile); the two
+# services that never run the kernel (projection-api, contract-resolver) ignore it.
+#
 # The deployment's provenance overlay (OMN-23981; ONEX_PROVENANCE_LANE,
 # ONEX_PROVENANCE_LANE_KIND, ONEX_PROVENANCE_HOST, ONEX_PROVENANCE_INSTALL_SOURCE,
 # ONEX_PROVENANCE_REVISION), read by the Kafka envelope publish seam. It stamps
@@ -544,6 +552,7 @@ x-runtime-passthrough-env: &runtime-passthrough-env
   ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD:
   ONEX_RUNTIME_LANE_CLASS:
   ONEX_RUNTIME_LANE_CLASS_CONTRACTS:
+  ONEX_RUNTIME_NODE_EXCLUSION:
   ONEX_PROVENANCE_LANE:
   ONEX_PROVENANCE_LANE_KIND:
   ONEX_PROVENANCE_HOST:
