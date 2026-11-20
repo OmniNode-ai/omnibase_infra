@@ -1,0 +1,80 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24551
+title: "Second-host stability broker layer: the agent and the refresh decide from one place, bad addresses are refused, the dry run shows the result"
+summary: >-
+  The deploy agent's stability compose file list and the shell resolver's list are decided by one module read from the node contract, so a full-scope up on a declaring host cannot recreate the stability broker without the host's layer. A declared address that is empty, whitespace or malformed is refused by name, the layer is matched to the lane overlay by equality, and the refresh dry run prints the resolved file list and the addresses.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24551-one-decision
+    statement: >-
+      The agent and the refresh resolver list the same compose files for the same declared addresses, and a bad declared address stops both by name.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the deploy agent's stability compose file list is the shell resolver's list for the same declared addresses, layer included -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_layer_file_list_matches_resolver_omn24509.py -q fails when the agent lists the old two files
+      - id: AC2
+        statement: >-
+          AC2: a declared address that is empty, whitespace or malformed is refused by name by the resolver and by the agent, and the layer is matched by equality on the overlay name -- falsifier: pytest tests/scripts/test_stability_host_broker_layer_applied.py -q fails when the shape check or the equality match is removed
+      - id: AC3
+        statement: >-
+          AC3: the stability refresh dry run prints the resolved compose file list and the advertised addresses, and a malformed address stops it before anything is read from the lane -- falsifier: pytest tests/integration/scripts/test_refresh_stability_lane_dry_run_layer_omn24509.py -q fails when the print is removed
+      - id: AC4
+        statement: >-
+          AC4: integrated: on h051 the stability refresh dry run from the branch prints the layer file and h051's advertised address -- falsifier: the same dry run with the overlay values removed prints layer_file=none
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The executor list equals the resolver list in every declared case, a refused declaration stops both, and the dry run prints the decision.
+    command: uv run --frozen pytest tests/scripts/test_stability_host_broker_layer_applied.py tests/integration/scripts/test_refresh_stability_lane_dry_run_layer_omn24509.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24551-ac1-executor-matches-resolver
+    description: >-
+      The ticket's falsifier. With the agent listing the static two files, the declared cases differ from the resolver's list and the test goes red.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_layer_file_list_matches_resolver_omn24509.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn24551-ac2-refusals-and-equality
+    description: >-
+      Empty, whitespace and malformed declared addresses are refused by name; the overlay is matched by equality; the dogfood lane never gains the layer; the control strips the wiring and the layer disappears.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_stability_host_broker_layer_applied.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn24551-ac2-deploy-probe
+    description: >-
+      Deploy probe. The resolver file GitHub serves at the checked-out commit names the module that decides the layer, which is what a host running the refresh reads. The probe reads the file at that commit, counts the references and exits nonzero on a tree without them, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/compose_files.sh?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'runtime_host_broker_layer.py' | grep -qx 1"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn24551-ac3-dry-run-prints-decision
+    description: >-
+      The refresh script in plan mode, in a sandbox of tagged clones with stub programs, prints the file list and the addresses with the values declared, prints no layer with them removed, and stops on a malformed or empty address.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/scripts/test_refresh_stability_lane_dry_run_layer_omn24509.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn24551-ac4-hosted-stand-in
+    description: >-
+      Hosted stand-in for AC4, which is read on h051 from the branch: the dry run with the values declared names the layer and the addresses, and with them removed names no layer.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/scripts/test_refresh_stability_lane_dry_run_layer_omn24509.py -q -n 0 -p no:cacheprovider -k "names_the_layer or names_no_layer"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
