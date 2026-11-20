@@ -66,6 +66,10 @@ ALLOWED_EMPTY_DEFAULTS = {
     # the minting services for the reason above; the fail-closed `:?` lives on the consumer,
     # GATEWAY_DATABASE_DSN in the dev and stability overlays.
     "GATEWAY_RUNTIME_PASSWORD",
+    # OMN-26151: the resolver-env anchor requires every env secret ref to be passed through
+    # x-runtime-env, and the shared base cannot carry the fail-closed `:?` (every lane layers
+    # it). The fail-closed value is set by the dev and stability overlays.
+    "GATEWAY_DATABASE_DSN",
     # OMN-4316: OMNIMEMORY_* vars are intentionally opt-in (empty = disabled)
     "OMNIMEMORY_ENABLED",
     "OMNIMEMORY_MEMGRAPH_HOST",
