@@ -59,11 +59,11 @@ dod_evidence:
         cwd: .
   - id: dod-omn26287-ac4-handoff
     description: >-
-      The hand-off facts (ready pull request, Lab line, needs=land message, STATUS cause=runner-routing-audit row) are ledger and pull-request facts that a hosted runner cannot read. This entry binds the behaviour they hand off: the audit's local pass is clean on the fixed policy.
+      The hand-off facts (ready pull request, Lab line, needs=land message, STATUS cause=runner-routing-audit row) are ledger and pull-request facts that a hosted runner cannot read. This entry binds the behaviour they hand off: the fixed policy declares the hosted seam value for the private infra repository, a test that fails on the unfixed policy.
     source: manual
     binds_ac:
       - AC4
     checks:
-      - check_type: command
-        check_value: uv run --frozen python scripts/audit-runner-routing.py --local-workflows
+      - check_type: test_passes
+        check_value: uv run --frozen pytest "tests/ci/test_runner_routing_audit.py::test_hosted_infra_trusted_seam_is_the_declared_state" -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
