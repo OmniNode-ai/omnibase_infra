@@ -39,7 +39,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/models/runtime/test_node_exclusion_lane_env_omn26218.py -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
-  - id: dod-omn26232-ac2-deploy-agent-allowlist-and-refusal
+  - id: dod-omn26232-ac2-agent-allowlist-refusal
     description: >-
       The runtime_lane_env.v1 allowlist carries the key and its literal is pinned to the model's constant. A fragment naming a known name, from the deploy source or the omnimarket sibling, is returned with the key. A mistyped name raises LaneEnvFragmentError naming the typo and a close match. Empty and unset are accepted, an empty value is still refused for every other key, and a name with no checkout to check it against is refused. The clone reader applies the check, and executor._compose_env, which every compose command reads, carries a known name and raises on a typo before any compose command runs.
     source: manual
@@ -69,7 +69,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/docker/test_node_exclusion_passthrough_omn26218.py -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
-  - id: dod-omn26232-ac5-lane-env-reader-no-container-touched
+  - id: dod-omn26232-ac5-lane-env-reader-readback
     description: >-
       The deploy agent's own reader, read_lane_env_fragment, runs against a scratch git clone holding a fragment for a synthetic lane: a known name is returned and a mistyped name raises LaneEnvFragmentError naming it. The reader is git and file reads only, and the test never calls docker. The lab run of the same reader from the pushed branch is recorded in the pull request's Lab line.
     source: manual
