@@ -649,8 +649,8 @@ jobs:
           set -euo pipefail
           dispatch_venv="${RUNNER_TEMP}/dispatch-venv"
           UV_PROJECT_ENVIRONMENT="${dispatch_venv}" uv sync
-          if [ ! -x "${dispatch_venv}/bin/onex" ]; then
-            echo "::error::${dispatch_venv}/bin/onex is missing after the dispatch-venv sync — every per-ticket verifier dispatch would fail closed at exec time, so refusing to continue." >&2
+          if ! "${dispatch_venv}/bin/python" -c 'import omnibase_core.cli.cli_commands' >/dev/null 2>&1; then
+            echo "::error::${dispatch_venv}/bin/python cannot import the core CLI after the dispatch-venv sync — every per-ticket verifier dispatch would fail closed at exec time, so refusing to continue." >&2
             exit 1
           fi
           echo "DISPATCH_VENV=${dispatch_venv}" >> "$GITHUB_ENV"
@@ -878,7 +878,7 @@ jobs:
               print(
                   "FAIL: node_dod_verify is not a resolvable onex.nodes entry point "
                   f"after the co-install ({len(eps)} entry points found). Every "
-                  "`onex skill dod_verify <ticket>` the sweep spawns would fail "
+                  "core CLI `skill dod_verify <ticket>` the sweep spawns would fail "
                   "closed with 'Unknown node', and no flip or gap decision could "
                   "be reached for any ticket.",
                   file=sys.stderr,
