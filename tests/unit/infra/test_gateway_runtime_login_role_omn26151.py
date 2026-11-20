@@ -215,7 +215,7 @@ def test_gateway_grants_file_carries_no_credential_and_no_role_attribute() -> No
 def test_runner_applies_the_grants_file_inside_the_slot_guarded_grant_seam() -> None:
     text = RUNNER.read_text(encoding="utf-8")
     guard = text.index('slot_skip_role_seam "login-only role grants (OMN-18060)"')
-    call = text.index("/../seams/gateway_runtime_grants.sql")
+    call = text.index("/migrations/seams/gateway_runtime_grants.sql")
     sentinel = text.index("All migrations complete. Setting sentinel TRUE")
     # Under a slot the guard's branch runs instead of the else-branch that
     # holds the call, so a slot never applies the file.
@@ -226,11 +226,26 @@ def test_runner_applies_the_grants_file_inside_the_slot_guarded_grant_seam() -> 
     )
 
 
-def test_forward_migration_service_mounts_the_seams_directory() -> None:
-    block = _service_block(
-        COMPOSE_INFRA.read_text(encoding="utf-8"), "forward-migration"
-    )
-    assert "      - ../docker/migrations/seams:/migrations/seams:ro" in block
+def test_every_definition_that_runs_the_runner_mounts_the_seams_directory() -> None:
+    """The runner applies /migrations/seams/gateway_runtime_grants.sql by absolute path.
+
+    A service that mounts the runner and not the directory would fail the run on a
+    missing file, so every compose or catalog definition that mounts one mounts both.
+    """
+    runner_mount = "../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro"
+    seams_mount = "../docker/migrations/seams:/migrations/seams:ro"
+    carriers = [
+        path
+        for path in sorted((ROOT / "docker").rglob("*.y*ml"))
+        if runner_mount in path.read_text(encoding="utf-8")
+    ]
+    assert len(carriers) >= 5, f"fewer runner carriers than expected: {carriers}"
+    missing = [
+        str(path.relative_to(ROOT))
+        for path in carriers
+        if seams_mount not in path.read_text(encoding="utf-8")
+    ]
+    assert not missing, f"these mount the runner but not the seams directory: {missing}"
 
 
 # ---------------------------------------------------------------------------

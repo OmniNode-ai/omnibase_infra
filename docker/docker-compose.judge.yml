@@ -433,6 +433,7 @@ services:
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
       - ../docker/migrations/forward:/migrations/forward:ro
+      - ../docker/migrations/seams:/migrations/seams:ro
     entrypoint: ["sh", "/run-forward-migrations.sh"]
     networks: !override
       - omnibase-infra-judge-network

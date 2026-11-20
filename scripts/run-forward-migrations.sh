@@ -2414,7 +2414,7 @@ else
   # function above cannot express and its tests forbid it to. The file gates on
   # the role, the database and the seven tables, resets then grants the nine
   # items, and reads them back (it fails the run on any difference).
-  psql -f "${MIGRATIONS_DIR}/../seams/gateway_runtime_grants.sql" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1
+  psql -f /migrations/seams/gateway_runtime_grants.sql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1
 fi
 # ---- END login-only role grant seam (OMN-18060) ----
 
