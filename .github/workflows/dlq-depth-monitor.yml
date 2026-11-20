@@ -51,7 +51,7 @@
 #       resolved to the literal every single run: no secret of that name
 #       exists at repo or org scope, and `source ~/.omnibase/.env` is a no-op
 #       on a hosted runner AND on the deploy runner, whose operator env is
-#       mounted at /home/runner/.runner-creds/operator.env instead. The node
+#       mounted in the runner user's credentials directory instead. The node
 #       applies no default and fails closed on an unset broker — and the
 #       workflow defeated that by supplying one the node then trusted. The
 #       header comment claiming otherwise was true of the node and false of
@@ -99,7 +99,7 @@
 # that landed during a gap.
 #
 # No new scripts/** file: scripts/** is DEFAULT-DENY for new files (OMN-14475
-# canonical-form guard). The step below is a direct `uv run onex ...`
+# canonical-form guard). The step below is a direct `uv run python -m omnibase_core.cli.cli_commands ...`
 # invocation of code that already lives under src/.
 
 name: DLQ Depth Monitor
@@ -292,7 +292,7 @@ jobs:
           if [ "$SUPPRESS_ALERT_EXIT" = "true" ]; then
             suppress_flag=(--suppress-alert-exit)
           fi
-          uv run onex skill dlq_depth_monitor \
+          uv run python -m omnibase_core.cli.cli_commands skill dlq_depth_monitor \
             --topic-prefix "$TOPIC_PREFIX" \
             --window-seconds "$WINDOW_SECONDS" \
             "${suppress_flag[@]}" \

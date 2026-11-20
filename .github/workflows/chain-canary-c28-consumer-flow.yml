@@ -211,7 +211,7 @@ jobs:
 
       - name: Re-measure C28 on the stability lane and grade it
         run: >-
-          uv run --frozen onex node node_board_probe_effect
+          uv run --frozen python -m omnibase_core.cli.cli_commands node node_board_probe_effect
           --contract c28-contract.yaml --input c28-request.json
           --timeout 1700 --output receipt
 

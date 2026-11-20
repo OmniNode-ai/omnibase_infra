@@ -218,7 +218,7 @@ def test_sasl_credentials_reach_the_client_as_env_never_argv(
 def test_invokes_the_skill_with_flags_the_mapping_declares(
     workflow_text: str,
 ) -> None:
-    assert f"onex skill {_SKILL_NAME}" in workflow_text
+    assert f"omnibase_core.cli.cli_commands skill {_SKILL_NAME}" in workflow_text
 
     registry = yaml.safe_load(_SKILL_MAPPING.read_text(encoding="utf-8"))
     mapping = next(

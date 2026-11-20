@@ -537,7 +537,8 @@ def test_ci_and_hook_use_the_bus_node_and_required_context() -> None:
     assert "if" not in job and "continue-on-error" not in job
     steps = job["steps"]
     assert any(
-        "onex node node_ci_live_contact_effect" in step.get("run", "")
+        "omnibase_core.cli.cli_commands node node_ci_live_contact_effect"
+        in step.get("run", "")
         and "event_bus=inmemory" in step["run"]
         for step in steps
     )
@@ -550,7 +551,9 @@ def test_ci_and_hook_use_the_bus_node_and_required_context() -> None:
         if h["id"] == "ci-live-contact"
     )
     assert (
-        "onex node node_ci_live_contact_effect" in hook["entry"] and hook["always_run"]
+        "omnibase_core.cli.cli_commands node node_ci_live_contact_effect"
+        in hook["entry"]
+        and hook["always_run"]
     )
     assert "event_bus=inmemory" in hook["entry"]
     contract = yaml.safe_load(CONTRACT.read_text())

@@ -490,7 +490,7 @@ class TestCutJobWiring:
 
     def test_the_cut_job_applies_notes_through_the_node(self) -> None:
         body = _WORKFLOW.read_text(encoding="utf-8")
-        assert f"onex node {_NODE_NAME}" in body
+        assert f"omnibase_core.cli.cli_commands node {_NODE_NAME}" in body
         assert 'pathlib.Path("CHANGELOG.md")' not in body, (
             "an inline CHANGELOG.md write is the second writer that ignores the "
             "repo's .readme-only-docs.yaml"
@@ -540,7 +540,7 @@ class TestCutJobWiring:
         self,
     ) -> None:
         body = _WORKFLOW.read_text(encoding="utf-8")
-        start = body.index(f"onex node {_NODE_NAME}")
+        start = body.index(f"omnibase_core.cli.cli_commands node {_NODE_NAME}")
         invocation = body[body.rindex("if ! ", 0, start) : start]
         assert "env -u GH_TOKEN -u GITHUB_TOKEN" in invocation
         assert '--project "${GITHUB_WORKSPACE}/_train"' in invocation
