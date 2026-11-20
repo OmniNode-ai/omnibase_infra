@@ -18,6 +18,9 @@ from omnibase_infra.models.model_action_archive_cache_fill_result import (
 )
 from omnibase_infra.models.model_deploy_runners_request import ModelDeployRunnersRequest
 from omnibase_infra.models.model_deploy_runners_result import ModelDeployRunnersResult
+from omnibase_infra.models.model_runner_lab_host_table_policy import (
+    ModelRunnerLabHostTablePolicy,
+)
 from omnibase_infra.models.model_runner_tmp_compose import ModelRunnerTmpCompose
 from omnibase_infra.models.model_runner_tmp_policy import ModelRunnerTmpPolicy
 from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
@@ -165,6 +168,57 @@ class HandlerDeployRunners:
             )
         return tuple(warnings)
 
+    async def _write_remote(
+        self, host: str, word: str, data: str, timeout: int
+    ) -> None:
+        """Overwrite the file named by the shell word ``word`` in place (inode, owner and mode kept)."""
+        process = await asyncio.create_subprocess_exec(
+            "ssh",
+            "--",
+            host,
+            f"set -eu; test -f {word}; cat > {word}",
+            stdin=asyncio.subprocess.PIPE,
+        )
+        try:
+            await asyncio.wait_for(process.communicate(data.encode()), timeout)
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+            raise
+        if process.returncode:
+            raise OSError(f"SSH exited {process.returncode}")
+
+    async def _converge_lab_host_table(
+        self, request: ModelDeployRunnersRequest, timeout: int
+    ) -> str | None:
+        """OMN-26098: a named refusal from the lab host table copy, or ``None`` when copy and key are in place."""
+        result = await ModelRunnerLabHostTablePolicy().converge(
+            host=request.host,
+            env_file=str(Path(request.host_dir) / "docker" / ".env"),
+            projection=request.lab_host_table_projection,
+            run=self._remote,
+            write=self._write_remote,
+        )
+        return None if result.success else result.error_message
+
+    @staticmethod
+    def _job_dir_root(request: ModelDeployRunnersRequest) -> str | None:
+        """OMN-26093: the host root the pool's job directories are declared under, if any.
+
+        Unreadable or absent declarations read as no root, so a pool with no declared root
+        keeps preparing the TMPDIR and pause directories alone, as before.
+        """
+        if not request.fleet_config:
+            return None
+        try:
+            fleet = load_runner_fleet_config(Path(request.fleet_config))
+        except (OSError, ValueError):
+            return None
+        row = next((h for h in fleet.hosts if h.host == request.host), None)
+        if row is None or row.runner_name_prefix != request.prefix:
+            return None
+        return row.job_dir_host_root
+
     async def handle(
         self, request: ModelDeployRunnersRequest
     ) -> ModelDeployRunnersResult:
@@ -172,16 +226,22 @@ class HandlerDeployRunners:
             return ModelDeployRunnersResult(success=True)
         try:
             policy = ModelRunnerTmpPolicy()
+            compose_text = Path(request.compose_file).read_text()
             # Read only the registration variable names; no credential value
             # leaves the remote Compose stdout -> typed model boundary.
             token_vars = sorted(
-                set(
-                    re.findall(
-                        r"RUNNER_TOKEN:\s*\$\{([A-Z0-9_]+)",
-                        Path(request.compose_file).read_text(),
-                    )
-                )
+                set(re.findall(r"RUNNER_TOKEN:\s*\$\{([A-Z0-9_]+)", compose_text))
             )
+            # OMN-26098: a compose that mounts the lab host table needs the copy and the env key in place before
+            # Compose renders it, here and at the container create that follows.
+            if ModelRunnerLabHostTablePolicy().env_key in compose_text:
+                refusal = await self._converge_lab_host_table(
+                    request, policy.timeout_seconds
+                )
+                if refusal is not None:
+                    return ModelDeployRunnersResult(
+                        success=False, error_message=refusal
+                    )
             exports = " ".join(f"export {name}=preflight;" for name in token_vars)
             compose = shlex.join(
                 [
@@ -211,6 +271,7 @@ class HandlerDeployRunners:
                 policy.timeout_seconds,
             )
             services = ModelRunnerTmpCompose.model_validate_json(rendered).services
+            job_root = self._job_dir_root(request)
             directories: dict[str, str] = {}
             for number in range(1, request.count + 1):
                 service = services[f"{request.prefix}-{number}"]
@@ -218,20 +279,30 @@ class HandlerDeployRunners:
                 for volume in service.volumes:
                     # OMN-25674: the disk-admission pause directory is a bind source too;
                     # Docker creates it root-owned and the hook writes its marker as runner.
+                    # OMN-26093: every other bind whose source is under the pool's declared
+                    # job-directory root (workspace, caches) is created runner-owned too, so a
+                    # runner's first job does not meet a root-owned cache directory.
+                    under_job_root = (
+                        job_root is not None
+                        and Path(volume.source).is_absolute()
+                        and Path(volume.source).is_relative_to(job_root)
+                    )
                     if volume.type is EnumComposeMountType.BIND and (
                         volume.target == tmpdir
                         or volume.target.endswith(_PAUSE_DIR_TARGET_SUFFIX)
+                        or under_job_root
                     ):
                         if (
                             not Path(volume.source).is_absolute()
                             or "\n" in volume.source
                         ):
                             raise ValueError("invalid TMPDIR source")
-                        directories[volume.source] = (
-                            policy.mode
-                            if volume.target == tmpdir
-                            else policy.pause_dir_mode
-                        )
+                        if volume.target == tmpdir:
+                            directories[volume.source] = policy.mode
+                        elif volume.target.endswith(_PAUSE_DIR_TARGET_SUFFIX):
+                            directories[volume.source] = policy.pause_dir_mode
+                        else:
+                            directories[volume.source] = policy.job_dir_mode
         except (OSError, ValueError, KeyError, TimeoutError):
             return ModelDeployRunnersResult(
                 success=False,

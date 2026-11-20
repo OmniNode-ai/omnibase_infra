@@ -453,7 +453,7 @@ ARTIFACTS_ONLY=false
 ROLLING_DEPLOY=false
 # OMN-19077: scale the general pool DOWN to expected_count, one idle runner at
 # a time. See the --retire-surplus block in the header.
-RETIRE_SURPLUS=false
+RETIRE_SURPLUS=false RETIRE_POOL=false
 # 0 means the whole fleet; --limit=N stops after N successful recreates.
 ROLL_LIMIT=0
 # Empty means the whole fleet; --only=<service> converges exactly one runner.
@@ -490,6 +490,7 @@ for arg in "$@"; do
         --artifacts-only) ARTIFACTS_ONLY=true ;;
         --rolling)    ROLLING_DEPLOY=true ;;
         --retire-surplus) RETIRE_SURPLUS=true ;;
+        --retire-pool) RETIRE_POOL=true ;;
         --relabel)    RELABEL_ROLL=true; RELABEL_LABEL="${RELABEL_DEFAULT_LABEL}" ;;
         --relabel=*)  RELABEL_ROLL=true; RELABEL_LABEL="${arg#*=}" ;;
         --drain-timeout=*) RELABEL_DRAIN_TIMEOUT_SECONDS="${arg#*=}" ;;
@@ -503,34 +504,26 @@ for arg in "$@"; do
             echo "Usage: $0 [--dry-run] [--skip-build] [--soft] [--rolling]"
             echo "  --dry-run     Print actions without executing remote commands"
             echo "  --skip-build  Skip docker build (use existing image)"
-            echo "  --soft        Update entrypoint in-place without destroying containers"
-            echo "                (preserves cached credentials, skips registration token)"
+            echo "  --soft        Update entrypoint in-place, no container destroyed (no token)"
             echo "  --rolling     Recreate one idle runner at a time and wait for it online."
-            echo "                On the primary host: DEPLOY_RUNNER_TOKEN or --token-file."
-            echo "                On secondary hosts: a 0600 --token-file, including for --dry-run."
-            echo "  --limit=N     With --rolling: stop after N recreates. Use 1 for a canary."
-            echo "  --only=NAME   With --rolling: converge one declared pool service."
+            echo "                Primary: DEPLOY_RUNNER_TOKEN or --token-file. Secondary: a 0600 --token-file, even for --dry-run."
+            echo "                A runner on the declared image is recreated too when its mounts or"
+            echo "                declared env differ from the synced Compose (never the token)."
+            echo "  --limit=N     With --rolling or --retire-pool: stop after N runners. 1 is a canary."
+            echo "  --only=NAME   With --rolling or --retire-pool: act on one declared pool service."
             echo "  --token-file=PATH  Registration token file. Passed over SSH stdin."
-            echo "  --add=LIST    Additively stand up the named DECLARED non-general-pool"
-            echo "                services: 'up -d --no-deps LIST' with NEITHER"
-            echo "                --force-recreate NOR --remove-orphans, no cron installs,"
-            echo "                and a wait scoped to those runners. Refuses a"
-            echo "                ${RUNNER_NAME_PREFIX}-N service (use --rolling), an"
-            echo "                undeclared service, and --soft/--rolling."
-            echo "  --retire-surplus  Scale the general pool DOWN to expected_count:"
-            echo "                each ${RUNNER_NAME_PREFIX}-N container with N above it is"
-            echo "                idle-checked, stopped and removed one at a time (its"
-            echo "                creds volume is kept), then its GitHub registration"
-            echo "                is deleted once it reads offline."
-            echo "  --relabel[=LABEL]  Drain-then-relabel roll: re-register the ONLINE"
-            echo "                pool with the label set its compose file renders (which"
-            echo "                must carry LABEL, default ${RELABEL_DEFAULT_LABEL}), one"
-            echo "                runner at a time, each only once idle, count unchanged."
-            echo "                Works on the primary host and with --host/--pool."
-            echo "  --drain-timeout=SECONDS  With --relabel: how long to wait for busy"
-            echo "                runners to go idle (default 1800)."
-            echo "  --host=NAME   Select a declared fleet host. Defaults to the primary."
-            echo "                Secondary hosts stand up additively unless --rolling is set."
+            echo "  --add=LIST    Additively stand up the named DECLARED non-general-pool services (no recreate, no cron"
+            echo "                installs). Refuses a ${RUNNER_NAME_PREFIX}-N service (use --rolling), an undeclared one, --soft/--rolling."
+            echo "  --retire-surplus  Scale the general pool DOWN to expected_count: each"
+            echo "                ${RUNNER_NAME_PREFIX}-N container above it is idle-checked, stopped and"
+            echo "                removed one at a time (creds volume kept), then deregistered."
+            echo "  --retire-pool With --host/--pool: drain, deregister and remove a whole CI pool,"
+            echo "                one idle runner at a time. Needs no token; --dry-run prints the plan."
+            echo "  --relabel[=LABEL]  Drain-then-relabel roll: re-register the ONLINE pool with"
+            echo "                the labels its compose renders (must carry LABEL, default"
+            echo "                ${RELABEL_DEFAULT_LABEL}), one idle runner at a time, count unchanged."
+            echo "  --drain-timeout=SECONDS  With --relabel: wait for busy runners (default 1800)."
+            echo "  --host=NAME   Select a declared fleet host (default: the primary; a secondary stands up additively)."
             echo "  --pool=PREFIX Select a declared additional pool of a secondary host."
             exit 0
             ;;
@@ -588,7 +581,7 @@ if [[ -n "${TARGET_HOST}" && "${TARGET_HOST}" != "${RUNNER_HOST}" ]]; then
     # assuming, and fail if it cannot be resolved -- a wrong path here rsyncs
     # the fleet's artifacts into a directory nothing reads.
     # The image roll resolves its host paths through its own handler.
-    if ! "${ROLLING_DEPLOY}" && { ! "${DRY_RUN}" || "${RELABEL_ROLL}"; }; then
+    if ! "${ROLLING_DEPLOY}" && ! "${RETIRE_POOL}" && { ! "${DRY_RUN}" || "${RELABEL_ROLL}"; }; then
         remote_home="$(ssh "${RUNNER_HOST}" 'printf %s "$HOME"')" || {
             echo "[deploy-runners] ERROR: cannot resolve \$HOME on ${RUNNER_HOST}" >&2
             exit 1
@@ -2014,7 +2007,7 @@ secondary_target_names() {
 
 # OMN-19998: dispatch preparation through the contract-backed effect.
 ensure_runner_tmp_dirs() {
-    jq -n --arg host "${RUNNER_HOST}" --arg host_dir "${RUNNER_HOST_DIR}" --arg compose_file "${REPO_ROOT}/${COMPOSE_FILE}" --arg prefix "${RUNNER_NAME_PREFIX}" --argjson count "${RUNNER_COUNT}" --argjson dry_run "${DRY_RUN}" --argjson secondary "${SECONDARY_HOST}" --arg fleet_config "${RUNNER_FLEET_CONFIG}" --arg clone_root "${OMNI_HOME:-}" '$ARGS.named | with_entries(select(.value != ""))' | uv run --frozen --project "${REPO_ROOT}" python -c 'from omnibase_infra.cli.cli_node import run_node_by_name; run_node_by_name()' node_deploy_runners --contract "${REPO_ROOT}/src/omnibase_infra/nodes/node_deploy_runners/contract.yaml" --input /dev/stdin --backend event_bus=inmemory --state-root "${ONEX_STATE_DIR:-${REPO_ROOT}/.onex_state}/runner-tmp"
+    jq -n --arg host "${RUNNER_HOST}" --arg host_dir "${RUNNER_HOST_DIR}" --arg compose_file "${REPO_ROOT}/${COMPOSE_FILE}" --arg prefix "${RUNNER_NAME_PREFIX}" --argjson count "${RUNNER_COUNT}" --argjson dry_run "${DRY_RUN}" --argjson secondary "${SECONDARY_HOST}" --arg fleet_config "${RUNNER_FLEET_CONFIG}" --arg clone_root "${OMNI_HOME:-}" --arg lab_host_table_projection "${RUNNER_LAB_HOST_TABLE_PROJECTION:-}" '$ARGS.named | with_entries(select(.value != ""))' | uv run --frozen --project "${REPO_ROOT}" python -c 'from omnibase_infra.cli.cli_node import run_node_by_name; run_node_by_name()' node_deploy_runners --contract "${REPO_ROOT}/src/omnibase_infra/nodes/node_deploy_runners/contract.yaml" --input /dev/stdin --backend event_bus=inmemory --state-root "${ONEX_STATE_DIR:-${REPO_ROOT}/.onex_state}/runner-tmp"
 }
 
 # One registry read, then "<name> <status>" per target name ("unknown" when the
@@ -2561,10 +2554,16 @@ main() {
 
     if "${DRY_RUN}"; then log "[DRY RUN MODE] No remote commands will be executed."; fi
 
+    if "${RETIRE_POOL}"; then
+        "${SECONDARY_HOST}" && ! "${ROLLING_DEPLOY}" && ! "${RELABEL_ROLL}" && ! "${SOFT_DEPLOY}" && ! "${RETIRE_SURPLUS}" && ! "${ARTIFACTS_ONLY}" && [[ -z "${ADD_SERVICES}" ]] || err "--retire-pool needs --host (a non-primary registry host) and is exclusive with every other deploy mode."
+        jq -n --arg host "${RUNNER_HOST}" --arg prefix "${RUNNER_NAME_PREFIX}" --arg fleet_config "${RUNNER_FLEET_CONFIG}" --arg only "${ROLL_ONLY}" --arg limit "${ROLL_LIMIT}" --argjson dry_run "${DRY_RUN}" '$ARGS.named | .limit |= tonumber' | uv run --frozen --project "${REPO_ROOT}" python -c 'from omnibase_infra.cli.cli_node import run_node_by_name; run_node_by_name()' node_runner_pool_retire --contract "${REPO_ROOT}/src/omnibase_infra/nodes/node_runner_pool_retire/contract.yaml" --input /dev/stdin --backend event_bus=inmemory --timeout 9600 --state-root "${ONEX_STATE_DIR:-${REPO_ROOT}/.onex_state}/runner-pool-retire"
+        return
+    fi
+
     if "${SECONDARY_HOST}" && "${ROLLING_DEPLOY}"; then
         if "${RELABEL_ROLL}" || "${SOFT_DEPLOY}" || "${RETIRE_SURPLUS}" || "${ARTIFACTS_ONLY}" || [[ -n "${ADD_SERVICES}" ]]; then err "Secondary --rolling is mutually exclusive with every other deploy mode."; fi
         [[ -n "${TOKEN_FILE}" ]] || err "Secondary --rolling requires --token-file, including for --dry-run."
-        jq -n --arg host "${RUNNER_HOST}" --arg prefix "${RUNNER_NAME_PREFIX}" --arg repo_root "${REPO_ROOT}" --arg fleet_config "${RUNNER_FLEET_CONFIG}" --arg token_path "${TOKEN_FILE}" --arg only "${ROLL_ONLY}" --arg limit "${ROLL_LIMIT}" --argjson dry_run "${DRY_RUN}" --argjson skip_build "${SKIP_BUILD}" '$ARGS.named | .limit |= tonumber' |
+        jq -n --arg host "${RUNNER_HOST}" --arg prefix "${RUNNER_NAME_PREFIX}" --arg repo_root "${REPO_ROOT}" --arg fleet_config "${RUNNER_FLEET_CONFIG}" --arg token_path "${TOKEN_FILE}" --arg only "${ROLL_ONLY}" --arg limit "${ROLL_LIMIT}" --arg lab_host_table_projection "${RUNNER_LAB_HOST_TABLE_PROJECTION:-}" --argjson dry_run "${DRY_RUN}" --argjson skip_build "${SKIP_BUILD}" '$ARGS.named | .limit |= tonumber' |
             uv run --frozen --project "${REPO_ROOT}" python -c 'from omnibase_infra.cli.cli_node import run_node_by_name; run_node_by_name()' node_runner_image_roll --contract "${REPO_ROOT}/src/omnibase_infra/nodes/node_runner_image_roll/contract.yaml" --input /dev/stdin --backend event_bus=inmemory --timeout 9600 --state-root "${ONEX_STATE_DIR:-${REPO_ROOT}/.onex_state}/runner-image-roll"
         return
     fi

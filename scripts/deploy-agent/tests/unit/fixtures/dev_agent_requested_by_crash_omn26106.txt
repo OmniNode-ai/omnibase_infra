@@ -1,0 +1,47 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/data/omninode/omnibase_infra/scripts/deploy-agent/deploy_agent/__main__.py", line 25, in <module>
+    main()
+  File "/data/omninode/omnibase_infra/scripts/deploy-agent/deploy_agent/__main__.py", line 21, in main
+    asyncio.run(agent.run())
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/data/omninode/omnibase_infra/scripts/deploy-agent/deploy_agent/agent.py", line 957, in run
+    await self._offload(self._maybe_idle_converge)
+  File "/data/omninode/omnibase_infra/scripts/deploy-agent/deploy_agent/agent.py", line 755, in _offload
+    return await loop.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/omninode/omnibase_infra/scripts/deploy-agent/deploy_agent/agent.py", line 1398, in _maybe_idle_converge
+    self._maybe_stability_follow(now)
+  File "/data/omninode/omnibase_infra/scripts/deploy-agent/deploy_agent/agent.py", line 1472, in _maybe_stability_follow
+    if not self._idle_converge_gate_open():
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/omninode/omnibase_infra/scripts/deploy-agent/deploy_agent/agent.py", line 1834, in _idle_converge_gate_open
+    return bool(load_dev_boot_guard(DEV_ROLL_EVENTS).window_admits(self, who))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/omninode/omnibase_infra/src/omnibase_infra/nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py", line 225, in window_admits
+    return gate is None or bool(gate.allow(requested_by, observed))
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/omninode/omnibase_infra/src/omnibase_infra/handlers/dev_recreate_window/handler_dev_recreate_window.py", line 171, in allow
+    return self.permit(requested_by, self._clock())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/omninode/omnibase_infra/src/omnibase_infra/handlers/dev_recreate_window/handler_dev_recreate_window.py", line 137, in permit
+    ModelDevRecreateRequest(
+  File "/data/omninode/omnibase_infra/scripts/deploy-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 250, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 1 validation error for ModelDevRecreateRequest
+requested_by
+  String should have at least 1 character [type=string_too_short, input_value='', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.12/v/string_too_short

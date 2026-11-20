@@ -140,7 +140,7 @@ def test_the_pool_slice_bounds_the_whole_pool() -> None:
     )
     assert limits["CPUWeight"] == "25"
     assert ram <= _bytes(limits["MemoryHigh"]) <= _bytes(limits["MemoryMax"])
-    # OMN-19998: the job directories are tmpfs, so nothing in the pool may swap to the rotational root volume.
+    # OMN-19998: nothing in the pool may swap to the rotational root volume.
     assert swap == 0
     assert limits["MemorySwapMax"] == "0"
 
@@ -177,10 +177,10 @@ def test_the_h053_service_blocks_are_the_h051_blocks_with_the_h053_names() -> No
     h053 = _compose(H053)["services"][f"{H053}-1"]
     for key in ("image", "restart", "pids_limit"):
         assert h053[key] == h051[key], key
-    # OMN-19998: the limits are h053's own, from the reads of 2026-11-04 (see the compose header).
+    # OMN-19998 and OMN-26093: the limits are h053's own, from the reads of 2026-11-04 and 2026-11-19 (see the compose header).
     assert (h053["mem_limit"], h053["memswap_limit"], h053["cpus"]) == (
-        "9g",
-        "9g",
+        "6g",
+        "6g",
         "5.0",
     )
     assert h053["group_add"] == h051["group_add"] == ["988"]

@@ -21,13 +21,28 @@ import asyncio
 import contextlib
 import importlib
 import logging
-from collections.abc import Awaitable, Callable, Iterable, MutableMapping
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    MutableMapping,
+)
 from typing import Any, cast
 
-from aiohttp import web
+from aiohttp import hdrs, web
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.handlers.http_mount.bounded_body import (
+    BodyTooLargeError,
+    BoundedInflater,
+    MalformedBodyError,
+    UnsupportedCodingError,
+    content_coding,
+    decoded_chunks,
+    replay,
+)
 from omnibase_infra.models.model_http_mount import ModelHttpMount
 from omnibase_infra.runtime.auto_wiring.discovery import read_contract_yaml
 from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import (
@@ -43,6 +58,32 @@ _AsgiSend = Callable[[_AsgiMessage], Awaitable[None]]
 _AsgiApp = Callable[[_AsgiScope, _AsgiReceive, _AsgiSend], Awaitable[None]]
 
 _SKIPPED_RESPONSE_HEADERS = frozenset({"transfer-encoding", "connection"})
+
+
+def listener_runner(
+    app: web.Application, *, shutdown_timeout: float | None = None
+) -> web.AppRunner:
+    """The runner for an application that carries mounts (OMN-26085).
+
+    ``auto_decompress=False`` leaves a request body as it came off the socket, so
+    the bridge decodes it under the mount's cap; aiohttp's parser would expand up
+    to a read buffer of it ahead of any check. ``lingering_time=0`` stops aiohttp
+    from reading and discarding the rest of a refused body before it closes.
+    """
+    if shutdown_timeout is None:
+        return web.AppRunner(app, auto_decompress=False, lingering_time=0)
+    return web.AppRunner(
+        app,
+        auto_decompress=False,
+        lingering_time=0,
+        shutdown_timeout=shutdown_timeout,
+    )
+
+
+def _refuse(status: type[web.HTTPClientError], reason: str) -> web.HTTPClientError:
+    error = status(text=reason)
+    error.force_close()
+    return error
 
 
 class LifespanDriver:
@@ -252,6 +293,13 @@ class AsgiMounts:
                 if not self._started:
                     return web.json_response({"status": "starting"}, status=503)
                 return await self._serve(app, request, mount.max_body_bytes)
+        try:
+            coding = content_coding(request.headers.get(hdrs.CONTENT_ENCODING))
+        except UnsupportedCodingError as exc:
+            raise _refuse(web.HTTPUnsupportedMediaType, str(exc)) from exc
+        if coding is not None:
+            # The listener does not decode bodies; only a mount's bridge does.
+            raise _refuse(web.HTTPUnsupportedMediaType, f"content-encoding {coding}")
         return await handler(request)
 
     @staticmethod
@@ -267,6 +315,25 @@ class AsgiMounts:
             content_length = request.content_length
             if content_length is not None and content_length > max_body_bytes:
                 raise reject_body(max_body_bytes, content_length)
+
+        # A compressed body is decoded here, under the cap, before dispatch.
+        decoded: AsyncIterator[bytes] | None = None
+        try:
+            coding = content_coding(request.headers.get(hdrs.CONTENT_ENCODING))
+            if coding is not None:
+                decoded = decoded_chunks(
+                    request.content,
+                    BoundedInflater(coding, max_body_bytes),
+                    max_body_bytes,
+                )
+                if max_body_bytes is not None:
+                    decoded = replay([chunk async for chunk in decoded])
+        except UnsupportedCodingError as exc:
+            raise _refuse(web.HTTPUnsupportedMediaType, str(exc)) from exc
+        except BodyTooLargeError as exc:
+            raise reject_body(exc.limit, exc.size) from exc
+        except MalformedBodyError as exc:
+            raise _refuse(web.HTTPBadRequest, str(exc)) from exc
 
         peer = (
             request.transport.get_extra_info("peername") if request.transport else None
@@ -289,13 +356,28 @@ class AsgiMounts:
         finished = asyncio.Event()
         body_done = False
         body_size = 0
-        body_rejection: web.HTTPRequestEntityTooLarge | None = None
+        body_rejection: web.HTTPClientError | None = None
         response: web.StreamResponse | None = None
 
         async def receive() -> _AsgiMessage:
             nonlocal body_done, body_size, body_rejection
             if body_rejection is not None:
                 raise body_rejection
+            if decoded is not None and not body_done:
+                try:
+                    piece = await anext(decoded, None)
+                except BodyTooLargeError as exc:
+                    body_rejection = reject_body(exc.limit, exc.size)
+                    raise body_rejection from exc
+                except MalformedBodyError as exc:
+                    body_rejection = _refuse(web.HTTPBadRequest, str(exc))
+                    raise body_rejection from exc
+                body_done = piece is None
+                return {
+                    "type": "http.request",
+                    "body": piece or b"",
+                    "more_body": not body_done,
+                }
             if not body_done:
                 if max_body_bytes is None:
                     chunk = await request.content.readany()
@@ -355,4 +437,4 @@ class AsgiMounts:
         return response
 
 
-__all__ = ["AsgiMounts"]
+__all__ = ["AsgiMounts", "listener_runner"]

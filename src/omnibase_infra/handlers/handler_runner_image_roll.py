@@ -16,11 +16,17 @@ from typing import cast
 import yaml
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.model_runner_config_drift_policy import (
+    ModelRunnerConfigDriftPolicy,
+)
 from omnibase_infra.models.model_runner_image_roll_request import (
     ModelRunnerImageRollRequest,
 )
 from omnibase_infra.models.model_runner_image_roll_result import (
     ModelRunnerImageRollResult,
+)
+from omnibase_infra.models.model_runner_lab_host_table_policy import (
+    ModelRunnerLabHostTablePolicy,
 )
 from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
     load_runner_fleet_config,
@@ -299,6 +305,7 @@ class HandlerRunnerImageRoll:
             )
         release = True
         try:
+            await self._converge_lab_host_table(request)
             await self._verify_compose(request, targets, token_vars)
             return await self._roll(
                 request,
@@ -323,6 +330,50 @@ class HandlerRunnerImageRoll:
                     raise RunnerRollError(
                         f"Could not release the pool roll lock on {request.host} (exit {rc})."
                     )
+
+    async def _converge_lab_host_table(
+        self, request: ModelRunnerImageRollRequest
+    ) -> None:
+        """OMN-26098: the recreate below mounts the lab host table; copy it and write its key first.
+
+        Only a pool whose own Compose file names the key is touched. A refusal halts before any container is stopped.
+        """
+        table = ModelRunnerLabHostTablePolicy()
+        compose = (
+            request.repo_root
+            / "docker"
+            / f"docker-compose.runners-{request.prefix}.yml"
+        )
+        if table.env_key not in compose.read_text():
+            return
+
+        async def run(host: str, command: str, timeout: int) -> str:
+            rc, output = await self._remote(host, command, timeout=timeout)
+            if rc:
+                raise OSError(f"SSH exited {rc}")
+            return output
+
+        async def write(host: str, word: str, data: str, timeout: int) -> None:
+            rc, _ = await self._remote(
+                host,
+                f"set -eu; test -f {word}; cat > {word}",
+                stdin=data.encode(),
+                timeout=timeout,
+            )
+            if rc:
+                raise OSError(f"SSH exited {rc}")
+
+        result = await table.converge(
+            host=request.host,
+            env_file=table.env_file_home_relative,
+            projection=request.lab_host_table_projection,
+            run=run,
+            write=write,
+        )
+        if not result.success:
+            raise RunnerRollError(
+                result.error_message or "The lab host table copy was refused."
+            )
 
     async def _verify_compose(
         self,
@@ -435,6 +486,40 @@ class HandlerRunnerImageRoll:
             return None
         return container
 
+    async def _config_drift(
+        self,
+        request: ModelRunnerImageRollRequest,
+        name: str,
+        container_id: str,
+        token_vars: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        """OMN-26105: mounts and declared env keys of the running container that differ from the synced Compose.
+
+        Read-only. The host renders the Compose service with a placeholder token and filters both documents to the
+        declared env keys (``ModelRunnerConfigDriftPolicy.env_keys``) before anything crosses SSH, so neither the
+        registration token nor any other secret leaves the host. An unreadable runner refuses; it is never in sync.
+        """
+        policy = ModelRunnerConfigDriftPolicy()
+        keys = shlex.quote(json.dumps(policy.env_keys))
+        exports = " ".join(f"{var}=onex-drift-probe" for var in token_vars)
+        rc, output = await self._remote(
+            request.host,
+            f"set -eo pipefail; cd {_DOCKER_DIR}; "
+            f"{exports} {self._compose(request.prefix)} config --format json | "
+            f"jq -c --arg n {shlex.quote(name)} --argjson keys {keys} {shlex.quote(policy.RENDERED_FILTER)}; "
+            f"docker inspect --type container {shlex.quote(container_id)} | "
+            f"jq -c --argjson keys {keys} {shlex.quote(policy.RUNNING_FILTER)}",
+        )
+        lines = output.splitlines()
+        if rc or len(lines) != 2:
+            raise RunnerRollError(f"{name}: could not read the running configuration.")
+        try:
+            return policy.drift(lines[0], lines[1])
+        except ValueError as exc:
+            raise RunnerRollError(
+                f"{name}: could not decode the running configuration."
+            ) from exc
+
     async def _recreate(
         self,
         request: ModelRunnerImageRollRequest,
@@ -535,9 +620,22 @@ printf '%s\n' {shlex.quote(override)} |
                         retry.append(name)
                         continue
                     previous_id, current_image = container
+                    drift: tuple[str, ...] = ()
                     if current_image == image:
-                        _LOG.info("%s: online on the declared image", name)
-                        continue
+                        drift = await self._config_drift(
+                            request, name, previous_id, token_vars
+                        )
+                        if not drift:
+                            _LOG.info(
+                                "%s: online on the declared image, configuration in sync",
+                                name,
+                            )
+                            continue
+                        _LOG.info(
+                            "%s: configuration differs from the synced Compose: %s",
+                            name,
+                            ", ".join(drift),
+                        )
                     if not await self._recreate(
                         request, name, previous_id, token, image_tag, token_vars
                     ):
@@ -549,6 +647,15 @@ printf '%s\n' {shlex.quote(override)} |
                         raise RunnerRollError(
                             f"HALT: {name} did not return online on {image_tag}."
                         )
+                    if drift:
+                        # A comparison that cannot converge stops at this runner, not the pool.
+                        replaced = await self._container(request, name)
+                        if replaced is None or await self._config_drift(
+                            request, name, replaced[0], token_vars
+                        ):
+                            raise RunnerRollError(
+                                f"HALT: {name} still differs from the synced Compose after its recreate."
+                            )
                 except RunnerUncertainRecreateError:
                     raise
                 except (RunnerRollError, OSError, TimeoutError) as exc:

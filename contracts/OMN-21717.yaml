@@ -6,6 +6,13 @@ summary: "The dedicated CI broker spent its 1 G Seastar budget replaying a 383 M
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn21717-ac1-accepted-20261119t2345z:
+      - label: AC1
+        criterion_hash: 13febbcb9f30c4a01d6cd922a30b0d48cc92e41eeb95ebdf9b31473d8ed3062b
+        proposed_by: lane=dod-closeout-bind-2026-11-19T2345Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-19T2345Z-c3
 requirements:
   - id: req-omn21717-broker-budget-and-retention
     statement: "The dedicated CI broker starts with a Seastar budget that recovers the production consumer-group log, and its consumer-group offsets expire within a day of the last member."
@@ -40,3 +47,12 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "env COMPOSE_PROJECT_NAME=omn21717-config-check CI_BUS_REDPANDA_MEMORY=1G CI_BUS_REDPANDA_ADVERTISE_HOST=broker.example.invalid CI_BUS_KAFKA_SASL_USERNAME=config-check CI_BUS_KAFKA_SASL_PASSWORD=config-check CI_BUS_LABWORK_SASL_USERNAME=config-check CI_BUS_LABWORK_SASL_PASSWORD=config-check docker compose -p omn21717-config-check -f docker/docker-compose.ci-b*.yml config --format json | python3 -c 'import json,sys; s=json.load(sys.stdin)[\"services\"]; assert \"--memory 4G\" in s[\"redpanda\"][\"command\"]; assert s[\"redpanda-partition-cap\"][\"environment\"][\"REDPANDA_PROFILE_MEMORY\"] == \"4G\"'"
+  - id: dod-omn21717-ac1-accepted-20261119t2345z
+    description: 'AC1: the compose default Seastar budget of the dedicated CI broker is at least the 4G that recovered a copy of the live data volume. Fails against the pre-fix compose, whose broker default was 1G, at the parent of omnibase_infra#5517.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "tests/unit/docker/test_ci_bus_redpanda_memory_budget.py::test_default_memory_budget_covers_recovery" -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

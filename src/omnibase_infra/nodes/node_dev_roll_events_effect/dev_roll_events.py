@@ -135,6 +135,21 @@ class DevRollEventsPublisher:
         """Contract-bound entry: publish the start event the request carries."""
         self.started(request.job_id, request.started_at, request.cause)
 
+    def recreate_announced(self, announcement: BaseModel) -> bool:
+        """Publish the announcement of a dev recreate; True only when the bus accepted it."""
+        try:
+            payload = announcement.model_dump(mode="json")
+            return bool(
+                self._send(
+                    self._topics["dev_recreate_announced"],
+                    f"dev-recreate-announced/{payload['event_id']}",
+                    payload,
+                )
+            )
+        except Exception:
+            logger.exception("dev recreate announcement failed %s", FRICTION)
+            return False
+
     def started(self, job_id: str, started_at: datetime, cause: str) -> None:
         self._publish(
             self._topics["dev_runtime_started"],

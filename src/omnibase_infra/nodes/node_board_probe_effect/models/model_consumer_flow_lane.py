@@ -24,6 +24,11 @@ class ModelConsumerFlowLane(BaseModel):
     ``omnibase-infra-<lane>-<service>``. The compose project comes from the lane
     the C28 workflow resolved, so the check reads that lane's containers and no
     other's.
+
+    A lane whose policy folds the ``effects`` role into main runs no
+    ``-runtime-effects`` container: its effects handlers run in the main
+    runtime, so that container is not read (and its absence is no defect). A
+    lane that folds nothing still names both runtime containers.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -35,8 +40,17 @@ class ModelConsumerFlowLane(BaseModel):
     postgres_container: str = Field(min_length=1)
 
     @classmethod
-    def from_compose_project(cls, compose_project: str) -> ModelConsumerFlowLane:
-        """Derive the lane's containers from its compose project; refuse any other shape."""
+    def from_compose_project(
+        cls,
+        compose_project: str,
+        *,
+        folded_profiles: frozenset[str] = frozenset(),
+    ) -> ModelConsumerFlowLane:
+        """Derive the lane's containers from its compose project; refuse any other shape.
+
+        ``folded_profiles`` are the roles the lane's policy folds into main
+        (``<LANE>_RUNTIME_MAIN_FOLDED_PROFILES``); the default folds nothing.
+        """
         match = _PROJECT_RE.match(compose_project)
         if match is None:
             raise ValueError(
@@ -44,12 +58,12 @@ class ModelConsumerFlowLane(BaseModel):
                 f"or {BASE_COMPOSE_PROJECT}-<lane>"
             )
         suffix = match.group("suffix")
+        runtime_containers: tuple[str, ...] = (f"omninode{suffix}-runtime",)
+        if "effects" not in folded_profiles:
+            runtime_containers += (f"omninode{suffix}-runtime-effects",)
         return cls(
             compose_project=compose_project,
-            runtime_containers=(
-                f"omninode{suffix}-runtime",
-                f"omninode{suffix}-runtime-effects",
-            ),
+            runtime_containers=runtime_containers,
             projection_api_container=f"omnimarket{suffix}-projection-api",
             broker_container=f"{compose_project}-redpanda",
             postgres_container=f"{compose_project}-postgres",

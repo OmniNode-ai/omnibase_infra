@@ -24,6 +24,9 @@ from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventMessage
 from omnibase_infra.models.model_deploy_runners_request import ModelDeployRunnersRequest
 from omnibase_infra.models.model_deploy_runners_result import ModelDeployRunnersResult
+from omnibase_infra.models.model_runner_lab_host_table_policy import (
+    ModelRunnerLabHostTablePolicy,
+)
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts_from_paths
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
@@ -45,8 +48,13 @@ if tool == "uv":
     os.execv(os.environ["TMP_NODE_PYTHON"], [os.environ["TMP_NODE_PYTHON"], *args])
 state_path = Path(os.environ["TMP_HOST_STATE"])
 state = json.loads(state_path.read_text())
-with open(os.environ["TMP_HOST_CALLS"], "a") as log:
-    log.write(tool + " " + " ".join(args) + "\n")
+# OMN-26098: the lab host table copy is not a TMPDIR bind; its sudo calls stay out of the bind counts.
+lab_table_call = (
+    tool == "sudo" and (args[1] in ("sh", "chown", "chmod") or "lab-host-table" in args[-1])
+) or (tool == "ssh" and "lab-host-table" in args[-1])
+if not lab_table_call:
+    with open(os.environ["TMP_HOST_CALLS"], "a") as log:
+        log.write(tool + " " + " ".join(args) + "\n")
 if tool == "ssh":
     sys.exit(subprocess.run(["bash", "-c", args[-1]], check=False).returncode)
 if tool == "rsync":
@@ -59,15 +67,37 @@ if tool == "docker":
     if "--format" in args:
         print(json.dumps(state["compose"]))
 elif tool == "sudo":
-    if state.get("install_error"):
+    if args[1] == "sh":  # OMN-26098: root writes the 0440 lab host table copy
+        Path(args[-1]).chmod(0o644)
+        sys.exit(subprocess.run(["sh", *args[2:]], check=False).returncode)
+    if args[1] == "chown":
+        state.setdefault("files", {})[args[-1]] = int(args[2].split(":")[0])
+        state_path.write_text(json.dumps(state))
+        sys.exit(0)
+    if args[1] == "chmod":
+        sys.exit(subprocess.run(["chmod", *args[2:]], check=False).returncode)
+    if state.get("install_error") and "lab-host-table" not in args[-1]:
         sys.exit(19)
-    assert args[0:2] == ["-n", "install"], args
+    assert args[1] == "install", args
+    if "lab-host-table" in args[-1]:
+        kept, skip = [], False
+        for arg in args[2:]:
+            if skip:
+                skip = False
+            elif arg in ("-o", "-g"):
+                skip = True
+            else:
+                kept.append(arg)
+        sys.exit(subprocess.run(["install", *kept], check=False).returncode)
     assert "-d" in args, args
     owner = int(args[args.index("-o") + 1])
     mode = args[args.index("-m") + 1].lstrip("0")
     if not state.get("ignore_install"):
         state["dirs"][args[-1]] = {"uid": owner, "mode": mode}
     state_path.write_text(json.dumps(state))
+elif tool == "stat" and args[-1] in state.get("files", {}):
+    mode = os.stat(args[-1]).st_mode & 0o7777
+    print("regular file:" + str(state["files"][args[-1]]) + ":" + format(mode, "o"))
 elif tool == "stat":
     entry = state["dirs"].get(args[-1])
     if entry is None:
@@ -87,8 +117,8 @@ def host(tmp_path: Path) -> tuple[Path, Path, Path]:
         tool.write_text(HOST_TOOL)
         tool.chmod(0o755)
 
-    # The shipped h053 pool keeps its job directories in tmpfs (OMN-19998), so
-    # the bind-repair path is modeled with a synthetic pool of the same size.
+    # The bind-repair path is modeled with a synthetic pool of the same size; the
+    # shipped h053 pool's own binds are asserted in test_hp053_pool_in_memory_omn19998.
     services = {}
     dirs = {}
     for number in range(1, POOL_COUNT + 1):
@@ -104,7 +134,16 @@ def host(tmp_path: Path) -> tuple[Path, Path, Path]:
         "volumes": [{"type": "bind", "source": "/other/tmp", "target": "/runner/tmp"}],
     }
     state = tmp_path / "state.json"
-    state.write_text(json.dumps({"compose": {"services": services}, "dirs": dirs}))
+    state.write_text(
+        json.dumps({"compose": {"services": services}, "dirs": dirs, "files": {}})
+    )
+    # OMN-26098: the runner host's overlay projection and host-generated env file, under the fake host's HOME.
+    projection = tmp_path / ModelRunnerLabHostTablePolicy().projection_home_relative
+    projection.parent.mkdir(parents=True)
+    projection.write_text("hosts: []\n")
+    env_file = tmp_path / ".omnibase/runners/docker/.env"
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text("LOCAL_LLM_SHARED_SECRET=x\n")
     calls = tmp_path / "calls.txt"
     return bindir, state, calls
 
@@ -276,6 +315,7 @@ async def test_command_and_terminal_event_chain(
     monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
     monkeypatch.setenv("TMP_HOST_STATE", str(state))
     monkeypatch.setenv("TMP_HOST_CALLS", str(calls))
+    monkeypatch.setenv("HOME", str(state.parent))
     contract = ROOT / "src/omnibase_infra/nodes/node_deploy_runners/contract.yaml"
     manifest = discover_contracts_from_paths([contract])
     assert manifest.errors == ()
@@ -302,7 +342,7 @@ async def test_command_and_terminal_event_chain(
         engine.freeze()
         request = ModelDeployRunnersRequest(
             host="h053",
-            host_dir=str(state.parent),
+            host_dir=str(state.parent / ".omnibase/runners"),
             compose_file=str(COMPOSE),
             prefix="hp053-ci-runner",
             count=POOL_COUNT,
