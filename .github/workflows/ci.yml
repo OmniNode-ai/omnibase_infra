@@ -327,6 +327,9 @@ jobs:
       - name: Secondary runner image roll (OMN-25796)
         run: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -q -n 0 --no-cov
 
+      - name: Runner roll config drift and pool retire (OMN-26105)
+        run: uv run --frozen pytest tests/unit/handlers/test_handler_runner_config_drift_omn26105.py tests/unit/handlers/test_handler_runner_pool_retire_omn26105.py -q -n 0 --no-cov
+
       - name: Caller-owned imperative guard regression (OMN-21004)
         run: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
 

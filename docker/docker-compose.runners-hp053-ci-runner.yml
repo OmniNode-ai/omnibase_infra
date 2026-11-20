@@ -64,7 +64,8 @@
 #   sudo systemctl daemon-reload && sudo systemctl enable --now omnirunners.slice
 # and, for the optional git mirror, the other three units, /data/scratch/git-mirror and /etc/default/omninode-git-mirror.
 # The job, TMPDIR and cache directories under job_dir_host_root are created by the deploy (node_deploy_runners), not by
-# hand. Before the first recreate, on the host, put LOCAL_LLM_SHARED_SECRET, LLM_ENDPOINT_CIDR_ALLOWLIST, RUNNER_LAB_HOST_TABLE, GITHUB_ORG_URL and UV_HTTP_TIMEOUT in ~/.omnibase/runners/docker/.env (mode 600).
+# hand. Before the first recreate, on the host, put LOCAL_LLM_SHARED_SECRET, LLM_ENDPOINT_CIDR_ALLOWLIST, GITHUB_ORG_URL and UV_HTTP_TIMEOUT in ~/.omnibase/runners/docker/.env (mode 600).
+# RUNNER_LAB_HOST_TABLE is not set by hand: every deploy copies the host's overlay projection for the runner user and writes the key (OMN-26098).
 # OMN-18829: the same host-owned declaration is read by native jobs and CI.
 # Two values the h051 file spells out are read from the host's docker/.env here, GITHUB_ORG_URL (the organisation URL
 # the runners register against) and UV_HTTP_TIMEOUT (the h051 pool's value is 600 seconds), because the hardcoded-config

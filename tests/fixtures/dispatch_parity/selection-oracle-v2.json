@@ -3354,6 +3354,22 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce": {
+      "category": "command",
+      "contract_name": "node_runner_pool_retire",
+      "event_model_module": "omnibase_infra.models.model_runner_pool_retire_request",
+      "event_model_name": "ModelRunnerPoolRetireRequest",
+      "handler_id": "dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce",
+      "handler_module": "omnibase_infra.handlers.handler_runner_pool_retire",
+      "handler_name": "HandlerRunnerPoolRetire",
+      "message_types": [
+        "ModelRunnerPoolRetireRequest",
+        "${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}",
+        "platform.runner-pool-retire"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_runner_usage_effect.HandlerRunnerUsageSavings.runner_usage_estimate_savings_7c9f313b": {
       "category": "event",
       "contract_name": "node_runner_usage_effect",
@@ -3875,15 +3891,15 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 167
+        "omnibase_infra": 169
       },
-      "contracts_discovered": 188,
+      "contracts_discovered": 190,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 105,
-      "probe_count": 1144,
-      "registered_dispatchers": 141,
-      "registered_routes": 124,
-      "type_scoped_dispatchers": 88
+      "distinct_subscribe_topics": 106,
+      "probe_count": 1147,
+      "registered_dispatchers": 142,
+      "registered_routes": 125,
+      "type_scoped_dispatchers": 89
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3929,9 +3945,9 @@
       "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-11-19T21:59:39.786479+00:00",
+    "generated_at_utc": "2026-11-20T02:53:46.890793+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.47.73.dev9+ga09066ca",
+      "omnibase-core": "0.47.75.dev1+ge9f061dc",
       "omnibase-infra": "0.38.79",
       "omniclaude": null,
       "omniintelligence": null,
@@ -4670,6 +4686,21 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}"
+    },
+    "P1a::${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.runner-pool-retire",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_PLATFORM_V1}",
+        "message_category": "command",
+        "message_type": "platform.runner-pool-retire",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}"
     },
     "P1a::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -6269,6 +6300,21 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}"
+    },
+    "P1b::${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}"
     },
     "P1b::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -24679,6 +24725,26 @@
       },
       "topic": "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}"
     },
+    "P4::dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce::${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce",
+      "event_model": "omnibase_infra.models.model_runner_pool_retire_request.ModelRunnerPoolRetireRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runner-pool-retire",
+        "payload": "ModelRunnerPoolRetireRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.runner-pool-retire",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}"
+    },
     "P4::dispatcher.auto.node_runner_usage_effect.HandlerRunnerUsageSavings.runner_usage_estimate_savings_7c9f313b::${topic:contract:omninode.EVT_RUNNER_USAGE_RECORDED_V1}": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_runner_usage_effect.HandlerRunnerUsageSavings.runner_usage_estimate_savings_7c9f313b",
@@ -26803,6 +26869,16 @@
       "route_id": "route.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37.onex_cmd_platform_runner_image_roll_v1",
       "topic": "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}",
       "topic_pattern": "*.cmd.platform.runner-image-roll.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_runner_pool_retire",
+      "dispatcher_id": "dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce",
+      "handler_id": "dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce",
+      "message_category": "command",
+      "route_id": "route.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce.onex_cmd_platform_runner_pool_retire_v1",
+      "topic": "${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}",
+      "topic_pattern": "*.cmd.platform.runner-pool-retire.*",
       "type_scoped": true
     },
     {
