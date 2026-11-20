@@ -2689,3 +2689,55 @@ def test_main_passes_the_canary_and_still_fails_any_other_hosted_private_job(
     assert code == 1
     assert f"other-private:{_CANARY}:canary" in out
     assert f"floor-canary:{_CANARY}:canary" not in out
+
+
+def _hosted_infra_repository(policy: dict) -> str:
+    """The one audited private infra repository, picked from the policy itself."""
+    names = [
+        repo
+        for repo in policy["repositories"]
+        if repo.endswith("_infra") and repo != "omnibase_infra"
+    ]
+    assert len(names) == 1, names
+    return names[0]
+
+
+def _hosted_infra_trusted_findings(monkeypatch: pytest.MonkeyPatch, shadow: str):
+    """Audit the live policy's trusted seam for that repository only."""
+    module = _load_script()
+    policy = module._load_policy(POLICY)
+    repo = _hosted_infra_repository(policy)
+    trusted = policy["trusted_runner_variable"]
+    name = trusted["name"]
+
+    def variables(args: list[str]) -> list[dict[str, str]]:
+        if args == ["--org", "OmniNode-ai"]:
+            return [{"name": name, "value": '["ubuntu-latest"]'}]
+        assert args == ["--repo", f"OmniNode-ai/{repo}"]
+        return [{"name": name, "value": shadow}]
+
+    monkeypatch.setattr(module, "_variables", variables)
+    return repo, module._audit_trusted_style_variable(trusted, [repo])
+
+
+def test_hosted_infra_trusted_seam_is_the_declared_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-26287: the private infra repository's CI moved to GitHub-hosted runners.
+
+    Its trusted-seam variable reads ``["ubuntu-latest"]`` live, so the policy must
+    declare that value for it rather than the retired fleet pair.
+    """
+    _, findings = _hosted_infra_trusted_findings(monkeypatch, '["ubuntu-latest"]')
+    assert findings == []
+
+
+def test_hosted_infra_fleet_pair_shadow_is_still_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Positive control: the audit still reports a divergent value there."""
+    repo, findings = _hosted_infra_trusted_findings(
+        monkeypatch, '["self-hosted","omnibase-ci"]'
+    )
+    assert [f.scope for f in findings] == [repo], findings
+    assert "OMNI_TRUSTED_CI_RUNS_ON_JSON drifted" in findings[0].message
