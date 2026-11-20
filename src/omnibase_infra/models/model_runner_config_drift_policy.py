@@ -9,6 +9,8 @@ from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums.enum_runner_mount_type import EnumRunnerMountType
+
 # A volume the daemon made for an image ``VOLUME`` line is named by its 64 hex digit id and appears in no Compose file.
 _ANONYMOUS_VOLUME = re.compile(r"[0-9a-f]{64}")
 
@@ -18,7 +20,7 @@ class ModelRunnerRenderedVolume(BaseModel):
 
     model_config = ConfigDict(extra="ignore", frozen=True)
 
-    type: str
+    type: EnumRunnerMountType
     source: str = ""
     target: str
     read_only: bool = False
@@ -108,12 +110,14 @@ class ModelRunnerConfigDriftPolicy(BaseModel):
     def _rendered_mounts(rendered: ModelRunnerRenderedConfig) -> dict[str, _MountFact]:
         mounts: dict[str, _MountFact] = {}
         for volume in rendered.volumes:
-            if volume.type == "volume" and not volume.source:
+            if volume.type is EnumRunnerMountType.VOLUME and not volume.source:
                 continue
-            if volume.type == "tmpfs":
+            if volume.type is EnumRunnerMountType.TMPFS:
                 mounts[volume.target] = ("tmpfs", "", False)
             else:
-                source = volume.source if volume.type == "bind" else ""
+                source = (
+                    volume.source if volume.type is EnumRunnerMountType.BIND else ""
+                )
                 mounts[volume.target] = (volume.type, source, volume.read_only)
         for entry in rendered.tmpfs:
             mounts[entry.split(":", 1)[0]] = ("tmpfs", "", False)
