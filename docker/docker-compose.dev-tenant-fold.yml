@@ -73,6 +73,14 @@ services:
       # longer contains its pin, a check run in the clone stays refused
       # PRODUCT_CLONE_NOT_FRESH.
       DOD_VERIFY_PRODUCT_CLONE_PIN_FILE: /etc/onex/product-clone-pin/pins.json
+      # OMN-26258: the scheduled ticket closer reads the PR watcher's state at
+      # $OMNI_HOME/.claude_scratch/pr-watcher/state.json unless this names another
+      # file, and with OMNI_HOME=/app nothing writes that path: the closer's bound
+      # profile refused "the PR watcher state file is absent at its declared path" and
+      # read no candidates. The file is the one the host's own read-only PR watcher
+      # (the onex-pr-watcher-readonly user timer, a tick every 300 s) writes, mounted
+      # below. Never a copy from another host.
+      ONEX_PR_WATCHER_STATE: /etc/onex/pr-watcher-state/state.json
     # The effects health port keeps answering, now from main (plan T8: port
     # 8086 answers from main).
     ports:
@@ -128,6 +136,12 @@ services:
       # running container. Relative to docker/ like the clones above: the registry root's
       # .onex_state, where the deploy agent writes it.
       - ../../.onex_state/product-clone-pin:/etc/onex/product-clone-pin:ro
+      # OMN-26258: the read-only PR watcher's state directory on this host, read-only.
+      # The directory, not the file: the watcher replaces state.json atomically, so a
+      # file mount would keep the replaced inode. ${HOME} is the deploy agent user's
+      # home, the user the watcher timer runs as (a user unit, installed by the host
+      # installer node into .local/state/onex/pr-watcher-readonly).
+      - ${HOME}/.local/state/onex/pr-watcher-readonly:/etc/onex/pr-watcher-state:ro
       - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/${RUNTIME_USER_NAME:-omniinfra}/.codex/auth.json:ro
       - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/${RUNTIME_USER_NAME:-omniinfra}/.claude:ro
   # The retired carrier starts under no profile a lane bring-up requests, as
