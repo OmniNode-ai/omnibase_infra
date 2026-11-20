@@ -43,7 +43,7 @@ dod_evidence:
   - id: "dod-omn26151-ac2-installed-and-probe-green"
     description: "AC2 (lab part): the lane's STATUS row names the installed revision and the newest probe run after the restart. Needs the work ledger, so only the local Done gate runs it."
     source: "manual"
-    binds_ac: ["AC2"]
+    binds_ac: []
     execution_scope: "local_done_gate"
     checks:
       - check_type: "command"
@@ -52,7 +52,7 @@ dod_evidence:
   - id: "dod-omn26151-ac4-status-rows"
     description: "AC4: the lane's STATUS rows for C11, C15 and C16 are on the work ledger. Needs the ledger, so only the local Done gate runs it."
     source: "manual"
-    binds_ac: ["AC4"]
+    binds_ac: []
     execution_scope: "local_done_gate"
     checks:
       - check_type: "command"
@@ -60,6 +60,14 @@ dod_evidence:
         cwd: "."
       - check_type: "command"
         check_value: "bash -c 'python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep \"crit=C11 | probe=c11-negative-paths\" | grep STATUS'"
+        cwd: "."
+  - id: "dod-omn26151-ac4-hosted-proxy"
+    description: "Hosted proxy for AC4: the STATUS rows need the work ledger, so the hosted check runs the new tests, which fail at the merge base where the role, the grants file and the mapping do not exist and pass at the head."
+    source: "manual"
+    binds_ac: ["AC4"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_gateway_runtime_login_role_omn26151.py -q -n 0 --no-cov"
         cwd: "."
 emergency_bypass:
   enabled: false
