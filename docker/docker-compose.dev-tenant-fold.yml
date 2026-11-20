@@ -6,6 +6,14 @@ services:
   omninode-runtime:
     environment:
       ONEX_RUNTIME_FOLDED_PROFILES: ${DEV_RUNTIME_MAIN_FOLDED_PROFILES:?runtime policy contract must set DEV_RUNTIME_MAIN_FOLDED_PROFILES}
+      # OMN-26218 (line stop, dev only): main hands the Evals projection writer to no process.
+      # projection_eval_results is a tenant-projection contract this runtime carries by the fold
+      # above; its EvalResultsProjectionWriter raised KeyError judge_run_id about 20 times a minute
+      # on delegation-acceptance-judged (fix: omnimarket#6510, open and red), the runtime health
+      # read projection_apply_divergence, and the dev boot guard rolled back every candidate build.
+      # Remove this line when omnimarket#6510 is merged and running on dev. The name must be a
+      # discovered contract: a misspelled name refuses runtime start-up (OMN-19513).
+      ONEX_RUNTIME_NODE_EXCLUSION: projection_eval_results
       # OMN-23009: the per-profile consumer group handover the policy renders
       # (effects and workers resume from the commits of the retired service that
       # last ran). The runtime reads it as ONEX_RUNTIME_FOLD_HANDOVERS; without

@@ -401,3 +401,28 @@ def test_invalid_fold_service_contract_is_refused(mapping: dict[str, str]) -> No
 
     with pytest.raises(ValidationError):
         ModelRuntimeFoldPolicy(foldable_services=mapping)
+
+
+EVAL_WRITER_CONTRACT = "projection_eval_results"
+
+
+def test_main_hands_the_evals_projection_writer_to_no_process_on_primary_dev() -> None:
+    """OMN-26218: primary dev switches the broken Evals writer off through the declared node exclusion.
+
+    The name must be a contract omnimarket ships, or runtime start-up refuses (OMN-19513);
+    no other compose file in the dev stack may carry the exclusion.
+    """
+    omnimarket = ROOT.parent / "omnimarket"
+    contract = (
+        omnimarket / "src/omnimarket/nodes/node_projection_eval_results/contract.yaml"
+    )
+    if contract.is_file():  # sibling clone present: the name is the contract's own
+        assert yaml.safe_load(contract.read_text())["name"] == EVAL_WRITER_CONTRACT
+    main = dev_stack_services()["omninode-runtime"]
+    assert main["environment"]["ONEX_RUNTIME_NODE_EXCLUSION"] == EVAL_WRITER_CONTRACT
+    for path in DEV_COMPOSE_FILES[:2]:
+        for name, service in (load_compose(path).get("services") or {}).items():
+            assert "ONEX_RUNTIME_NODE_EXCLUSION" not in yaml.safe_dump(service or {}), (
+                path.name,
+                name,
+            )

@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26218"
+title: "Switch the Evals projection writer off on primary dev while its fix is red"
+summary: "Primary dev names projection_eval_results in ONEX_RUNTIME_NODE_EXCLUSION on the main runtime, so the writer that raises KeyError judge_run_id is carried by no process and the dev health read stops failing on projection_apply_divergence."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-dev-eval-writer-off"
+    statement: "The primary dev main runtime excludes the projection_eval_results contract and no other lane or compose file does."
+    acceptance:
+      - id: "AC1"
+        statement: "the dev tenant fold overlay sets ONEX_RUNTIME_NODE_EXCLUSION to projection_eval_results on omninode-runtime, the name equal to the node's contract name, and the base and shared dev-lane compose files set no exclusion (command: uv run pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py -q)"
+evidence_requirements:
+  - kind: "tests"
+    description: "The fold overlay tests pass at the head."
+    command: "uv run pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn26218-ac1-exclusion"
+    description: "AC1 the dev tenant fold overlay sets ONEX_RUNTIME_NODE_EXCLUSION to projection_eval_results on omninode-runtime and no other compose file sets it"
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py -q"
+        cwd: "."
+    binds_ac: ["AC1"]
