@@ -1137,7 +1137,7 @@ services:
       # other reader in the container sees a config root it never had. The root
       # holds only config/lab, mounted read-only below, where the lane declaration
       # the broker address is resolved from lives.
-      ONEX_LEDGER_BUS_READ_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config OMNIBASE_PATH=/app onex ledger query --bus-lane dev --stdin
+      ONEX_LEDGER_BUS_READ_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config OMNIBASE_PATH=/app python -m omnibase_core.cli.cli_commands ledger query --bus-lane dev --stdin
       ONEX_LEDGER_BUS_APPEND_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config python -m omnimarket.work_ledger_bus.cli append --bus-lane dev --omnibase-path /app
       ONEX_LEDGER_HOST_NAME: ${DEV_LANE_LEDGER_HOST_NAME:-dev-runtime}
       # OMN-25901: the product clones below are read-only, so the verifier cannot fetch
