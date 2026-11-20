@@ -62,6 +62,10 @@ ALLOWED_EMPTY_DEFAULTS = {
     # behaviour lives where the check is: an unprovisioned role makes the
     # canary report `skipped_not_configured` against link 2, which is RED.
     "CHAIN_CANARY_READER_PASSWORD",
+    # OMN-26151: the fourth LOGIN_ONLY_ROLE_MAP member, gateway_runtime. Empty-means-skip on
+    # the minting services for the reason above; the fail-closed `:?` lives on the consumer,
+    # GATEWAY_DATABASE_DSN in the dev and stability overlays.
+    "GATEWAY_RUNTIME_PASSWORD",
     # OMN-4316: OMNIMEMORY_* vars are intentionally opt-in (empty = disabled)
     "OMNIMEMORY_ENABLED",
     "OMNIMEMORY_MEMGRAPH_HOST",

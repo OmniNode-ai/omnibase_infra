@@ -227,7 +227,7 @@ slot_skip_role_seam() {
 # SLOT_MANAGED_ROLES mirrors the roles scripts/provision_db_slot.sh derives,
 # SERVICE_DB_MAP's roles and LOGIN_ONLY_ROLES, and is pinned equal to them by
 # tests/unit/infra/test_forward_migration_slot_role_confinement.py.
-SLOT_MANAGED_ROLES="role_omnibase role_omniintelligence role_omniclaude role_omnimemory role_omninode role_omnidash omninode_runtime tenant_projection_writer chain_canary_reader"
+SLOT_MANAGED_ROLES="role_omnibase role_omniintelligence role_omniclaude role_omnimemory role_omninode role_omnidash omninode_runtime tenant_projection_writer chain_canary_reader gateway_runtime"
 
 # The caller runs this in a command substitution, so a refusal is signalled by
 # exit status and the caller must stop on it; the copy is the caller's to
@@ -504,10 +504,7 @@ is_skipped_by_manifest() {
 # operator env var must not be able to supply or empty this list — see
 # test_fence_is_not_overridable_by_environment.
 FENCE_MANIFEST="${MIGRATIONS_DIR}/fenced-node-migrations.yaml"
-if [ ! -f "${FENCE_MANIFEST}" ]; then
-  echo "FATAL: operator fence manifest not found: ${FENCE_MANIFEST}" >&2
-  exit 1
-fi
+[ -f "${FENCE_MANIFEST}" ] || { echo "FATAL: operator fence manifest not found: ${FENCE_MANIFEST}" >&2; exit 1; }
 FENCED_NODE_MIGRATION_IDS="$(sed -n \
   's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*"\([^"]*\)".*/\1/p' \
   "${FENCE_MANIFEST}")"
@@ -1849,6 +1846,7 @@ else
     "omninode_runtime:OMNINODE_RUNTIME_PASSWORD" \
     "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD" \
     "chain_canary_reader:CHAIN_CANARY_READER_PASSWORD" \
+    "gateway_runtime:GATEWAY_RUNTIME_PASSWORD" \
   ; do
     entry_role_name=${login_role_entry%%:*}
     entry_password_var=${login_role_entry#*:}
@@ -2411,6 +2409,12 @@ else
     reassert_login_only_role_grants \
       "$entry_grant_role" "$entry_grant_relation" "$entry_grant_columns"
   done
+  # OMN-26151: the gateway_runtime grants are a data file, not shell. They are
+  # writes on a DIFFERENT database (omninode_cloud), which the column-scoped
+  # function above cannot express and its tests forbid it to. The file gates on
+  # the role, the database and the seven tables, resets then grants the nine
+  # items, and reads them back (it fails the run on any difference).
+  psql -f "${MIGRATIONS_DIR}/../seams/gateway_runtime_grants.sql" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1
 fi
 # ---- END login-only role grant seam (OMN-18060) ----
 

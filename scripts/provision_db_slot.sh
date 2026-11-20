@@ -127,7 +127,8 @@ omniweb"
 # on every slot, on the very lane the slot exists to prove things on.
 LOGIN_ONLY_ROLES="omninode_runtime
 tenant_projection_writer
-chain_canary_reader"
+chain_canary_reader
+gateway_runtime"
 
 # ---------------------------------------------------------------------------
 # Connection budget (OMN-19415)
@@ -181,6 +182,7 @@ role_omninode:6
 role_omnidash:12
 omninode_runtime:16
 tenant_projection_writer:4
+gateway_runtime:2
 chain_canary_reader:2"
 
 # The dev lane is not fenced by this tool and carries no per-role limit; this is
@@ -810,9 +812,7 @@ EOSQL
     assert_in_fence "$_dash_role" "role"
     psql_admin -c "GRANT CREATE ON DATABASE \"${_dash_db}\" TO \"${_dash_role}\";"
     _dash_create_ok="$(scalar "SELECT has_database_privilege('${_dash_role}', '${_dash_db}', 'CREATE')")"
-    if [ "$_dash_create_ok" != "t" ]; then
-        fail 1 "${_dash_role} still lacks CREATE on ${_dash_db} after the grant."
-    fi
+    [ "$_dash_create_ok" = "t" ] || fail 1 "${_dash_role} still lacks CREATE on ${_dash_db} after the grant."
 
     # The intelligence corpus opens with CREATE EXTENSION pgcrypto (000_extensions),
     # and the same trusted-extension rule applies: CREATE on the DATABASE. The
