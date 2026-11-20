@@ -609,11 +609,13 @@ def test_standalone_probe_reads_only_the_requested_lane(tmp_path: Path) -> None:
 
     def runner(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
-        assert argv[:6] == [
+        assert argv[:8] == [
             "uv",
             "run",
             "--frozen",
-            "onex",
+            "python",
+            "-m",
+            "omnibase_core.cli.cli_commands",
             "node",
             "node_board_probe_effect",
         ]
@@ -854,7 +856,7 @@ def test_the_workflow_runs_the_probe_beside_the_resolved_lane() -> None:
     assert "schedule" in triggers and "workflow_dispatch" in triggers
     assert "pull_request" not in triggers
     runs = "\n".join(str(s.get("run", "")) for s in job["steps"])
-    assert "onex node node_board_probe_effect" in runs
+    assert "omnibase_core.cli.cli_commands node node_board_probe_effect" in runs
     assert "scripts/ci/c28_consumer_flow_probe.py" not in runs
     uploads = [
         s

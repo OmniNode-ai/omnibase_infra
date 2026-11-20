@@ -282,11 +282,14 @@ class HandlerDeployRunners:
                     # OMN-26093: every other bind whose source is under the pool's declared
                     # job-directory root (workspace, caches) is created runner-owned too, so a
                     # runner's first job does not meet a root-owned cache directory.
+                    # OMN-26113: and so is every cache bind (``~/.npm``, ``~/.cache/<name>``) of any
+                    # pool, declared root or not: a pool's prefix is never its host row's, so the
+                    # declared root alone left the h051 caches to Docker, which creates them root-owned.
                     under_job_root = (
                         job_root is not None
                         and Path(volume.source).is_absolute()
                         and Path(volume.source).is_relative_to(job_root)
-                    )
+                    ) or policy.is_cache_target(volume.target)
                     if volume.type is EnumComposeMountType.BIND and (
                         volume.target == tmpdir
                         or volume.target.endswith(_PAUSE_DIR_TARGET_SUFFIX)

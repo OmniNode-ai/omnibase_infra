@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-25201: the AC6 check of ``contracts/OMN-25179.yaml`` names its ten base failures.
+"""OMN-25201: the AC6 check of ``contracts/OMN-25179.yaml`` names its three remaining base failures.
 
 The deploy agent's whole ``tests/unit`` tree reads ``10 failed, 2265 passed`` on the
 merge base ``1f5f40f80b2d`` (lab host h051, read 2026-11-17, 16 workers): the failures are in
-files this pull request does not touch. The AC6 check therefore deselects those ten by name
-and nothing else. These checks pin that list: exactly the ten, each naming a real test
+files this pull request does not touch. The AC6 check therefore deselects those three by name
+and nothing else. These checks pin that list: exactly the three, each naming a real test
 in a real file, and none of them in the dev signing key test or the launcher test, so a
 failure of the work itself can never hide in the deselect list.
 """
@@ -29,22 +29,10 @@ _UNIT_TESTS = "tests/unit"
 #: reads ``tests/unit/...``; an id spelled from the repository root deselects nothing.
 _PROJECT = "scripts/deploy-agent"
 
-#: The ten tests that fail on the merge base 1f5f40f80b2d, as pytest reported them on
-#: lab host h051 (read 2026-11-17: ``10 failed, 2265 passed``).
+#: The three tests that fail on the merge base 1f5f40f80b2d, as pytest reported them on
+#: lab host h051 (read 2026-11-17: ``10 failed, 2265 passed``; the seven companion-restore ones are fixed by OMN-26153).
 _BASE_FAILURES = frozenset(
     {
-        f"{_UNIT_TESTS}/test_companion_restore_omn22845.py::{name}"
-        for name in (
-            "test_the_default_dev_lane_needs_main_and_effects",
-            "test_read_lane_presence[states1-companion_down]",
-            "test_read_lane_presence[states2-companion_down]",
-            "test_read_lane_presence[states3-companion_down]",
-            "test_the_dev_lane_reads_its_own_containers",
-            "test_the_down_container_is_named_in_the_detail",
-            "test_an_unreadable_effects_container_never_restores",
-        )
-    }
-    | {
         f"{_UNIT_TESTS}/test_dev_refresh_llm_endpoint_env_omn24081.py::"
         "test_seam_the_scripts_own_python_renders_the_overlay_address",
         f"{_UNIT_TESTS}/test_stability_refresh_llm_endpoint_env_omn24119.py::"
@@ -88,13 +76,13 @@ def _ac6_deselected() -> list[str]:
     return _deselected_by(_contract())
 
 
-def test_ac6_deselects_exactly_the_ten_base_failures() -> None:
+def test_ac6_deselects_exactly_the_three_base_failures() -> None:
     deselected = _ac6_deselected()
-    assert len(deselected) == len(set(deselected)) == 10, deselected
+    assert len(deselected) == len(set(deselected)) == 3, deselected
     assert set(deselected) == _BASE_FAILURES, sorted(set(deselected) ^ _BASE_FAILURES)
 
 
-def test_none_of_the_ten_is_in_the_key_test_or_the_launcher_test() -> None:
+def test_none_of_the_three_is_in_the_key_test_or_the_launcher_test() -> None:
     for node_id in _ac6_deselected():
         assert not node_id.split("::")[0].endswith(_OWN_TEST_FILES), node_id
 
@@ -124,7 +112,7 @@ def test_control_the_contract_without_one_of_the_ten_fails_the_pin(
 
     The command is edited in a copy of the parsed contract and read back through the
     same extractor the pin uses; the pin (``_BASE_FAILURES``, spelled in this file)
-    must then no longer hold, for each of the ten.
+    must then no longer hold, for each of the three.
     """
     document = copy.deepcopy(_contract())
     for item in document["dod_evidence"]:
@@ -142,6 +130,6 @@ def test_control_the_contract_without_one_of_the_ten_fails_the_pin(
                         kept.append(word)
                 check["check_value"] = shlex.join(kept)
     remaining = _deselected_by(document)
-    assert len(remaining) == 9, remaining
+    assert len(remaining) == 2, remaining
     assert dropped not in remaining
     assert set(remaining) != _BASE_FAILURES

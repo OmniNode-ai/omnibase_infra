@@ -1,0 +1,73 @@
+schema_version: 1.0.0
+ticket_id: OMN-26113
+title: The runner installer prepares every bind-mounted cache directory as the runner user, so a runner whose npm and pre-commit caches were created by root no longer fails with EACCES on the first job
+summary: 'The h051 omnibase CI pool bound each runner''s six caches from /mnt/h051-nvme/runners/hp051-omnibase-ci-runner/N/cache/, and the deploy''s directory effect prepared only the TMPDIR and pause directories there: its cache preparation read job_dir_host_root from the fleet row whose prefix equals the pool''s, and the h051 row declares none (and a pool''s prefix is never its host row''s). Docker created the cache sources root-owned, the entrypoint hands only the top level of the home cache directory to the runner user, and every job (uid 1001) failed its first npm or pre-commit call with EACCES. The effect now prepares every bind whose target is ~/.npm or under ~/.cache as uid 1001 with a readback, and a new operation of node_deploy_runners, runner.cache-ownership.restore, restores the declared cache mounts of a runner container to 1001:1001 through docker exec -u 0 and only where no Runner.Worker is running.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26113-runner-cache-ownership
+    statement: A runner's cache mounts are owned by the runner user from install on, and a mount that turns root-owned is restored without a human and without touching a running job.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: every hp051-omnibase-ci-runner container (1 to 16) and every hp053-ci-runner container reads runner-owned (1001:1001) on ~/.npm and the pre-commit, pip, pnpm, ms-playwright and ci-envs cache mounts after an idle-only chown, and a busy runner is fixed once its job ends -- falsifier: `ssh h051 docker exec hp051-omnibase-ci-runner-9 stat -c %u:%g ~/.npm ~/.cache/pre-commit` prints 0:0 on any runner with no Runner.Worker running'
+      - id: AC2
+        statement: 'AC2: the installer prepares each bind-mounted cache directory as the runner user at install, the way it prepares tmp, so a new runner starts owned 1001:1001, with a test that fails on the code that leaves the host directory root-owned -- falsifier: `uv run pytest tests/unit/ -q -k runner_cache_dirs` passes on an installer that creates a cache directory owned by root'
+      - id: AC3
+        statement: 'AC3: a pre-job hook or periodic check restores ownership of those cache mounts to 1001:1001 and never runs while a job is running, with a test -- falsifier: `uv run pytest tests/unit/ -q -k runner_cache_ownership_restore` passes on a check that changes ownership under a running Runner.Worker'
+evidence_requirements:
+  - kind: tests
+    description: The effect prepares every cache bind runner-owned with a readback and refuses a root-owned readback; the restore chowns only declared cache mounts of an idle runner.
+    command: env -u OMNI_HOME uv run --frozen pytest tests/unit/handlers/test_handler_deploy_runners_cache_dirs_omn26113.py tests/unit/handlers/test_handler_runner_cache_ownership_restore_omn26113.py tests/unit/handlers/test_handler_deploy_runners_job_dirs_omn26093.py -q -n 0 --no-cov
+dod_evidence:
+  - id: dod-omn26113-ac1-deploy-probe
+    description: 'AC1 (hosted part): the node contract and the effect at the PR head carry the cache preparation and the restore operation that fix the live ownership; the live container read is the local Done gate item.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_deploy_runners/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F -- "runner.cache-ownership.restore" > /dev/null'
+        cwd: .
+      - check_type: command
+        check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_deploy_runners.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F -- "is_cache_target" > /dev/null'
+        cwd: .
+  - id: dod-omn26113-ac1-live-owners
+    description: 'Bound to no criterion, local Done gate, live-host read for AC1: every omnibase and hp053 runner container reads 1001:1001 on the npm and pre-commit cache mounts. Needs the lab hosts, so only the local Done gate runs it.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: bash -c 'for i in $(seq 1 16); do ssh h051 docker exec -u runner hp051-omnibase-ci-runner-$i sh -c "stat -c %u:%g ~/.npm ~/.cache/pre-commit"; done | sort -u | grep -vx 1001:1001 && exit 1 || exit 0'
+        cwd: .
+  - id: dod-omn26113-ac2-cache-dirs
+    description: 'AC2: the effect creates every ~/.npm and ~/.cache bind source of the h051 pools as uid 1001 mode 755 with a readback, declared job root or not, leaves the workspace and foreign binds alone, and refuses a root-owned readback.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: env -u OMNI_HOME uv run --frozen pytest tests/unit/handlers/test_handler_deploy_runners_cache_dirs_omn26113.py -q -n 0 --no-cov -k runner_cache_dirs
+        cwd: .
+  - id: dod-omn26113-ac2-hp053-control
+    description: 'AC2: the earlier job-directory effect of the hp053 pool still prepares every bind under its declared root.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: env -u OMNI_HOME uv run --frozen pytest tests/unit/handlers/test_handler_deploy_runners_job_dirs_omn26093.py -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn26113-ac3-restore
+    description: 'AC3: the restore chowns only the declared cache mounts, never runs where a Runner.Worker runs, the process list is unreadable, no Runner.Listener is present or a job starts before the chown, and reports a chown that did not hold.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: env -u OMNI_HOME uv run --frozen pytest tests/unit/handlers/test_handler_runner_cache_ownership_restore_omn26113.py -q -n 0 --no-cov -k runner_cache_ownership_restore
+        cwd: .
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
