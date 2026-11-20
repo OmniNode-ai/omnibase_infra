@@ -16,14 +16,14 @@ from packaging.requirements import Requirement
 from scripts.ci.check_sibling_compatible_range import violations
 
 ROOT = Path(__file__).resolve().parents[2]
-TAG = "dev-20261118065911-e9f061dc9b4c"
-COMMIT = "e9f061dc9b4c86595359ba7036623c72faa711a7"
+TAG = "dev-20261120075721-2a9efbda3548"
+COMMIT = "2a9efbda3548e9f4b4e008b9354dbcd9fa7d1ab9"
 # The published floor is the release that first ships every core module the infra
 # nodes import (OMN-21924: node_architecture_validator); the lock tracks the dev tag.
 VERSION = "0.47.62"
 # The floor the retained core recording was made against; the recording is not remade.
 RECORDED_FLOOR = "0.47.58"
-LOCKED_VERSION = "0.47.75.dev1+ge9f061dc"
+LOCKED_VERSION = "0.47.76"
 GIT_URL = "https://github.com/OmniNode-ai/omnibase_core.git"
 
 
@@ -48,6 +48,90 @@ def test_core_tag_alone_range_and_lock_agree() -> None:
     assert parse_qs(source.query) == {"tag": [TAG]}
     assert source.fragment == COMMIT
     assert COMMIT.startswith(TAG.rsplit("-", 1)[1])
+
+
+def _pin_and_lock_name_different_releases(
+    manifest: dict[str, Any],
+    lock: dict[str, Any],
+    *,
+    release_version: str,
+) -> list[str]:
+    """Ways the pyproject core tag and the uv.lock core entry name different releases.
+
+    OMN-26227: the tag in ``[tool.uv.sources]`` names a core commit by its suffix; the
+    lock records the tag, the commit and the version uv derived from it. A lock left
+    at an older core release than the tag (or a tag moved without a re-lock) reads
+    here as a mismatch, whatever the constants of this module say.
+    """
+    tag = manifest["tool"]["uv"]["sources"]["omnibase-core"]["tag"]
+    (entry,) = (p for p in lock["package"] if p["name"] == "omnibase-core")
+    source = urlsplit(entry["source"]["git"])
+    problems: list[str] = []
+    locked_tags = parse_qs(source.query).get("tag", [])
+    if locked_tags != [tag]:
+        problems.append(f"lock tag {locked_tags} != pyproject tag {tag!r}")
+    if not source.fragment.startswith(tag.rsplit("-", 1)[1]):
+        problems.append(f"lock commit {source.fragment!r} is not the commit of {tag!r}")
+    if entry["version"] != release_version:
+        problems.append(f"lock version {entry['version']!r} != {release_version!r}")
+    return problems
+
+
+def test_pyproject_core_tag_and_lock_core_release_name_the_same_release() -> None:
+    manifest = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    lock = tomllib.loads((ROOT / "uv.lock").read_text())
+    assert (
+        _pin_and_lock_name_different_releases(
+            manifest, lock, release_version=LOCKED_VERSION
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("lock_source", "lock_version", "expected"),
+    [
+        # control: pin and lock agree
+        (f"{GIT_URL}?tag={TAG}#{COMMIT}", LOCKED_VERSION, []),
+        # lock left at the previous core release (OMN-26227 falsifier)
+        (
+            f"{GIT_URL}?tag={TAG}#{COMMIT}",
+            "0.47.75.dev1+ge9f061dc",
+            [f"lock version '0.47.75.dev1+ge9f061dc' != '{LOCKED_VERSION}'"],
+        ),
+        # tag moved in pyproject without a re-lock
+        (
+            f"{GIT_URL}?tag=dev-20261118065911-e9f061dc9b4c"
+            "#e9f061dc9b4c86595359ba7036623c72faa711a7",
+            LOCKED_VERSION,
+            [
+                "lock tag ['dev-20261118065911-e9f061dc9b4c'] != pyproject tag "
+                f"{TAG!r}",
+                "lock commit 'e9f061dc9b4c86595359ba7036623c72faa711a7' is not the "
+                f"commit of {TAG!r}",
+            ],
+        ),
+    ],
+)
+def test_a_pin_and_lock_naming_different_core_releases_are_found(
+    lock_source: str, lock_version: str, expected: list[str]
+) -> None:
+    manifest = {"tool": {"uv": {"sources": {"omnibase-core": {"tag": TAG}}}}}
+    lock = {
+        "package": [
+            {
+                "name": "omnibase-core",
+                "version": lock_version,
+                "source": {"git": lock_source},
+            }
+        ]
+    }
+    assert (
+        _pin_and_lock_name_different_releases(
+            manifest, lock, release_version=LOCKED_VERSION
+        )
+        == expected
+    )
 
 
 def _locked_core_version_outside_range(
