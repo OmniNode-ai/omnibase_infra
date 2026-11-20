@@ -119,10 +119,10 @@ async def test_every_job_directory_is_created_runner_owned_under_the_declared_ro
 
 
 @pytest.mark.asyncio
-async def test_a_pool_with_no_declared_root_still_prepares_only_tmpdir(
+async def test_a_pool_with_no_declared_root_prepares_tmpdir_and_caches_but_not_the_workspace(
     tmp_path: Path,
 ) -> None:
-    """Control: without ``job_dir_host_root`` the caches and workspace are not touched, as before this change."""
+    """Control: without ``job_dir_host_root`` the workspace is not touched; OMN-26113 prepares the cache binds regardless."""
     document = yaml.safe_load(FLEET.read_text(encoding="utf-8"))
     for row in document["hosts"]:
         row.pop("job_dir_host_root", None)
@@ -132,9 +132,21 @@ async def test_a_pool_with_no_declared_root_still_prepares_only_tmpdir(
     result = await handler.handle(_request(fleet))
 
     assert result.success is True, result.error_message
-    assert sorted(handler.dirs) == [
-        f"{NVME_ROOT}/{n}/{SCRATCH}" for n in range(1, POOL_COUNT + 1)
-    ]
+    assert sorted(handler.dirs) == sorted(
+        [f"{NVME_ROOT}/{n}/{SCRATCH}" for n in range(1, POOL_COUNT + 1)]
+        + [
+            f"{NVME_ROOT}/{n}/cache/{cache}"
+            for n in range(1, POOL_COUNT + 1)
+            for cache in (
+                "pip",
+                "pre-commit",
+                "pnpm",
+                "ms-playwright",
+                "ci-envs",
+                "npm",
+            )
+        ]
+    )
 
 
 @pytest.mark.asyncio
