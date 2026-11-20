@@ -16,8 +16,8 @@
               "omn19175_not_a_field": true
             },
             "loc": [
-              "body",
-              "name"
+              "query",
+              "runner_identity"
             ],
             "msg": "Field required",
             "type": "missing"
