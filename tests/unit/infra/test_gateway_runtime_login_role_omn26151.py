@@ -70,6 +70,18 @@ EXPECTED_GRANTS: dict[str, frozenset[str]] = {
     "public.gateway_rate_limit_events": frozenset({"INSERT"}),
 }
 
+# Where the dev omninode_cloud holds each gateway relation, read from its catalog:
+# all seven are in schema public and the database has no platform_catalog schema.
+LIVE_SCHEMA_BY_RELATION: dict[str, str] = {
+    "tenants": "public",
+    "tenant_plans": "public",
+    "plan_tiers": "public",
+    "plan_entitlements": "public",
+    "tenant_api_keys": "public",
+    "gateway_workflows": "public",
+    "gateway_rate_limit_events": "public",
+}
+
 FORBIDDEN_TOKENS = (
     "TRUNCATE",
     "DELETE",
@@ -149,6 +161,30 @@ def test_runner_credential_map_carries_the_gateway_role() -> None:
 def test_gateway_grant_seam_declares_exactly_the_nine_items() -> None:
     declared = _declared_grants(_gateway_seam())
     assert {k: frozenset(v) for k, v in declared.items()} == EXPECTED_GRANTS
+
+
+def test_gateway_grants_name_every_relation_in_the_schema_the_live_database_holds_it_in() -> (
+    None
+):
+    seam = _gateway_seam()
+    granted = {
+        tuple(obj.split(".", 1))
+        for obj in _declared_grants(seam)
+        if not obj.startswith(("DATABASE ", "SCHEMA "))
+    }
+    assert {name for _, name in granted} == set(LIVE_SCHEMA_BY_RELATION)
+    for schema, name in granted:
+        assert schema == LIVE_SCHEMA_BY_RELATION[name], (
+            f"grants name {schema}.{name}; the live database holds it in "
+            f"{LIVE_SCHEMA_BY_RELATION[name]}"
+        )
+    # The presence gate probes the same schema-qualified names, so a relation
+    # that lives elsewhere cannot pass the gate and miss its grant.
+    assert "to_regclass('public.' || t.name)" in seam
+    array = re.search(r"ARRAY\[(.+?)\]", seam, flags=re.S)
+    assert array is not None
+    gate_names = set(re.findall(r"'(\w+)'", array.group(1)))
+    assert gate_names == set(LIVE_SCHEMA_BY_RELATION)
 
 
 def _statements(seam: str) -> str:
