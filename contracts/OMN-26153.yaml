@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-26153
+title: 'Deploy Agent Tests read green on omnibase_infra dev: the seven companion-restore tests expect the folded runtime, not a separate runtime-effects container'
+summary: >-
+  The companion-restore tests computed the dev lane at import from the runtime policy file of the host they ran on, so a lab host that carries the folded policy read the dev lane as main alone while the tests expected a separate omninode-runtime-effects container. The tests now build the folded dev lane from this checkout's tracked policy file and the companion rule from a lane that still runs a separate effects container, and every assertion they held stays.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26153-folded-dev-companion-tests
+    statement: The companion-restore tests expect the folded dev runtime on the dev lane and keep the companion rule on a lane with a separate effects container, independent of the host policy file.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the seven tests are updated to the folded runtime the fold intended, by changing their expectation and any deploy-agent code that still assumes the separate container, never by skip, xfail, deselect or a weaker assertion -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py -q fails on origin/dev and passes at the pull request head, and git diff of the pull request shows an added skip, xfail or deselect or a removed assertion
+      - id: AC2
+        statement: >-
+          AC2: the whole deploy-agent suite reads green at the pull request head as the Deploy Agent Tests workflow runs it, after reading red on unmodified dev -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests -m "not lab_overlay" -n 4 --dist loadfile exits non-zero at the head
+      - id: AC3
+        statement: >-
+          AC3: the pull request is READY with a PR comment that starts `Lab: head=<full head sha>` and the open omnibase_infra pull requests that go green after a rebase onto the new dev are listed in a STATUS row -- falsifier: onex scm pr-view OmniNode-ai/omnibase_infra#<n> shows a draft pull request or no Lab comment naming the head, or the ledger holds no STATUS row from the lane that lists the pull requests by number
+evidence_requirements:
+  - kind: tests
+    description: The companion-restore tests pass at the pushed head with the checkout's own runtime policy file in force; at the merge base the same file reads the folded dev lane and seven of its tests fail.
+    command: bash -c 'DEPLOY_AGENT_REPO_DIR="$PWD" uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py -q'
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26153-ac1-companion-tests
+    description: 'AC1: with the deploy agent pointed at this checkout, whose tracked docker/runtime-policy.env folds the dev effects role into main, the companion-restore file passes at the head; the same command on the merge base fails seven tests.'
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: bash -c 'DEPLOY_AGENT_REPO_DIR="$PWD" uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py -q'
+        cwd: .
+  - id: dod-omn26153-ac2-whole-suite
+    description: 'AC2: the whole deploy-agent suite, as the Deploy Agent Tests workflow runs it, passes at the head.'
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests -m "not lab_overlay" -n 4 --dist loadfile -q
+        cwd: .
+  - id: dod-omn26153-ac3-ready-and-listed
+    description: 'AC3: the READY state, the Lab comment and the STATUS row live on the pull request and the ledger, which the hosted gate cannot read; the check runs the focused tests the Lab comment and the row rest on.'
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py -q
+        cwd: .
