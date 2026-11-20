@@ -128,6 +128,9 @@ from typing import Any, Final
 
 import yaml
 
+# The core CLI as a module: omnibase-core no longer declares the onex script (OMN-25070).
+_CORE_CLI = ("uv", "run", "--frozen", "python", "-m", "omnibase_core.cli.cli_commands")
+
 RECORD_VERSION: Final[int] = 1
 
 EXIT_OK: Final[int] = 0
@@ -884,10 +887,7 @@ def _observe_node(
         try:
             done = runner(
                 [
-                    "uv",
-                    "run",
-                    "--frozen",
-                    "onex",
+                    *_CORE_CLI,
                     "node",
                     "node_board_probe_effect",
                     "--contract",
