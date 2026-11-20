@@ -1,0 +1,83 @@
+schema_version: 1.0.0
+ticket_id: OMN-26106
+title: deploy-agent-dev.service stays running after omnibase_infra#6080 - every recreate window ask names its requester
+summary: The deploy agent's stability follow and forward migration converge asked the dev recreate window with an empty requester, which the window's request model refuses, so the dev agent crash-looped on every idle tick. Each caller of the gate now names the requester of what it is about to run, and the gate takes it with no default.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26106-gate-requester
+    statement: Every caller of the deploy agent's recreate window gate passes a non-empty requested_by, and a bare call cannot return.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: every caller of the dev recreate window gate in the deploy agent passes a non-empty requested_by, and a unit test added by the fix fails on omnibase_infra origin/dev at cb23b5f25 and passes at the fix head -- falsifier: uv run pytest <the test file the pull request adds under scripts/deploy-agent/tests/unit or tests/unit> exits non-zero on cb23b5f25 and zero on the fix head'
+      - id: AC2
+        statement: 'AC2: a regression test built from the recorded journal text of the crash (a fixture file holding the ValidationError lines read from deploy-agent-dev.service on h201, scrubbed of secrets) fails on the broken code and passes on the fix -- falsifier: uv run pytest <that test> exits zero on cb23b5f25'
+      - id: AC3
+        statement: 'AC3: integrated: after the fix is installed on h201 through the declared dev installer, deploy-agent-dev.service is active, its NRestarts reading is the same at two reads ten minutes apart, and the health port 8098 answers on h201 -- falsifier: systemctl show -p NRestarts --value deploy-agent-dev.service on h201 differs between the two reads, or curl -sS http://127.0.0.1:8098/health on h201 is refused'
+      - id: AC4
+        statement: 'AC4: the prod deploy agent''s unit file and its key are untouched -- falsifier: sha256sum of the prod deploy agent unit file on h201 read before and after the install differs'
+evidence_requirements:
+  - kind: tests
+    description: The deploy agent gate-requester tests and the real recreate window requester tests.
+    command: uv run --frozen pytest tests/unit/handlers/test_recreate_window_requester_omn26106.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26106-ac1-requester
+    description: The stability follow and the migration converge each name their requester to the window, the gate takes it with no default, and the real window accepts every requester the idle paths name.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_recreate_window_requester_omn26106.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_idle_gate_requester_omn26106.py -q
+        cwd: .
+  - id: dod-omn26106-ac2-journal
+    description: The stability follow, which raised the journal's ValidationError on the dev host, runs against a recreate window that refuses the input the journal recorded (fixture scripts/deploy-agent/tests/unit/fixtures/dev_agent_requested_by_crash_omn26106.txt); the real model's refusal reads as the journal recorded it.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_idle_gate_requester_omn26106.py -q -k stability_follow_names_its_requester
+        cwd: .
+  - id: dod-omn26106-ac3-wiring
+    description: 'The hosted structural proof of AC3: the stability follow and the migration converge, the paths that raised on every idle tick on the dev host, run against a recreate window that refuses the recorded empty requester and complete. The integrated read of the unit on h201 is the local-gate entry below.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_idle_gate_requester_omn26106.py -q
+        cwd: .
+  - id: dod-omn26106-ac3-integrated
+    description: The integrated read of the dev agent on h201 needs the host, so it binds no criterion and the local Done gate runs it.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh h201 'systemctl --user is-active deploy-agent-dev.service && curl -sS http://127.0.0.1:8098/health'
+        cwd: .
+  - id: dod-omn26106-ac4-prod-untouched
+    description: 'The hosted structural proof of AC4: the tracked prod unit and its drop-in keep the prod port and name no dev signing key. The digest read of the prod unit file on h201 before and after the install is the local-gate entry below.'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_recreate_window_requester_omn26106.py -q --no-cov -n 0 -p no:randomly -k prod_unit_keeps_its_port
+        cwd: .
+  - id: dod-omn26106-ac4-integrated
+    description: The prod unit file digest on h201, read before and after the install; the two reads are written in the lane's STATUS rows.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh h201 'sha256sum ~/.config/systemd/user/deploy-agent.service'
+        cwd: .
