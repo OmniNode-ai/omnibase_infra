@@ -80,11 +80,10 @@ print(json.dumps([record.get("url", ""), record.get("vcs_info", {}).get("commit_
 
 def _read_record(python_bin: str) -> tuple[str, str]:
     out = subprocess.run(
-        [python_bin, "-c", _RECORD_PROBE],
+        [python_bin, "-I", "-c", _RECORD_PROBE],
         capture_output=True,
         text=True,
         check=False,
-        env={k: v for k, v in os.environ.items() if k != "PYTHONPATH"},
     )
     if out.returncode != 0:
         return "", ""
