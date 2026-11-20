@@ -1,3 +1,27 @@
+## v0.38.79 (2026-11-20)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.79 by the scheduled release train.
+- 15 release-relevant commit(s) merged since v0.38.78.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.78
+- : the runner roll recreates idle runners whose mounts or env differ from the synced Compose; a declared verb retires a whole CI pool (#6101)
+- : the C28 consumer-flow probe reads the runtime containers a lane's policy leaves running (#6104)
+- : every recreate window ask in the deploy agent now names its requester (#6100)
+- : a host installer verb installs one omnimarket pull request head into a dispatch venv and reverts it (#6098)
+- : accept tenant-prefixed topics in contract topic declarations (#6093)
+- : the runner installer writes RUNNER_LAB_HOST_TABLE from the overlay projection and mounts it readable by the runner user (#6097)
+- : enforce a mount's body cap on the raw and decoded request body (#6090)
+- : hp053-ci-runner job and temp directories on the h053 NVMe, memory limit 6g (#6095)
+- : bound dev runtime recreates to one per declared window, on window start, announced first (#6080)
+- : Use shared wire identity in the HTTPS forwarder (#6063)
+- : an unhealthy stability runtime reads as running no revision in the stability follow (#6020)
+- : dev boot guard keeps a verified dev roll when the compose files move after up (#6084)
+- feat: the local provision node reads the Docker engine's resources (#6049)
+- : stability lane broker requires SASL with one principal per service (#6088)
+- : declare the dev runtime's product clone pin file for dod_verify (#6083)
+
 ## v0.38.78 (2026-11-19)
 
 ### Release
