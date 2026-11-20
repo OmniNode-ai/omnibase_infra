@@ -1,0 +1,52 @@
+schema_version: "1.0.0"
+ticket_id: OMN-25845
+title: Unblock omnibase_infra PR 6002
+summary: >-
+  Rebase the stability broker layer onto dev, retain the current lane declaration and executor behavior, and address the PR's governed interpreter, naming and typing failures.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25845-unblock
+    statement: Resolve the conflicts and the blocking required checks for PR 6002.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: omnibase_infra PR 6002 no longer conflicts with its base and its required contexts read success at its new head, with the new head named in a PR comment that starts `Lab: head=<full head sha>` -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6002` shows a merge state of DIRTY or a required context not success at the head, or shows no Lab comment naming that head
+      - id: AC2
+        statement: >-
+          AC2: When a blocking cause lies outside PR 6002, record a STATUS row with shared=yes and the observed failure. The PR stays at its original head without weakening a required check.
+evidence_requirements:
+  - kind: tests
+    description: Exercise the refresh dry-run and its fail-closed address checks.
+    command: uv run --frozen pytest tests/integration/scripts/test_refresh_stability_lane_dry_run_layer_omn24509.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn25845-ac1-refresh-dry-run
+    description: >-
+      The refresh dry-run tests check the layer decision, the reported file list and the rejection of invalid values. Mergeability, required CI and the Lab comment require a separate read of the published PR head.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/scripts/test_refresh_stability_lane_dry_run_layer_omn24509.py -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25845-ac1-deploy-interpreter
+    description: >-
+      The hosted check reads the resolver at the verified commit and requires it to invoke the broker-layer decision through the locked project interpreter. The old head uses a bare interpreter and fails the assertion.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/compose_files.sh?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "uv run --frozen python" | grep -F "runtime_host_broker_layer.py"'
+        cwd: .
+  - id: dod-omn25845-ac2-shared-failure
+    description: >-
+      If a blocking cause is shared and still present, the manual evidence is the lane's STATUS row with shared=yes and the supporting check result. The required CI configuration stays in force.
+    source: manual
+    binds_ac: [AC2]
+    checks: []
