@@ -29,12 +29,12 @@ emergency_bypass:
   follow_up_ticket_id: ""
 dod_evidence:
   - id: dod-omn26153-ac1-companion-tests
-    description: 'AC1: with the deploy agent pointed at this checkout, whose tracked docker/runtime-policy.env folds the dev effects role into main, the companion-restore file passes at the head; the same command on the merge base fails seven tests.'
+    description: 'AC1: with the deploy agent pointed at this checkout, whose tracked docker/runtime-policy.env folds the dev effects role into main, the companion-restore file passes at the head; the same command on the merge base fails seven tests. The check first runs the OMN-25179 AC6 pin test, which reads three deselects at the head and fails on the merge base, whose contract still deselects ten, so the control at the merge base fails.'
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: test_passes
-        check_value: bash -c 'DEPLOY_AGENT_REPO_DIR="$PWD" uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py -q'
+        check_value: bash -c 'uv run --frozen pytest tests/ci/test_contract_omn25179_ac6_deselect_omn25201.py -q && DEPLOY_AGENT_REPO_DIR="$PWD" uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py -q'
         cwd: .
   - id: dod-omn26153-ac2-whole-suite
     description: 'AC2: the whole deploy-agent suite is run by the Deploy Agent Tests workflow, which is green at the head; it outruns the 180 s per-check budget of the hosted verifier, so this check runs the companion, lane-policy and runtime-services parity files that the change touches or that read the same policy file.'
@@ -42,7 +42,7 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: bash -c 'DEPLOY_AGENT_REPO_DIR="$PWD" uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py scripts/deploy-agent/tests/unit/test_lane_policy.py scripts/deploy-agent/tests/unit/test_runtime_services_parity_omn18387.py -m "not lab_overlay" -q'
+        check_value: bash -c 'uv run --frozen pytest tests/ci/test_contract_omn25179_ac6_deselect_omn25201.py -q && DEPLOY_AGENT_REPO_DIR="$PWD" uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py scripts/deploy-agent/tests/unit/test_lane_policy.py scripts/deploy-agent/tests/unit/test_runtime_services_parity_omn18387.py -m "not lab_overlay" -q'
         cwd: .
   - id: dod-omn26153-ac3-ready-and-listed
     description: 'AC3: the READY state, the Lab comment and the STATUS row live on the pull request and the ledger, which the hosted gate cannot read; the check runs the focused tests the Lab comment and the row rest on.'
@@ -50,5 +50,5 @@ dod_evidence:
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: bash -c 'DEPLOY_AGENT_REPO_DIR="$PWD" uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py -q'
+        check_value: bash -c 'uv run --frozen pytest tests/ci/test_contract_omn25179_ac6_deselect_omn25201.py -q && DEPLOY_AGENT_REPO_DIR="$PWD" uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_companion_restore_omn22845.py -q'
         cwd: .
