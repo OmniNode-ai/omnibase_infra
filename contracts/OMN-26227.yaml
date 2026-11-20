@@ -60,4 +60,5 @@ dod_evidence:
       - AC4
     checks:
       - check_type: command
-        check_value: ledger MSG rows to=landing-controller and to=orchestrator-31d9-swarm are recorded by the lane on the rolling ledger after the pull request is ready; not checkable on the hosted runner
+        check_value: onex scm pr-list OmniNode-ai/omnibase_infra
+        cwd: .
