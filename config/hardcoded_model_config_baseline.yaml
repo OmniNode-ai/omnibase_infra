@@ -926,9 +926,6 @@ entries:
   - path: scripts/ci/bulk_pr_throttle.py
     family: O
     content_sha1: ada7c748e408797c304787ca4d5a6e93a56f0590
-  - path: scripts/ci/c12_provider_catalogue_probe.py
-    family: F
-    content_sha1: abcc13f35d84b1dcb2379255922c838dab4f6b76
   - path: scripts/ci/c13_customer_local_probe.py
     family: F
     content_sha1: 1333048cd28364876e1014d96adb1eb2e494a8aa

@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""OMN-19195 -- the C12 OBSERVER. Runs INSIDE the deployed onex-api container.
+"""OMN-19195 -- the C12 OBSERVER. Runs INSIDE the deployed runtime container.
 
 WHAT THIS IS
     The half of the C12 producer that executes in the deployed interpreter,
-    against the deployed ``omnimarket`` package and the deployed ``onex-api``
-    router. ``c12_provider_catalogue_probe.py`` pipes this file to
-    ``docker exec -i -u appuser <container> python -`` and grades what it
+    against the deployed ``omnimarket`` package and the deployed intake
+    node. ``c12_provider_catalogue_probe.py`` pipes this file to
+    ``docker exec -i -u nobody <container> python -`` and grades what it
     prints. This file GRADES NOTHING: it reports what the deployed code
     returned, and the verdict is decided on the runner, in a grader that is
     tested offline against recorded observations. A program that both runs the
@@ -15,11 +15,9 @@ WHAT THIS IS
 
 WHY INSIDE THE CONTAINER AND NOT OVER HTTP
     No customer-visible HTTP rendering of the catalogue exists: the intake
-    route answers 401 before its body is validated, and its OpenAPI schema
-    carries only a charset regex. The 2026-09-19 hand readback recorded the
-    same limit. The strongest reading available is therefore the deployed
-    package through the deployed interpreter, plus the request model the
-    deployed route actually binds -- which is what this reads.
+    route answers 401 before its body is validated. The strongest reading is
+    the deployed package in the deployed interpreter, plus the route and the
+    request model the runtime's node_inference_credentials node binds.
 
 IT WRITES NOTHING
     Every injection below is an in-memory copy of a shipped row handed to a
@@ -39,13 +37,17 @@ OUTPUT
 
 from __future__ import annotations
 
+import ast
 import copy
 import hashlib
 import importlib.metadata
+import importlib.resources
 import json
 import sys
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 # The customer route this criterion's catalogue is bound to. Declared here and
 # echoed back so the grader checks the observer looked at the right one.
@@ -111,17 +113,15 @@ def _intake(model: Any, provider: str) -> dict[str, Any]:
     try:
         model(name="c12-probe", provider=provider, key_value="c12-probe-not-a-key")
     except Exception as exc:  # noqa: BLE001 - the refusal IS the observation
-        errors: list[dict[str, Any]] = []
         raw_errors = getattr(exc, "errors", None)
-        if callable(raw_errors):
-            for err in raw_errors():
-                errors.append(
-                    {
-                        "loc": [str(p) for p in err.get("loc", ())],
-                        "type": str(err.get("type", "")),
-                        "msg": str(err.get("msg", ""))[:400],
-                    }
-                )
+        errors = [
+            {
+                "loc": [str(p) for p in err.get("loc", ())],
+                "type": str(err.get("type", "")),
+                "msg": str(err.get("msg", ""))[:400],
+            }
+            for err in (raw_errors() if callable(raw_errors) else ())
+        ]
         return {"accepted": False, "exception": type(exc).__name__, "errors": errors}
     return {"accepted": True}
 
@@ -130,10 +130,10 @@ def observe(app_root: str) -> dict[str, Any]:
     if app_root and app_root not in sys.path:
         sys.path.insert(0, app_root)
 
+    from omnimarket.handlers.routing import byok_provider_backends as byok
     from omnimarket.projection.credential_publisher import (
         ModelInferenceCredentialCreateRequest,
     )
-    from omnimarket.routing import byok_provider_backends as byok
     from omnimarket.validators import byok_catalogue_no_house_entry as house
 
     obs: dict[str, Any] = {
@@ -171,31 +171,34 @@ def observe(app_root: str) -> dict[str, Any]:
     }
 
     # ---- the customer surface ----------------------------------------------
-    from routers import inference_credentials as route_mod
-
-    body_models: list[str] = []
-    bound = False
-    for route in route_mod.router.routes:
-        methods = getattr(route, "methods", set()) or set()
-        if getattr(route, "path", None) != ROUTE_PREFIX or "POST" not in methods:
-            continue
-        # The RESOLVED annotation FastAPI validates the body against. The
-        # endpoint's own ``__annotations__`` are strings under postponed
-        # evaluation and would compare unequal to the class they name.
-        dependant = getattr(route, "dependant", None)
-        for param in getattr(dependant, "body_params", None) or ():
-            candidate = getattr(getattr(param, "field_info", None), "annotation", None)
-            if candidate is None:
-                continue
-            body_models.append(
-                f"{getattr(candidate, '__module__', '?')}."
-                f"{getattr(candidate, '__qualname__', str(candidate))}"
-            )
-            if candidate is ModelInferenceCredentialCreateRequest:
-                bound = True
+    # The runtime serves the intake route: the node contract declares the POST
+    # route and the mount prefix, and the node's handler validates the body.
+    # Both are read as DATA from the deployed package (the contract file and the
+    # handler's syntax tree); no node code is imported.
+    node = importlib.resources.files("omnimarket") / "nodes/node_inference_credentials"
+    contract = yaml.safe_load((node / "contract.yaml").read_text(encoding="utf-8"))
+    source = (node / "handlers/handler_inference_credentials.py").read_text("utf-8")
+    name = ModelInferenceCredentialCreateRequest.__name__
+    mount = (contract.get("http_mount") or {}).get("path_prefix")
+    routes = {(r["method"], r["path"]) for r in contract.get("http_routes") or []}
+    homes = {
+        str(n.module)
+        for n in ast.walk(ast.parse(source))
+        if isinstance(n, ast.ImportFrom) and any(a.name == name for a in n.names)
+    }
+    bound = (
+        f"{name}.model_validate_json(" in source
+        and len(homes) == 1
+        and getattr(importlib.import_module(next(iter(homes))), name, None)
+        is ModelInferenceCredentialCreateRequest
+    )
     obs["route"] = {
-        "prefix": ROUTE_PREFIX,
-        "body_models": body_models,
+        # The intake route only when the contract declares the POST AND mounts it.
+        "prefix": ROUTE_PREFIX
+        if ("POST", ROUTE_PREFIX) in routes and mount == ROUTE_PREFIX
+        else None,
+        "mount_prefix": mount,
+        "body_models": [f"{h}.{name}" for h in sorted(homes)] if bound else [],
         "bound_to_catalogue_model": bound,
     }
     obs["intake"] = {
@@ -271,7 +274,6 @@ def observe(app_root: str) -> dict[str, Any]:
         collided["backend_id"] = target_rung["backend_id"]
         neg["house_rung_collision"] = {
             "provider": target_row["provider"],
-            "value": target_rung["backend_id"],
             **_findings(
                 house.find_house_keyed_catalogue_entries,
                 [collided if r is target_row else r for r in rows],

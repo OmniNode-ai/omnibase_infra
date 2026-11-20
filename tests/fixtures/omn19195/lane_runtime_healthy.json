@@ -1,0 +1,180 @@
+{
+  "files": {
+    "catalogue": "db63f1638aa270a2e27ad34ac8847549bc8898e35f1c9224d760f222da8b4717",
+    "catalogue_module": "5ecff0f7f450837ceeb6297ef8b177d75618884faf6d5c0157d744c974d630bd",
+    "house_validator": "b29c33bed8930f4bae2b2e544d6c2c2c231296da32bf5dfeca4a13cabbfb3992",
+    "platform_contract": "f5054f2fbbd023bc9e2729c1337a165b0f9eac469f2d247dfa27e6c2067dae34"
+  },
+  "finding_classes": {
+    "declared_house_ref": "declared_house_ref",
+    "house_rung_identity_collision": "house_rung_identity_collision",
+    "no_customer_registerable_key": "no_customer_registerable_key"
+  },
+  "intake": {
+    "anthropic": {
+      "accepted": true
+    },
+    "gemini": {
+      "accepted": true
+    },
+    "glm": {
+      "accepted": true
+    },
+    "mistral": {
+      "accepted": false,
+      "errors": [
+        {
+          "loc": [
+            "provider"
+          ],
+          "msg": "Value error, 'mistral' is not a provider a key may be registered for. Offered: anthropic, gemini, glm, openai, openai_compatible, openrouter, reflection. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be route",
+          "type": "value_error"
+        }
+      ],
+      "exception": "ValidationError"
+    },
+    "openai": {
+      "accepted": true
+    },
+    "openai_compatible": {
+      "accepted": true
+    },
+    "openrouter": {
+      "accepted": true
+    },
+    "reflection": {
+      "accepted": true
+    },
+    "typesafe": {
+      "accepted": false,
+      "errors": [
+        {
+          "loc": [
+            "provider"
+          ],
+          "msg": "Value error, 'typesafe' is not a provider a key may be registered for. Offered: anthropic, gemini, glm, openai, openai_compatible, openrouter, reflection. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be rout",
+          "type": "value_error"
+        }
+      ],
+      "exception": "ValidationError"
+    },
+    "vertex": {
+      "accepted": false,
+      "errors": [
+        {
+          "loc": [
+            "provider"
+          ],
+          "msg": "Value error, 'vertex' is not a provider a key may be registered for. Offered: anthropic, gemini, glm, openai, openai_compatible, openrouter, reflection. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed",
+          "type": "value_error"
+        }
+      ],
+      "exception": "ValidationError"
+    }
+  },
+  "negative": {
+    "customer_only_self_exemption": {
+      "customer_only": [
+        "anthropic",
+        "mistral",
+        "openai",
+        "openai_compatible",
+        "reflection"
+      ],
+      "injected": "mistral"
+    },
+    "empty_rungs_fail_closed": {
+      "raised": {
+        "message": "no platform rungs supplied; the house-keyed set would be empty and every conjunct would pass vacuously",
+        "type": "HouseCatalogueError"
+      }
+    },
+    "house_declared_ref": {
+      "findings": [
+        {
+          "finding_class": "declared_house_ref",
+          "provider": "openrouter"
+        }
+      ],
+      "provider": "openrouter",
+      "value": "llm.openrouter.api_key"
+    },
+    "house_rung_collision": {
+      "findings": [
+        {
+          "finding_class": "house_rung_identity_collision",
+          "provider": "openrouter"
+        }
+      ],
+      "provider": "openrouter"
+    },
+    "no_registerable_key": {
+      "findings": [
+        {
+          "finding_class": "no_customer_registerable_key",
+          "provider": "c12probe"
+        }
+      ],
+      "provider": "c12probe"
+    },
+    "parity_missing": {
+      "dropped": "gemini",
+      "missing_from_catalogue": [
+        "gemini"
+      ],
+      "unbacked_in_catalogue": []
+    },
+    "parity_unbacked": {
+      "injected": "mistral",
+      "missing_from_catalogue": [],
+      "unbacked_in_catalogue": [
+        "mistral"
+      ]
+    }
+  },
+  "omnimarket_version": "0.4.322",
+  "route": {
+    "body_models": [
+      "omnimarket.projection.credential_publisher.ModelInferenceCredentialCreateRequest"
+    ],
+    "bound_to_catalogue_model": true,
+    "mount_prefix": "/v1/tenants/me/inference-credentials",
+    "prefix": "/v1/tenants/me/inference-credentials"
+  },
+  "shipped": {
+    "customer_only": [
+      "anthropic",
+      "openai",
+      "openai_compatible",
+      "reflection"
+    ],
+    "house_entry": {
+      "findings": []
+    },
+    "house_keyed_slugs": [
+      "gemini",
+      "glm",
+      "openrouter",
+      "typesafe",
+      "vertex"
+    ],
+    "not_offered": [
+      "typesafe",
+      "vertex"
+    ],
+    "offered": [
+      "anthropic",
+      "gemini",
+      "glm",
+      "openai",
+      "openai_compatible",
+      "openrouter",
+      "reflection"
+    ],
+    "parity_gap": {
+      "missing_from_catalogue": [],
+      "unbacked_in_catalogue": []
+    },
+    "rung_count": 12
+  }
+}

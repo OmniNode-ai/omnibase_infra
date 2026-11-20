@@ -18,7 +18,7 @@ WHAT THIS IS
 
 HOW IT READS THE SUBJECT
     ``c12_provider_catalogue_observe.py`` is piped to
-    ``docker exec -i -u appuser <container> python - /app`` on the lane's host,
+    ``docker exec -i -u nobody <container> python - ""`` on the lane's host,
     so it runs in the DEPLOYED interpreter against the DEPLOYED package and the
     DEPLOYED intake route, as the container's own unprivileged user. It prints
     what the deployed code returned and grades nothing; the grading is here,
@@ -39,8 +39,8 @@ WHAT IS CHECKED, BY CLAUSE
                 ``CUSTOMER_ONLY_PROVIDERS`` below, so it takes the same parity,
                 no-house-rung and intake-accepts checks as ``openai``.
     no_house    the deployed OMN-18311 validator returns zero findings.
-    surface     the intake route's resolved body model IS the model that
-                validates against the catalogue; it ACCEPTS every offered
+    surface     the runtime node's body model IS the model that validates
+                against the catalogue; the model ACCEPTS every offered
                 provider (the positive control: a gate that refuses
                 everything also refuses what it should) and refuses every
                 not-offered one and an unbacked one.
@@ -75,9 +75,12 @@ OBSERVER: Final[Path] = (
     Path(__file__).resolve().parent / "c12_provider_catalogue_observe.py"
 )
 
-DEFAULT_CONTAINER: Final[str] = "onex-api"
-DEFAULT_USER: Final[str] = "appuser"
-DEFAULT_APP_ROOT: Final[str] = "/app"
+# The dev lane's one runtime container, which serves the customer intake route.
+DEFAULT_CONTAINER: Final[str] = "omninode-runtime"
+# The runtime image has no appuser; nobody is its unprivileged user.
+DEFAULT_USER: Final[str] = "nobody"
+# Empty: the runtime installs omnimarket into its venv; nothing to put on sys.path.
+DEFAULT_APP_ROOT: Final[str] = ""
 
 # Must match the observer's constants; pinned by a test.
 UNBACKED_PROVIDER: Final[str] = "mistral"
@@ -85,11 +88,13 @@ UNBACKED_PROVIDER: Final[str] = "mistral"
 # Providers the catalogue may offer with no house rung behind them: the platform
 # holds no key, the customer's own key pays (OMN-17373 openai, omnimarket#3777 anthropic,
 # omnimarket#4632 openai_compatible: a keyed endpoint the developer names by URL,
-# added to this list by OMN-21981). Declared HERE, not read
+# added to this list by OMN-21981; omnimarket#5813 reflection: a keyed
+# OpenAI-compatible endpoint, ``mirrors_house_rung: false`` and no rung in the
+# platform contract). Declared HERE, not read
 # back from the catalogue: a row that declares ``mirrors_house_rung: false`` on
 # its own authority would otherwise exempt itself from the parity clause. An
 # exemption the catalogue declares for a provider not on this list stays RED.
-CUSTOMER_ONLY_PROVIDERS: Final = ("anthropic", "openai", "openai_compatible")
+CUSTOMER_ONLY_PROVIDERS = ("anthropic", "openai", "openai_compatible", "reflection")
 SYNTHETIC_TOKEN_PROVIDER: Final[str] = "c12probe"
 ROUTE_PREFIX: Final[str] = "/v1/tenants/me/inference-credentials"
 

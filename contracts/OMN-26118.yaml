@@ -1,0 +1,43 @@
+# OMN-26118 contract file for omnibase_infra: the C12 probe reads the dev lane's one runtime.
+schema_version: "1.0.0"
+ticket_id: "OMN-26118"
+title: "The M4 beta board check C12 (probe c12-provider-catalogue) reads green against what exists now, or its real product defect is named with a ticket"
+summary: "C12 read red from scheduled run 44661210305 back to 2026-11-15. The resolve job required the lane's gateway_url (port 8090), which refuses connections since the separate HTTP gateway was removed, so the grading job never ran. Behind it, the probe read an onex-api container that the dev lane no longer runs (omnibase_infra#5987), through a catalogue module that moved to omnimarket.handlers.routing (omnimarket#4810) and a router that the runtime node node_inference_credentials replaced. The probe now requires the lane's ingress_url, reads the omninode-runtime container, imports the module at its present path, grades the node contract's intake route and the handler's request model, and declares the customer-only reflection row (omnimarket#5813). No clause is removed or added: 27 checks held before and after on the dev-201 catalogue, and route_is_the_intake_route now also requires the runtime mount."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26118-c12-reads-the-one-runtime
+    statement: "The C12 workflow resolves the dev lane without the removed gateway and the probe reads the runtime container that serves the intake route, so the deployed catalogue grades pass while every injected fault still grades fail."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the cause of the red is named from the probe's newest failure text, with the run id and the failure lines read -- falsifier: the lane report names a cause with no run id or no quoted failure line"
+      - id: AC2
+        statement: "AC2: the probe's next run reads green against what exists now, with no retired thing restored and no clause removed unless a ruling retired the fact it graded -- falsifier: the newest c12-provider-catalogue run reads red, or the clause table in the report lists a removed assertion that no ruling retires"
+      - id: AC3
+        statement: "AC3: the lane writes one STATUS row `crit=C12 probe=c12-provider-catalogue verdict=<green|red> read_at=<UTC>` -- falsifier: a ledger grep for `crit=C12 probe=c12-provider-catalogue` finds no STATUS row after this ticket's creation"
+evidence_requirements:
+  - kind: tests
+    description: "The C12 grading tests pass, including the runtime recording, the one-runtime workflow pin, the pre-fix declared lists and every broken-observation case."
+    command: "uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "The C12 grading tests pass on the recording taken from the dev-201 runtime container, and each broken observation (including a route the runtime does not mount) grades fail."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q -p no:cacheprovider
+  - id: dod-002
+    description: "The cause, reproduced: the resolver given the pre-fix requirement (gateway_url) and the dev-201 lane entry exits 1 with the line scheduled run 44661210305 printed, and the workflow pin test fails on the pre-fix workflow."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py::test_the_workflow_reads_the_one_runtime_and_needs_no_gateway tests/ci/test_c12_provider_catalogue_probe_omn19195.py::test_neither_script_reads_a_retired_subject tests/ci/test_c12_provider_catalogue_probe_omn19195.py::test_the_pre_fix_declared_list_reproduces_the_board_red -q -p no:cacheprovider
+  - id: dod-deploy
+    description: "Deploy probe: the C12 workflow on the PR branch (read from GitHub by branch name) requires ingress_url and docker_runs_on and no longer requires gateway_url. The workflow runs from the checked-out repository, so the branch content is what the next scheduled run uses after merge; the hourly C12 run on dev reading success is the live readback."
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/chain-canary-c12-provider-catalogue.yml?ref=omn-26118-c12-probe-one-runtime" | grep -Eq ''^ +require: ingress_url docker_runs_on$'''

@@ -20,26 +20,28 @@
 #
 # HOW IT READS THE SUBJECT
 #   scripts/ci/c12_provider_catalogue_observe.py is piped to
-#   `docker exec -i -u appuser onex-api python - /app` through this runner's
+#   `docker exec -i -u nobody omninode-runtime python -` through this runner's
 #   docker socket, so it runs in the DEPLOYED interpreter against the DEPLOYED
 #   omnimarket package and the DEPLOYED intake route, as the container's own
-#   unprivileged user. It writes nothing: every injection of the negative test
-#   is an in-memory copy handed to a pure function. The grading runs here, in
+#   unprivileged user. The lane's one runtime container serves the intake route from the
+#   node_inference_credentials node; the separate onex-api container was
+#   removed from the dev lane. It writes nothing: every injection of the
+#   negative test is an in-memory copy handed to a pure function. The grading
+#   runs here, in
 #   scripts/ci/c12_provider_catalogue_probe.py, against expectations declared in
 #   that file and tested offline in
 #   tests/ci/test_c12_provider_catalogue_probe_omn19195.py.
 #
 #   Over HTTP there is nothing to read: the intake route answers 401 before its
-#   body is validated and its OpenAPI schema carries only a charset regex. The
-#   deployed package through the deployed interpreter is the strongest reading
-#   available, and the same one the hand readback took.
+#   body is validated. The deployed package through the deployed interpreter
+#   is the strongest reading available, and the same one the hand readback took.
 #
 # WHY THIS REPOSITORY, WHICH LANE, WHICH RUNNER (OMN-19894)
-#   The subject is a lab lane's onex-api container, read through the docker
+#   The subject is a lab lane's runtime container, read through the docker
 #   daemon that runs it: over HTTP there is nothing to read (above). So the
 #   job is two: `resolve-lane` runs on any runner of the overlay's pool
 #   (vars.LAB_PROBE_RUNS_ON_JSON) and picks the first lane of the overlay's
-#   ordered list (vars.LAB_LANES_JSON) whose onex-api answers and which
+#   ordered list (vars.LAB_LANES_JSON) whose runtime answers and which
 #   declares `docker_runs_on`, the runner labels that sit beside that lane's
 #   docker daemon; `c12-provider-catalogue` then runs there. No host label or
 #   address is written in this file: the only place a host is named is the
@@ -86,9 +88,9 @@ on:
   workflow_dispatch:
     inputs:
       container:
-        description: 'The deployed onex-api container on the dev lane.'
+        description: 'The deployed runtime container on the dev lane.'
         required: false
-        default: 'onex-api'
+        default: 'omninode-runtime'
       deploy_wait_seconds:
         description: 'Total seconds the lane resolution may wait for a dev-lane deploy to converge before it grades RED (OMN-19811; the chain canary default).'
         required: false
@@ -134,7 +136,11 @@ jobs:
         uses: ./.github/actions/resolve-lab-lane
         with:
           lanes-json: ${{ vars.LAB_LANES_JSON }}
-          require: gateway_url docker_runs_on
+          # OMN-26118: ingress_url is the lane's runtime HTTP port, which serves the
+          # customer intake route this probe reads. The lane's gateway_url
+          # (port 8090) is not required: the separate HTTP gateway was removed
+          # by the one-runtime rulings and the probe calls no gateway route.
+          require: ingress_url docker_runs_on
           match: compose_project=omnibase-infra
           # OMN-19811: a lane that does not answer while its deploy agent reports
           # a deploy in progress is waited for, not graded. Idle, unreadable or
@@ -166,7 +172,7 @@ jobs:
 
       - name: Read the deployed catalogue and grade it
         env:
-          C12_CONTAINER: ${{ github.event.inputs.container || 'onex-api' }}
+          C12_CONTAINER: ${{ github.event.inputs.container || 'omninode-runtime' }}
           LANE_NAME: ${{ needs.resolve-lane.outputs.lane }}
         run: |
           set -uo pipefail

@@ -3,10 +3,13 @@
 
 """Offline grading tests for the C12 provider-catalogue producer (OMN-19195).
 
-``tests/fixtures/omn19195/lane_healthy.json`` is the observer's output as
-recorded by running the observer in the dev-201 onex-api container (omnimarket
-0.4.312, the catalogue with the customer-only openai and anthropic rows) on
-2026-10-13. Every other case here is that recording with ONE observation
+``tests/fixtures/omn19195/lane_runtime_healthy.json`` is the observer's output
+as recorded by running the observer in the dev-201 lane's one runtime container
+(omnimarket 0.4.322, the catalogue with the customer-only anthropic, openai,
+openai_compatible and reflection rows) on 2026-11-20. The earlier recording,
+``lane_healthy.json``, came from the onex-api container that the dev lane no
+longer runs, and is kept only as the history of the pre-removal subject.
+Every other case here is the current recording with ONE observation
 broken, so each test says which property of the deployed subject the verdict turns on.
 
 Beta criterion C12 no longer says "no Claude entry": operator ruling
@@ -38,7 +41,9 @@ WORKFLOW = (
 
 
 def _healthy() -> dict[str, Any]:
-    payload = json.loads((FIXTURES / "lane_healthy.json").read_text(encoding="utf-8"))
+    payload = json.loads(
+        (FIXTURES / "lane_runtime_healthy.json").read_text(encoding="utf-8")
+    )
     assert isinstance(payload, dict)
     return payload
 
@@ -98,20 +103,26 @@ def test_the_deployed_openai_compatible_row_is_a_declared_customer_only_provider
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("undeclared", ["openai_compatible", "reflection"])
 def test_the_pre_fix_declared_list_reproduces_the_board_red(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, undeclared: str
 ) -> None:
-    """The cause, pinned: graded with the list the probe declared before
-    OMN-21981, the deployed shape fails on exactly the line C12 run 41406642460
-    printed on dev-201."""
-    monkeypatch.setattr(probe, "CUSTOMER_ONLY_PROVIDERS", ("anthropic", "openai"))
-    record = probe.grade(_with_openai_compatible(_healthy()))
+    """The cause, pinned: graded with the list the probe declared before a
+    customer-only row was offered (openai_compatible: OMN-21981, run
+    41406642460; reflection: omnimarket#5813, read from the dev-201 runtime on
+    2026-11-20), the deployed shape fails on exactly that line."""
+    obs = _healthy()
+    assert undeclared in obs["shipped"]["customer_only"]
+    declared = tuple(p for p in probe.CUSTOMER_ONLY_PROVIDERS if p != undeclared)
+    assert undeclared in probe.CUSTOMER_ONLY_PROVIDERS
+    monkeypatch.setattr(probe, "CUSTOMER_ONLY_PROVIDERS", declared)
+    record = probe.grade(obs)
     assert record.verdict == "fail"
     assert _failed(record) == {"customer_only_exemptions_are_declared_here"}
     assert (
         "parity/customer_only_exemptions_are_declared_here: "
-        "customer_only=['anthropic', 'openai', 'openai_compatible'] "
-        "declared=['anthropic', 'openai']"
+        f"customer_only={obs['shipped']['customer_only']!r} "
+        f"declared={list(declared)!r}"
     ) in record.failures
 
 
@@ -139,12 +150,12 @@ def test_openai_compatible_backed_by_a_house_rung_still_grades_fail() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.live_contact("tests/ci/fixtures/omn17353_c12_dev201_observation.json")
-def test_the_recorded_dev201_container_reading_grades_pass(
+@pytest.mark.live_contact("tests/ci/fixtures/omn26118_c12_runtime_observation.json")
+def test_the_recorded_dev201_runtime_reading_grades_pass(
     recorded_response: dict[str, object],
 ) -> None:
-    """The observer's output as the dev-201 onex-api container printed it
-    (omnimarket 0.4.312, anthropic offered), graded by the probe."""
+    """The observer's output as the dev-201 runtime container printed it
+    (omnimarket 0.4.322, anthropic offered), graded by the probe."""
     observed = recorded_response["response"]
     assert isinstance(observed, dict)
     assert "anthropic" in observed["shipped"]["offered"]
@@ -295,6 +306,16 @@ BROKEN: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
         "route_body_is_catalogue_model",
     ),
     (
+        "the node contract declares no mounted POST intake route",
+        _set(("route", "prefix"), None),
+        "route_is_the_intake_route",
+    ),
+    (
+        "the route reading is absent",
+        _drop(("route", "prefix")),
+        "route_is_the_intake_route",
+    ),
+    (
         "the wrong route was read",
         _set(("route", "prefix"), "/v1/whoami"),
         "route_is_the_intake_route",
@@ -432,7 +453,7 @@ def _fake_docker(tmp_path: Path, body: str) -> str:
 @pytest.mark.unit
 def test_an_unreachable_container_cannot_produce_a_pass(tmp_path: Path) -> None:
     docker = _fake_docker(
-        tmp_path, 'echo "error: no such object: onex-api" >&2; exit 1'
+        tmp_path, 'echo "error: no such object: omninode-runtime" >&2; exit 1'
     )
     record_path = tmp_path / "c12.json"
     rc = probe.main(["--docker-bin", docker, "--record", str(record_path)])
@@ -454,7 +475,7 @@ def test_the_live_path_grades_what_the_container_printed(tmp_path: Path) -> None
     docker = _fake_docker(
         tmp_path,
         f'echo "$@" >> "{argv_log}"\n'
-        'if [ "$1" = inspect ]; then echo "onex-lab/omnicloud-core:x|running|t"; exit 0; fi\n'
+        'if [ "$1" = inspect ]; then echo "omnibase-infra-omninode-runtime|running|t"; exit 0; fi\n'
         "cat > /dev/null\n"
         f"cat <<'JSON'\n{healthy}\nJSON",
     )
@@ -462,11 +483,12 @@ def test_the_live_path_grades_what_the_container_printed(tmp_path: Path) -> None
     rc = probe.main(["--docker-bin", docker, "--record", str(record_path)])
     assert rc == probe.EXIT_OK
     calls = argv_log.read_text(encoding="utf-8").splitlines()
-    assert calls[1] == "exec -i -u appuser onex-api python - /app"
+    # The empty app root is the last argument: the runtime venv carries omnimarket.
+    assert calls[1] == "exec -i -u nobody omninode-runtime python - "
     written = json.loads(record_path.read_text(encoding="utf-8"))
     assert written["criterion"] == "C12"
     assert written["verdict"] == "pass"
-    assert written["target"]["image"] == "onex-lab/omnicloud-core:x"
+    assert written["target"]["image"] == "omnibase-infra-omninode-runtime"
     assert written["as_of"].endswith("Z")
 
 
@@ -477,7 +499,7 @@ def test_replay_round_trips_through_main(tmp_path: Path) -> None:
     rc = probe.main(
         [
             "--replay",
-            str(FIXTURES / "lane_healthy.json"),
+            str(FIXTURES / "lane_runtime_healthy.json"),
             "--record",
             str(record_path),
             "--summary",
@@ -506,6 +528,38 @@ def test_the_workflow_cannot_soften_its_verdict() -> None:
 
 
 @pytest.mark.unit
+def test_the_workflow_reads_the_one_runtime_and_needs_no_gateway() -> None:
+    """The red this pins (run 44661210305, 2026-11-20): the resolve job required
+    the lane's gateway_url, port 8090 refused the connection (the separate HTTP
+    gateway was removed) and the grading job never ran. The probe reads the
+    lane's runtime container, whose HTTP port is the lane's ingress_url."""
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    resolve = workflow["jobs"]["resolve-lane"]
+    (step,) = [s for s in resolve["steps"] if s.get("id") == "lane"]
+    required = step["with"]["require"].split()
+    assert required == ["ingress_url", "docker_runs_on"]
+    assert "gateway_url" not in required
+    default = workflow[True]["workflow_dispatch"]["inputs"]["container"]["default"]
+    assert default == probe.DEFAULT_CONTAINER == "omninode-runtime"
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert "'onex-api'" not in text
+    assert "-u appuser" not in text
+
+
+@pytest.mark.unit
+def test_neither_script_reads_a_retired_subject() -> None:
+    """The module the catalogue moved out of, and the onex-api router that the
+    runtime node replaced, are never read (omnimarket#4810, omnibase_infra#5987)."""
+    for path in (Path(observer.__file__), Path(probe.__file__)):
+        text = path.read_text(encoding="utf-8")
+        assert "omnimarket.routing" not in text, path.name
+        assert "from routers" not in text, path.name
+    observer_text = Path(observer.__file__).read_text(encoding="utf-8")
+    assert "omnimarket.handlers.routing" in observer_text
+    assert "node_inference_credentials" in observer_text
+
+
+@pytest.mark.unit
 def test_the_observer_is_standard_library_plus_the_subject() -> None:
     """The observer runs in a foreign interpreter; it may import only the
     standard library and the deployed subject it is reading."""
@@ -518,7 +572,9 @@ def test_the_observer_is_standard_library_plus_the_subject() -> None:
             roots.update(a.name.split(".")[0] for a in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             roots.add(node.module.split(".")[0])
-    allowed_subject = {"omnimarket", "routers"}
+    # yaml reads the node contract the subject ships; the subject's own
+    # catalogue reader needs it too, so it is present wherever the subject is.
+    allowed_subject = {"omnimarket", "yaml"}
     stdlib = set(getattr(__import__("sys"), "stdlib_module_names", ()))
     assert roots - stdlib - allowed_subject == set(), roots
 
