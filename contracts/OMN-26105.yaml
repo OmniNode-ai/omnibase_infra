@@ -1,0 +1,92 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26105"
+title: "The runner roll recreates an idle runner whose mounts or env differ from the synced compose, and a declared verb retires a whole runner pool on any registry host, so the h053 NVMe binds take effect and h202's CI pool drains"
+summary: >-
+  The secondary pool image roll (HandlerRunnerImageRoll) skipped a runner that was online on the declared image, so a Compose change to binds or env never reached a running container (the h053 pool still ran on tmpfs after the NVMe change). It now reads each idle runner's running mounts and a declared set of non-secret env keys (ModelRunnerConfigDriftPolicy) against the synced Compose and recreates one idle runner at a time when they differ, never comparing the registration token. A new node, node_runner_pool_retire (HandlerRunnerPoolRetire), drains, deregisters and removes a whole declared CI pool on one registry host, selected by its exact prefix followed by -<digits>, idle only and one runner at a time; scripts/deploy-runners.sh --retire-pool dispatches it with no token and a dry run that prints the plan and writes nothing. The branch is stacked on the head branch of omnibase_infra#6097.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26105-roll-drift-and-pool-retire"
+    statement: "The runner installer converges a running runner to its synced Compose and can retire a whole CI pool on a non-primary registry host, each one idle runner at a time."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the image roll (node_runner_image_roll or its caller) recreates an idle runner whose running mounts or env differ from the synced compose, not only on an image change, one runner at a time and never a busy one, with tests red first on the current branch -- falsifier: `uv run pytest tests/unit/handlers/ -q -k runner_config_drift` passes on a roll that skips a drifted runner on the declared image or recreates a busy runner
+      - id: "AC2"
+        statement: >-
+          AC2: a declared retire verb takes a whole runner pool on any registry host through drain (stop new jobs, wait idle, deregister, remove the container), idle only, and a dry run prints the plan without any write -- falsifier: `uv run pytest tests/unit/handlers/ -q -k retire_pool` passes on a verb that removes a busy runner or writes in dry run
+      - id: "AC3"
+        statement: >-
+          AC3: the verb accepts a non-primary host and pool prefix (h202 and its declared CI pool prefix) where --retire-surplus refuses, and never selects the customer-plane or verify runners that share that host -- falsifier: `uv run pytest tests/unit/handlers/ -q -k retire_pool_secondary_host` passes on a verb that refuses a secondary host or lists a runner outside the named pool prefix
+      - id: "AC4"
+        statement: >-
+          AC4: the lane writes the exact dry-run and real commands for h053 and h202 in one MSG to orchestrator-31d9-swarm and stops before any registration token use -- falsifier: `python3 plugins/omni/skills/lane-brief/scripts/lane_brief.py grep 'OMN-26098'` returns no MSG row to=orchestrator-31d9-swarm from the child lane that names both commands
+      - id: "AC5"
+        statement: >-
+          AC5: the PR body carries a Lab line, the change is a PR on the omnibase_infra#6097 branch and is handed to the landing controller by one MSG, and the installed= proof is written only after the orchestrator session runs the commands -- falsifier: `python3 plugins/omni/skills/lane-brief/scripts/lane_brief.py grep 'OMN-26098'` returns a STATUS row with installed=h053 before the orchestrator session ran the real commands
+evidence_requirements:
+  - kind: "tests"
+    description: "The roll compares mounts and declared env keys (never the token) and recreates only idle drifted runners one at a time; the pool retire selects by exact prefix, drains idle runners one at a time, refuses a non-CI pool and writes nothing in a dry run."
+    command: "uv run --frozen pytest tests/unit/handlers/test_handler_runner_config_drift_omn26105.py tests/unit/handlers/test_handler_runner_pool_retire_omn26105.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn26105-ac1-config-drift"
+    description: "AC1: a runner on the declared image whose mounts or declared env differ is recreated when idle, a busy one is never probed or touched, the token is never compared, the limit and one-at-a-time order hold, and a recreate that does not converge halts the roll."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/handlers/ -q -n 0 --no-cov -k runner_config_drift"
+        cwd: "."
+  - id: "dod-omn26105-ac2-retire-pool"
+    description: "AC2: the retire verb stops, deregisters and removes one idle runner at a time, never a busy or unreadable one, and a dry run reads container evidence only and issues no stop, remove or registry delete."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/handlers/ -q -n 0 --no-cov -k retire_pool"
+        cwd: "."
+  - id: "dod-omn26105-ac3-secondary-host"
+    description: "AC3: the verb takes h202 with its declared CI pool prefix (and the h051 and h053 CI pools) through the installer flag, selects exactly <prefix>-<digits>, and refuses the customer-plane and verify pools and the shared name stem before any remote read."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/handlers/ -q -n 0 --no-cov -k retire_pool_secondary_host"
+        cwd: "."
+  - id: "dod-omn26105-ac3-hosted-deploy-probe"
+    description: "Deploy scope: the pushed head declares the retire operation in the new node's contract and the drift check in the roll handler, read from GitHub at the checked-out revision so the hosted runner can run it."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "command"
+        check_value: "bash -o pipefail -c 'gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_runner_pool_retire/contract.yaml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F \"operation: runner.pool.retire\" >/dev/null'"
+        cwd: "."
+      - check_type: "command"
+        check_value: "bash -o pipefail -c 'gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_runner_image_roll.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F \"async def _config_drift\" >/dev/null'"
+        cwd: "."
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/handlers/test_handler_runner_pool_retire_omn26105.py -q -n 0 --no-cov -k 'secondary_host_flag'"
+        cwd: "."
+  - id: "dod-omn26105-ac4-command-msg"
+    description: "AC4: the lane's MSG to orchestrator-31d9-swarm names the dry-run and real commands for h053 and h202. Needs the work ledger, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: ["AC4"]
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep OMN-26105 | grep MSG | grep to=orchestrator-31d9-swarm | grep -F -e --retire-pool | grep -F -e --limit=1'"
+        cwd: "."
+  - id: "dod-omn26105-ac5-handoff"
+    description: "AC5: the PR body carries a Lab line and the landing handoff MSG is on the ledger; no STATUS row names installed=h053 until the orchestrator session has run the real commands. Needs the work ledger, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: ["AC5"]
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep OMN-26105 | grep MSG | grep to=landing-controller'"
+        cwd: "."
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""

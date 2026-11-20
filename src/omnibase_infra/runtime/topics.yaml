@@ -53,6 +53,9 @@ topics:
   # OMN-25796: scripts/deploy-runners.sh --rolling on a secondary host pipes the
   # roll request through the generic node CLI, which publishes it on the local bus.
   - onex.cmd.platform.runner-image-roll.v1
+  # OMN-26105: scripts/deploy-runners.sh --retire-pool pipes the pool retire request
+  # through the generic node CLI, which publishes it on the local bus.
+  - onex.cmd.platform.runner-pool-retire.v1
   # OMN-22002: omnibase_core publishes the validator run and triggered events
   # (node_validation_report_write_effect); the validation ledger projection node
   # consumes them, so they are declared as published outside this corpus.

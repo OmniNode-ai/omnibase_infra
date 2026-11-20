@@ -16,6 +16,9 @@ from typing import cast
 import yaml
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.model_runner_config_drift_policy import (
+    ModelRunnerConfigDriftPolicy,
+)
 from omnibase_infra.models.model_runner_image_roll_request import (
     ModelRunnerImageRollRequest,
 )
@@ -483,6 +486,40 @@ class HandlerRunnerImageRoll:
             return None
         return container
 
+    async def _config_drift(
+        self,
+        request: ModelRunnerImageRollRequest,
+        name: str,
+        container_id: str,
+        token_vars: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        """OMN-26105: mounts and declared env keys of the running container that differ from the synced Compose.
+
+        Read-only. The host renders the Compose service with a placeholder token and filters both documents to the
+        declared env keys (``ModelRunnerConfigDriftPolicy.env_keys``) before anything crosses SSH, so neither the
+        registration token nor any other secret leaves the host. An unreadable runner refuses; it is never in sync.
+        """
+        policy = ModelRunnerConfigDriftPolicy()
+        keys = shlex.quote(json.dumps(policy.env_keys))
+        exports = " ".join(f"{var}=onex-drift-probe" for var in token_vars)
+        rc, output = await self._remote(
+            request.host,
+            f"set -eo pipefail; cd {_DOCKER_DIR}; "
+            f"{exports} {self._compose(request.prefix)} config --format json | "
+            f"jq -c --arg n {shlex.quote(name)} --argjson keys {keys} {shlex.quote(policy.RENDERED_FILTER)}; "
+            f"docker inspect --type container {shlex.quote(container_id)} | "
+            f"jq -c --argjson keys {keys} {shlex.quote(policy.RUNNING_FILTER)}",
+        )
+        lines = output.splitlines()
+        if rc or len(lines) != 2:
+            raise RunnerRollError(f"{name}: could not read the running configuration.")
+        try:
+            return policy.drift(lines[0], lines[1])
+        except ValueError as exc:
+            raise RunnerRollError(
+                f"{name}: could not decode the running configuration."
+            ) from exc
+
     async def _recreate(
         self,
         request: ModelRunnerImageRollRequest,
@@ -583,9 +620,22 @@ printf '%s\n' {shlex.quote(override)} |
                         retry.append(name)
                         continue
                     previous_id, current_image = container
+                    drift: tuple[str, ...] = ()
                     if current_image == image:
-                        _LOG.info("%s: online on the declared image", name)
-                        continue
+                        drift = await self._config_drift(
+                            request, name, previous_id, token_vars
+                        )
+                        if not drift:
+                            _LOG.info(
+                                "%s: online on the declared image, configuration in sync",
+                                name,
+                            )
+                            continue
+                        _LOG.info(
+                            "%s: configuration differs from the synced Compose: %s",
+                            name,
+                            ", ".join(drift),
+                        )
                     if not await self._recreate(
                         request, name, previous_id, token, image_tag, token_vars
                     ):
@@ -597,6 +647,15 @@ printf '%s\n' {shlex.quote(override)} |
                         raise RunnerRollError(
                             f"HALT: {name} did not return online on {image_tag}."
                         )
+                    if drift:
+                        # A comparison that cannot converge stops at this runner, not the pool.
+                        replaced = await self._container(request, name)
+                        if replaced is None or await self._config_drift(
+                            request, name, replaced[0], token_vars
+                        ):
+                            raise RunnerRollError(
+                                f"HALT: {name} still differs from the synced Compose after its recreate."
+                            )
                 except RunnerUncertainRecreateError:
                     raise
                 except (RunnerRollError, OSError, TimeoutError) as exc:
