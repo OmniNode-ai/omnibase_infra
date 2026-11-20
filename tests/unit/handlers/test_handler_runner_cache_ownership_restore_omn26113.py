@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 import pytest
 
 from omnibase_infra.handlers.handler_runner_cache_ownership_restore import (
+    DockerCacheCli,
     HandlerRunnerCacheOwnershipRestore,
-    RunnerDockerCli,
 )
 from omnibase_infra.models.model_runner_cache_ownership_restore_request import (
     ModelRunnerCacheOwnershipRestoreRequest,
@@ -61,7 +61,7 @@ class FakeContainer:
     chown_has_effect: bool = True
 
 
-class FakeDocker(RunnerDockerCli):
+class FakeDocker(DockerCacheCli):
     """docker replaced by an in-memory host that records every write."""
 
     def __init__(self, containers: dict[str, FakeContainer]) -> None:

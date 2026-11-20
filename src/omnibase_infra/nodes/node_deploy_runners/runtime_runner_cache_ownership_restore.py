@@ -11,8 +11,8 @@ import argparse
 import sys
 
 from omnibase_infra.handlers.handler_runner_cache_ownership_restore import (
+    DockerCacheCli,
     HandlerRunnerCacheOwnershipRestore,
-    RunnerDockerCli,
 )
 from omnibase_infra.models.model_runner_cache_ownership_restore_request import (
     ModelRunnerCacheOwnershipRestoreRequest,
@@ -20,22 +20,20 @@ from omnibase_infra.models.model_runner_cache_ownership_restore_request import (
 
 
 def _handler_with_docker(
-    docker: RunnerDockerCli,
+    docker: DockerCacheCli,
 ) -> HandlerRunnerCacheOwnershipRestore:
     """The handler working through a docker the caller supplies (tests)."""
 
     class InjectedDockerRestore(HandlerRunnerCacheOwnershipRestore):
         def make_docker(
             self, request: ModelRunnerCacheOwnershipRestoreRequest
-        ) -> RunnerDockerCli:
+        ) -> DockerCacheCli:
             return docker
 
     return InjectedDockerRestore()
 
 
-def main(
-    argv: list[str] | None = None, *, docker: RunnerDockerCli | None = None
-) -> int:
+def main(argv: list[str] | None = None, *, docker: DockerCacheCli | None = None) -> int:
     """Exit 0 ok (busy runners are left for the next pass), 1 a restore did not hold, 2 the list was unread."""
     parser = argparse.ArgumentParser(
         description="Restore runner cache mount ownership in idle runner containers."

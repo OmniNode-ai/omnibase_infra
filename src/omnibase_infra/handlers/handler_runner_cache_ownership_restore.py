@@ -41,7 +41,7 @@ _WORKER = "Runner.Worker"
 _LISTENER = "Runner.Listener"
 
 
-class RunnerDockerCli:
+class DockerCacheCli:
     """The docker calls the check needs, through the CLI without a shell. Tests replace it with a recording."""
 
     def __init__(self, timeout_seconds: int, chown_timeout_seconds: int) -> None:
@@ -103,7 +103,7 @@ class RunnerDockerCli:
             raise OSError(f"chown in {name} exited {done.returncode}")
 
 
-def is_idle(docker: RunnerDockerCli, name: str) -> bool:
+def is_idle(docker: DockerCacheCli, name: str) -> bool:
     """True only when the process list is readable, shows the runner's listener and holds no ``Runner.Worker``.
 
     A list that cannot be read, or that shows no ``Runner.Listener`` (a container that is not a running runner), is
@@ -123,8 +123,8 @@ class HandlerRunnerCacheOwnershipRestore:
 
     def make_docker(
         self, request: ModelRunnerCacheOwnershipRestoreRequest
-    ) -> RunnerDockerCli:
-        return RunnerDockerCli(
+    ) -> DockerCacheCli:
+        return DockerCacheCli(
             request.docker_timeout_seconds, request.chown_timeout_seconds
         )
 
