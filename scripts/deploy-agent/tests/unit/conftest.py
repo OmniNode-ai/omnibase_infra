@@ -25,11 +25,37 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import Executor, Future
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from deploy_agent import agent as agent_mod
 from deploy_agent import executor as executor_mod
+
+
+@pytest.fixture(autouse=True)
+def _no_recreate_window_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An agent built by an unrelated test carries no recreate window gate (OMN-25912).
+
+    The gate reads the checkout's rendered policy and the wall clock, so a test of the
+    converge rule would otherwise depend on the hour. A test that sets ``_recreate_gate``
+    on its agent gets the real window decision; every other agent is admitted.
+    """
+    real = agent_mod.load_dev_boot_guard
+
+    def loader(effect: str = "handler_dev_boot_guard") -> Any:
+        if effect != agent_mod.DEV_ROLL_EVENTS:
+            return real(effect)
+        module = real(effect)
+        return SimpleNamespace(
+            window_admits=lambda agent, who: (
+                module.window_admits(agent, who)
+                if hasattr(agent, "_recreate_gate")
+                else True
+            )
+        )
+
+    monkeypatch.setattr(agent_mod, "load_dev_boot_guard", loader)
 
 
 @pytest.fixture(autouse=True)
