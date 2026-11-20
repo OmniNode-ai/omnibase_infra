@@ -56,7 +56,8 @@ def test_c28_request_uses_the_resolved_lane_and_writes_the_uploaded_record() -> 
     run = next(
         step["run"]
         for step in job["steps"]
-        if "onex node node_board_probe_effect" in step.get("run", "")
+        if "omnibase_core.cli.cli_commands node node_board_probe_effect"
+        in step.get("run", "")
     )
     assert "--input c28-request.json" in run
 

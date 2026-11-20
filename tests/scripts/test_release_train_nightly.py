@@ -2052,7 +2052,7 @@ class TestPathsDownstreamReposCloneByTagAreReleaseRelevant:
         )
         git("add", "pyproject.toml")
         git("commit", "-m", "init")
-        git("tag", "v1.0.0")
+        git("tag", "-a", "v1.0.0", "-m", "v1.0.0")
         target = root / touched
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("changed\n", encoding="utf-8")

@@ -78,6 +78,18 @@ class _StubCompleted:
         self.stderr = stderr
 
 
+def test_build_argv_runs_a_multi_word_cli_command() -> None:
+    # OMN-25070: omnibase-core no longer declares the onex script, so the probe
+    # runs the core CLI as a module from the repository venv.
+    argv = build_argv(onex_bin=".venv/bin/python -m omnibase_core.cli.cli_commands")
+    assert argv[:4] == [
+        ".venv/bin/python",
+        "-m",
+        "omnibase_core.cli.cli_commands",
+        "delegate",
+    ]
+
+
 def test_build_argv_uses_the_corrected_lane_dev_form() -> None:
     """AC1's premise made mechanical: no --kafka-bootstrap literal, ever."""
     argv = build_argv(onex_bin="onex")
@@ -669,7 +681,7 @@ def test_workflow_probe_declares_the_lab_house_tenant_and_mints_nothing() -> Non
 def test_workflow_probe_step_uses_the_composed_cli_and_publishes_the_terminal() -> None:
     step = _step("Run the R1 front-door probe")
     script = step["run"]
-    assert "--onex-bin .venv/bin/onex" in script
+    assert '--onex-bin ".venv/bin/python -m omnibase_core.cli.cli_commands"' in script
     assert '--summary-file "${GITHUB_STEP_SUMMARY}"' in script
     assert 'exit "${status}"' in script
     assert "--kafka-bootstrap" not in script
@@ -782,7 +794,7 @@ def test_workflow_successful_setup_runs_cli_and_preserves_its_verdict(
     assert (tmp_path / "cli-argv.txt").read_text().splitlines() == [
         "scripts/ci/r1_front_door_probe.py",
         "--onex-bin",
-        ".venv/bin/onex",
+        ".venv/bin/python -m omnibase_core.cli.cli_commands",
         "--record",
         "r1-front-door-probe.json",
         "--summary-file",
