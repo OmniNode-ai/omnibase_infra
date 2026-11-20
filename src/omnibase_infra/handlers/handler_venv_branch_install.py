@@ -41,7 +41,7 @@ import subprocess
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -102,7 +102,9 @@ def read_installed_source(python_bin: str) -> str:
     return _read_record(python_bin)[0].removeprefix("git+")
 
 
-def head_from_watcher_facts(state: Mapping[str, Any], *, repo: str, number: int) -> str:
+def head_from_watcher_facts(
+    state: Mapping[str, object], *, repo: str, number: int
+) -> str:
     """The head sha the pull request watcher read, for an open pull request of ``repo``.
 
     ``state`` is the watcher record of the pull request (``facts`` holds the
@@ -129,6 +131,23 @@ def _omnimarket_requirement(source: str, sha: str) -> str:
 
 def _utc_now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _receipts_dir(request: ModelVenvBranchInstallRequest) -> Path:
+    return request.state_dir / "receipts"
+
+
+def _write_receipt(path: Path, receipt: ModelVenvBranchInstallReceipt) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = receipt.model_dump(mode="json") | {"installed": receipt.installed}
+    scratch = path.with_suffix(".tmp")
+    scratch.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    scratch.replace(path)
+
+
+def _discard_stage(stage_dir: Path) -> None:
+    engine.prune_git_checkouts(stage_dir)
+    shutil.rmtree(stage_dir, ignore_errors=True)
 
 
 class HandlerVenvBranchInstall:
@@ -184,33 +203,16 @@ class HandlerVenvBranchInstall:
             **fields,
         )
 
-    @staticmethod
-    def _receipts_dir(request: ModelVenvBranchInstallRequest) -> Path:
-        return request.state_dir / "receipts"
-
     def _active_receipt(
         self, request: ModelVenvBranchInstallRequest
     ) -> tuple[Path, ModelVenvBranchInstallReceipt] | None:
-        for path in sorted(self._receipts_dir(request).glob(f"{request.host}-*.json")):
+        for path in sorted(_receipts_dir(request).glob(f"{request.host}-*.json")):
             data = json.loads(path.read_text(encoding="utf-8"))
             data.pop("installed", None)
             receipt = ModelVenvBranchInstallReceipt.model_validate(data)
             if receipt.host == request.host and receipt.state == "active":
                 return path, receipt
         return None
-
-    @staticmethod
-    def _write_receipt(path: Path, receipt: ModelVenvBranchInstallReceipt) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = receipt.model_dump(mode="json") | {"installed": receipt.installed}
-        scratch = path.with_suffix(".tmp")
-        scratch.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        scratch.replace(path)
-
-    @staticmethod
-    def _discard_stage(stage_dir: Path) -> None:
-        engine.prune_git_checkouts(stage_dir)
-        shutil.rmtree(stage_dir, ignore_errors=True)
 
     def _install(
         self, request: ModelVenvBranchInstallRequest
@@ -283,7 +285,7 @@ class HandlerVenvBranchInstall:
             label=label,
         )
         if code != 0 or not (stage_dir / "plan.json").exists():
-            self._discard_stage(stage_dir)
+            _discard_stage(stage_dir)
             return self._result(
                 "refused" if code == _EXIT_REFUSED else "failed",
                 code or _EXIT_FAILED,
@@ -291,14 +293,14 @@ class HandlerVenvBranchInstall:
             )
         code = engine.commit_stage(str(python), stage_dir)
         if code != 0:
-            self._discard_stage(stage_dir)
+            _discard_stage(stage_dir)
             return self._result(
                 "failed", code, "the commit failed and restored every path"
             )
         installed = self._read_revision(str(python))
         if installed != request.head_sha:
             engine.rollback_stage(stage_dir)
-            self._discard_stage(stage_dir)
+            _discard_stage(stage_dir)
             return self._result(
                 "failed",
                 _EXIT_FAILED,
@@ -315,8 +317,8 @@ class HandlerVenvBranchInstall:
             stage_dir=str(stage_dir),
             installed_at=_utc_now(),
         )
-        path = self._receipts_dir(request) / f"{receipt.host}-{receipt.head_sha}.json"
-        self._write_receipt(path, receipt)
+        path = _receipts_dir(request) / f"{receipt.host}-{receipt.head_sha}.json"
+        _write_receipt(path, receipt)
         return self._result(
             "installed",
             0,
@@ -356,8 +358,8 @@ class HandlerVenvBranchInstall:
                     f"{receipt.replaced_revision}",
                     receipt_path=str(path),
                 )
-            self._discard_stage(stage_dir)
-            self._write_receipt(
+            _discard_stage(stage_dir)
+            _write_receipt(
                 path,
                 receipt.model_copy(
                     update={"state": "reverted", "reverted_at": _utc_now()}

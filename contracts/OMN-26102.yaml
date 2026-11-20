@@ -73,3 +73,13 @@ dod_evidence:
         check_value: |-
           ssh h051 "systemctl --user show onex-floor-fill-tick.service -p ExecMainStatus | grep -qx ExecMainStatus=0"
         cwd: .
+  - id: dod-omn26102-integration-proof
+    description: 'The installed command line runs as a real process against the real node contract, refuses a merged pull request with exit 2 and leaves no state behind.'
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/handlers/test_venv_branch_install_command_omn26102.py -q
+        cwd: .
