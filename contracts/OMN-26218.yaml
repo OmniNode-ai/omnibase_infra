@@ -12,6 +12,9 @@ requirements:
       - id: "AC1"
         statement: "the dev tenant fold overlay sets ONEX_RUNTIME_NODE_EXCLUSION to projection_eval_results on omninode-runtime, the name equal to the node's contract name, and the base and shared dev-lane compose files set no exclusion (command: uv run pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py -q)"
 evidence_requirements:
+  - kind: "deploy"
+    description: "The running dev runtime container carries the exclusion."
+    command: "docker exec omninode-runtime printenv ONEX_RUNTIME_NODE_EXCLUSION"
   - kind: "tests"
     description: "The fold overlay tests pass at the head."
     command: "uv run pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py -q"
@@ -26,5 +29,13 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py -q"
+        cwd: "."
+    binds_ac: ["AC1"]
+  - id: "dod-omn26218-ac1-deploy"
+    description: "AC1 the running dev main runtime container carries ONEX_RUNTIME_NODE_EXCLUSION=projection_eval_results"
+    source: "manual"
+    checks:
+      - check_type: "command_succeeds"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} sh -c 'printenv ONEX_RUNTIME_NODE_EXCLUSION | grep -qx projection_eval_results'"
         cwd: "."
     binds_ac: ["AC1"]
