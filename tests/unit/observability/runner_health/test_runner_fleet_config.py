@@ -47,9 +47,12 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     # its CI runners off first) cut the primary host's share 10 -> 0 once the
     # 16 runners of the second amd64 host and the 5 `hp053-ci-runner` carried its labels, so
     # the declared total is 16 + 5 = 21.
+    # OMN-25674 declares the 16 runners h051 takes over from the second amd64 host before its
+    # 16 are drained (make before break), so it is 16 + 16 + 5 = 37 until the
+    # pool there is removed, and 21 again after.
     assert config.expected_count == 0
     assert config.burst_count == 0
-    assert config.declared_total("action") == 21
+    assert config.declared_total("action") == 37
 
 
 def test_runner_compose_matches_configured_count() -> None:
@@ -102,8 +105,13 @@ def test_primary_host_declares_only_its_host_specific_runners() -> None:
     action_hosts = {
         host.host for host in config.hosts if host.declared_count("action") > 0
     }
-    assert len(action_hosts) == 2
-    assert "h053" in action_hosts
+    # OMN-25674: h051 declares the pool that takes over the second amd64 host's capacity.
+    second_host = next(
+        host
+        for host in config.hosts
+        if host.host not in {"h051", "h053"} and host.declared_count("action") > 0
+    )
+    assert action_hosts == {"h051", "h053", second_host.host}
     assert config.runner_host not in action_hosts
 
 
@@ -677,3 +685,21 @@ def test_deploy_ships_healthcheck_script_to_host() -> None:
     assert '"docker/runners/healthcheck.sh"' in deploy_script
     # And in the real rsync invocation that ships into docker/runners/.
     assert '"${REPO_ROOT}/docker/runners/healthcheck.sh" \\' in deploy_script
+
+
+def test_job_dir_host_root_is_an_absolute_path_or_absent() -> None:
+    """OMN-26093: a host row's job-directory root is absolute, and only h053 declares one."""
+    config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
+    declared = {
+        host.host: host.job_dir_host_root
+        for host in config.hosts
+        if host.job_dir_host_root is not None
+    }
+    assert declared == {"h053": "/mnt/h053-nvme/runners/hp053-ci-runner"}
+    document = yaml.safe_load(
+        (REPO_ROOT / "config" / "runner_fleet.yaml").read_text(encoding="utf-8")
+    )
+    row = next(h for h in document["hosts"] if h["host"] == "h053")
+    row["job_dir_host_root"] = "relative/path"
+    with pytest.raises(ValidationError):
+        type(config).model_validate(document)

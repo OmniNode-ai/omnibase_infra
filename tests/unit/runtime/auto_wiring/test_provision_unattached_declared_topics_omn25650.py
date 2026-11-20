@@ -230,3 +230,99 @@ async def test_no_provisioner_creates_nothing(tmp_path: Path) -> None:
         )
         == {}
     )
+
+
+TENANT_PROOF_TOPIC: Final = (
+    "tenant-cli-run-h051.onex.evt.omnimarket.pool-usage-verdict-evaluated.v1"
+)
+
+
+@pytest.mark.unit
+def test_tenant_prefixed_topics_are_read_from_the_declared_fields() -> None:
+    """OMN-25548: tenant-<slug>.<canonical> is read beside the unprefixed controls."""
+    from omnibase_infra.handlers.boot_topic_provisioning import (
+        declared_topics_outside_event_bus,
+    )
+
+    controls = (
+        "onex.evt.omnimarket.pool-usage-verdict-evaluated.v1",
+        "onex.cmd.omnimarket.pool-usage-verdict-requested.v1",
+        "onex.snapshot.projection.delegation.quality-gate.v1",
+    )
+    declared = declared_topics_outside_event_bus(
+        {
+            "runtime_dispatch": {"command_topic": controls[1]},
+            "externally_consumed_topics": [
+                controls[0],
+                controls[2],
+                TENANT_PROOF_TOPIC,
+            ],
+        }
+    )
+
+    assert declared == (controls[1], controls[0], controls[2], TENANT_PROOF_TOPIC)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "bad_topic",
+    [
+        "tenant-Cli.onex.evt.omnimarket.x-done.v1",
+        f"tenant-{'a' * 33}.onex.evt.omnimarket.x-done.v1",
+        "tenant--a.onex.evt.omnimarket.x-done.v1",
+        "tenant-a-.onex.evt.omnimarket.x-done.v1",
+        "tenant-.onex.evt.omnimarket.x-done.v1",
+        "tenant-a.omnimarket.x-done.v1",
+        "tenant-a.onex.evt.omnimarket",
+        "tenant-a.tenant-b.onex.evt.omnimarket.x-done.v1",
+    ],
+)
+def test_malformed_tenant_prefixed_topic_is_not_read(bad_topic: str) -> None:
+    from omnibase_infra.handlers.boot_topic_provisioning import (
+        declared_topics_outside_event_bus,
+    )
+
+    assert (
+        declared_topics_outside_event_bus({"externally_consumed_topics": [bad_topic]})
+        == ()
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_unwired_boot_path_creates_the_tenant_prefixed_topic(
+    tmp_path: Path,
+) -> None:
+    """A contract declaring the proof topic outside event_bus gets it created at boot."""
+    node_dir = tmp_path / "node_proof_effect"
+    node_dir.mkdir()
+    path = node_dir / "contract.yaml"
+    path.write_text(
+        'name: "node_proof_effect"\n'
+        'node_type: "EFFECT_GENERIC"\n'
+        "runtime_profiles: [effects]\n"
+        "externally_consumed_topics:\n"
+        f"  - {TENANT_PROOF_TOPIC}\n"
+        "  - onex.evt.omnimarket.pool-usage-verdict-evaluated.v1\n",
+        encoding="utf-8",
+    )
+    contract = _parse_contract(
+        contract_path=path,
+        entry_point_name="node_proof_effect",
+        package_name="omnimarket",
+        package_version="0.4.321",
+    )
+    provisioner = RecordingProvisioner()
+
+    ensured = await provision_unattached_publish_topics(
+        ModelAutoWiringManifest(contracts=(contract,)),
+        (),
+        provisioner,
+        max_concurrent=1,
+    )
+
+    assert set(provisioner.created) == {
+        TENANT_PROOF_TOPIC,
+        "onex.evt.omnimarket.pool-usage-verdict-evaluated.v1",
+    }
+    assert set(ensured["node_proof_effect"]) == set(provisioner.created)

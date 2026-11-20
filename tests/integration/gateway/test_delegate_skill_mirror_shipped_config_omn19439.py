@@ -17,6 +17,7 @@ error or attempt text in the output.
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.models.contracts.model_ingest_contract import compute_event_id
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
@@ -31,13 +33,13 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
     ServiceGatewayForwarder,
-    content_addressed_event_id,
 )
 from omnibase_infra.runtime import gateway_forwarder
+from tests.unit.nodes.node_bus_forwarder_effect.test_https_ingest_omn16459 import (
+    recording_https_ingest,
+)
 
 pytestmark = pytest.mark.integration
-
-_EVENT_ID_TAG = "event_id"
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPLETED = "onex.evt.omnimarket.delegate-skill-completed.v1"
@@ -66,14 +68,6 @@ class _Bus:
         headers: object | None = None,
     ) -> None:
         self.published.append(_Message(topic, key, value, headers))
-
-
-class _BatchBus(_Bus):
-    async def publish_batch(
-        self, records: list[tuple[str, bytes | None, bytes, object | None]]
-    ) -> None:
-        for topic, key, value, headers in records:
-            self.published.append(_Message(topic, key, value, headers))
 
 
 def _shipped_config(
@@ -156,26 +150,26 @@ async def test_shipped_deployment_mirrors_both_terminals_metadata_only(
 
     messages = [_message(COMPLETED, "completed"), _message(FAILED, "failed")]
 
-    single = _Bus()
-    await ServiceGatewayForwarder(
+    single, single_records = recording_https_ingest()
+    single_forwarder = ServiceGatewayForwarder(
         config=forwarder_config, local_bus=_Bus(), cloud_bus=single
-    ).forward_outbound_message(messages[0])
-    await ServiceGatewayForwarder(
-        config=forwarder_config, local_bus=_Bus(), cloud_bus=single
-    ).forward_outbound_message(messages[1])
+    )
+    for message in messages:
+        await single_forwarder.forward_outbound_message(message)
 
-    batch = _BatchBus()
+    batch, batch_records = recording_https_ingest()
     await ServiceGatewayForwarder(
         config=forwarder_config, local_bus=_Bus(), cloud_bus=batch
     ).forward_outbound_messages(list(messages))
 
-    for published in (single.published, batch.published):
-        assert [m.topic for m in published] == [
+    for published in (single_records, batch_records):
+        assert [record["topic"] for record in published] == [
             f"tenant-{slug}.{COMPLETED}",
             f"tenant-{slug}.{FAILED}",
         ]
-        for message in published:
-            text = message.value.decode("utf-8")
+        for record, source in zip(published, messages, strict=True):
+            value = base64.b64decode(str(record["value"]))
+            text = value.decode("utf-8")
             assert PROMPT not in text
             assert ANSWER not in text
             assert "llm.glm.api_key" not in text
@@ -183,20 +177,11 @@ async def test_shipped_deployment_mirrors_both_terminals_metadata_only(
             assert set(payload) <= retained, set(payload) - retained
             assert "status" in payload
             assert "metrics" in payload
+            assert base64.b64decode(str(record["key"])) == source.key
+            assert record["event_id"] == compute_event_id(
+                source.topic, source.key, value, {}
+            )
 
-    # Both outbound paths hash the same scrubbed form, so a record that crosses
-    # once on each leg is deduplicated downstream under one event_id, and the
-    # id is the hash of what crossed, never of the unscrubbed payload.
-    def _event_ids(published: list[_Message]) -> list[str]:
-        return [
-            json.loads(m.value)["metadata"]["tags"][_EVENT_ID_TAG] for m in published
-        ]
-
-    assert _event_ids(single.published) == _event_ids(batch.published)
-    for message, source in zip(single.published, messages, strict=True):
-        crossed = ModelEventEnvelope[dict[str, object]].model_validate_json(
-            message.value
-        )
-        assert _event_ids([message])[0] == content_addressed_event_id(
-            crossed, source.topic
-        )
+    assert [record["event_id"] for record in single_records] == [
+        record["event_id"] for record in batch_records
+    ]

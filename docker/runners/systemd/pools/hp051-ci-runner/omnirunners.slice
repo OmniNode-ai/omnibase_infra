@@ -4,8 +4,8 @@ Before=slices.target
 
 [Slice]
 MemoryAccounting=yes
-MemoryHigh=96G
-MemoryMax=112G
+MemoryHigh=128G
+MemoryMax=144G
 MemorySwapMax=2G
 CPUAccounting=yes
 CPUWeight=25

@@ -853,6 +853,7 @@ def _run_reapply_entry(tmp_path: Path, lane: _Lane, starts: _Starts) -> int:
             argv, run=lane, clock=lambda: NOW, sleep=lambda _s: None
         ),
         announce=announce,
+        window=lambda *_args, **_kwargs: False,
     )
 
 
