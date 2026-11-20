@@ -472,6 +472,14 @@ repos:
         require_serial: true
         files: ^(scripts/deploy-runners\.sh|docker/runners/Dockerfile|src/omnibase_infra/(handlers/handler_runner_image_roll\.py|models/model_runner_image_roll_.*|nodes/node_runner_image_roll/.*)|tests/unit/scripts/test_deploy_runners_secondary_rolling\.py|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
         stages: [pre-commit]
+      - id: runner-roll-config-drift-and-pool-retire
+        name: Runner roll config drift and pool retire (OMN-26105)
+        entry: uv run --frozen pytest tests/unit/handlers/test_handler_runner_config_drift_omn26105.py tests/unit/handlers/test_handler_runner_pool_retire_omn26105.py -q -n 0 --no-cov
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/deploy-runners\.sh|src/omnibase_infra/(handlers/handler_runner_(image_roll|pool_retire)\.py|models/model_runner_(config_drift_policy|pool_retire_.*)\.py|nodes/node_runner_pool_retire/.*)|tests/unit/handlers/test_handler_runner_(config_drift|pool_retire)_omn26105\.py|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
       # OMN-18786: same blocking scan as the CI Summary context.
       - id: seed-provenance-check
         name: Seed Provenance Check
