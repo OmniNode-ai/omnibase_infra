@@ -65,13 +65,13 @@ dod_evidence:
         check_value: ssh h201 'systemctl --user is-active deploy-agent-dev.service && curl -sS http://127.0.0.1:8098/health'
         cwd: .
   - id: dod-omn26106-ac4-prod-untouched
-    description: 'The hosted structural proof of AC4: the tracked prod unit and its drop-in keep the prod port and name no dev signing key. The digest read of the prod unit file on h201 before and after the install is the local-gate entry below.'
+    description: 'The hosted structural proof of AC4: the tracked prod unit and its drop-in keep the prod port, name no dev signing key and match their recorded sha256 digests (ModelUnitFileDigest, added by this fix), and a copy with one byte changed reads as changed. At the merge base the digest model does not exist, so the control fails. The digest read of the prod unit file on h201 before and after the install is the local-gate entry below.'
     source: manual
     binds_ac:
       - AC4
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/handlers/test_recreate_window_requester_omn26106.py -q --no-cov -n 0 -p no:randomly -k prod_unit_keeps_its_port
+        check_value: uv run --frozen pytest tests/unit/handlers/test_recreate_window_requester_omn26106.py -q --no-cov -n 0 -p no:randomly -k prod_unit
         cwd: .
   - id: dod-omn26106-ac4-integrated
     description: The prod unit file digest on h201, read before and after the install; the two reads are written in the lane's STATUS rows.

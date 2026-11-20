@@ -34,6 +34,7 @@ from omnibase_infra.models.model_dev_recreate_announcement import (
 )
 from omnibase_infra.models.model_dev_recreate_policy import ModelDevRecreatePolicy
 from omnibase_infra.models.model_dev_recreate_request import ModelDevRecreateRequest
+from omnibase_infra.models.model_unit_file_digest import ModelUnitFileDigest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 POLICY_ENV = REPO_ROOT / "docker" / "runtime-policy.env"
@@ -45,6 +46,25 @@ JOURNAL = (
     / "unit"
     / "fixtures"
     / "dev_agent_requested_by_crash_omn26106.txt"
+)
+#: The tracked prod deploy agent unit and drop-in as they stood when OMN-26106 was
+#: written. A deliberate edit of either file updates its digest here in the same change.
+PROD_UNIT_DIR = REPO_ROOT / "scripts" / "deploy-agent" / "deploy"
+PROD_UNIT_DIGESTS = (
+    (
+        PROD_UNIT_DIR / "deploy-agent.service",
+        ModelUnitFileDigest(
+            name="deploy-agent.service",
+            sha256="8c1d10d778cdf226838f6d3210efa27182ac6373a12b0492b31dde4edcedf8be",
+        ),
+    ),
+    (
+        PROD_UNIT_DIR / "deploy-agent.service.d" / "override.conf",
+        ModelUnitFileDigest(
+            name="deploy-agent.service.d/override.conf",
+            sha256="dd026e66e81897631d8cab300c0cc6afcf006261ddb756740731f69ef41354b1",
+        ),
+    ),
 )
 REQUESTERS = (
     IDLE_CONVERGE_REQUESTER,
@@ -120,3 +140,28 @@ def test_recreate_window_requester_prod_unit_keeps_its_port_and_names_no_dev_key
     )
     assert "Environment=DEPLOY_AGENT_PORT=8099" in prod
     assert "deploy-agent-dev-signing-key" not in prod + drop_in
+
+
+@pytest.mark.parametrize(("path", "recorded"), PROD_UNIT_DIGESTS)
+def test_recreate_window_requester_prod_unit_digest_is_untouched(
+    path: Path, recorded: ModelUnitFileDigest
+) -> None:
+    """AC4: the tracked prod unit and drop-in are byte-for-byte the recorded ones.
+
+    The prod agent's signing key is not in the repository, so its before and after
+    read is the host read the contract's local-gate entry makes.
+    """
+    assert not recorded.reads_as_changed(path.read_bytes()), recorded.name
+
+
+@pytest.mark.parametrize(("path", "recorded"), PROD_UNIT_DIGESTS)
+def test_recreate_window_requester_prod_unit_digest_reads_a_one_byte_change(
+    path: Path, recorded: ModelUnitFileDigest, tmp_path: Path
+) -> None:
+    """The digest read can fail: a copy with one byte changed reads as changed."""
+    original = path.read_bytes()
+    copy = tmp_path / path.name
+    copy.write_bytes(original)
+    assert not recorded.reads_as_changed(copy.read_bytes())
+    copy.write_bytes(original[:-1] + bytes([original[-1] ^ 0x01]))
+    assert recorded.reads_as_changed(copy.read_bytes()), recorded.name
