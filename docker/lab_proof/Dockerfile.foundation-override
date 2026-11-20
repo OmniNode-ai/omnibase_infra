@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 #
 # Lab proof derived image (OMN-19572): the laptop-bundle runtime image with ONE
-# foundation package (omnibase_core, omnibase_spi or omnibase_compat) replaced
+# foundation package (omnibase_core or omnibase_spi) replaced
 # by the tree of the commit under test.
 #
 # Built only by node_lab_proof_run_effect, from a plan rendered by

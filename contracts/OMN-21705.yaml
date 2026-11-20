@@ -7,6 +7,13 @@ summary: >-
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn21705-ac1-accepted-20261119t2145z:
+      - label: AC1
+        criterion_hash: 171adec2e00468905ae742ea6fd1b7de88f91368e0918be5f8034c105682b815
+        proposed_by: lane=dod-closeout-bind-2026-11-19T2145Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-19T2145Z-c2
 requirements:
   - id: req-omn21705-slice-infra-test-settings
     statement: >-
@@ -94,3 +101,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn21705-ac1-accepted-20261119t2145z
+    description: >-
+      AC1, accepted by a second lane: the infra-test settings and CLI tests pass (broker, URL, timeouts and waits come from infra_test_settings.yaml, an omitted value fails to load), then the contracts_and_di validator reports zero findings over the infra-test CLI and its settings model, down from 34 at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          env -u PYTHONPATH sh -c 'PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/models/infra_test/test_model_infra_test_settings.py tests/unit/cli/infra_test/test_cli_scaffold.py tests/unit/cli/infra_test/test_helpers.py tests/unit/cli/infra_test/test_introspect.py tests/unit/cli/infra_test/test_verify_topics.py tests/integration/test_infra_test_settings_cli_omn21623.py -q -o addopts= && uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/cli/infra_test src/omnibase_infra/models/infra_test && echo validator_clean'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

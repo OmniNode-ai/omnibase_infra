@@ -118,18 +118,6 @@ instances:
     hostnames: [omninode-pc]
     consumer_group: onex-deploy-agent
     flags:
-      # OMN-24474. Every merge-driven roll of the dev lane has failed at onex-api
-      # (omnimarket.routing.byok_provider_backends moved to omnimarket.handlers.routing,
-      # omnimarket commit 63fc12c0bb) and the boot guard's recovery then recreated the
-      # runtime: 17:26Z, 17:47Z and 18:03Z on 2026-11-14, each followed by about 15
-      # minutes of readiness. The lane takes only a deliberate promotion (requested_by
-      # promotion/<who>) until the freeze expires on its own. LIFT IT EARLIER, in a PR
-      # that removes this block and the test beside it, once the onex-api import fix
-      # (OMN-24471) and the recovery change that leaves a healthy runtime alone when
-      # onex-api fails are both merged.
-      freeze:
-        until: "2026-11-15T06:00:00Z"
-        reason: "OMN-24474 every dev roll fails at onex-api and its recovery recreates the runtime; orchestrator-31d9 MSG 2026-11-14T18:07:20Z asks for the churn to stop"
       max_dev_lag_minutes: 20
       # OMN-21629. The lab dev lane has no cloud edge. The cloud dev broker the
       # gateway forwarder dialled has been deleted by the cloud owner, the
@@ -162,12 +150,13 @@ instances:
   dev-202:
     hostnames: [omnipc2]
     consumer_group: onex-deploy-agent-dev-202
-    # OMN-21402: this instance's host is out for hardware repair (operator,
-    # 2026-10-25), so none of its agents reads the control topic and the
-    # default instance skipped every omnimarket rebuild routed here. While it
-    # is out, the omnimarket route below resolves to the default instance. Set
-    # true when the host is back.
-    available: false
+    # OMN-21402: this instance's host was out for hardware repair (operator,
+    # 2026-10-25), so none of its agents read the control topic and the
+    # default instance skipped every omnimarket rebuild routed here; the
+    # omnimarket route below then resolved to the default instance. The host
+    # is back and this instance's agent has read the control topic since
+    # 2026-11-12 (OMN-24213): the instance is available again.
+    available: true
     flags:
       max_dev_lag_minutes: 20
     lane:

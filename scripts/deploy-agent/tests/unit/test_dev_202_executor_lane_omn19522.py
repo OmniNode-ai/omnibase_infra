@@ -102,6 +102,9 @@ def _capture_compose_up(
     def fake_run(
         cmd: list[str], timeout: int, **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["docker", "inspect"]:
+            # OMN-25106: the roll reads a service's health before it rolls it.
+            return subprocess.CompletedProcess(cmd, 1, "", "No such object")
         captured.append(cmd)
         return _ok()
 
@@ -121,6 +124,9 @@ def _capture_build(executor: DeployExecutor) -> list[list[str]]:
     def fake_run(
         cmd: list[str], timeout: int, **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["docker", "inspect"]:
+            # OMN-25106: the roll reads a service's health before it rolls it.
+            return subprocess.CompletedProcess(cmd, 1, "", "No such object")
         captured.append(cmd)
         return _ok()
 
@@ -137,6 +143,9 @@ def _capture_migrations(executor: DeployExecutor) -> list[list[str]]:
     def fake_run(
         cmd: list[str], timeout: int, **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["docker", "inspect"]:
+            # OMN-25106: the roll reads a service's health before it rolls it.
+            return subprocess.CompletedProcess(cmd, 1, "", "No such object")
         captured.append(cmd)
         if "to_regclass" in " ".join(cmd):
             # The projection-table probe answers "the table exists".
@@ -175,7 +184,6 @@ class TestDev202LaneConfig:
         cfg = lane_config_for(EnumRuntimeLane.DEV)
 
         assert cfg.compose_project == "omnibase-infra-dev-202"
-        assert cfg.build_project == "omnibase-infra-dev-202"
         assert cfg.compose_files[0] == COMPOSE_FILE
         assert [Path(f).name for f in cfg.compose_files] == [
             "docker-compose.infra.yml",
@@ -470,9 +478,11 @@ class TestDev202PhasesOff:
             if (spec or {}).get("profiles") == ["dev-202-disabled"]
         }
         cfg = DEV_INSTANCE_LANE_CONFIGS["dev-202"]
-        assert disabled_by_overlay >= _DEV_202_DISABLED
+        # OMN-24476: the three removed services are declared by no overlay any
+        # more; the table still lists them so no argv on this instance names one.
+        assert disabled_by_overlay >= {"keycloak", "infisical"}
         assert cfg.disabled_services == frozenset(
-            disabled_by_overlay | set(DEV_LANE_GATEWAY_SERVICES)
+            disabled_by_overlay | set(DEV_LANE_GATEWAY_SERVICES) | _DEV_202_DISABLED
         )
 
     def test_dev_202_phases_off_restarted_services_exclude_disabled(
@@ -508,7 +518,6 @@ class TestDev201Unchanged:
 
         assert cfg == default
         assert cfg.compose_project == COMPOSE_PROJECT == "omnibase-infra"
-        assert cfg.build_project == "omnibase-infra"
         assert [Path(f).name for f in cfg.compose_files] == [
             "docker-compose.infra.yml",
             "docker-compose.dev-lane.yml",
@@ -533,7 +542,9 @@ class TestDev201Unchanged:
         up = ups[0]
         assert _project_of(up) == "omnibase-infra"
         assert len(_files_of(up)) == 3
-        assert "onex-api" in [c[-1] for c in ups]
+        # OMN-24476: onex-api is no longer a dev-lane service.
+        assert "onex-api" not in [c[-1] for c in ups]
+        assert "cost-estimator-web" in [c[-1] for c in ups]
 
         builds = _capture_build(DeployExecutor())
         assert {_project_of(c) for c in builds} == {"omnibase-infra"}

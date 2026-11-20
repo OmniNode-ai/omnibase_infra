@@ -124,9 +124,13 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "gate_store_safety": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "gate_store_state": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "gate_store_steps": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
-    "goal_trace_events": "omnimarket OMN-20034 (node_projection_goal_trace)",
-    "goal_traces": "omnimarket OMN-20034 (node_projection_goal_trace)",
+    "eval_item_scores": "omnimarket OMN-24171 (node_projection_eval_results)",
+    "eval_item_traces": "omnimarket OMN-24171 (node_projection_eval_results)",
+    "eval_run_closes": "omnimarket OMN-24171 (node_projection_eval_results)",
+    "eval_run_rates": "omnimarket OMN-24171 (node_projection_eval_results)",
     "experiment_arm_results": "omnimarket OMN-24286 (node_projection_experiment_result)",
+    "done_items": "omnimarket OMN-25104 (node_projection_done_items)",
+    "floor_integration_rows": "omnimarket OMN-25103 (node_projection_floor_integration)",
 }
 
 _SKIP_REASON = (

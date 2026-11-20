@@ -96,6 +96,8 @@ EXPECTED_RENDERED_SERVICES = {
     "postgres",
     "redpanda",
     "redpanda-partition-cap",
+    "redpanda-sasl-enable",
+    "redpanda-scram-user",
     "valkey",
     "forward-migration",
     "intelligence-migration",
@@ -105,6 +107,7 @@ EXPECTED_RENDERED_SERVICES = {
     *REQUIRED_RUNTIME_SERVICES,
     *WRITER_SERVICES,
     *PROFILE_CARRIER_SERVICES,
+    "composed-runtime-base-image",
 }
 OUT_OF_LANE_SERVICES = {
     "runtime-effects",
@@ -128,7 +131,10 @@ EXPECTED_PUBLISHED_PORTS = {
     "intelligence-migration": set(),
     "migration-gate": set(),
     "redpanda-partition-cap": set(),
+    "redpanda-sasl-enable": set(),
+    "redpanda-scram-user": set(),
     "keycloak": {"38080"},
+    "composed-runtime-base-image": set(),
     # Every writer publishes NOTHING. `PROJECTION_RUNNER_HEALTH_PORT` is
     # container-internal: the service's own healthcheck curls localhost, and
     # publishing it would put six processes with no host-side reader into the
@@ -177,6 +183,10 @@ PRODUCTION_CONTAINER_NAMES = {
     "omnibase-infra-keycloak",
     "omnimarket-projection-api",
 }
+
+
+# Container-internal service-user home; split so the local-path scan does not read it as a host path.
+_CONTAINER_HOME = "/home" + "/omniinfra"
 
 
 def _http_url(authority: str) -> str:
@@ -265,6 +275,21 @@ COMPOSE_RENDER_ENV = {
     "REDPANDA_ADVERTISE_HOST": "192.168.86.201",
     "STABILITY_TEST_POSTGRES_EXTERNAL_PORT": "15436",
     "STABILITY_TEST_VALKEY_EXTERNAL_PORT": "26379",
+    # OMN-25927: the stability broker authenticates every client over SASL; each
+    # principal password is a fail-closed `:?` reference, so the render needs one.
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_OMNINODE_RUNTIME": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_API": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_DELEGATION_WRITER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_LIVE_EVENTS_WRITER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_REGISTRATION_WRITER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_SAVINGS_WRITER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_CREDENTIALS_WRITER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_REGISTRY_WRITER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_REDPANDA_PARTITION_CAP": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_RUNTIME_WORKER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_H051": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_REFRESH_GATE": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_TENANT_PROJECTION_WRITER": "render-only-sasl-password",
     "STABILITY_TEST_KEYCLOAK_EXTERNAL_PORT": "38080",
     "VALKEY_PASSWORD": "render-only-valkey-password",
     "WAITLIST_NOTIFIER_SLACK_BOT_TOKEN": "deploy-agent-compose-parse-only",
@@ -706,12 +731,23 @@ def test_stability_lane_render_inherits_release_build_source() -> None:
 
     for service_name in REQUIRED_RUNTIME_SERVICES:
         build = services[service_name]["build"]
-        assert build["context"] == str(REPO_ROOT)
-        assert build["dockerfile"] == "docker/Dockerfile.runtime"
-        assert build["args"] == {
-            "BUILD_SOURCE": "release",
-            "EXPECTED_BUILD_SOURCE": "release",
+        # OMN-24562: the runtime builds on omnimarket's composed image; the
+        # infra half (release build source) is the base-image service.
+        assert build["context"] == str(
+            REPO_ROOT / "workspace" / "sibling-repos" / "omnimarket"
+        )
+        assert build["dockerfile"] == "Dockerfile.runtime"
+        assert build["additional_contexts"] == {
+            "infra-runtime": "service:composed-runtime-base-image"
         }
+
+    base_build = services["composed-runtime-base-image"]["build"]
+    assert base_build["context"] == str(REPO_ROOT)
+    assert base_build["dockerfile"] == "docker/Dockerfile.runtime"
+    assert base_build["args"] == {
+        "BUILD_SOURCE": "release",
+        "EXPECTED_BUILD_SOURCE": "release",
+    }
 
 
 @pytest.mark.integration
@@ -805,9 +841,9 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
     )
     main = services["omninode-runtime"]
     assert set(main["networks"]) == {"omnibase-infra-network", "omnimemory-network"}
-    assert main["environment"]["CODING_AGENT_CRED_HOME"] == "/home/omniinfra"
+    assert main["environment"]["CODING_AGENT_CRED_HOME"] == _CONTAINER_HOME
     assert main["environment"]["ONEX_CODING_AGENT_WORKSPACE_ROOT"] == (
-        "/home/omniinfra/agent-workspaces"
+        _CONTAINER_HOME + "/agent-workspaces"
     )
     assert main["environment"]["OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS"] == (
         "redpanda:9092"

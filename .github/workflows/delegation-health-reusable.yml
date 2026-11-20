@@ -8,9 +8,9 @@
 # (omnimarket) or an M4 verdict workflow (omninode_infra) is red. Auto-merge, the
 # landing lane and humans already obey a check, so no skill needs to change.
 #
-# ENFORCING. There is no shadow state (operator ruling 2026-09-29T12:02:35Z,
-# OMN-19998). On omnibase_infra a red of this check fails CI Summary through the
-# default-deny external sweep in scripts/ci/ci_summary_gate.py.
+# On omnibase_infra this is a signal (OMN-25514): the caller runs on a schedule
+# and on push to dev, reads every verdict, and writes it to the job summary; no
+# required list names the check. omnimarket's caller still runs on pull requests.
 # config/delegation_health_check.yaml names the sources and why each belongs.
 #
 # THE READER IS THE EXISTING ONE. Each source is read through
@@ -131,12 +131,18 @@ jobs:
               pr="${BASH_REMATCH[1]}"
               labels="$(gh api "repos/${REPO}/pulls/${pr}" --jq '[.labels[].name] | join(",")')"
               ;;
+            push|schedule)
+              # OMN-25514: the dev signal reads every verdict, so it is
+              # runtime-affecting by label and diffs nothing.
+              : > "$RUNNER_TEMP/changed.txt"
+              labels="runtime_change"
+              ;;
             *)
               echo "::error::unsupported event '${EVENT_NAME}' for the delegation-health check"
               exit 1
               ;;
           esac
-          if [[ ! -s "$RUNNER_TEMP/changed.txt" ]]; then
+          if [[ "$EVENT_NAME" != push && "$EVENT_NAME" != schedule && ! -s "$RUNNER_TEMP/changed.txt" ]]; then
             echo "::error::no changed files resolved for this ${EVENT_NAME} event"
             exit 1
           fi
@@ -164,7 +170,8 @@ jobs:
             --changed-files "$PR_CHANGED_FILES" \
             --labels "$PR_LABELS" \
             --runtime-validator ".deploy-gate-source/.github/actions/deploy-gate/validate_pr_deploy_required.py" \
-            --record-out "$RUNNER_TEMP/delegation-health-record.json"
+            --record-out "$RUNNER_TEMP/delegation-health-record.json" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the admission record
         if: always()

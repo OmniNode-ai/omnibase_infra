@@ -173,6 +173,10 @@ services:
     profiles: !override ["dev-202-disabled"]
   infisical:
     profiles: !override ["dev-202-disabled"]
+  # OMN-24714: the dev-lane overlay makes the architecture graph's store a
+  # dependency of the dev lane; this lane starts no graph, so it is scaled to 0.
+  omnibase-infra-memgraph:
+    scale: 0
   forward-migration:
     container_name: omnibase-infra-dev-202-forward-migration
     labels:
@@ -181,23 +185,6 @@ services:
     container_name: omnibase-infra-dev-202-migration-gate
   intelligence-migration:
     container_name: omnibase-infra-dev-202-intelligence-migration
-  cloud-migration-files:
-    container_name: omnibase-infra-dev-202-cloud-migration-files
-    profiles: !override ["dev-202-disabled"]
-    labels:
-      com.omninode.lane: dev-202
-  cloud-migration:
-    container_name: omnibase-infra-dev-202-cloud-migration
-    profiles: !override ["dev-202-disabled"]
-    labels:
-      com.omninode.lane: dev-202
-  onex-api:
-    container_name: onex-api-dev-202
-    profiles: !override ["dev-202-disabled"]
-    ports: !override
-      - "127.0.0.1:61090:8000"
-    labels:
-      com.omninode.lane: dev-202
   autoheal:
     container_name: omnibase-infra-dev-202-autoheal
   phoenix:
@@ -377,8 +364,6 @@ volumes:
     name: omnibase-infra-dev-202-keycloak-data
   phoenix_data:
     name: omnibase-infra-dev-202-phoenix-data
-  cloud_migrations:
-    name: omnibase-infra-dev-202-cloud-migrations
   runtime_logs:
     name: omninode-dev-202-runtime-logs
   runtime_data:

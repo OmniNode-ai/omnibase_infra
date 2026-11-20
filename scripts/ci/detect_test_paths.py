@@ -83,7 +83,7 @@ CI_PROCESS_TEST_PATHS = (
 # NOT permissible either: selecting nothing. "Workflow YAML cannot break Python
 # tests, therefore skip" is the wrong inference -- workflow files break the
 # ENFORCEMENT of tests, which is worse and invisible. OMN-15541 is the live
-# counterexample: `ci.yml` hardcoded `pytest src/omnibase_compat/tests/` while
+# counterexample: `ci.yml` hardcoded a test path under the package while
 # the selector and pyproject named different roots, so full-suite escalation
 # collected ZERO of the top-level `tests/` tree -- a fail-OPEN safety net
 # produced by a workflow edit. A renamed job id silently drops a required

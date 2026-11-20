@@ -1,0 +1,92 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-25674"
+title: "The runner deploy prepares the disk-admission pause directory as the runner user so the job-started hook can record its own backoff"
+summary: >-
+  The runner compose files bind a host directory at the runner home's .onex-disk-admission-pause. Docker creates a missing bind source as root, mode 755, and the job-started hook runs as runner, so on hp051 it could not write its pause marker (Permission denied on hp051-ci-runner-3.tmp, 12 consecutive admission failures against a threshold of 3). The deploy's contract-backed directory effect (node_deploy_runners, HandlerDeployRunners), which already prepares each runner's TMPDIR bind with sudo install and reads owner and mode back, now prepares this bind too: owner uid 1001 (the runner user), mode 755, with the same discovery from the rendered compose, readback and refusal before registration. A bind mount shows the host owner at once, so running containers need no restart. No hook, gate, floor or compose declaration changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn25674-pause-dir-owner"
+    statement: "The declared runner installer leaves the disk-admission pause directory owned by the runner user of the runner image, on every host it installs to."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the deploy of a secondary host prepares the pause bind source of the rendered compose as uid 1001 mode 755, leaves other binds alone, and refuses before registration when the readback differs -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_tmp_dirs_omn19998.py, red on the unchanged handler and green on the change
+  - id: req-omn25674-hp-ci-pools
+    statement: The omnibase-ci capacity declared on the second amd64 host is declared on h051, sized from measured headroom, with no timeout raised and no required check changed.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: config/runner_fleet.yaml declares hp051-omnibase-ci-runner (16, classes action and action-multiarch) on h051 with a compose file whose service count matches, whose labels keep omnibase-ci, whose job directories are NVMe binds and not tmpfs, and the declared action total less the the second amd64 host pool is 21 -- falsifier: uv run --frozen pytest tests/ci/test_ci_pools_hp_hosts_omn25674.py -q --no-cov fails on the base commit, which declares no such pool
+      - id: AC3
+        statement: >-
+          AC3: h051's slice unit is the aggregate for its pools, with MemoryHigh 128G and MemoryMax 144G, the same in both pools' files, and the h051 high limit holds the measured 50.1 GB peak plus sixteen runners at a 3 GiB budget -- falsifier: the slice test in tests/ci/test_ci_pools_hp_hosts_omn25674.py and the updated pool tests fail when either file keeps the old limits
+evidence_requirements:
+  - kind: "tests"
+    description: "The shipped deploy path against a modeled host: the pause bind source goes from uid 0 mode 755 to uid 1001 mode 755, one install for it, no install for other binds, a VERIFY refusal before registration."
+    command: "env -u OMNI_HOME uv run --frozen pytest tests/unit/scripts/test_deploy_runners_tmp_dirs_omn19998.py -q -n 0 --no-cov"
+  - kind: "tests"
+    description: "The pool declaration, slice and installer-resolution tests pass at the pushed head and fail at the merge base, which declares no such pool."
+    command: "uv run --frozen pytest tests/ci/test_ci_pools_hp_hosts_omn25674.py tests/ci/test_hp051_pool_omn17232.py tests/ci/test_h202_pool_slice_swap_omn24186.py tests/ci/test_hp053_pool_in_memory_omn19998.py tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q --no-cov"
+dod_evidence:
+  - id: "dod-omn25674-pause-dir-test"
+    description: "AC1: the deploy's directory effect prepares the pause directory as the runner user; red on the unchanged handler."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u OMNI_HOME uv run --frozen pytest tests/unit/scripts/test_deploy_runners_tmp_dirs_omn19998.py -k pause -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn25674-pause-dir-deploy-probe"
+    description: "AC1 hosted deploy artifact probe: runs the shipped deploy handler's pause-directory tests (owner uid 1001 mode 755 convergence, refusal before registration) against the modeled host filesystem, without installing a host or touching running jobs. The fixture runs with no registry root so it exercises bind preparation without the optional action-archive cache sync."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "command"
+        check_value: "env -u OMNI_HOME uv run --frozen pytest tests/unit/scripts/test_deploy_runners_tmp_dirs_omn19998.py -k pause -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn25674-pause-dir-integration-test"
+    description: "AC1: the secondary deploy handler prepares a shared pause bind once as uid 1001 mode 755, leaves unrelated binds alone, and refuses when ownership readback differs."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/integration/handlers/test_runner_pause_directory_omn25674.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn25674-integration-proof"
+    description: "Run this pull request's own check on a lab host at the pushed head. Hosted CI cannot reach the lab, so only the local Done gate runs this unbound check."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha \"$(git rev-parse HEAD)\" --lane dod-integration-proof-25674 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/handlers/test_runner_pause_directory_omn25674.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn25674-ac2-pools"
+    description: "AC2: the pool declarations, compose files, labels, NVMe job directories and the action total pass at the head; the base declares no such pool"
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_ci_pools_hp_hosts_omn25674.py -q --no-cov"
+        cwd: "."
+  - id: "dod-omn25674-ac3-slices"
+    description: "AC3: the slice units and the pool tests that read them pass at the head"
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_hp051_pool_omn17232.py tests/ci/test_h202_pool_slice_swap_omn24186.py tests/ci/test_hp053_pool_in_memory_omn19998.py tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q --no-cov"
+        cwd: "."
+  - id: "dod-omn25674-ac2-declaration"
+    description: "AC2 deploy scope: the fleet config at the pushed head declares the h051 pool, read from GitHub at that commit"
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "command"
+        check_value: "bash -o pipefail -c 'gh api \"repos/OmniNode-ai/omnibase_infra/contents/config/runner_fleet.yaml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F -- \"runner_name_prefix: hp051-omnibase-ci-runner\" > /dev/null'"
+        cwd: "."
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""

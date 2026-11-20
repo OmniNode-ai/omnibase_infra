@@ -136,13 +136,19 @@ def warm_lane(
             compose_project=project,
             postgres_container=f"{project}-postgres",
             runtime_health_targets=(("omninode-runtime", 0),),
-            build_project=project,
         )
         monkeypatch.setattr(executor_mod, "lane_config_for", lambda lane: config)
         monkeypatch.setattr(
             executor_mod, "_compose_env", lambda *args: dict(os.environ)
         )
         monkeypatch.setattr(executor_mod, "REQUIRED_PROJECTION_TABLES", ())
+        # OMN-24476 emptied the dev lane's cloud declarations; this proof restores them.
+        monkeypatch.setattr(
+            executor_mod,
+            "DEV_LANE_ONLY_MIGRATION_SERVICES",
+            ("cloud-migration-files", "cloud-migration"),
+        )
+        monkeypatch.setattr(executor_mod, "DEV_LANE_CLOUD_DB_SERVICES", ("onex-api",))
         monkeypatch.setattr(
             executor_mod, "read_checkout_migration_fingerprint", lambda: "tree:new"
         )

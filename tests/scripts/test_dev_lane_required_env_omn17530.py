@@ -65,8 +65,8 @@ _EXECUTOR = _REPO_ROOT / "scripts" / "deploy-agent" / "deploy_agent" / "executor
 _REQUIRED_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):\?")
 
 # The two variables omnibase_infra#3332 added to the dev-lane overlay -- the two
-# that surfaced one deploy at a time. Named explicitly: this is the concrete
-# regression, and it must pass now that they are declared.
+# that surfaced one deploy at a time. OMN-24476 removed the services that read
+# them, so the test now pins that neither is required or declared any more.
 _OMN_3332_VARS = ("ONEX_API_IMAGE", "ONEX_CLOUD_MIGRATE_IMAGE")
 
 
@@ -172,37 +172,16 @@ def test_union_of_dev_lane_compose_files_is_fully_declared() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize("var_name", _OMN_3332_VARS)
-def test_omn_3332_image_vars_are_declared(var_name: str) -> None:
-    """The GREEN half: the two variables that cost two deploys are declared."""
-    assert var_name in _required_names(_DEV_LANE_COMPOSE), (
-        f"{var_name} is no longer a ${{VAR:?}} in the dev-lane overlay; if it was "
-        "deliberately removed, remove it from the manifest and from this test."
-    )
-    assert var_name in _declared_names(_DEV_LANE_MANIFEST), (
-        f"{var_name} is required by the dev-lane overlay but not declared in "
-        f"{_DEV_LANE_MANIFEST.name}"
-    )
+def test_omn_3332_image_vars_are_retired_with_the_services(var_name: str) -> None:
+    """OMN-24476: the two image pins left with the services that read them.
 
-
-@pytest.mark.unit
-def test_image_vars_carry_provenance_comments() -> None:
-    """Each image tag name is preceded by a provenance comment, not bare.
-
-    An image tag resolved from an operator store, with no compose default and no
-    committed value, is exactly the kind of name a reader will otherwise guess
-    at. The previous lane had to derive ONEX_CLOUD_MIGRATE_IMAGE by hashing the
-    migration corpus against the deployed clone because the intuitive pick — the
-    tag sharing the API image's build stamp — was provably the wrong image.
+    ``ONEX_API_IMAGE`` and ``ONEX_CLOUD_MIGRATE_IMAGE`` were required by the cloud
+    API and its migration one-shots. Both are gone from the dev lane, so neither
+    name may stay required in the overlay or declared in the manifest: a name
+    left in the manifest would make the preflight demand a value nothing reads.
     """
-    lines = _DEV_LANE_MANIFEST.read_text(encoding="utf-8").splitlines()
-    for var_name in _OMN_3332_VARS:
-        index = lines.index(var_name)
-        preceding = [line for line in lines[:index][::-1] if line.strip()]
-        assert preceding and preceding[0].lstrip().startswith("#"), (
-            f"{var_name} in {_DEV_LANE_MANIFEST.name} has no provenance comment "
-            "immediately above it. Image-tag names resolve from a store, not from "
-            "a compose default — say where the value comes from (OMN-17530)."
-        )
+    assert var_name not in _required_names(_DEV_LANE_COMPOSE)
+    assert var_name not in _declared_names(_DEV_LANE_MANIFEST)
 
 
 @pytest.mark.unit
@@ -235,6 +214,61 @@ def test_declaration_check_passes_the_real_dev_lane_pair() -> None:
     """GREEN. The shipped overlay + manifest agree exactly, via the real script."""
     result = _run_check(_DEV_LANE_COMPOSE, _DEV_LANE_MANIFEST)
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+
+
+_DECLARATION_DIR = "ONEX_LANE_DECLARATION_DIR"
+_FOLD_COMPOSE = _REPO_ROOT / "docker" / "docker-compose.dev-tenant-fold.yml"
+_FOLD_MANIFEST = _REPO_ROOT / "docker" / "dev-tenant-fold-required-env.manifest.txt"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("compose", "manifest"),
+    [(_DEV_LANE_COMPOSE, _DEV_LANE_MANIFEST), (_FOLD_COMPOSE, _FOLD_MANIFEST)],
+)
+def test_the_declaration_dir_manifest_entry_is_enforced_by_its_consumer(
+    tmp_path: Path, compose: Path, manifest: Path
+) -> None:
+    """OMN-25202: the readers of the two manifests are scripts/check_required_env_vars.py
+    (the pre-commit hooks of ``.pre-commit-config.yaml``, committed files only) and this
+    file. No runtime path reads a manifest: the deploy-time preflight parses the compose
+    files, so the entry has no stored-env reader to block a deploy. Dropping the entry
+    makes the declaration check fail, and keeping it passes.
+    """
+    assert _DECLARATION_DIR in _declared_names(manifest)
+    assert _run_check(compose, manifest).returncode == 0
+    without = tmp_path / "without-entry.manifest.txt"
+    without.write_text(
+        "".join(
+            f"{line}\n"
+            for line in manifest.read_text(encoding="utf-8").splitlines()
+            if line.strip() != _DECLARATION_DIR
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run_check(compose, without)
+
+    assert result.returncode == 1
+    assert _DECLARATION_DIR in (result.stdout + result.stderr)
+
+
+@pytest.mark.unit
+def test_the_preflight_reads_the_declaration_dir_from_the_environment_not_a_manifest() -> (
+    None
+):
+    """OMN-25202: the agent and the refresh hand the preflight an environment that holds the
+    folder (render_dev_lane, refresh_exports), so a dev deploy is not blocked; an environment
+    without it is named, so the entry is not dead."""
+    base = {"PATH": "/usr/bin:/bin"}
+    composes = [_BASE_COMPOSE, _DEV_LANE_COMPOSE, _FOLD_COMPOSE]
+
+    missing = _run_preflight(composes, env=base)
+    named = _run_preflight(composes, env={**base, _DECLARATION_DIR: "/srv/config/lab"})
+
+    assert missing.returncode == 1
+    assert _DECLARATION_DIR in missing.stderr
+    assert _DECLARATION_DIR not in named.stderr
 
 
 @pytest.mark.unit
@@ -528,6 +562,8 @@ def test_tenant_fold_required_names_match_its_manifest() -> None:
             "DEV_RUNTIME_MAIN_FOLDED_PROFILES",
             "DEV_RUNTIME_MAIN_FOLD_HANDOVERS",
             "DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON",
+            # OMN-24854: the config/lab folder the folded main mounts for the ledger source.
+            "ONEX_LANE_DECLARATION_DIR",
         }
     )
     assert "docker-compose.dev-tenant-fold.yml" in _REFRESH_DEV_LANE.read_text()

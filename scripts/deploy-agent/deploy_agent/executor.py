@@ -164,8 +164,7 @@ for package in os.environ.get("ONEX_ACTIVE_RUNTIME_PACKAGES", "").split(","):
 
 def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
     """Load host-effect modules from the standalone agent's own checkout."""
-    prefix = "omnibase_infra." if "." in effect else "omnibase_infra.handlers."
-    name = prefix + effect
+    name = ("omnibase_infra." if "." in effect else "omnibase_infra.handlers.") + effect
     if name in sys.modules:
         return sys.modules[name]
     root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
@@ -186,6 +185,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",
         "models/model_dev_lane_code_ref_pin.py",
         "handlers/handler_dev_lane_code_ref_pin.py",
+        "nodes/node_deploy_job_reading_effect/runtime_deploy_job_reading.py",
         "models/model_onex_api_image_import_request.py",
         "models/model_onex_api_image_import_verdict.py",
         "handlers/handler_onex_api_image_import_check.py",
@@ -194,6 +194,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "handlers/handler_onex_api_image_build.py",
         "models/model_dev_lane_pin_staleness.py",
         "handlers/handler_dev_lane_pin_compose_guard.py",
+        "handlers/handler_stability_rollback_waiver.py",
         "models/model_cost_estimator_build_config.py",
         "models/model_cost_estimator_build_request.py",
         "models/model_cost_estimator_build_result.py",
@@ -221,6 +222,14 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         module = sys.modules[module_name] = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     return sys.modules[name]
+
+
+# The runtime cost estimator build module, which also rolls the stability writers.
+_RCB = "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+
+
+def _rcb() -> ModuleType:
+    return load_dev_boot_guard(_RCB)
 
 
 def dev_boot_report_config() -> ModelDevBootReportConfig:
@@ -501,6 +510,10 @@ PhaseCallback = Callable[[Phase, PhaseStatus], None]
 # (``omninode-stability-test-runtime``), not compose SERVICE names, so the argv
 # this path builds would abort on `no such service` there in any case.
 VERIFY_RECREATE_LANES: frozenset[EnumRuntimeLane] = frozenset({EnumRuntimeLane.DEV})
+
+# OMN-24562: where verify() waits out a runtime's declared start (it only re-probes
+# and reads Docker); a recreate stays dev only (above).
+VERIFY_START_WAIT_LANES = VERIFY_RECREATE_LANES | {EnumRuntimeLane.STABILITY_TEST}
 
 # The ceiling on the recreate command itself. The same number
 # ``deliver_onex_api_pin`` uses for the same shape of command: one service,
@@ -795,13 +808,9 @@ class ModelLaneConfig(BaseModel):
     non-dev lanes layer their overlay (``docker-compose.<lane>.yml``) on top so
     the overlay's container names, project, and host port bindings win.
 
-    OMN-19522 adds four fields, each defaulting to what every lane did before,
+    OMN-19522 adds three fields, each defaulting to what every lane did before,
     so only a config that sets them behaves differently:
 
-    * ``build_project`` -- the project ``docker compose build`` runs under.
-      Compose names a built image ``<project>-<service>``, so a lane that brings
-      its runtime up under its own project must build under it too, or the up
-      finds no image and builds a second one without the build args.
     * ``main_runtime_container`` override -- the container whose image records
       the running build (the lineage fence reads it). On the .201 dev lane the
       first health target's service name is also its container name; on a lane
@@ -820,7 +829,6 @@ class ModelLaneConfig(BaseModel):
     compose_project: str
     postgres_container: str
     runtime_health_targets: tuple[tuple[str, int], ...]
-    build_project: str = COMPOSE_PROJECT
     runtime_container: str = ""
     disabled_phases: frozenset[EnumInstancePhase] = frozenset()
     disabled_services: frozenset[str] = frozenset()
@@ -874,6 +882,10 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
         compose_files=(COMPOSE_FILE, _STABILITY_OVERLAY),
         compose_project="omnibase-infra-stability-test",
         postgres_container="omnibase-infra-stability-test-postgres",
+        # The overlay disables these by profile and gives them no container_name of
+        # their own, so an explicit start by name would create them under the dev
+        # lane's names (the runtime phase then fails on a name conflict).
+        disabled_services=frozenset({"autoheal", "context-audit-consumer"}),
         # OMN-15181: must match the container_name: override in
         # docker-compose.stability-test.yml, never the dev-lane bare name —
         # docker inspect on the bare name returns "no such object" for this lane.
@@ -939,7 +951,6 @@ def dev_instance_lane_config(
             f"{repo_dir}/{spec.compose_overlay}",
         ),
         compose_project=spec.compose_project,
-        build_project=spec.compose_project,
         postgres_container=spec.postgres_container,
         runtime_health_targets=(
             ("omninode-runtime", spec.health_ports.main),
@@ -1017,23 +1028,26 @@ def active_dev_instance() -> str:
 
 
 def _folded_dev_services(lane: EnumRuntimeLane) -> set[str]:
-    services: set[str] = load_dev_boot_guard().folded_dev_services(
-        _load_runtime_policy_env(), lane_folded_profiles(lane)
+    policy = _load_runtime_policy_env()  # one snapshot for the profiles and the map
+    return set(
+        load_dev_boot_guard().folded_dev_services(
+            policy, lane_folded_profiles(lane, policy), LANE_POLICY_PREFIX.get(lane, "")
+        )
     )
-    return services
 
 
 def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
     if lane is EnumRuntimeLane.DEV:
         config: ModelLaneConfig = DEV_INSTANCE_LANE_CONFIGS[_DevInstanceSelection.name]
-        if retired := _folded_dev_services(lane):
-            config = config.model_copy(
-                update={"disabled_services": config.disabled_services | retired}
-            )
     else:
         config = _LANE_CONFIGS[lane]
-    if "effects" in lane_folded_profiles(lane):
+    if retired := _folded_dev_services(lane):
+        config = load_dev_boot_guard().retire_lane_services(
+            config, retired, {ONEX_API_SERVICE: EnumInstancePhase.ONEX_API_PIN}
+        )
+    # One policy snapshot decides both: a folded effects role is one the lane retires.
+    if "runtime-effects" in retired:
         # The effects port is published by main once the role is folded, so the
         # effects health target reads main's container (OMN-22930 on primary dev).
         targets = list(config.runtime_health_targets)
@@ -1223,13 +1237,10 @@ def _requested_services_for_up(
     ``compose_files``; passing one to ``docker compose -p omnibase-infra up`` aborts
     on `no such service`. A no-op on every non-DEV lane.
     """
-    if services:
-        return _without_disabled_services(without_gateway_services(services), lane)
-    if scope == Scope.RUNTIME:
-        return _without_disabled_services(
-            without_gateway_services(services_for_scope(scope, lane=lane)), lane
-        )
-    return []
+    if not services and scope != Scope.RUNTIME:
+        return []
+    named = services or services_for_scope(scope, lane=lane)
+    return _without_disabled_services(without_gateway_services(named), lane)
 
 
 def _coerce_build_source(value: BuildSource | str, *, layer: str) -> BuildSource:
@@ -3558,15 +3569,6 @@ class DeployExecutor:
                 ModelContainerResidue(service=service, state=state, exit_code=exit_code)
             )
 
-    def _mark_residue_recovered(self, recovered: set[str]) -> None:
-        """Flip residue entries whose service came up under recovery."""
-        self.container_residue = [
-            item.model_copy(update={"recovered": True})
-            if item.service in recovered
-            else item
-            for item in self.container_residue
-        ]
-
     def validate_llm_endpoint_env_contract(self) -> None:
         """Fail runtime deploys when configured LLM endpoints drift from contract."""
         operator_store = operator_env_file() or Path.home() / ".omnibase" / ".env"
@@ -4715,6 +4717,9 @@ class DeployExecutor:
             )
             return services
 
+        # OMN-24903: a stability roll with no sha is refused before any build.
+        roll = _rcb().writer_roll(sys.modules[__name__], lane, scope, git_sha)
+
         # OMN-23368: before any build, refuse a service the lane's compose lacks.
         self.pin_staleness_report = load_dev_boot_guard(_PIN_GUARD).guard_before_build(
             _without_disabled_services(
@@ -4739,9 +4744,7 @@ class DeployExecutor:
             # staged provenance a reconcile checkout would reset to a placeholder.
             # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
             with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
-                settings = load_dev_boot_guard(
-                    "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-                ).dev_lane_build_settings(sys.modules[__name__], lane)
+                settings = _rcb().dev_lane_build_settings(sys.modules[__name__], lane)
                 for build_scope in (Scope.CORE, Scope.RUNTIME):
                     self._compose_build(
                         build_scope,
@@ -4778,7 +4781,7 @@ class DeployExecutor:
             )
             # OMN-18143: every image was built above; compose must not build
             # them again inside the up ceiling.
-            self._compose_up(
+            _rcb().handed_over(self._compose_up, roll)(
                 Phase.RUNTIME,
                 Scope.RUNTIME,
                 [],
@@ -4804,12 +4807,8 @@ class DeployExecutor:
         # cannot reset staged provenance before the dev-only build consumes it.
         # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
         with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
-            settings = (
-                load_dev_boot_guard(
-                    "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-                ).dev_lane_build_settings(sys.modules[__name__], lane)
-                if scope == Scope.RUNTIME
-                else None
+            settings = _rcb().dev_lane_build_settings(
+                sys.modules[__name__], lane, scope
             )
             self._compose_build(
                 scope,
@@ -4830,7 +4829,7 @@ class DeployExecutor:
                     read_settings=lambda: settings,
                 )
                 self._preflight_runtime_boot(services, on_phase_update, lane=lane)
-        self._compose_up(
+        _rcb().handed_over(self._compose_up, roll)(
             phase,
             scope,
             services,
@@ -5142,9 +5141,7 @@ class DeployExecutor:
         git_ref: str,
         read_settings: Callable[[], Any] | None = None,
     ) -> dict[str, str]:
-        environment: dict[str, str] = load_dev_boot_guard(
-            "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-        ).build_dev_lane_services(
+        environment: dict[str, str] = _rcb().build_dev_lane_services(
             sys.modules[__name__],
             self._compose_build,
             git_sha,
@@ -5701,9 +5698,11 @@ class DeployExecutor:
             "compose",
             *compose_file_args,
             "-p",
-            # OMN-19522: the lane's build project, which is COMPOSE_PROJECT on
-            # every lane but one that brings its runtime up under its own.
-            lane_config_for(runtime_lane).build_project,
+            # OMN-24562: compose names a built image ``<project>-<service>`` and
+            # the runtime up runs --no-build under the lane's own project, so the
+            # build runs under it too (it ran under the default project: the
+            # stability up found stale images, or none).
+            lane_config_for(runtime_lane).compose_project,
             "--profile",
             profile,
             "build",
@@ -6209,9 +6208,7 @@ class DeployExecutor:
     def _retire_folded_dev_services(
         self, lane: EnumRuntimeLane, config: ModelLaneConfig | None = None
     ) -> None:
-        """Retire each primary dev container whose role main now carries; keep volumes."""
-        if lane is not EnumRuntimeLane.DEV:
-            return  # Other dev instances fold nothing (lane_folded_profiles).
+        """Retire each lane container whose role main now carries; keep volumes."""
         config = lane_config_for(lane) if config is None else config
         project = f"label=com.docker.compose.project={config.compose_project}"
         containers: list[str] = []
@@ -6247,13 +6244,14 @@ class DeployExecutor:
         force_recreate: bool = True,
         build: bool = True,
         compose_may_build: bool = True,
+        after_migrations: Callable[..., object] = lambda *_: None,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
 
         config = lane_config_for(lane)
         profile = "core" if scope == Scope.CORE else "runtime"
         requested_services = _requested_services_for_up(scope, services, lane=lane)
-        if lane is EnumRuntimeLane.DEV and services and not requested_services:
+        if services and not requested_services:
             # A retired-role-only request must never start the whole profile.
             on_phase_update(phase, PhaseStatus.SUCCESS)
             return
@@ -6294,6 +6292,9 @@ class DeployExecutor:
             self.rerun_changed_oneshots(
                 lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME], build=build
             )
+            # OMN-24903: the stability writers roll here, on the migrated schema,
+            # before the runtime up and outside the build-context lock.
+            after_migrations(extra_env)
             if self.cloud_migration_failure:
                 had_requested_services = bool(requested_services)
                 requested_services = self._without_failed_cloud_consumers(
@@ -6451,7 +6452,14 @@ class DeployExecutor:
                 timeout_s=CONTAINER_RECOVERY_VERIFY_TIMEOUT_SECONDS,
                 lane=lane,
             )
-            self._mark_residue_recovered(set(stuck) - set(still_stuck))
+            # Flip residue entries whose service came up under recovery.
+            recovered = set(stuck) - set(still_stuck)
+            self.container_residue = [
+                item.model_copy(update={"recovered": True})
+                if item.service in recovered
+                else item
+                for item in self.container_residue
+            ]
             if not ok:
                 detail = f"Containers still not running after docker start recovery: {still_stuck}"
                 if compose_up_error:
@@ -7012,7 +7020,7 @@ class DeployExecutor:
                 earlier_target_failed = True
             if (
                 check.status == "fail"
-                and lane in VERIFY_RECREATE_LANES
+                and lane in VERIFY_START_WAIT_LANES
                 and recover_runtime
             ):
                 self._assert_boot_can_progress(lane=lane, service=service, failed=check)
@@ -7318,29 +7326,25 @@ class DeployExecutor:
     def _compose_service_container(self, lane: EnumRuntimeLane, service: str) -> str:
         """Resolve one compose service on this lane to its container id, or ``""``.
 
-        By compose's own labels rather than a container name, because on the
-        dev lane ``runtime_health_targets`` carries SERVICE names. More than one
-        match is ambiguous and reads as unresolved.
+        By compose's labels; only stability, whose targets are CONTAINER names,
+        also tries the exact name. More than one match reads as unresolved.
         """
+        label = "label=com.docker.compose"
+        project = f"{label}.project={lane_config_for(lane).compose_project}"
+        selectors = [f"{label}.service={service}"]
+        if lane is EnumRuntimeLane.STABILITY_TEST:
+            selectors.append(f"name=^/{re.escape(service)}$")
         try:
-            result = _run(
-                [
-                    "docker",
-                    "ps",
-                    "--all",
-                    "-q",
-                    "--no-trunc",
-                    "--filter",
-                    f"label=com.docker.compose.project={lane_config_for(lane).compose_project}",
-                    "--filter",
-                    f"label=com.docker.compose.service={service}",
-                ],
-                timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS,
-            )
+            for selector in selectors:
+                argv = ["docker", "ps", "--all", "-q", "--no-trunc"]
+                argv += ["--filter", project, "--filter", selector]
+                result = _run(argv, timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS)
+                ids = result.stdout.split() if result.returncode == 0 else []
+                if ids:
+                    return ids[0] if len(ids) == 1 else ""
         except (OSError, subprocess.TimeoutExpired):
-            return ""
-        ids = result.stdout.split() if result.returncode == 0 else []
-        return ids[0] if len(ids) == 1 else ""
+            pass
+        return ""
 
     def _force_recreate_and_reverify(
         self,
@@ -7637,13 +7641,6 @@ class DeployRolledBackError(VerificationFailedError):
         )
 
 
-def _retention_ref(image_ref: str, lane: EnumRuntimeLane) -> str:
-    repo = image_ref.split("@", 1)[0]
-    if repo.rfind(":") > repo.rfind("/"):
-        repo = repo.rsplit(":", 1)[0]
-    return f"{repo}:rollback-{lane.value}"
-
-
 def _tag_image(image_id: str, image_ref: str) -> None:
     result = _run(
         ["docker", "tag", image_id, image_ref],
@@ -7716,7 +7713,10 @@ def capture_rollback_point(
                     container,
                 )
                 return None
-            retain_ref = _retention_ref(image_ref, lane)
+            retain_repo = image_ref.split("@", 1)[0]
+            if retain_repo.rfind(":") > retain_repo.rfind("/"):
+                retain_repo = retain_repo.rsplit(":", 1)[0]
+            retain_ref = f"{retain_repo}:rollback-{lane.value}"
             if retain_ref in retention and retention[retain_ref] != image_id:
                 logger.warning(
                     "Cannot capture rollback for %s: conflicting image ids for %s",

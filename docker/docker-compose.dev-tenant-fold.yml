@@ -41,7 +41,13 @@ services:
       # is relative to this docker/ directory, i.e. <registry root>/overlays/overlays
       # beside the omnibase_infra checkout, the clone the canonical-clone sync keeps
       # current; DEV_LANE_OVERLAY_STORE_ROOTS_DIR overrides it.
-      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-store:/etc/onex/skill-overlays
+      # The branch root comes before both, so an overlay a lane installs from a branch
+      # (the dev branch installer, OMN-25536) wins. It is a plain directory in the
+      # container's writable layer, not a mount: both mounts below are read-only and
+      # docker cp cannot write there. The installer's declared roots name it
+      # (src/omnibase_infra/models/dev_lane_branch_install_roots.yaml); a recreate removes
+      # it, and a reader skips a root that holds no <node>/overlay.yaml.
+      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-branch:/etc/onex/skill-overlays-store:/etc/onex/skill-overlays
       ONEX_CONTEXT_SOURCE_TENANT_ID: ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}
       ONEX_TICKET_GUARD_PATH: /etc/onex/ticket-guard/plugins/onex/hooks/lib/ticket_creation_guard.py
       #
@@ -60,6 +66,13 @@ services:
       ONEX_LEDGER_BUS_READ_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config OMNIBASE_PATH=/app onex ledger query --bus-lane dev --stdin
       ONEX_LEDGER_BUS_APPEND_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config python -m omnimarket.work_ledger_bus.cli append --bus-lane dev --omnibase-path /app
       ONEX_LEDGER_HOST_NAME: ${DEV_LANE_LEDGER_HOST_NAME:-dev-runtime}
+      # OMN-25901: the product clones below are read-only, so the verifier cannot fetch
+      # into them to measure freshness. It reads each clone's boot revision from this
+      # pin file instead, which the deploy agent writes from the clones' own HEAD at the
+      # start of a dev job and mounts below. With no readable file, or a clone that no
+      # longer contains its pin, a check run in the clone stays refused
+      # PRODUCT_CLONE_NOT_FRESH.
+      DOD_VERIFY_PRODUCT_CLONE_PIN_FILE: /etc/onex/product-clone-pin/pins.json
     # The effects health port keeps answering, now from main (plan T8: port
     # 8086 answers from main).
     ports:
@@ -89,10 +102,32 @@ services:
       # current; DEV_LANE_OVERLAY_STORE_ROOTS_DIR overrides it.
       - ${DEV_LANE_OVERLAY_STORE_ROOTS_DIR:-../../overlays/overlays}:/etc/onex/skill-overlays-store:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}/../../..:/etc/onex/ticket-guard:ro
-      # The lane declaration folder (OMN-24218): ONEX_LANE_OVERLAY_DIR is the lane
-      # overlay folder under the workspace config root's config/lab, which the infra
-      # compose already requires, so its parent is config/lab. Read-only.
-      - ${ONEX_LANE_OVERLAY_DIR}/..:/etc/onex/workspace-config/config/lab:ro
+      # The lane declaration folder (OMN-24218): the deploy agent sets
+      # ONEX_LANE_DECLARATION_DIR to the real config/lab folder, because it points
+      # ONEX_LANE_OVERLAY_DIR at a rendered copy under its state directory, so the
+      # overlay directory's parent is not it. Required, never a nested default
+      # (tests/ci/test_compose_no_nested_expansion.py); every caller of this file sets
+      # it. Read-only.
+      - ${ONEX_LANE_DECLARATION_DIR:?ONEX_LANE_DECLARATION_DIR must name the config/lab folder that holds ci_bus_lanes.yaml; the deploy agent, the warm refresh and the compose file helpers set it from ONEX_LANE_OVERLAY_DIR}:/etc/onex/workspace-config/config/lab:ro
+      # Product clones (OMN-25709): the Done guard's dod_verify finds a ticket's contract only through
+      # a canonical clone at $OMNI_HOME/<name> (OMNI_HOME=/app in the runtime image) and returned
+      # CONTRACT_MISSING with product_clones=[] for every ticket while /app held none. Each product
+      # clone is mounted read-only from the registry-root layout the canonical-clone sync keeps current
+      # (the same layout the overlays store root above is derived from), so the lane host needs no new
+      # operator variable and no credential. onex_change_control is the governance repository the
+      # verifier never reads as a product clone and is not mounted.
+      - ../../omnibase_core:/app/omnibase_core:ro
+      - ../../omnibase_infra:/app/omnibase_infra:ro
+      - ../../omnibase_spi:/app/omnibase_spi:ro
+      - ../../omniclaude:/app/omniclaude:ro
+      - ../../omnidash:/app/omnidash:ro
+      - ../../omniintelligence:/app/omniintelligence:ro
+      - ../../omnimarket:/app/omnimarket:ro
+      - ../../omnimemory:/app/omnimemory:ro
+      # OMN-25901: the pin file's directory, read-only, so a replaced file shows in a
+      # running container. Relative to docker/ like the clones above: the registry root's
+      # .onex_state, where the deploy agent writes it.
+      - ../../.onex_state/product-clone-pin:/etc/onex/product-clone-pin:ro
       - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/${RUNTIME_USER_NAME:-omniinfra}/.codex/auth.json:ro
       - ${CODING_AGENT_CLAUDE_CREDS_HOST_DIR:-/dev/null}:/home/${RUNTIME_USER_NAME:-omniinfra}/.claude:ro
   # The retired carrier starts under no profile a lane bring-up requests, as

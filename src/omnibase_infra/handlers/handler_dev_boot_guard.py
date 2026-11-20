@@ -17,6 +17,7 @@ import json
 import logging
 import math
 import re
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
@@ -110,6 +111,26 @@ def redact_credential_spans(text: str) -> str:
 
 class DevBootFailedError(RuntimeError):
     """A dev runtime failed boot, or cannot be safely replaced."""
+
+
+class DevBootSettingsDriftError(DevBootFailedError):
+    """A healthy dev container carries a compose config hash the clone no longer renders.
+
+    The container was created from the compose files the deploy read when it ran
+    ``up``. The deploy-source clone is a canonical clone that the canonical-clone sync
+    fast-forwards while a job runs (OMN-25942: job 20cf29c6 pinned commit 925858038 at
+    08:04:02Z and the sync moved the clone at 08:12:26Z and 08:18:26Z), so the
+    capture after a verified roll can render other files than ``up`` did. The family is
+    healthy; only the recovery point cannot be advanced.
+    """
+
+    def __init__(self, service: str, container_hash: str, rendered_hash: str) -> None:
+        super().__init__(
+            f"{service}: compose settings differ from the healthy container"
+        )
+        self.service = service
+        self.container_hash = container_hash
+        self.rendered_hash = rendered_hash
 
 
 class DevBootRecoveryError(RuntimeError):
@@ -245,6 +266,14 @@ def run_runtime_roll_step(
     """
     service = argv[-1]
     lane = execution.EnumRuntimeLane.DEV
+    if service in execution.SERVICE_HEALTH_TARGET_INDEX:
+        # OMN-25106: a running container that stayed unhealthy is not replaced
+        # by the compose up below, so it is restarted first.
+        restart_if_wedged(
+            execution._health_target_container(lane, service),
+            timeout,
+            execution=execution,
+        )
     wait_budget = execution.runtime_health_probe_budget(lane, service)
     command = list(argv)
     index = command.index("--no-deps")
@@ -303,16 +332,6 @@ def run_compose_up_steps(
     """
     env = execution._compose_env(extra_env)
     result = ModelSubprocessOutcome(returncode=0, stdout="", stderr="", timed_out=False)
-    if (
-        rolling
-        and lane is execution.EnumRuntimeLane.DEV
-        and any(step[-1] == execution.ONEX_API_SERVICE for step in steps)
-    ):
-        # OMN-23039: a pin that is already a broken image would stop this roll at onex-api.
-        guard = execution.load_dev_boot_guard("handler_onex_api_image_import_check")
-        healed = guard.heal_pin(execution._run, execution.operator_env_file())
-        if healed is not None:
-            logger.warning("onex-api pin heal before the roll: %s", healed)
     for step in steps:
         if rolling and lane is execution.EnumRuntimeLane.DEV:
             try:
@@ -448,12 +467,35 @@ def _all_healthy(
         return False
 
 
-def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> set[str]:
+def retire_lane_services[LaneT: BaseModel](
+    config: LaneT, retired: Collection[str], phase_by_service: Mapping[str, StrEnum]
+) -> LaneT:
+    """``config`` with ``retired`` services disabled and their settle phases off.
+
+    A service the policy retires by name is never recreated, so the phase that
+    only builds or pins its image has nothing to deliver (OMN-24476).
+    """
+    current = config.model_dump(
+        mode="json", include={"disabled_services", "disabled_phases"}
+    )
+    phases = {phase_by_service[s] for s in retired if s in phase_by_service}
+    return config.model_copy(
+        update={
+            "disabled_services": frozenset(current["disabled_services"]).union(retired),
+            "disabled_phases": frozenset(current["disabled_phases"]).union(phases),
+        }
+    )
+
+
+def folded_dev_services(
+    policy: Mapping[str, str], folded: frozenset[str], prefix: str = "DEV"
+) -> set[str]:
     """Retirement uses the same contract mapping as the compose gates.
 
     A lane that folds nothing (any other dev instance) retires nothing. On the
     lane that folds, the services main carries with no profile of its own
-    (``DEV_RUNTIME_MAIN_RETIRED_SERVICES``) are retired with the folded ones.
+    (``<prefix>_RUNTIME_MAIN_RETIRED_SERVICES``) are retired with the folded
+    ones; a lane that declares none (stability) retires only the mapped ones.
     """
     if not folded:
         return set()
@@ -473,7 +515,9 @@ def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> se
         raise RuntimeError(f"fold policy maps no service for {sorted(missing)}")
     retired = {
         service.strip()
-        for service in policy.get("DEV_RUNTIME_MAIN_RETIRED_SERVICES", "").split(",")
+        for service in policy.get(f"{prefix}_RUNTIME_MAIN_RETIRED_SERVICES", "").split(
+            ","
+        )
         if service.strip()
     }
     if any(not re.fullmatch(r"[a-z][a-z0-9-]*", service) for service in retired):
@@ -483,6 +527,68 @@ def folded_dev_services(policy: Mapping[str, str], folded: frozenset[str]) -> se
 
 #: ``docker inspect`` states of a lane container that mean it is down.
 DOWN_STATES = frozenset({"created", "exited", "dead"})
+#: OMN-25106: consecutive failed health probes after which a running container
+#: reads as wedged, which restores it like a stopped one. The dev runtime's
+#: compose healthcheck probes every 30 s, so 20 is a 10 minute non-200 window;
+#: docker does not count failed probes inside ``start_period``.
+WEDGED_FAILING_STREAK: Final = 20
+#: The state, then (when the container declares a healthcheck) its health
+#: status and failing streak, as whitespace-separated fields.
+PRESENCE_INSPECT_FORMAT: Final = (
+    "{{.State.Status}}"
+    " {{if .State.Health}}{{.State.Health.Status}} {{.State.Health.FailingStreak}}{{end}}"
+)
+
+
+def _is_wedged(fields: Sequence[str]) -> bool:
+    """Whether inspect fields read a RUNNING container that stayed unhealthy too long.
+
+    Only state ``running`` can be wedged: a paused or restarting container with
+    a failing streak is not what a restart cures, so it reads as it did before.
+    """
+    return (
+        len(fields) >= 3
+        and fields[0].lower() == "running"
+        and fields[1].lower() == "unhealthy"
+        and fields[2].isdigit()
+        and int(fields[2]) >= WEDGED_FAILING_STREAK
+    )
+
+
+def _presence_of(container: str, fields: Sequence[str]) -> tuple[str, str]:
+    """``down`` or ``running`` with its detail, from one container's inspect fields."""
+    state = fields[0].lower() if fields else ""
+    if state in DOWN_STATES:
+        return "down", f"{container} is {state}"
+    if _is_wedged(fields):
+        return "down", (
+            f"{container} is {state} but unhealthy: {fields[2]} consecutive failed "
+            f"health probes, at least {WEDGED_FAILING_STREAK} read as wedged"
+        )
+    return "running", f"{container} is {state}"
+
+
+def restart_if_wedged(container: str, timeout: int, *, execution: ModuleType) -> bool:
+    """``docker restart`` one container the presence read calls wedged (OMN-25106).
+
+    The restore's rebuild converges with ``compose up -d``, which leaves a
+    running container whose image and configuration are unchanged exactly as it
+    is, and the post-deploy verify declines to recreate a runtime that still
+    answers ``/health`` degraded. A wedged container therefore has to be
+    restarted before the roll waits on it. A read or a restart that docker
+    refuses is not an error here: the roll goes on and its own wait decides.
+    """
+    try:
+        read = execution._run(
+            ["docker", "inspect", "--format", PRESENCE_INSPECT_FORMAT, container],
+            timeout=DOCKER_READ_SECONDS,
+        )
+        if read.returncode != 0 or not _is_wedged(read.stdout.split()):
+            return False
+        restarted = execution._run(["docker", "restart", container], timeout=timeout)
+    except (OSError, execution.subprocess.TimeoutExpired):
+        return False
+    return bool(restarted.returncode == 0)
 
 
 def lane_runtime_containers(
@@ -503,6 +609,66 @@ def lane_runtime_containers(
     return (main, f"{main}-effects")
 
 
+def running_ref_if_healthy(
+    container: str,
+    repository: str,
+    read_ref: Callable[[str, str], str | None],
+) -> str | None:
+    """``read_ref``'s answer for a healthy runtime, ``""`` for an unhealthy one (OMN-24562).
+
+    A runtime that failed its boot is parked and still answers ``docker exec`` with
+    the provenance of the image it was built from, so the stability follow read it
+    as running the tag it had just built and never rebuilt it. An unhealthy runtime
+    runs no revision: ``""`` names no tag and no commit that contains one. ``None``
+    stays what docker could not answer.
+    """
+    try:
+        shown = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+                container,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=DOCKER_READ_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if shown.returncode == 0 and shown.stdout.strip() == "unhealthy":
+        return ""
+    return read_ref(container, repository)
+
+
+def healthy_ref_reader(
+    container: Callable[[], str], read_ref: Callable[[str, str], str | None]
+) -> Callable[[str], str | None]:
+    """The repository -> running ref reader of a lane's runtime, unhealthy reading ``""``.
+
+    ``container`` resolves the lane's runtime container at READ time, never when the
+    reader is built: the agent builds this reader in ``__init__`` on every lane, and a
+    lane configuration that cannot resolve (a bad stability fold policy) must stop
+    only the lane that reads it. A resolution failure is logged and reads ``None``,
+    what docker could not answer, so that lane's follow starts no job and every other
+    lane runs on.
+    """
+
+    def read(repository: str) -> str | None:
+        try:
+            name = container()
+        except (OSError, RuntimeError, ValueError) as error:
+            logger.exception(
+                "runtime container of the followed lane unresolved: %s", error
+            )
+            return None
+        return running_ref_if_healthy(name, repository, read_ref)
+
+    return read
+
+
 def read_lane_presence(
     health_targets: Sequence[tuple[str, int]],
     disabled_services: frozenset[str],
@@ -512,7 +678,8 @@ def read_lane_presence(
 ) -> tuple[str, str]:
     """``(state, detail)`` of the lane's containers: running, down, companion_down or unknown.
 
-    Main reads on its own: absent, created, exited or dead is ``down``. With
+    Main reads on its own: absent, created, exited, dead or wedged (running
+    but unhealthy for ``WEDGED_FAILING_STREAK`` probes, OMN-25106) is ``down``. With
     main running, a down container beside it is ``companion_down`` and one that
     cannot be read is ``unknown``, which never restores. ``unreadable`` is what
     ``run`` raises when docker does not answer.
@@ -521,7 +688,7 @@ def read_lane_presence(
     for container in lane_runtime_containers(health_targets, disabled_services):
         try:
             result = run(
-                ["docker", "inspect", "--format", "{{.State.Status}}", container],
+                ["docker", "inspect", "--format", PRESENCE_INSPECT_FORMAT, container],
                 timeout=DOCKER_READ_SECONDS,
             )
         except unreadable as exc:
@@ -539,13 +706,7 @@ def read_lane_presence(
                     )
                 )
         else:
-            state = result.stdout.strip().lower()
-            states.append(
-                (
-                    "down" if state in DOWN_STATES else "running",
-                    f"{container} is {state}",
-                )
-            )
+            states.append(_presence_of(container, result.stdout.split()))
     if states[0][0] != "running":
         return states[0]
     for wanted in ("down", "unknown"):
@@ -758,8 +919,10 @@ class HandlerDevBootGuard:
             if not hashes.get(service) or hashes[service] != labels.get(
                 "com.docker.compose.config-hash"
             ):
-                raise DevBootFailedError(
-                    f"{service}: compose settings differ from the healthy container"
+                raise DevBootSettingsDriftError(
+                    service,
+                    labels.get("com.docker.compose.config-hash", ""),
+                    hashes.get(service, ""),
                 )
         # Compose's canonical JSON already escapes literal dollars for reuse.
         # Preserve those strings verbatim when writing the recovery config.
@@ -962,7 +1125,7 @@ class HandlerDevBootGuard:
             raise DevBootFailedError("no last healthy dev revision")
         try:
             yield
-            self.point.hold(self._capture())
+            _advance_point(self, job, commit)
             _announce_start(self, job, success=True)
         except Exception as exc:
             _announce_start(self, job, success=False)
@@ -1370,6 +1533,48 @@ def _announce(
         call(events)
     except Exception:
         logger.exception("dev roll event failed friction_type=dev_event_publish_failed")
+
+
+def _advance_point(guard: HandlerDevBootGuard, job: str, commit: str) -> None:
+    """Record the verified family as the recovery point, or keep the one held.
+
+    A roll that reached this call was replaced, verified and Docker healthy. A
+    compose config hash that no longer matches (the clone moved after ``up``, see
+    :class:`DevBootSettingsDriftError`) says the family cannot be re-rendered
+    exactly, not that the deploy failed: rolling a verified family back to the
+    previous image recreates the runtime a second time and leaves dev one image
+    behind on every such job. The previous recovery point stays held and the drift
+    is written beside the incidents for the next reader.
+    """
+    try:
+        guard.point.hold(guard._capture())
+    except DevBootSettingsDriftError as drift:
+        logger.warning(
+            "Dev recovery point not advanced job=%s commit=%s service=%s "
+            "container_hash=%s rendered_hash=%s",
+            job,
+            commit,
+            drift.service,
+            drift.container_hash,
+            drift.rendered_hash,
+        )
+        record: dict[str, JsonValue] = {
+            "job": job,
+            "commit": commit,
+            "service": drift.service,
+            "container_config_hash": drift.container_hash,
+            "rendered_config_hash": drift.rendered_hash,
+            "kept_recovery_revision": (
+                guard.point.current.revision if guard.point.current else ""
+            ),
+            "at": guard.execution._dev_boot_timestamp(),
+        }
+        try:
+            guard.execution._atomic_write_private_json(
+                guard.root / f"settings-drift-{job}.json", record
+            )
+        except OSError:
+            logger.warning("Cannot record dev settings drift", exc_info=True)
 
 
 def _announce_start(guard: HandlerDevBootGuard, job: str, *, success: bool) -> None:

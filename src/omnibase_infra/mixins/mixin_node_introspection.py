@@ -226,6 +226,12 @@ from omnibase_infra.models.discovery import (
 from omnibase_infra.models.discovery.model_introspection_performance_metrics import (
     ModelIntrospectionPerformanceMetrics,
 )
+from omnibase_infra.models.model_runtime_heartbeat_account import (
+    ModelRuntimeHeartbeatAccount,
+)
+from omnibase_infra.models.model_runtime_heartbeat_health import (
+    ModelRuntimeHeartbeatHealth,
+)
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeHeartbeatEvent,
@@ -248,6 +254,9 @@ from omnibase_infra.topics import (
 if TYPE_CHECKING:
     from omnibase_core.models.contracts import ModelContractBase
     from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+    from omnibase_infra.handlers.handler_runtime_introspection_startup import (
+        HandlerRuntimeIntrospectionStartup,
+    )
     from omnibase_infra.protocols.protocol_introspection_event_bus import (
         ProtocolIntrospectionEventBus,
     )
@@ -469,6 +478,7 @@ class MixinNodeIntrospection:
 
     # Background task attributes
     _heartbeat_task: asyncio.Task[None] | None
+    _heartbeat_account: ModelRuntimeHeartbeatAccount
     _registry_listener_task: asyncio.Task[None] | None
     _ack_listener_task: asyncio.Task[None] | None
     _introspection_stop_event: asyncio.Event | None
@@ -704,6 +714,7 @@ class MixinNodeIntrospection:
 
         # Background tasks
         self._heartbeat_task = None
+        self._heartbeat_account = ModelRuntimeHeartbeatAccount()
         self._registry_listener_task = None
         self._ack_listener_task = None
         self._introspection_stop_event = asyncio.Event()
@@ -1803,6 +1814,7 @@ class MixinNodeIntrospection:
             True if published successfully, False otherwise
         """
         if self._introspection_event_bus is None:
+            self._heartbeat_account.record_failure("no event bus")
             return False
 
         # Generate correlation_id early for reliable exception logging
@@ -1911,9 +1923,11 @@ class MixinNodeIntrospection:
                     "topic": topic,
                 },
             )
+            self._heartbeat_account.record_success()
             return True
 
         except Exception as e:
+            self._heartbeat_account.record_failure(f"{type(e).__name__}: {e}")
             # Use error() with exc_info=True instead of exception() to include
             # structured error_type and error_message fields for log aggregation
             logger.error(
@@ -1929,70 +1943,36 @@ class MixinNodeIntrospection:
             return False
 
     async def _heartbeat_loop(self, interval: float) -> None:
-        """Background loop for periodic heartbeat publishing.
+        """Background loop for periodic heartbeat publishing (OMN-24559).
 
-        Runs until stop event is set, publishing heartbeats at the
-        specified interval.
+        The loop lives in ``HandlerRuntimeIntrospectionStartup`` so a failing
+        heartbeat is counted, reported and announced there.
 
         Args:
             interval: Time between heartbeats in seconds
         """
-        # Ensure stop event is initialized
-        if self._introspection_stop_event is None:
-            self._introspection_stop_event = asyncio.Event()
+        await self._heartbeat_handler().run_heartbeat_loop(self, interval)
 
-        logger.info(
-            f"Starting heartbeat loop for {self._introspection_node_id}",
-            extra={
-                "node_id": self._introspection_node_id,
-                "interval_seconds": interval,
-            },
+    def _heartbeat_handler(self) -> HandlerRuntimeIntrospectionStartup:
+        """The handler that owns heartbeat accounting (lazy: it imports models)."""
+        from omnibase_infra.handlers.handler_runtime_introspection_startup import (
+            HandlerRuntimeIntrospectionStartup,
         )
 
-        while not self._introspection_stop_event.is_set():
-            # Generate correlation_id for this loop iteration for traceability
-            loop_correlation_id = uuid4()
-            try:
-                await self._publish_heartbeat()
-            except asyncio.CancelledError:
-                logger.debug(
-                    f"Heartbeat loop cancelled for {self._introspection_node_id}",
-                    extra={
-                        "node_id": self._introspection_node_id,
-                        "correlation_id": str(loop_correlation_id),
-                    },
-                )
-                break
-            except Exception as e:
-                # Use error() with exc_info=True instead of exception() to include
-                # structured error_type and error_message fields for log aggregation
-                logger.error(
-                    f"Error in heartbeat loop for {self._introspection_node_id}",
-                    extra={
-                        "node_id": self._introspection_node_id,
-                        "correlation_id": str(loop_correlation_id),
-                        "error_type": type(e).__name__,
-                        "error_message": str(e),
-                    },
-                    exc_info=True,
-                )
+        return HandlerRuntimeIntrospectionStartup()
 
-            # Wait for next interval or stop event
-            try:
-                await asyncio.wait_for(
-                    self._introspection_stop_event.wait(),
-                    timeout=interval,
-                )
-                # Stop event was set
-                break
-            except TimeoutError:
-                # Normal timeout, continue loop
-                pass
+    @property
+    def heartbeat_account(self) -> ModelRuntimeHeartbeatAccount:
+        """The running count of this node's heartbeat publishes."""
+        return self._heartbeat_account
 
-        logger.info(
-            f"Heartbeat loop stopped for {self._introspection_node_id}",
-            extra={"node_id": self._introspection_node_id},
-        )
+    async def publish_heartbeat_now(self) -> bool:
+        """Publish one counted heartbeat now (startup confirms the first one)."""
+        return await self._heartbeat_handler().publish_beat(self)
+
+    def heartbeat_health(self) -> ModelRuntimeHeartbeatHealth:
+        """The typed heartbeat health verdict of this node."""
+        return self._heartbeat_handler().health_of(self)
 
     def _parse_correlation_id(self, raw_value: str | None) -> UUID | None:
         """Parse correlation ID from request data with graceful fallback.

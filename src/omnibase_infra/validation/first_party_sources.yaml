@@ -41,10 +41,6 @@
 # workspace build stamps it stability-candidate with non-main lineage, which the
 # prod promotion gate refuses. The next merge-driven deploy builds the dev-merge
 # tag again, which returns the dev lane to main lineage.
-#
-# omnibase_compat is not a first-party package of the dev lane (OMN-21284): it is
-# being retired, it has no dev-merge tags and gets none, and until its last
-# consumer drops it the image takes it from the lock like any other dependency.
 schema_version: 1.0.0
 policy: dev-merge-tag
 # The name a dev-merge tag carries. The same pattern the tag workflows

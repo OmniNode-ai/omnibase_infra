@@ -10,6 +10,8 @@ typed form of the same operation is ``HandlerVenvAtomicInstall``.
     exchange A B | supported | installed-commit | verify
     stage --python P --stage-dir D [--no-deps] [--label L] -- REQUIREMENT ...
     commit --python P --stage-dir D | rollback --stage-dir D | finalize --stage-dir D
+    sweep --stage-dir D [--lock-held PATH] [--lock-timeout SECONDS]
+    (finalize and sweep take the venv reconcile lock unless --lock-held names the one the caller holds)
     staging-lock-acquire --path P --pid N | staging-lock-release --path P --pid N
     staging-lock-held --path P
     promote-floor --venv V --uv-lock L --workspace-root H --floor F [--changed]
@@ -36,6 +38,11 @@ def _load(name: str) -> ModuleType:
     return module
 
 
+def _seconds(value: str) -> float:
+    """Read a duration given as seconds, with an optional trailing ``s``."""
+    return float(value.removesuffix("s"))
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse one command and run it."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -48,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
             "commit",
             "rollback",
             "finalize",
+            "sweep",
             "verify",
             "installed-commit",
             "staging-lock-acquire",
@@ -66,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--python")
     parser.add_argument("--stage-dir", type=Path)
     parser.add_argument("--no-deps", action="store_true")
+    parser.add_argument("--lock-held")
+    parser.add_argument("--lock-timeout", type=_seconds, default=0.0)
     parser.add_argument("--label", default="install")
     parser.add_argument("rest", nargs="*")
     args = parser.parse_intermixed_args(argv)
@@ -102,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
             no_deps=args.no_deps,
             label=args.label,
             paths=args.rest,
+            lock_held=args.lock_held,
+            lock_timeout_s=args.lock_timeout,
         )
     )
 

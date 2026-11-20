@@ -8,6 +8,13 @@
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now deploy-agent-dev.service
 #
+# ROLLOUT ORDER (OMN-24611): put the key file on the host FIRST, then install this
+# unit. The unit's EnvironmentFile= and its ExecStartPre both read
+# %h/.omnibase/deploy-agent-dev-signing-key.env, which holds the one
+# DEPLOY_AGENT_HMAC_SECRET line (the secret store's DEPLOY_AGENT_DEV_HMAC_SECRET
+# entry delivered to that path). A unit installed before the file exists fails
+# every start (the file is required, no leading `-`) until the file lands.
+#
 # WHY A SECOND UNIT EXISTS
 #
 # deploy-agent.service's tracked drop-in (deploy-agent.service.d/override.conf,
@@ -105,9 +112,10 @@
 # ref -- and prod image promotion is governed by the OMN-13418 grant path, not
 # by which branch this agent's own code tracks.
 #
-# ENV TRANSPORT: NO EnvironmentFile= ON THIS UNIT (OMN-18073)
+# ENV TRANSPORT: NO EnvironmentFile= FOR THE OPERATOR STORE (OMN-18073)
 #
-# This unit deliberately declares NO EnvironmentFile=. ExecStart runs
+# This unit deliberately declares NO EnvironmentFile= for the operator store (the one
+# it does declare is the dev signing key, below). ExecStart runs
 # deploy/deploy-agent-launch.sh, which bash-`source`s the operator env store
 # and then execs the interpreter -- exactly what onex-runtime-deploy has
 # always done.
@@ -138,6 +146,49 @@
 # this. It stays as the fail-closed backstop for any path that still arrives
 # mangled -- including this unit installed without a matching daemon-reload.
 #
+# THE ONE EnvironmentFile= THIS UNIT DOES DECLARE (OMN-24565)
+#
+# The operator env store carries ONE signing key, DEPLOY_AGENT_HMAC_SECRET, and
+# the live deploy agent reads the same name from the same file. The dev agent
+# must not hold that key (and a lab host that sends a signed dev command must not
+# need it), so this unit reads its own dev-only key from a second file that holds
+# that one key and nothing else:
+#
+#   EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env
+#
+# systemd's parser is safe for it: the file is one `DEPLOY_AGENT_HMAC_SECRET=<key>`
+# line, and the generated key is letters, digits, `-` and `_` only (the secret store
+# node refuses to write any other value), so it has no quote or backslash for the
+# OMN-18073 mangling to touch. The file is NOT optional (no leading `-`): an unreadable file fails the
+# start loudly, where a missing key would start an agent that rejects every
+# signed command. The value is the secret store's DEPLOY_AGENT_DEV_HMAC_SECRET,
+# the dev-only entry that node_secret_store_effect generates; the file is its
+# delivery to this host, and a value is never written in this repository.
+#
+# Why that beats the store: DEPLOY_AGENT_HMAC_SECRET is listed in
+# DEPLOY_AGENT_ENV_PROTECTED below. The launcher snapshots every protected name
+# before it sources the store and restores it after, so the dev key survives the
+# store's shared value; deploy_agent.executor.operator_store_overlay leaves the
+# protected names out of its re-read, so no compose command re-applies the shared
+# value either. The dev runtime's containers (which sign with the same name) get
+# the dev key too, because compose interpolates ${DEPLOY_AGENT_HMAC_SECRET} from the
+# agent's environment (docker-compose.infra.yml) and nothing loads the operator
+# store around it: no compose or other YAML file in this repository declares an
+# `env_file:` key, and the two compose argv the agent runs with `--env-file` are the
+# standalone factory-floor-web recreate (a different compose file and project, whose
+# env file is named by DEPLOY_AGENT_FACTORY_FLOOR_WEB_ENV_FILE) and a `config` render
+# of the dev broker stack on the tracked docker/runtime-policy.env (no signing key in
+# it). Every other `--env-file` in the scanned files is a flag of its own tool or a
+# pre-PR slot script. The scans read this repository only: every YAML file, and every
+# source line (extensionless scripts included) in the directories the agent runs code
+# from and in the single scripts its source names, each `--env-file` line pinned by
+# its text, in tests/unit/test_dev_agent_own_signing_key_omn24565.py. They do not read
+# the overlays repository (the agent's overlay home; its `env_file` keys belong to
+# host installer units and tools) or onex-runtime-deploy (a console script of
+# omnimarket, not a file of this repository): those were read by hand at their main
+# branches and are named in the pull request comments, not pinned here. auth.py, the
+# launcher and the compose files do not change.
+#
 # PORT PREFLIGHT (fail-fast, never destructive)
 #
 # ExecStartPre runs deploy/preflight_port_free.sh, which refuses to start
@@ -166,6 +217,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/data/omninode/omnibase_infra/scripts/deploy-agent
+# OMN-24565: the dev agent's own signing key, see THE ONE EnvironmentFile= above.
+EnvironmentFile=%h/.omnibase/deploy-agent-dev-signing-key.env
 # OMN-19522: the agent runs a bare `uv` (self-update's `uv sync`, build steps'
 # `uv run`), and uv lives in ~/.local/bin, which a systemd user manager's default
 # PATH does not carry. Declared here rather than inherited from whatever the
@@ -180,7 +233,7 @@ Environment=DEPLOY_AGENT_PYTHON=/data/omninode/omnibase_infra/scripts/deploy-age
 # (stage_workspace.sh -> deploy_source_ref.py) runs checkout --force, reset --hard
 # and clean -ffdx on every vendored sibling under OMNI_HOME. The env store above
 # selects the lanes' canonical tree, so before
-# this line every dev job detached omnimarket, omnibase_core and omnibase_compat
+# this line every dev job detached omnimarket and omnibase_core
 # there, and the clone guard refused every in-process delegate while they stayed
 # detached. Declared and protected here so the env store cannot move it back.
 Environment=OMNI_HOME=/data/omninode
@@ -188,7 +241,7 @@ Environment=OMNI_HOME=/data/omninode
 Environment=UNIT_DRIFT_REGISTRY_ROOT=/data/omninode/omni_home
 # OMN-20637: same declaration as the host operator env used by stability refresh.
 Environment=DEPLOY_SOURCE_CLONE_ROOT=/data/omninode
-Environment="DEPLOY_AGENT_ENV_PROTECTED=PATH OMNI_HOME UNIT_DRIFT_REGISTRY_ROOT DEPLOY_SOURCE_CLONE_ROOT DEPLOY_AGENT_ENV_FILE DEPLOY_AGENT_PYTHON DEPLOY_AGENT_ENV_PROTECTED DEPLOY_AGENT_DIR DEPLOY_AGENT_STATE_DIR DEPLOY_AGENT_PORT DEPLOY_AGENT_TRACKING_REF DEPLOY_AGENT_ALLOWED_LANES DEPLOY_AGENT_FOLLOW_STABILITY ONEX_LEDGER_WRITE_VIA ONEX_LEDGER_HOST_NAME KAFKA_BOOTSTRAP_SERVERS KAFKA_ENVIRONMENT KAFKA_SECURITY_PROTOCOL KAFKA_SASL_MECHANISM KAFKA_SASL_ENV_PREFIX DEPLOY_AGENT_LANE_BUILDER DEPLOY_AGENT_OVERLAY_HOME_CLONE"
+Environment="DEPLOY_AGENT_ENV_PROTECTED=PATH OMNI_HOME UNIT_DRIFT_REGISTRY_ROOT DEPLOY_SOURCE_CLONE_ROOT DEPLOY_AGENT_ENV_FILE DEPLOY_AGENT_PYTHON DEPLOY_AGENT_ENV_PROTECTED DEPLOY_AGENT_DIR DEPLOY_AGENT_STATE_DIR DEPLOY_AGENT_PORT DEPLOY_AGENT_TRACKING_REF DEPLOY_AGENT_ALLOWED_LANES DEPLOY_AGENT_FOLLOW_STABILITY ONEX_LEDGER_WRITE_VIA ONEX_LEDGER_HOST_NAME KAFKA_BOOTSTRAP_SERVERS KAFKA_ENVIRONMENT KAFKA_SECURITY_PROTOCOL KAFKA_SASL_MECHANISM KAFKA_SASL_ENV_PREFIX DEPLOY_AGENT_LANE_BUILDER DEPLOY_AGENT_OVERLAY_HOME_CLONE DEPLOY_AGENT_HMAC_SECRET"
 # OMN-21279: the host agent reports a failed dev boot even while the runtime
 # bus workers are down. The ledger writer is bus-only; its local ledger is a
 # read mirror, not a second ledger of record. The guard retains unacknowledged
@@ -214,6 +267,52 @@ Environment=KAFKA_ENVIRONMENT=dev
 Environment=KAFKA_SECURITY_PROTOCOL=SASL_PLAINTEXT
 Environment=KAFKA_SASL_MECHANISM=SCRAM-SHA-256
 Environment=KAFKA_SASL_ENV_PREFIX=DEV_
+# OMN-24611: the key FILE must hold a usable key -- refuse the start when it does not.
+#
+# The EnvironmentFile= above is required-to-exist (no leading `-`), but that is
+# not required-to-parse. A broken file leaves DEPLOY_AGENT_HMAC_SECRET unset or
+# empty in the environment systemd hands ExecStartPre (EnvironmentFile= applies to
+# ExecStartPre), and the launcher then either keeps the EMPTY value or sources the
+# operator env store:
+#
+#   1. an empty-valued line (`DEPLOY_AGENT_HMAC_SECRET=`) sets the name to the
+#      EMPTY string, which the launcher's protected snapshot restores: the agent
+#      starts with an empty key;
+#   2. a wrong-named line (`DEPLOY_AGENT_HMAC=...`) sets only the wrong name --
+#      the real one is never set at all;
+#   3. an unparseable line (not `NAME=value` at all) sets nothing.
+#
+# In cases 2 and 3 the agent silently runs on the SHARED signing key -- exactly what
+# the unit's own key file exists to prevent. The launcher is a baselined file that
+# cannot grow the check, so the unit refuses the start itself: exit 2, printing only
+# the NAME to stderr, never a value. It is ordered BEFORE the port preflight below and
+# runs before the launcher sources the store.
+#
+# The check reads the key FILE, not the assembled environment: when the user
+# manager already carries DEPLOY_AGENT_HMAC_SECRET (environment.d, `systemctl --user
+# import-environment`), the name is protected, so that inherited value would
+# survive a broken file and a test on the environment would pass it. The file must
+# hold exactly ONE line, and that line must be `DEPLOY_AGENT_HMAC_SECRET=<key>` whose
+# key is letters, digits, `-` and `_` (the whole line, `grep -x`, so an empty,
+# whitespace-only or quoted value, or trailing blanks, fails); the template
+# placeholder `__REPLACE_WITH_...__` (which has only those characters) is refused by
+# name. Every other line is refused -- comments and blank lines included -- because
+# systemd does not read the file the way a line-anchored grep does: it strips leading
+# blanks and takes the LAST assignment of a name (an indented second assignment
+# wins), a comment line ending in a backslash continues onto the next line and
+# swallows a key line that follows it, and any other NAME=value line (for example
+# DEPLOY_AGENT_ENV_PROTECTED=) overrides the unit's own Environment=, since an
+# EnvironmentFile= setting beats Environment= (systemd.exec). A file that is exactly
+# the key line has none of those. `%h` is the unit user's home, expanded by systemd
+# in this line exactly as in EnvironmentFile=. `$$` is systemd's escape for a literal `$`.
+#
+# THE EXIT-2 REFUSAL DOES NOT LOOP. systemd's RestartPreventExitStatus= tests the
+# MAIN process's exit status, not a control process such as ExecStartPre, so it
+# would not stop this refusal; the bound is the start limit in [Unit]. With
+# Restart=on-failure and RestartSec=5, a refused start is retried at 5 s spacing
+# and the sixth start inside StartLimitIntervalSec=300 is refused by systemd, so the
+# unit lands in `failed` after five tries (~25 s) instead of looping forever.
+ExecStartPre=/bin/sh -c 'f="%h/.omnibase/deploy-agent-dev-signing-key.env"; test "$$(grep -c "" "$$f")" = 1 && grep -Eqx "DEPLOY_AGENT_HMAC_SECRET=[A-Za-z0-9_-]+" "$$f" && ! grep -Eqx "DEPLOY_AGENT_HMAC_SECRET=__REPLACE_WITH_.*" "$$f" || { echo "deploy-agent-dev: the key file does not hold exactly one valid DEPLOY_AGENT_HMAC_SECRET line, refusing to start (OMN-24611)" >&2; exit 2; }'
 ExecStartPre=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/preflight_port_free.sh 8098
 ExecStart=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/deploy-agent-launch.sh
 Restart=on-failure

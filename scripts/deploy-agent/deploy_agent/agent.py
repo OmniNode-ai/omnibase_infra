@@ -216,8 +216,7 @@ def _sibling_clone(repository: str) -> Path | None:
     ``OMNI_HOME`` has no default here, as in the executor's workspace build:
     unset, there is no clone and every read of it is unread.
     """
-    registry_root = os.environ.get("OMNI_HOME", "").strip()
-    if not registry_root:
+    if not (registry_root := os.environ.get("OMNI_HOME", "").strip()):
         return None
     return Path(registry_root) / repository
 
@@ -235,16 +234,14 @@ def _declared_branch_install_repos() -> list[str]:
 
 def _read_dev_tags(repository: str) -> list[ModelDevTag] | None:
     """Every dev tag on ``repository``'s origin, oldest first (OMN-19998)."""
-    clone = _sibling_clone(repository)
-    if clone is None:
+    if (clone := _sibling_clone(repository)) is None:
         return None
     return read_dev_tags(clone, AGENT_CLONE_ROOT)
 
 
 def _running_contains(repository: str, ancestor: str, running_ref: str) -> bool:
     """Whether the lane's running ``repository`` commit contains ``ancestor``."""
-    clone = _sibling_clone(repository)
-    if clone is None:
+    if (clone := _sibling_clone(repository)) is None:
         return False
     return contains_commit(clone, ancestor, running_ref)
 
@@ -280,8 +277,7 @@ def _read_dev_head(repository: str) -> str | None:
         return ref
     if repository == "omnibase_infra":
         return read_dev_head(Path(REPO_DIR))
-    clone = _sibling_clone(repository)
-    if clone is None:
+    if (clone := _sibling_clone(repository)) is None:
         return None
     if repository in DEV_TAG_FOLLOWED_REPOSITORIES:
         tags = read_dev_tags(clone, AGENT_CLONE_ROOT)
@@ -346,6 +342,8 @@ BRANCH_INSTALL_APPLY_TIMEOUT_SECONDS = 900
 #: tree the job just built), so a change to it needs no release of the omnibase_infra
 #: package the agent venv holds.
 BRANCH_INSTALL_ENTRY = f"{REPO_DIR}/src/omnibase_infra/nodes/node_dev_roll_events_effect/runtime_dev_branch_install_reapply.py"
+JOB_READING = "nodes.node_deploy_job_reading_effect.runtime_deploy_job_reading"
+DEV_ROLL_EVENTS = "nodes.node_dev_roll_events_effect.runtime_dev_roll_events"
 BRANCH_INSTALL_EXIT_NOT_WHOLE = 4
 
 #: OMN-18200 AC5. The k3s ``onex-lab`` overlay re-apply, ON by default.
@@ -552,10 +550,9 @@ class DeployAgent:
         # a lab dev agent whose fence admits it; its seams and its last verdict.
         self._stability_follow_attempted: set[str] = set()
         self._stability_follow_last_verdict: EnumStabilityFollowVerdict | None = None
-        self._stability_read_running_ref: Callable[[str], str | None] = lambda repo: (
-            read_running_ref(
-                _runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST), repo
-            )
+        self._stability_read_running_ref = load_dev_boot_guard().healthy_ref_reader(
+            lambda: _runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST),
+            read_running_ref,
         )
         # OMN-20864: the restore of a lane with no running runtime, and its seams.
         self._idle_restore_last_attempt: datetime | None = None
@@ -677,10 +674,6 @@ class DeployAgent:
         with self._settle_guard:
             future = self._settle_future
         return future is not None and not future.done()
-
-    def _hand_to_settle(self, settle: Callable[[], None]) -> None:
-        with self._settle_guard:
-            self._settle_future = self._settle_pool.submit(settle)
 
     def drain_settle(self, timeout: float | None = None) -> bool:
         """Wait for every settle submitted so far. True when none is in flight.
@@ -811,13 +804,11 @@ class DeployAgent:
         logger.info("Deploy agent loaded code sha: %s", loaded_sha)
 
         # Step 1: Recover crashed jobs
-        recovered = self.job_store.recover_crashed_jobs()
-        if recovered:
+        if recovered := self.job_store.recover_crashed_jobs():
             logger.info("Recovered %d crashed job(s)", len(recovered))
 
         # Step 2: Prune old completed jobs
-        pruned = self.job_store.prune_completed()
-        if pruned:
+        if pruned := self.job_store.prune_completed():
             logger.info("Pruned %d old job(s)", pruned)
 
         # Step 3: Retry pending publishes. Called directly rather than through
@@ -960,6 +951,8 @@ class DeployAgent:
                     # deferred IS one already waiting, so no converge while a
                     # deferral holds its partition paused.
                     await self._offload(self._maybe_reapply_branch_installs)
+                    if EnumRuntimeLane.DEV in self._allowed_lanes:
+                        await self._offload(self._job_reading, "check_pin")
                     if getattr(consumer, "load_gate_paused", None) is None:
                         await self._offload(self._maybe_idle_converge)
                         await self._offload(self._maybe_converge_forward_migration)
@@ -1181,8 +1174,7 @@ class DeployAgent:
                 EnumSelfUpdateBoundary.IDLE_HEARTBEAT.value,
             )
             return
-        pending = self.job_store.get_pending_publish()
-        if pending:
+        if pending := self.job_store.get_pending_publish():
             logger.info(
                 "self_update[boundary=%s]: %d result(s) still awaiting publish, "
                 "deferring",
@@ -1281,6 +1273,13 @@ class DeployAgent:
         result = self._run_branch_installs("apply")
         return result is not None and result.returncode == 0
 
+    def _job_reading(self, call: str, *args: object) -> None:
+        """OMN-24562: run one job-reading entry; a load or call error is logged, never raised."""
+        try:
+            getattr(load_dev_boot_guard(JOB_READING), call)(*args)
+        except Exception:
+            logger.exception("deploy job reading %s failed", call)
+
     def _maybe_reapply_branch_installs(self) -> None:
         """Idle tick: detect a declared install missing from its container and put it back.
 
@@ -1288,6 +1287,7 @@ class DeployAgent:
         settle worker's pin recreate, a rollback). Throttled. Releasing a merged
         or expired install touches no container and runs unlocked; an apply takes
         the dev lane lock and is skipped for this tick when another writer holds it.
+        The apply entry waits for the recreate window before it restarts (OMN-25912).
         """
         if EnumRuntimeLane.DEV not in self._allowed_lanes:
             return
@@ -1344,15 +1344,11 @@ class DeployAgent:
         }
 
     def _maybe_idle_converge(self) -> None:
-        # Converge on a followed repository's dev head when idle (OMN-19509); see
-        # deploy_agent.idle_converge for the rule and the model behind it.
-        # Throttled to one check per interval. Each followed repository is decided
-        # in turn (OMN-20867), the declared web source (OMN-22808) after the
-        # runtime's siblings, and the first that says converge runs; a converge
-        # builds every repository at its dev head, so one is enough. A refusal is
-        # logged once per change of verdict. A converge runs as an ordinary job
-        # through _execute_command, under the same single-flight and lane locks,
-        # with its own job record and terminal event named agent/idle-converge.
+        # Converge on a followed repository's dev head when idle (OMN-19509, rule in
+        # deploy_agent.idle_converge), one check per interval. Each followed repository
+        # (OMN-20867) and the declared web source (OMN-22808) is decided in turn; the
+        # first converge runs, once per verdict change logged, as an ordinary job
+        # through _execute_command (agent/idle-converge), after the recreate window.
         if self._router is None:
             return
         tick = time.monotonic()
@@ -1405,10 +1401,10 @@ class DeployAgent:
         # OMN-19507: a converge is a deploy like any other, so it waits for the
         # load gate too. The head is not marked attempted, so it runs once the
         # gate opens.
-        if not self._idle_converge_gate_open():
+        cmd = converge_command()
+        if not self._idle_converge_gate_open(cmd.requested_by):
             return
         self._idle_converge_attempted.add(decision.head_ref)
-        cmd = converge_command()
         logger.info(
             "idle converge: running %s as %s: %s",
             cmd.correlation_id,
@@ -1503,9 +1499,7 @@ class DeployAgent:
     def _maybe_idle_restore(self, now: datetime) -> bool:
         """Restore the lane when its main runtime is not running (OMN-20864).
 
-        Returns True when the lane is DOWN, whatever the decision, so the
-        converge rule is not evaluated against a container that is not there.
-        See ``deploy_agent.idle_converge`` (decide_restore) for the rule.
+        True when the lane is DOWN, whatever the decision; the rule is decide_restore.
         """
         presence, presence_detail = self._idle_read_runtime_presence()
         decision = decide_restore(
@@ -1535,10 +1529,10 @@ class DeployAgent:
             return False
         if decision.verdict is not EnumIdleRestoreVerdict.RESTORE:
             return True
-        if not self._idle_converge_gate_open():
+        cmd = restore_command()
+        if not self._idle_converge_gate_open(cmd.requested_by):
             return True
         self._idle_restore_last_attempt = now
-        cmd = restore_command()
         logger.warning(
             "idle restore: running %s as %s: %s",
             cmd.correlation_id,
@@ -1620,8 +1614,7 @@ class DeployAgent:
         # :data:`DEV_LANE_DRIFT_REPUBLISH_AFTER` while it stays overdue, with a
         # WARNING carrying ``friction_type=dev_lane_drift``. A lane that was
         # published overdue and now runs the head is published once more, cleared.
-        max_lag = lane_flags.max_dev_lag()
-        if max_lag is None:
+        if (max_lag := lane_flags.max_dev_lag()) is None:
             return
         on_head = running_ref is not None and running_ref == head_ref
         if behind_since is None:
@@ -1826,21 +1819,19 @@ class DeployAgent:
                 exc,
             )
 
-    def _idle_converge_gate_open(self) -> bool:
-        """Whether the load gate lets an idle converge start now (OMN-19507)."""
-        gate = getattr(self, "_load_gate", None)
-        if gate is None:
-            return True
-        decision = gate.check()
-        if decision.verdict is EnumLoadGateVerdict.DEFER:
-            if self._load_gate_last_verdict is not EnumLoadGateVerdict.DEFER:
+    def _idle_converge_gate_open(self, who: str = "") -> bool:
+        """Whether the load gate (OMN-19507) and recreate window (OMN-25912) admit it."""
+        if (gate := getattr(self, "_load_gate", None)) is not None:
+            decision = gate.check()
+            deferred = decision.verdict is EnumLoadGateVerdict.DEFER
+            if deferred and self._load_gate_last_verdict is not decision.verdict:
                 logger.info(
                     "idle converge: deferred by load gate %s", decision.describe()
                 )
             self._load_gate_last_verdict = decision.verdict
-            return False
-        self._load_gate_last_verdict = decision.verdict
-        return True
+            if deferred:
+                return False
+        return bool(load_dev_boot_guard(DEV_ROLL_EVENTS).window_admits(self, who))
 
     def _execute_command(self, cmd: ModelRebuildRequested) -> None:
         """Run one accepted command to its terminal state. BLOCKING, by design.
@@ -2044,23 +2035,23 @@ class DeployAgent:
                 with protection:
                     # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
                     # cache. prod pulls the pinned digest instead of rebuilding from a ref.
-                    lanes_off_guard = (EnumRuntimeLane.PROD, EnumRuntimeLane.DEV)
-                    needs_point = cmd.scope in (Scope.RUNTIME, Scope.FULL)
-                    needs_point = (
-                        needs_point and cmd.runtime_lane not in lanes_off_guard
+                    # OMN-24562: a stability lane read down by the guard's own
+                    # probe may deploy with no point; see the handler.
+                    rollback_point = load_dev_boot_guard(
+                        "handler_stability_rollback_waiver"
+                    ).admit_rollback_point(
+                        lane=cmd.runtime_lane,
+                        scope=cmd.scope,
+                        correlation_id=cid,
+                        record_dir=self.job_store.state_dir / "rollback-waivers",
+                        targets=lane_config_for(
+                            cmd.runtime_lane
+                        ).runtime_health_targets,
+                        probe=lambda **kw: self.executor._probe_runtime_health(**kw),
+                        capture=lambda: capture_rollback_point(
+                            self.executor, cmd.runtime_lane
+                        ),
                     )
-                    rollback_point = (
-                        capture_rollback_point(self.executor, cmd.runtime_lane)
-                        if needs_point
-                        else None
-                    )
-                    # Dev recovery belongs to the boot guard. Every other
-                    # non-prod runtime/full rebuild needs a retained point.
-                    if needs_point and rollback_point is None:
-                        raise RuntimeError(
-                            f"Refusing {cmd.runtime_lane.value} {cmd.scope.value} deploy: "
-                            "no healthy, retained rollback point"
-                        )
                     services_restarted = self.executor.rebuild_scope(
                         cmd.scope,
                         cmd.services,
@@ -2316,7 +2307,8 @@ class DeployAgent:
             # the job thread, so the next command's compose job can start while
             # this one's overlay applies. The terminal event is published by the
             # settle, after the pin, exactly as OMN-18572 shaped it.
-            self._hand_to_settle(settle)
+            with self._settle_guard:
+                self._settle_future = self._settle_pool.submit(settle)
             self._state = "idle"
             return
 
@@ -2443,6 +2435,7 @@ class DeployAgent:
                 job.result_publish_pending = True
                 self.job_store._save(job)
                 logger.warning("Publish failed for %s, marked pending", cid)
+            self._job_reading("publish", job, sys.modules[__name__])
 
         # OMN-18636 AC5. Nothing further runs for this job, so it stops
         # reporting itself as settling. A flag that is only ever set makes every

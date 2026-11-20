@@ -54,6 +54,7 @@ one_shots:
   - redpanda-sasl-enable
   - redpanda-scram-user
   - redpanda-settings
+  - composed-runtime-base-image
   - "*-labwork-user"
   - "*-sasl-enable"
   - "*-scram-user"
@@ -255,6 +256,13 @@ allowed_commands:
   - match: exact
     field: command
     services:
+      - redpanda-sasl-enable
+    reason: The stability lane's own principal one-shot and SASL flip (OMN-25927), declared in its overlay for its broker only.
+    argv_sha256: 174df47ebbd987e20f8f89a4a9f2262fb3909697c126a2351d2d3c5021ad419c
+    command_hint: set -eu
+  - match: exact
+    field: command
+    services:
       - sha256:88d12b21011ce6ecc6a5db72ec53c093a45f5026c119b974d02b0a7c93e9e143
     reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
     argv_sha256: 43ffaed8dd05a5bc3dab140785a0403fb6b83b1e50b87640e894b355ee014722
@@ -265,6 +273,13 @@ allowed_commands:
       - redpanda-scram-user
     reason: Declared dependency or one-shot command; this grants no runtime sidecar executable.
     argv_sha256: 605bb4fec55961b85941f3e4e8b665b40ec06633d4162e56a896fd086f6456a4
+    command_hint: set -eu
+  - match: exact
+    field: command
+    services:
+      - redpanda-scram-user
+    reason: The stability lane's own principal one-shot and SASL flip (OMN-25927), declared in its overlay for its broker only.
+    argv_sha256: 9dd58fff7cfb07104fea649ffea4ba7148b60aa195d6aa35c8da4a5c8d7fb455
     command_hint: set -eu
   - match: exact
     field: command
@@ -555,7 +570,6 @@ console_scripts:
       status: developer_only
       reason: Developer or CI tooling; not a permitted runtime-image service command.
   omnibase_spi: {}
-  omnibase_compat: {}
   omnibase_infra:
     omni-infra:
       target: omnibase_infra.cli.commands:cli
@@ -700,7 +714,6 @@ console_scripts:
 console_script_sources:
   omnibase_core: installed 0.47.66
   omnibase_spi: installed 0.23.7
-  omnibase_compat: installed 0.5.7
   omnibase_infra: installed 0.38.77
   omninode-claude: declared 0.27.0
   omninode-memory: wheel 0.18.9 sha256:16563f5a39814f4c9c4d11b2ca4faa7ea15f348db9600931a28f645ed2cf5414
@@ -735,7 +748,7 @@ baseline:
     files: 7
     ticket: OMN-21288
   - service: onex-api
-    files: 5
+    files: 1
     ticket: OMN-21288
   - service: projection-api
     files: 11

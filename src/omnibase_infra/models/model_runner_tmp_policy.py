@@ -10,4 +10,6 @@ class ModelRunnerTmpPolicy(BaseModel):
 
     uid: int = Field(default=1001, ge=0)
     mode: str = "1777"
+    pause_dir_mode: str = "755"
+    job_dir_mode: str = "755"
     timeout_seconds: int = Field(default=60, gt=0)

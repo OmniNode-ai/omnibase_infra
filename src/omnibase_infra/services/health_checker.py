@@ -84,7 +84,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.enum_runtime_readiness_state import (
     EnumRuntimeReadinessState,
 )
-from omnibase_infra.handlers.http_mount import AsgiMounts
+from omnibase_infra.handlers.http_mount import AsgiMounts, listener_runner
 from omnibase_infra.handlers.mixin_shared_listener import MixinSharedListener
 from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
 from omnibase_infra.runtime.health.runtime_health_block import (
@@ -752,7 +752,7 @@ class ServiceHealth(MixinSharedListener):
             self._app = self._build_app()
 
             # Create and start runner
-            self._runner = web.AppRunner(self._app)
+            self._runner = listener_runner(self._app)
             await self._runner.setup()
 
             # Create site and start listening

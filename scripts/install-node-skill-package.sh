@@ -43,18 +43,11 @@
 # baked-in literal. Set OMNIMARKET_REF to pin an exact rev for reproducibility
 # or offline use — that override always wins and is never second-guessed.
 #
-# PIN RESOLUTION (OMN-18675): the same staleness applied, unnoticed, to the two
-# omni-internal leaf deps co-installed beside omnimarket. They were baked-in
-# literals (`omnibase-compat==0.5.5`, `omninode-memory==0.15.0`, written
-# 2026-07-02 and never touched since) installed with `--no-deps` and an EXACT
-# `==`, which is an instruction rather than a floor. On 2026-09-18 a --repair
-# run therefore force-DOWNGRADED a healthy shared plugin CLI venv from
-# omnibase-compat 0.5.7 and omninode-memory 0.18.0 back to those 2026-07 pins,
-# removing `omnibase_compat.contracts.pr_occ_stamp` and breaking the whole
-# `onex` CLI — every command, every lane on the host. Both versions are now
-# read from the pyproject.toml OF THE REF BEING INSTALLED, so they cannot
-# disagree with omnimarket's own declared requirements, and every install step
-# is planned before it is applied and REFUSED if it would move any installed
+# PIN RESOLUTION (OMN-18675): hardcoded exact pins for the packages
+# co-installed beside omnimarket drifted from its requirements. On 2026-09-18
+# those pins downgraded dependencies and broke the shared `onex` CLI. The
+# installer now reads the requirements from pyproject.toml at the ref it
+# installs. The installer plans each step and refuses to move any installed
 # package backwards (scripts/venv_install_plan.py). There is no bypass flag.
 #
 # READBACK (OMN-18663): steps 3 and 4 below prove the venv still WORKS -- the
@@ -110,7 +103,7 @@ OMNIMARKET_GIT="https://github.com/OmniNode-ai/omnimarket.git"
 # are installed --no-deps so their internal metadata does not re-resolve (or
 # downgrade) the infra layer beneath. The NAMES are fixed here; the VERSIONS
 # are resolved from the ref being installed (OMN-18675) — never literals.
-OMNI_INTERNAL_NO_DEPS_PKGS=(omnibase-compat omninode-memory)
+OMNI_INTERNAL_NO_DEPS_PKGS=(omninode-memory)
 # Pure-PyPI leaf deps (safe to resolve normally; no omni-internal metadata).
 PYPI_LEAF_DEPS=(anthropic radon "docker>=7.0.0" python-dateutil)
 
@@ -234,7 +227,7 @@ fi
 # too. `-t <prefix>` alone is BSD-only and fails on Linux runners.
 PYPROJECT_TMP="$(mktemp "${TMPDIR:-/tmp}/omnimarket-pyproject.XXXXXX")"
 STAGE_DIR=""
-trap 'rm -f "$PYPROJECT_TMP"; [[ -z "$STAGE_DIR" ]] || rm -rf "$STAGE_DIR"' EXIT
+trap 'rm -f "$PYPROJECT_TMP"; [[ -z "$STAGE_DIR" ]] || env -u PYTHONPATH "$PYTHON_BIN" "$ATOMIC_TOOL" sweep --python "$PYTHON_BIN" --stage-dir "$STAGE_DIR" --lock-held "$VENV_LOCK_PATH" --lock-timeout "$ONEX_VENV_LOCK_TIMEOUT"' EXIT
 git -C "$OMNIMARKET_CLONE" show "${OMNIMARKET_REF}:pyproject.toml" >"$PYPROJECT_TMP"
 
 RESOLVED_PINS="$(env -u PYTHONPATH "$PYTHON_BIN" "$SCRIPT_DIR/resolve_omnimarket_pins.py" \
@@ -334,12 +327,11 @@ if [[ -n "$STAGE_DIR" ]]; then
   # place, read the venv back WITHOUT the overlay, and restore on a failure.
   echo
   echo "== commit: exchanging the staged packages into $PYTHON_BIN =="
-  trap 'rm -f "$PYPROJECT_TMP"' EXIT # the stage now holds the previous packages
-  atomic() { env -u PYTHONPATH "$PYTHON_BIN" "$ATOMIC_TOOL" "$1" --python "$PYTHON_BIN" --stage-dir "$STAGE_DIR"; }
+  atomic() { env -u PYTHONPATH "$PYTHON_BIN" "$ATOMIC_TOOL" "$1" --python "$PYTHON_BIN" --stage-dir "$STAGE_DIR" --lock-held "$VENV_LOCK_PATH" --lock-timeout "$ONEX_VENV_LOCK_TIMEOUT"; }
   atomic commit || { echo "FAIL: the commit did not complete; the previous packages were restored ($STAGE_DIR)." >&2; exit 1; }
   if ! ( verify_install "$PYTHON_BIN" ); then
     echo "FAIL: the venv failed its readback after the commit; rolling back." >&2
-    if atomic rollback >&2; then rm -rf "$STAGE_DIR"; else echo "  rollback incomplete; journal and previous packages are in $STAGE_DIR" >&2; fi
+    if atomic rollback >&2; then :; else echo "  rollback incomplete; journal and previous packages are in $STAGE_DIR" >&2; fi
     exit 1
   fi
   atomic finalize

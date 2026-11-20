@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""omnibase_compat is retired; no live use may remain in the repo.
+"""Guard the build, deployment and runtime surfaces against retired package use.
 
 The graduated symbols live in omnibase_core and omnibase_spi. This guard
 scans the files that previously referenced the retired package and asserts
@@ -15,7 +15,7 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Repo-relative paths that previously referenced omnibase_compat.
+# Repo-relative paths that previously referenced the retired package.
 _SCANNED_PATHS: list[str] = [
     "docker/Dockerfile.runtime",
     "scripts/deploy-agent/deploy_agent/executor.py",
@@ -24,6 +24,28 @@ _SCANNED_PATHS: list[str] = [
     ".github/workflows/docker-build.yml",
     "config/lab_proof_profiles.yaml",
     "src/omnibase_infra/nodes/node_lab_proof_plan_compute/contract.yaml",
+    # Guard CI checkouts, installs, pins, lists and workspace sibling sets.
+    ".github/workflows/ci.yml",
+    ".github/workflows/hostile-review-judge.yml",
+    ".github/workflows/hostile-reviewer.yml",
+    ".github/workflows/build-workspace-candidate-runtime.yml",
+    ".github/workflows/evidence-autoclose-sweep.yml",
+    ".github/workflows/in-progress-probe-hygiene.yml",
+    ".github/workflows/sibling-lock-refresh.yml",
+    ".github/sibling-pins.yaml",
+    "docker/docker-compose.runners.yml",
+    "architecture-handshakes/validator-requirements.yaml",
+    "config/validation/stack_shape.yaml",
+    "scripts/version-matrix.yaml",
+    "scripts/install-node-skill-package.sh",
+    "scripts/check-pinned-wheels.py",
+    "scripts/check_dep_provenance.py",
+    "src/omnibase_infra/runtime_identity.py",
+    "src/omnibase_infra/validators/contract_topic_graph.py",
+    "scripts/runtime_build/build_effects_candidate.py",
+    "scripts/runtime_build/scoped_effects_plan.py",
+    "scripts/runtime_build/scoped_image_probe.py",
+    "scripts/validation/lint_topic_names.py",
 ]
 
 # Tokens that must not appear in non-comment lines of the scanned files.
@@ -65,7 +87,7 @@ def test_strip_function_detects_token_in_code() -> None:
 @pytest.mark.unit
 def test_strip_function_ignores_comment_only_lines() -> None:
     """A token that appears only in a whole-line comment is not detected."""
-    sample = "# omnibase_compat is retired\nx = 1\n"
+    sample = f"# {_RETIRED_TOKENS[0]} is retired\nx = 1\n"
     stripped = _strip_whole_line_comments(sample)
     for token in _RETIRED_TOKENS:
         assert token not in stripped

@@ -166,6 +166,12 @@ services:
     profiles: !override ["dev-105-disabled"]
   infisical:
     profiles: !override ["dev-105-disabled"]
+  # OMN-24714: docker-compose.dev-lane.yml empties this service's profile list so
+  # the dev lane's core phase starts the architecture graph's store. This lane
+  # layers that file and runs no graph (4 GiB it does not have, ports on every
+  # interface on a host whose overlay publishes loopback only), so it is fenced.
+  omnibase-infra-memgraph:
+    profiles: !override ["graph-store-fenced"]
   forward-migration:
     container_name: omnibase-infra-dev-105-forward-migration
     labels:
@@ -174,23 +180,6 @@ services:
     container_name: omnibase-infra-dev-105-migration-gate
   intelligence-migration:
     container_name: omnibase-infra-dev-105-intelligence-migration
-  cloud-migration-files:
-    container_name: omnibase-infra-dev-105-cloud-migration-files
-    profiles: !override ["dev-105-disabled"]
-    labels:
-      com.omninode.lane: dev-105
-  cloud-migration:
-    container_name: omnibase-infra-dev-105-cloud-migration
-    profiles: !override ["dev-105-disabled"]
-    labels:
-      com.omninode.lane: dev-105
-  onex-api:
-    container_name: onex-api-dev-105
-    profiles: !override ["dev-105-disabled"]
-    ports: !override
-      - "127.0.0.1:43090:8000"
-    labels:
-      com.omninode.lane: dev-105
   autoheal:
     container_name: omnibase-infra-dev-105-autoheal
   phoenix:
@@ -353,8 +342,6 @@ volumes:
     name: omnibase-infra-dev-105-keycloak-data
   phoenix_data:
     name: omnibase-infra-dev-105-phoenix-data
-  cloud_migrations:
-    name: omnibase-infra-dev-105-cloud-migrations
   runtime_logs:
     name: omninode-dev-105-runtime-logs
   runtime_data:

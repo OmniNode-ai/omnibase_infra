@@ -513,17 +513,15 @@ services:
       # load-bearing exemption is the scoped `git -c safe.directory=<clone>`
       # committed in the runtime_build scripts themselves (OMN-14900); this
       # env only covers stray git invocations outside those scripts.
-      GIT_CONFIG_COUNT: "5"
+      GIT_CONFIG_COUNT: "4"
       GIT_CONFIG_KEY_0: safe.directory
       GIT_CONFIG_VALUE_0: ${DEPLOY_RUNNER_OMNI_HOME:?}/omnibase_infra
       GIT_CONFIG_KEY_1: safe.directory
       GIT_CONFIG_VALUE_1: ${DEPLOY_RUNNER_OMNI_HOME:?}/omnibase_core
       GIT_CONFIG_KEY_2: safe.directory
-      GIT_CONFIG_VALUE_2: ${DEPLOY_RUNNER_OMNI_HOME:?}/omnibase_compat
+      GIT_CONFIG_VALUE_2: ${DEPLOY_RUNNER_OMNI_HOME:?}/onex_change_control
       GIT_CONFIG_KEY_3: safe.directory
-      GIT_CONFIG_VALUE_3: ${DEPLOY_RUNNER_OMNI_HOME:?}/onex_change_control
-      GIT_CONFIG_KEY_4: safe.directory
-      GIT_CONFIG_VALUE_4: ${DEPLOY_RUNNER_OMNI_HOME:?}/omnimarket
+      GIT_CONFIG_VALUE_3: ${DEPLOY_RUNNER_OMNI_HOME:?}/omnimarket
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # PRIVATE clone tree at the identical host:container path. The shared

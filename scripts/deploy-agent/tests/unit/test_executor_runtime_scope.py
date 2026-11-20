@@ -92,6 +92,9 @@ class TestRuntimeScopeComposeUp:
         def fake_run(
             cmd: list[str], timeout: int, **kwargs: object
         ) -> subprocess.CompletedProcess:
+            if cmd[:2] == ["docker", "inspect"]:
+                # OMN-25106: the roll reads a service's health before it rolls it.
+                return subprocess.CompletedProcess(cmd, 1, "", "No such object")
             captured_cmds.append(cmd)
             return _ok()
 
@@ -156,6 +159,9 @@ class TestRuntimeScopeComposeUp:
         def fake_run(
             cmd: list[str], timeout: int, **kwargs: object
         ) -> subprocess.CompletedProcess:
+            if cmd[:2] == ["docker", "inspect"]:
+                # OMN-25106: the roll reads a service's health before it rolls it.
+                return subprocess.CompletedProcess(cmd, 1, "", "No such object")
             captured_cmds.append(cmd)
             return _ok()
 
@@ -195,6 +201,9 @@ class TestCoreAndFullScopeComposeUp:
         def fake_run(
             cmd: list[str], timeout: int, **kwargs: object
         ) -> subprocess.CompletedProcess:
+            if cmd[:2] == ["docker", "inspect"]:
+                # OMN-25106: the roll reads a service's health before it rolls it.
+                return subprocess.CompletedProcess(cmd, 1, "", "No such object")
             captured_cmds.append(cmd)
             return _ok()
 
@@ -243,6 +252,9 @@ class TestCoreAndFullScopeComposeUp:
         def fake_run(
             cmd: list[str], timeout: int, **kwargs: object
         ) -> subprocess.CompletedProcess:
+            if cmd[:2] == ["docker", "inspect"]:
+                # OMN-25106: the roll reads a service's health before it rolls it.
+                return subprocess.CompletedProcess(cmd, 1, "", "No such object")
             captured_cmds.append(cmd)
             return _ok()
 
@@ -268,6 +280,12 @@ class TestCoreAndFullScopeComposeUp:
             requested, timeout_s=120, lane=EnumRuntimeLane.DEV
         )
 
+    # OMN-24476 emptied the dev lane's cloud one-shots; restore the pair so the preflight
+    # ordering they exercised stays tested.
+    @patch(
+        "deploy_agent.executor.DEV_LANE_ONLY_MIGRATION_SERVICES",
+        ("cloud-migration-files", "cloud-migration"),
+    )
     def test_runtime_scope_runs_migration_preflight_before_runtime_services(
         self,
     ) -> None:
@@ -280,6 +298,9 @@ class TestCoreAndFullScopeComposeUp:
         ) -> subprocess.CompletedProcess:
             if cmd[:1] == ["git"] and "rev-parse" in cmd:
                 return _ok()
+            if cmd[:2] == ["docker", "inspect"]:
+                # OMN-25106: the roll reads a service's health before it rolls it.
+                return subprocess.CompletedProcess(cmd, 1, "", "No such object")
             captured_cmds.append(cmd)
             if "SELECT to_regclass('public.delegation_events') IS NOT NULL" in cmd:
                 return subprocess.CompletedProcess(

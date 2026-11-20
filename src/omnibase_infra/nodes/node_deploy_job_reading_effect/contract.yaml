@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_deploy_job_reading_effect
+contract_name: node_deploy_job_reading_effect
+node_name: node_deploy_job_reading_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Turns the terminal outcome of one deploy job (dev or stability lane, never prod) into one ledger reading row in the shape of the reading writer's rows, and appends it through the append command the reading writer's overlay already names. A successful job reads WORKING; a failed job reads NOT_WORKING with its failing step. The node declares no topic: the bus append command owns the ledger's topics.
+input_model:
+  name: ModelDeployJobReadingRequest
+  module: omnibase_infra.models.model_deploy_job_reading_request
+  description: The job's settled record (id, lane, scope, status, phase results, completion time) and the time the reading is read.
+output_model:
+  name: ModelDeployJobReadingResult
+  module: omnibase_infra.models.model_deploy_job_reading_result
+  description: The row built, the request id it was appended under and whether the ledger took it.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: read_deploy_job
+      handler: {name: HandlerDeployJobReading, module: omnibase_infra.handlers.handler_deploy_job_reading}
+# The reading writer's append route, by the names its overlay gives the two variables.
+settings:
+  append_command_env: ONEX_LEDGER_BUS_APPEND_COMMAND
+  host_name_env: ONEX_LEDGER_HOST_NAME
+  # The deploy agent holds its broker login under a prefixed name (the variable named by
+  # sasl_prefix_env gives the prefix); the append command reads the unprefixed names.
+  sasl_prefix_env: KAFKA_SASL_ENV_PREFIX
+  sasl_login_names: [KAFKA_SASL_USERNAME, KAFKA_SASL_PASSWORD]
+  append_timeout_seconds: 30
+  error_cell_chars: 160
+  row_lane: deploy-agent
+  row_actor: deploy-agent:job-reading
+  piece: "11"
+  piece_name: deploy-agent-job
+  max_age_seconds: 7200
+  excluded_lanes: [prod]
+  # OMN-24562: the alarm rows. A failed job and a pin inside the window before its expiry
+  # each write one STATUS row with src=alarm that names its owner and the owner's action.
+  pin_alarm_window_hours: 6
+  pin_alarm_check_interval_seconds: 300
+  # The agent's state directory, where its code-ref pin record lives (the pin handler's variable).
+  pin_state_dir_env: DEPLOY_AGENT_STATE_DIR
+  alarm_owner: swarm-item-lane-OMN-24562
+  alarm_job_owner_line: read the job's failing step on the deploy agent's host and open or hand the fix to the integrator lane that owns the pin
+  alarm_pin_owner_line: the integrator lane that owns the pin lands or re-registers its unmerged fixes before expires_at; the orchestrator lands the open PRs
+  # The deploy phases in pipeline order; the first one that failed is the failing step.
+  phase_order: [preflight, git, compose_gen, seed, core, runtime, verification]
+capabilities:
+  - name: deploy.job_reading
+    description: Publish each deploy job's terminal outcome as a ledger reading row, so a failed job reads NOT_WORKING with its failing step where an owner reads it, and write an alarm row with an owner line for a failed job and for a code-ref pin within six hours of its expiry.
+metadata:
+  ticket: OMN-24617
+  author: OmniNode Team
+  description: Host-local effect run by the deploy agent. It appends one ledger row and writes nothing else; no prod runner admission.
+  tags: [effect, deployment, reading]

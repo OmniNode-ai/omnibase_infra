@@ -89,8 +89,7 @@
 #   The stability lane runs a pinned release set and never a dev ref. The
 #   set is the committed pin file, config/lab/lane-overlays/<lane>.release-pin.yaml
 #   under ONEX_WORKSPACE_CONFIG_ROOT (or --pin-file), naming one v<major>.<minor>.<patch>
-#   tag each for omnibase_infra, omnibase_core and omnimarket (omnibase_compat is
-#   retired and no longer staged, OMN-14108; a pin file line for it is ignored)
+#   tag each for omnibase_infra, omnibase_core and omnimarket.
 #   (lines `  <repo>: <tag>` under `pin:`); --ref overrides the omnibase_infra tag.
 #   Before anything is read from the lane, tagged, checked out, built or
 #   restarted, each tag must be a release tag of its clone under OMNI_HOME: a dev
@@ -277,7 +276,11 @@ readonly CORE_SERVICES=(omninode-runtime runtime-worker projection-api)
 # docker/Dockerfile.runtime, the same image the four core services build from,
 # not the release-only selector path that is still broken in workspace mode.
 readonly REFRESH_BUILD_SERVICES=(
-    "${CORE_SERVICES[@]}"
+    # OMN-25927 -- this lane's principal one-shot and SASL flip ride on the first
+    # line, in the scope for refresh_dev_lane.sh's OMN-18012 reason: pinned
+    # upstream images that cannot go stale, here so every governed refresh
+    # re-creates the declared principals and re-asserts the flip and its readback.
+    "${CORE_SERVICES[@]}" redpanda-scram-user redpanda-sasl-enable
     projection-tenant-registry-writer
     projection-delegation-writer
     projection-registration-writer
@@ -304,7 +307,8 @@ readonly REFRESH_BUILD_SERVICES=(
     # It builds from docker/Dockerfile.runtime -- the same image as the four
     # core services -- so the open OMN-14262 BUILD_SOURCE selector mismatch
     # that scopes this array does not reach it.
-    tenant-projection-writer
+    tenant-projection-writer composed-runtime-base-image
+    # OMN-24562: composed-runtime-base-image, on the line above, is the build-only infra half of the composed runtime image that the stability overlay builds the kernel, worker, projection api and writers on, as the dev lane does. Scale 0, so up starts nothing.
 )
 # OMN-18061: the ROLLBACK set is the DEPLOYED set, not the core four.
 #
@@ -524,7 +528,7 @@ trap 'rm -rf "${WORKDIR}"' EXIT
 # the ONEX_DEPLOY_LANE_ENV_EXPORTS line that has onex-runtime-deploy source them after the
 # operator env, so they survive. An overlay that cannot be rendered stops the refresh
 # here, before anything is read from the lane, built or restarted.
-LANE_ENV_EXPORTS="$(PYTHONPATH="${REPO_ROOT}/scripts/deploy-agent${PYTHONPATH:+:${PYTHONPATH}}" run_python "${REPO_ROOT}/src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py" "${OMNI_HOME}" "${STATE_DIR}")" || { err "LANE_ENV_FRAGMENT_REFUSED: the LLM endpoint env could not be rendered from the llm_endpoints overlay (reason above); nothing was built or restarted."; exit 64; }
+LANE_ENV_EXPORTS="$(PYTHONPATH="${REPO_ROOT}/scripts/deploy-agent${PYTHONPATH:+:${PYTHONPATH}}" run_python "${REPO_ROOT}/src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py" "${OMNI_HOME}" "${STATE_DIR}" without-declaration)" || { err "LANE_ENV_FRAGMENT_REFUSED: the LLM endpoint env could not be rendered from the llm_endpoints overlay (reason above); nothing was built or restarted."; exit 64; }
 # shellcheck source=/dev/null
 source <(printf '%s' "${LANE_ENV_EXPORTS}")
 

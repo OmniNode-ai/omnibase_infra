@@ -63,8 +63,7 @@ HOSTNAME_ON_HOST = "omnibook"
 COMPOSE_PROJECT = "omnibase-infra-dev-105"
 NETWORK = "omnibase-infra-dev-105-network"
 
-#: The declared block. 61090 (onex-api) is published by a disabled service, so
-#: it is reserved and never bound; it is still in the block.
+#: The declared block.
 EXPECTED_PUBLISHED_PORTS = {
     "43085",  # runtime main
     "43086",  # runtime effects
@@ -74,7 +73,6 @@ EXPECTED_PUBLISHED_PORTS = {
     "43092",  # skill lifecycle consumer
     "43093",  # context audit consumer
     "43006",  # phoenix
-    "43090",  # onex-api (disabled here, reserved)
     "43436",  # Postgres
     "43379",  # Valkey
     "43192",  # Redpanda Kafka (external listener)
@@ -111,33 +109,26 @@ REDPANDA_MEMORY_DEFAULT = "${DEV_105_REDPANDA_MEMORY:-2G}"
 FORBIDDEN_SERVICE_FRAGMENTS = ("keycloak", "infisical")
 
 #: The .201 dev lane's declared service -> its dev-105 name. AC1.
+#: The projection API, the runtime effects role and the delegation writer are
+#: folded into the dev main runtime and no longer declared by the dev lane's
+#: manifest, so the dev lane has nothing of theirs to map here.
 DEV_TO_DEV_105 = {
     "omnibase-infra-postgres": "omnibase-infra-dev-105-postgres",
     "omnibase-infra-redpanda": "omnibase-infra-dev-105-redpanda",
     "omnibase-infra-valkey": "omnibase-infra-dev-105-valkey",
-    "omnimarket-projection-api": "omnimarket-dev-105-projection-api",
     "omninode-runtime": "omninode-dev-105-runtime",
-    "omninode-runtime-effects": "omninode-dev-105-runtime-effects",
     "omnimarket-projection-tenant-registry-writer": "omnimarket-dev-105-projection-tenant-registry-writer",
-    "omnimarket-projection-delegation-writer": "omnimarket-dev-105-projection-delegation-writer",
     "omnimarket-projection-registration-writer": "omnimarket-dev-105-projection-registration-writer",
     "omnimarket-projection-savings-writer": "omnimarket-dev-105-projection-savings-writer",
     "omnimarket-projection-tenant-credentials-writer": "omnimarket-dev-105-projection-tenant-credentials-writer",
     "omnimarket-projection-live-events-writer": "omnimarket-dev-105-projection-live-events-writer",
     "omnimarket-tenant-projection-writer": "omnimarket-dev-105-tenant-projection-writer",
     "omnibase-infra-forward-migration": "omnibase-infra-dev-105-forward-migration",
-    "omnibase-infra-cloud-migration": "omnibase-infra-dev-105-cloud-migration",
-    "omnibase-infra-cloud-migration-files": "omnibase-infra-dev-105-cloud-migration-files",
-    "onex-api": "onex-api-dev-105",
 }
 
-#: Declared but disabled on .105: the cloud image only the .201 lab-overlay pin
-#: delivers.
-PROFILE_GATED = {
-    "omnibase-infra-dev-105-cloud-migration",
-    "omnibase-infra-dev-105-cloud-migration-files",
-    "onex-api-dev-105",
-}
+#: No service is declared but disabled on this lane: the cloud API and its
+#: one-shots were removed from the dev lane (OMN-24476).
+PROFILE_GATED: set[str] = set()
 
 
 #: OMN-21481: dev services this lane does not mirror. The cost estimator page

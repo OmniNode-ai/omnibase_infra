@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from click.testing import CliRunner
@@ -81,7 +82,13 @@ def _readme_only_clone(root: Path) -> Path:
 
 
 def _run_node(
-    tmp_path: Path, clone: Path, entry: Path, *, repo_name: str
+    tmp_path: Path,
+    clone: Path,
+    entry: Path,
+    *,
+    repo_name: str,
+    visibility: Literal["public", "private", "internal"] = "private",
+    vocabulary: Path | None = None,
 ) -> tuple[int, str]:
     request = tmp_path / "request.json"
     request.write_text(
@@ -90,6 +97,8 @@ def _run_node(
                 "clone_path": str(clone),
                 "entry_file": str(entry),
                 "repo_name": repo_name,
+                "repository_visibility": visibility,
+                "hygiene_vocabulary_file": str(vocabulary) if vocabulary else None,
             }
         ),
         encoding="utf-8",
@@ -111,6 +120,94 @@ def _run_node(
         ],
     )
     return result.exit_code, result.stdout
+
+
+@pytest.fixture
+def repository_name_release(tmp_path: Path) -> tuple[Path, Path, str]:
+    """Keep the recorded release subject, substituting a synthetic private slug."""
+    subject = (
+        "fix: the writer-app workflow pin classifier admits Example_Secret's "
+        "OMNIBASE_CORE_COMMIT env pin bump (#4610)"
+    )
+    entry = tmp_path / "entry.md"
+    entry.write_text(
+        f"## v0.4.321 (2026-11-18)\n\n### Included Since v0.4.320\n- {subject}\n"
+        "- fix: retry example_secret-tool without changing its name (#4611)\n"
+        "- fix: align Example-Other, example_secret and example.other (#4612)\n",
+        encoding="utf-8",
+    )
+    vocabulary = tmp_path / "vocabulary.yaml"
+    vocabulary.write_text(
+        "private_repo_names: [example_secret, example-other, example.other]\n",
+        encoding="utf-8",
+    )
+    return entry, vocabulary, subject
+
+
+def test_public_repository_changelog_filters_private_subject_names(
+    tmp_path: Path, repository_name_release: tuple[Path, Path, str]
+) -> None:
+    entry, vocabulary, original_subject = repository_name_release
+    code, output = _run_node(
+        tmp_path,
+        tmp_path,
+        entry,
+        repo_name="public-example",
+        visibility="public",
+        vocabulary=vocabulary,
+    )
+    assert code == 0, output
+    changelog = (tmp_path / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert original_subject not in changelog
+    assert "Example_Secret" not in changelog
+    assert "OMNIBASE_CORE_COMMIT env pin bump (#4610)" in changelog
+    assert "retry example_secret-tool without changing its name (#4611)" in changelog
+    assert "Example-Other" not in changelog
+    assert "example_secret and" not in changelog
+    assert "example.other" not in changelog
+    assert "(#4612)" in changelog
+
+
+def test_private_repository_changelog_preserves_the_release_block(
+    tmp_path: Path, repository_name_release: tuple[Path, Path, str]
+) -> None:
+    entry, vocabulary, original_subject = repository_name_release
+    code, output = _run_node(
+        tmp_path,
+        tmp_path,
+        entry,
+        repo_name="private-example",
+        vocabulary=vocabulary,
+    )
+    assert code == 0, output
+    changelog = (tmp_path / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert original_subject in changelog
+    assert changelog == entry.read_text(encoding="utf-8").rstrip("\n") + "\n\n"
+
+
+@pytest.mark.parametrize("invalid_vocabulary", [None, "private_repo_names: []", "["])
+def test_public_repository_refuses_to_write_without_a_valid_vocabulary(
+    tmp_path: Path,
+    repository_name_release: tuple[Path, Path, str],
+    invalid_vocabulary: str | None,
+) -> None:
+    entry, vocabulary, _ = repository_name_release
+    if invalid_vocabulary is not None:
+        vocabulary.write_text(invalid_vocabulary, encoding="utf-8")
+    code, output = _run_node(
+        tmp_path,
+        tmp_path,
+        entry,
+        repo_name="public-example",
+        visibility="public",
+        vocabulary=vocabulary if invalid_vocabulary is not None else None,
+    )
+    assert code == 1, output
+    assert (
+        "release hygiene vocabulary" in output
+        or "require a hygiene vocabulary" in output
+    )
+    assert not (tmp_path / "CHANGELOG.md").exists()
 
 
 def _read_staged_paths(

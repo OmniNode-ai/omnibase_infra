@@ -10,7 +10,7 @@ each clone and ran the clone delegate in-process, as root, into those
 operator-owned trees -- so every hourly tick deposited more root-owned objects.
 Counted live on 2026-09-01::
 
-    omnibase_infra 572   omnimarket 261   omnibase_compat 150
+    omnibase_infra 572   omnimarket 261   retired repository 150
     omnibase_core  119   omnibase_spi  16          (1118 total)
 
 The resulting failure is intermittent, which is what makes it expensive: a plain

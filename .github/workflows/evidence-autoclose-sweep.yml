@@ -550,8 +550,8 @@ jobs:
       #
       # GitHub Actions checks a repo out to
       # `<runner-work-dir>/<repo>/<repo>` (the documented `github.workspace`
-      # convention — GitHub's own docs give `/home/runner/work/my-repo-name/
-      # my-repo-name` as the canonical example), so `github.workspace`'s OWN
+      # convention — GitHub's own docs give the runner's `work/my-repo-name/my-repo-name`
+      # as the canonical example), so `github.workspace`'s OWN
       # PARENT directory already satisfies
       # `${OMNI_HOME}/omnibase_infra == github.workspace` exactly, using the
       # real checkout with no symlink and no second checkout.
@@ -708,16 +708,14 @@ jobs:
       # used the same convention.
       #
       # Two reasons not to call it: it is operator tooling whose blast radius
-      # is a long-lived machine venv, not a throwaway job env; and its sibling
-      # pins are hand-maintained literals that have already drifted from what
-      # omnimarket@dev actually requires (it pins omnibase-compat==0.5.5 /
-      # omninode-memory==0.15.0; omnimarket@dev requires 0.5.6 / 0.17.1 as of
-      # this commit). Reading the split out of omnimarket's OWN pyproject makes
+      # is a long-lived machine venv, and its hand-maintained sibling pins
+      # have drifted from what omnimarket@dev
+      # requires. Reading the split out of omnimarket's OWN pyproject makes
       # this job correct by construction and immune to that drift class.
       #
       # Three-way split, by layer position:
       #   omnibase-*  SKIP     — the layer BENEATH infra. omnibase_infra's own
-      #                          lock is authoritative for core/spi/compat;
+      #                          lock is authoritative for core and spi;
       #                          letting market metadata re-pin them is the
       #                          exact inversion the layer graph forbids.
       #   omninode-*  NO-DEPS  — sibling packages beside/above infra. Install
@@ -982,7 +980,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GIT_ASKPASS: ${{ runner.temp }}/git-askpass.sh
           GIT_TERMINAL_PROMPT: "0"
-          CONTRACT_REPOS: omniclaude omnibase_compat omnibase_core omnibase_infra omnibase_spi omnidash omnidash-v2 omniintelligence omnimarket omnimemory
+          CONTRACT_REPOS: omniclaude omnibase_core omnibase_infra omnibase_spi omnidash omnidash-v2 omniintelligence omnimarket omnimemory
           CONTRACT_REPOS_PRIVATE: ${{ vars.ONEX_CONTRACT_REPOS_PRIVATE }}
         run: |
           set -euo pipefail

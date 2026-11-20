@@ -86,6 +86,26 @@ x-stability-test-strict-wiring-env: &stability_test_strict_wiring_env
 x-stability-test-lane-identity-env: &stability_test_lane_identity_env
   ONEX_RUNTIME_LANE: "stability-test"
 # =============================================================================
+# BROKER AUTHENTICATION (OMN-25927; design OMN-23363, modelled on OMN-18012)
+# =============================================================================
+# The stability broker requires SASL/SCRAM-SHA-256 with authorization on,
+# as the dev lane's does (docker-compose.dev-lane.yml, `redpanda-scram-user`
+# and `redpanda-sasl-enable`). Every client reads transport auth through
+# ModelKafkaEventBusConfig.apply_environment_overrides(): KAFKA_SECURITY_PROTOCOL,
+# KAFKA_SASL_MECHANISM, KAFKA_SASL_USERNAME, KAFKA_SASL_PASSWORD.
+#
+# One principal per stability service, named by the service: the
+# name is a literal so the principal set is declared here, and the password is a
+# fail-closed `:?` reference to STABILITY_TEST_KAFKA_SASL_PASSWORD_<SERVICE>,
+# each one generated into Infisical by that name and rendered into the operator
+# env that the stability refresh sources. No value lives in this file.
+#
+# Declared in this overlay, never in docker-compose.infra.yml: the base is
+# merged by every other lane too.
+x-broker-sasl-env: &stability_test_broker_sasl_env
+  KAFKA_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
+  KAFKA_SASL_MECHANISM: "SCRAM-SHA-256"
+# =============================================================================
 # STANDALONE PROJECTION WRITER CONFIG (OMN-17562)
 # =============================================================================
 # YAML anchors do NOT cross compose files, so the writer services at the bottom
@@ -122,6 +142,18 @@ x-lane-overlay-mount: &lane-overlay-mount
   read_only: true
   bind:
     create_host_path: false
+# OMN-24562: stability builds the runtime on omnimarket's composed image, as the dev
+# lane does (OMN-21279, docker-compose.dev-lane.yml). The infra image carries no
+# omnimarket and no BIFROST_BASE_CONTRACT_PATH, so a kernel built from it alone
+# fails boot with "BIFROST_BASE_CONTRACT_PATH is unset or blank". The build-only
+# service below is the infra half; nothing runs from it.
+x-composed-runtime-build: &lane_composed_runtime_build
+  context: ../workspace/sibling-repos/omnimarket
+  dockerfile: Dockerfile.runtime
+  additional_contexts:
+    infra-runtime: "service:composed-runtime-base-image"
+  args:
+    INFRA_RUNTIME_IMAGE: infra-runtime
 services:
   postgres:
     container_name: omnibase-infra-stability-test-postgres
@@ -196,17 +228,138 @@ services:
       - *stability_test_redpanda_kafka_port_publish
       - *stability_test_redpanda_kafka_lan_port_publish
       - *stability_test_redpanda_admin_port_publish
+  # ===========================================================================
+  # STABILITY LANE BROKER PRINCIPALS AND SASL FLIP (OMN-25927, design OMN-23363)
+  # ===========================================================================
+  # Same shape as the dev lane's OMN-18012 pair, for this lane's broker only.
+  #
+  # `redpanda-scram-user` creates one SCRAM-SHA-256 user per declared principal,
+  # idempotently, and reads each back. `redpanda-sasl-enable` waits for it to
+  # COMPLETE, grants the stability service principals `superusers` (the dev
+  # lane's grant; `kafka_enable_authorization` is null, which follows
+  # `enable_sasl`, so authorization comes on with the flip and a principal with
+  # no grant is locked out) BEFORE it flips `enable_sasl`, then proves the
+  # refusal: an unauthenticated client fails and an authenticated one succeeds.
+  #
+  # `stability-refresh-gate` is the refresh health gate's own login
+  # (verify_stability_refresh.py reads topics and groups through the Kafka API);
+  # refresh_stability_lane.sh exports it under rpk's variable names.
+  #
+  # `stability-h051` is a NEW principal for the h051 stability lane. It is NOT
+  # a superuser: its ACL rows are declared through the lab broker ACL path
+  # (the stability lane's broker ACL declaration in the lab config overlay).
+  #
+  # Both one-shots are this overlay's, so the flip reaches this lane and no
+  # other; `enable_sasl` and `superusers` are dynamic properties, so the broker
+  # is not restarted. The admin API (:9644) stays unauthenticated, as on dev:
+  # the broker healthcheck and the deploy path's reachability probe use it.
+  #
+  # Each password is a fail-closed `:?` reference; no value lives here. NOT A
+  # ROTATION: every principal is new, and no existing credential is read or
+  # changed (OPERATOR-CONSENT 2026-11-19T13:04:24Z).
+  redpanda-scram-user:
+    image: redpandadata/redpanda:v24.2.7
+    entrypoint: ["/bin/sh", "-c"]
+    environment: &stability_test_broker_principal_env
+      # <principal>=<the variable holding its password>, space-separated.
+      STABILITY_TEST_SUPERUSER_PRINCIPALS: >-
+        omninode-runtime=STABILITY_TEST_KAFKA_SASL_PASSWORD_OMNINODE_RUNTIME runtime-worker=STABILITY_TEST_KAFKA_SASL_PASSWORD_RUNTIME_WORKER projection-api=STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_API projection-tenant-registry-writer=STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_REGISTRY_WRITER projection-delegation-writer=STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_DELEGATION_WRITER projection-registration-writer=STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_REGISTRATION_WRITER projection-savings-writer=STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_SAVINGS_WRITER projection-tenant-credentials-writer=STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_CREDENTIALS_WRITER projection-live-events-writer=STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_LIVE_EVENTS_WRITER tenant-projection-writer=STABILITY_TEST_KAFKA_SASL_PASSWORD_TENANT_PROJECTION_WRITER redpanda-partition-cap=STABILITY_TEST_KAFKA_SASL_PASSWORD_REDPANDA_PARTITION_CAP stability-refresh-gate=STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_REFRESH_GATE
+      STABILITY_TEST_ACL_PRINCIPALS: "stability-h051=STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_H051"
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_OMNINODE_RUNTIME: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_OMNINODE_RUNTIME:?STABILITY_TEST_KAFKA_SASL_PASSWORD_OMNINODE_RUNTIME must be set (OMN-25927)}
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_RUNTIME_WORKER: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_RUNTIME_WORKER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_RUNTIME_WORKER must be set (OMN-25927)}
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_API: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_API:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_API must be set (OMN-25927)}
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_REGISTRY_WRITER: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_REGISTRY_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_REGISTRY_WRITER must be set (OMN-25927)}
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_DELEGATION_WRITER: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_DELEGATION_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_DELEGATION_WRITER must be set (OMN-25927)}
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_REGISTRATION_WRITER: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_REGISTRATION_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_REGISTRATION_WRITER must be set (OMN-25927)}
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_SAVINGS_WRITER: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_SAVINGS_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_SAVINGS_WRITER must be set (OMN-25927)}
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_CREDENTIALS_WRITER: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_CREDENTIALS_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_CREDENTIALS_WRITER must be set (OMN-25927)}
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_LIVE_EVENTS_WRITER: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_LIVE_EVENTS_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_LIVE_EVENTS_WRITER must be set (OMN-25927)}
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_TENANT_PROJECTION_WRITER: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_TENANT_PROJECTION_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_TENANT_PROJECTION_WRITER must be set (OMN-25927)}
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_REDPANDA_PARTITION_CAP: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_REDPANDA_PARTITION_CAP:?STABILITY_TEST_KAFKA_SASL_PASSWORD_REDPANDA_PARTITION_CAP must be set (OMN-25927)}
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_REFRESH_GATE: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_REFRESH_GATE:?STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_REFRESH_GATE must be set (OMN-25927)}
+      STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_H051: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_H051:?STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_H051 must be set (OMN-25927)}
+    command:
+      - |
+        set -eu
+        ADMIN="-X admin.hosts=redpanda:9644"
+        for pair in $$STABILITY_TEST_SUPERUSER_PRINCIPALS $$STABILITY_TEST_ACL_PRINCIPALS; do
+          name="$${pair%%=*}"
+          pass="$$(printenv "$${pair#*=}")"
+          [ -n "$$pass" ] || { echo "OMN-25927 FAIL: no password for $$name" >&2; exit 1; }
+          if /usr/bin/rpk security user list $$ADMIN | awk '{print $$1}' | grep -qx "$$name"; then
+            echo "OMN-25927: SCRAM principal $$name already present"
+          else
+            /usr/bin/rpk security user create "$$name" -p "$$pass" --mechanism SCRAM-SHA-256 $$ADMIN >/dev/null
+            echo "OMN-25927: SCRAM principal $$name created"
+          fi
+          /usr/bin/rpk security user list $$ADMIN | awk '{print $$1}' | grep -qx "$$name"
+        done
+        echo "OMN-25927: readback confirms every declared principal exists"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - omnibase-infra-network
+    restart: "no"
+    logging: *stability_test_logging
+    labels:
+      - "com.omninode.service=redpanda-scram-user"
+      - "com.omninode.ticket=OMN-25927"
+  redpanda-sasl-enable:
+    image: redpandadata/redpanda:v24.2.7
+    entrypoint: ["/bin/sh", "-c"]
+    environment: *stability_test_broker_principal_env
+    command:
+      - |
+        set -eu
+        ADMIN="-X admin.hosts=redpanda:9644"
+        BROKER="-X brokers=redpanda:9092"
+        SUPERUSERS=""
+        for pair in $$STABILITY_TEST_SUPERUSER_PRINCIPALS; do
+          SUPERUSERS="$${SUPERUSERS:+$$SUPERUSERS,}'$${pair%%=*}'"
+        done
+        /usr/bin/rpk cluster config set superusers "[$$SUPERUSERS]" $$ADMIN
+        /usr/bin/rpk cluster config set enable_sasl true $$ADMIN
+        for pair in $$STABILITY_TEST_SUPERUSER_PRINCIPALS; do
+          /usr/bin/rpk cluster config get superusers $$ADMIN | grep -q "$${pair%%=*}"
+        done
+        echo "OMN-25927: superuser grant confirmed for every stability service principal"
+        /usr/bin/rpk cluster config get enable_sasl $$ADMIN | grep -qx true
+        echo "OMN-25927: enable_sasl confirmed true"
+        if /usr/bin/rpk topic list $$BROKER >/dev/null 2>&1; then
+          echo "OMN-25927 FAIL: an UNAUTHENTICATED client reached the Kafka listener" >&2
+          exit 1
+        fi
+        echo "OMN-25927: unauthenticated client refused"
+        control="$${STABILITY_TEST_SUPERUSER_PRINCIPALS%% *}"
+        RPK_USER="$${control%%=*}" RPK_PASS="$$(printenv "$${control#*=}")" RPK_SASL_MECHANISM=SCRAM-SHA-256 /usr/bin/rpk topic list $$BROKER >/dev/null
+        echo "OMN-25927: authenticated client accepted - positive control"
+    depends_on:
+      redpanda-scram-user:
+        condition: service_completed_successfully
+    networks:
+      - omnibase-infra-network
+    restart: "no"
+    logging: *stability_test_logging
+    labels:
+      - "com.omninode.service=redpanda-sasl-enable"
+      - "com.omninode.ticket=OMN-25927"
   redpanda-partition-cap:
     image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-stability-test-redpanda-partition-cap
     entrypoint: ["/bin/sh", "-c"]
     # OMN-14013's durable 15000 cap survives the shared-profile fold.
+    # OMN-25927: it runs after the SASL flip and reads the Kafka API as its own principal.
     environment:
       REDPANDA_PARTITIONS_PER_SHARD: "15000"
       REDPANDA_PROFILE_MEMORY: ${STABILITY_TEST_REDPANDA_MEMORY:-12G}
+      RPK_USER: "redpanda-partition-cap"
+      RPK_PASS: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_REDPANDA_PARTITION_CAP:?STABILITY_TEST_KAFKA_SASL_PASSWORD_REDPANDA_PARTITION_CAP must be set (OMN-25927)}
     depends_on:
       redpanda:
         condition: service_healthy
+      redpanda-sasl-enable:
+        condition: service_completed_successfully
     networks:
       - omnibase-infra-network
     restart: "no"
@@ -228,7 +381,20 @@ services:
     restart: "no"
   intelligence-migration:
     container_name: omnibase-infra-stability-test-intelligence-migration
+  # OMN-24562: the build-only infra half of the composed runtime image (mirrors
+  # dev-lane-infra-runtime-image). A one-shot of config/validation/stack_shape.yaml; scale 0: `up` never starts a container for it.
+  composed-runtime-base-image:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    restart: "no"
+    profiles: ["runtime", "full"]
+    scale: 0
   omninode-runtime:
+    build: *lane_composed_runtime_build
     container_name: omninode-stability-test-runtime
     restart: unless-stopped
     depends_on:
@@ -239,7 +405,9 @@ services:
       redpanda-partition-cap:
         condition: service_completed_successfully
     environment:
-      !!merge <<: [*stability_test_strict_wiring_env, *stability_test_lane_identity_env]
+      !!merge <<: [*stability_test_strict_wiring_env, *stability_test_lane_identity_env, *stability_test_broker_sasl_env]
+      KAFKA_SASL_USERNAME: "omninode-runtime"
+      KAFKA_SASL_PASSWORD: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_OMNINODE_RUNTIME:?STABILITY_TEST_KAFKA_SASL_PASSWORD_OMNINODE_RUNTIME must be set - the stability lane authenticates omninode-runtime to its own broker as principal omninode-runtime (OMN-25927); resolved from Infisical through the operator env, never inlined here}
       # OMN-21288: carried over unchanged from runtime-effects.
       CODING_AGENT_CRED_HOME: /home/${RUNTIME_USER_NAME:-omniinfra}
       ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/${RUNTIME_USER_NAME:-omniinfra}/agent-workspaces
@@ -286,6 +454,11 @@ services:
       # (docker/runtime-policy.env), fail-fast if the policy env is missing.
       ONEX_TRAJECTORY_EVALUATION_BACKEND: ${STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND}
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
+      # OMN-24903 (RULING 2026-11-17T00:45:37Z): the same overlay roots as the
+      # dev runtime main (docker-compose.dev-tenant-fold.yml), from the same
+      # host directories. Unset, every delegation the nightly measures on this
+      # lane was refused "no call budget declared".
+      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-branch:/etc/onex/skill-overlays-store:/etc/onex/skill-overlays
     ports: !override
       - "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085"
       - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
@@ -303,6 +476,10 @@ services:
       - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
+      # OMN-24903: the dev runtime main's two overlay mounts, with its defaults.
+      # The branch root is a directory in the container's writable layer, not a mount.
+      - ${DEV_LANE_SKILL_OVERLAY_ROOTS_DIR:-./skill-overlay-roots}:/etc/onex/skill-overlays:ro
+      - ${DEV_LANE_OVERLAY_STORE_ROOTS_DIR:-../../overlays/overlays}:/etc/onex/skill-overlays-store:ro
     # OMN-15217: strict semantic healthcheck — this lane's green is cited as
     # stability-proof for prod promotion (OMN-13418), so it must not be able to
     # report healthy while the runtime reports DEGRADED. Verified mask on
@@ -345,6 +522,7 @@ services:
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/main"
       - "com.omninode.runtime.id=stability-test-main"
   runtime-effects:
+    build: *lane_composed_runtime_build
     # OMN-21288, 2026-10-20 ruling: effects run as nodes inside the one runtime.
     profiles: !override ["folded-effects"]
     container_name: omninode-stability-test-runtime-effects
@@ -441,9 +619,13 @@ services:
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/effects"
       - "com.omninode.runtime.id=stability-test-effects"
   projection-api:
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-api
     restart: unless-stopped
     environment:
+      !!merge <<: *stability_test_broker_sasl_env
+      KAFKA_SASL_USERNAME: "projection-api"
+      KAFKA_SASL_PASSWORD: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_API:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_API must be set - the stability lane authenticates projection-api to its own broker as principal projection-api (OMN-25927); resolved from Infisical through the operator env, never inlined here}
       ONEX_ENVIRONMENT: stability-test
       KAFKA_ENVIRONMENT: stability-test
       ONEX_DATABASE_TOPOLOGY_PROFILE: stability-test
@@ -455,13 +637,16 @@ services:
       - "com.omninode.ticket=OMN-11542"
       - "com.omninode.service=projection-api"
   runtime-worker:
+    build: *lane_composed_runtime_build
     container_name: omninode-stability-test-runtime-worker
     restart: unless-stopped
     depends_on:
       migration-gate:
         condition: service_healthy
     environment:
-      !!merge <<: *stability_test_strict_wiring_env
+      !!merge <<: [*stability_test_strict_wiring_env, *stability_test_broker_sasl_env]
+      KAFKA_SASL_USERNAME: "runtime-worker"
+      KAFKA_SASL_PASSWORD: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_RUNTIME_WORKER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_RUNTIME_WORKER must be set - the stability lane authenticates runtime-worker to its own broker as principal runtime-worker (OMN-25927); resolved from Infisical through the operator env, never inlined here}
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test
@@ -628,12 +813,7 @@ services:
   # writers do carry it (as `${ONEX_ENVIRONMENT:-local}`), pinned to the lane
   # value here rather than left to a host default.
   projection-tenant-registry-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-tenant-registry-writer
     profiles: ["runtime", "full"]
     networks:
@@ -651,7 +831,9 @@ services:
       - -m
       - omnimarket.nodes.node_projection_tenant_registry.handlers.handler_tenant_registry_projection
     environment:
-      !!merge <<: *stability_test_analytics_env
+      !!merge <<: [*stability_test_analytics_env, *stability_test_broker_sasl_env]
+      KAFKA_SASL_USERNAME: "projection-tenant-registry-writer"
+      KAFKA_SASL_PASSWORD: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_REGISTRY_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_REGISTRY_WRITER must be set - the stability lane authenticates projection-tenant-registry-writer to its own broker as principal projection-tenant-registry-writer (OMN-25927); resolved from Infisical through the operator env, never inlined here}
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       # Its OWN consumer group, distinct from the shared kernel's subscription
@@ -692,12 +874,7 @@ services:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-17562"
   projection-delegation-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-delegation-writer
     profiles: ["runtime", "full"]
     networks:
@@ -715,7 +892,9 @@ services:
       - -m
       - omnimarket.nodes.node_projection_delegation.handlers.handler_delegation
     environment:
-      !!merge <<: [*stability_test_analytics_env, *stability_test_tenant_projection_env, *stability_test_internal_projection_env]
+      !!merge <<: [*stability_test_analytics_env, *stability_test_tenant_projection_env, *stability_test_internal_projection_env, *stability_test_broker_sasl_env]
+      KAFKA_SASL_USERNAME: "projection-delegation-writer"
+      KAFKA_SASL_PASSWORD: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_DELEGATION_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_DELEGATION_WRITER must be set - the stability lane authenticates projection-delegation-writer to its own broker as principal projection-delegation-writer (OMN-25927); resolved from Infisical through the operator env, never inlined here}
       ONEX_DATABASE_TOPOLOGY_PROFILE: stability-test
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
@@ -746,12 +925,7 @@ services:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-17562"
   projection-registration-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-registration-writer
     profiles: ["runtime", "full"]
     networks:
@@ -769,7 +943,9 @@ services:
       - -m
       - omnimarket.nodes.node_projection_registration.handlers.handler_registration
     environment:
-      !!merge <<: *stability_test_analytics_env
+      !!merge <<: [*stability_test_analytics_env, *stability_test_broker_sasl_env]
+      KAFKA_SASL_USERNAME: "projection-registration-writer"
+      KAFKA_SASL_PASSWORD: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_REGISTRATION_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_REGISTRATION_WRITER must be set - the stability lane authenticates projection-registration-writer to its own broker as principal projection-registration-writer (OMN-25927); resolved from Infisical through the operator env, never inlined here}
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.registration-writer.consume.v1"
@@ -799,12 +975,7 @@ services:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-17562"
   projection-savings-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-savings-writer
     profiles: ["runtime", "full"]
     networks:
@@ -822,7 +993,9 @@ services:
       - -m
       - omnimarket.nodes.node_projection_savings.handlers.handler_savings
     environment:
-      !!merge <<: [*stability_test_analytics_env, *stability_test_tenant_projection_env, *stability_test_internal_projection_env]
+      !!merge <<: [*stability_test_analytics_env, *stability_test_tenant_projection_env, *stability_test_internal_projection_env, *stability_test_broker_sasl_env]
+      KAFKA_SASL_USERNAME: "projection-savings-writer"
+      KAFKA_SASL_PASSWORD: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_SAVINGS_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_SAVINGS_WRITER must be set - the stability lane authenticates projection-savings-writer to its own broker as principal projection-savings-writer (OMN-25927); resolved from Infisical through the operator env, never inlined here}
       ONEX_DATABASE_TOPOLOGY_PROFILE: stability-test
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
@@ -853,12 +1026,7 @@ services:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-17562"
   projection-tenant-credentials-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-tenant-credentials-writer
     profiles: ["runtime", "full"]
     networks:
@@ -876,7 +1044,9 @@ services:
       - -m
       - omnimarket.nodes.node_projection_tenant_credentials.handlers.handler_tenant_credentials_projection
     environment:
-      !!merge <<: [*stability_test_analytics_env, *stability_test_tenant_projection_env, *stability_test_internal_projection_env]
+      !!merge <<: [*stability_test_analytics_env, *stability_test_tenant_projection_env, *stability_test_internal_projection_env, *stability_test_broker_sasl_env]
+      KAFKA_SASL_USERNAME: "projection-tenant-credentials-writer"
+      KAFKA_SASL_PASSWORD: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_CREDENTIALS_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_CREDENTIALS_WRITER must be set - the stability lane authenticates projection-tenant-credentials-writer to its own broker as principal projection-tenant-credentials-writer (OMN-25927); resolved from Infisical through the operator env, never inlined here}
       ONEX_DATABASE_TOPOLOGY_PROFILE: stability-test
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
@@ -907,12 +1077,7 @@ services:
       - "com.omninode.lane=stability-test"
       - "com.omninode.ticket=OMN-17562"
   projection-live-events-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-projection-live-events-writer
     profiles: ["runtime", "full"]
     networks:
@@ -930,7 +1095,9 @@ services:
       - -m
       - omnimarket.nodes.node_projection_live_events.handlers.handler_live_events
     environment:
-      !!merge <<: *stability_test_analytics_env
+      !!merge <<: [*stability_test_analytics_env, *stability_test_broker_sasl_env]
+      KAFKA_SASL_USERNAME: "projection-live-events-writer"
+      KAFKA_SASL_PASSWORD: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_LIVE_EVENTS_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_LIVE_EVENTS_WRITER must be set - the stability lane authenticates projection-live-events-writer to its own broker as principal projection-live-events-writer (OMN-25927); resolved from Infisical through the operator env, never inlined here}
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.live-events-writer.consume.v1"
@@ -980,11 +1147,14 @@ services:
   # as DEV_. The base service is the declaration; this stanza is this lane's
   # policy, the same split the three shared kernels above already use.
   tenant-projection-writer:
+    build: *lane_composed_runtime_build
     container_name: omnimarket-stability-test-tenant-projection-writer
     profiles: !override ["runtime", "full"]
     restart: unless-stopped
     environment:
-      !!merge <<: [*stability_test_analytics_env, *stability_test_strict_wiring_env]
+      !!merge <<: [*stability_test_analytics_env, *stability_test_strict_wiring_env, *stability_test_broker_sasl_env]
+      KAFKA_SASL_USERNAME: "tenant-projection-writer"
+      KAFKA_SASL_PASSWORD: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_TENANT_PROJECTION_WRITER:?STABILITY_TEST_KAFKA_SASL_PASSWORD_TENANT_PROJECTION_WRITER must be set - the stability lane authenticates tenant-projection-writer to its own broker as principal tenant-projection-writer (OMN-25927); resolved from Infisical through the operator env, never inlined here}
       ONEX_ENVIRONMENT: stability-test
       KAFKA_ENVIRONMENT: stability-test
       ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS:?runtime policy contract must set STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS}
