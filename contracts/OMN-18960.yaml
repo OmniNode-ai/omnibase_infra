@@ -1,0 +1,81 @@
+schema_version: 1.0.0
+ticket_id: OMN-18960
+title: The CI Summary umbrella sweeps every unregistered external check-run default-deny
+summary: >-
+  scripts/ci/ci_summary_gate.py carries a fifth, default-deny layer (merged in omnibase_infra#3902, commit 15f6a804b3c3e895ba4a2d588b6b500d2247cf83) that reads every check-run on the pull-request head that layers 1-4 do not account for, and fails the umbrella on any whose conclusion is not success. A name is admitted only through an entry in scripts/ci/ci_summary_sweep_exclusions.json that carries a reason, a ticket, an added date and an absolute expiry; a malformed entry fails the gate and an expired entry stops excluding. A check-run attributable to a non-pull-request event is not swept, and an unattributable row is swept. The verdict report prints the swept population size on every verdict and names every applied exclusion. This contract adds no gate code. It binds each acceptance criterion to the gate's own tests in tests/ci/test_ci_summary_gate.py, and the one test added with it, test_every_applied_exclusion_is_named_not_just_the_first, covers the half of the fourth criterion that no earlier test could falsify, because every earlier exclusion test used a single entry. Since the merge the strict bar replaced the refusal-only conclusion set (OMN-18979) and the registry moved to a JSON file (OMN-22478); the criteria hold on that base. The calendar tripwire test_no_shipped_entry_has_expired is deliberately not bound, because it turns red on 2026-12-21 for a reason unrelated to these criteria.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18960-external-default-deny
+    statement: No check-run on a pull-request head can fail behind a green CI Summary because no list names it.
+    acceptance:
+      - id: AC1
+        statement: "AC-1: A red external check-run in neither the expected tuple nor the exclusion registry fails the umbrella — falsifier: a green umbrella beside that red row, which is today's behaviour and is the red test"
+      - id: AC2
+        statement: "AC-2: A registry entry missing a reason, a ticket, a date or an expiry is refused, and an expired entry stops excluding — falsifier: an undated or expired entry admitted silently"
+      - id: AC3
+        statement: "AC-3: A check-run attributable to a non-pull-request event is not swept, and an unattributable row IS swept — falsifier: a push-event row failing a pull request, or an unattributable row passing unseen"
+      - id: AC4
+        statement: "AC-4: The verdict report names the swept population size and every excluded name — falsifier: a silent clean sweep"
+      - id: AC5
+        statement: "AC-5: Proven against the real pre-change tree with counts recorded, not a synthetic fixture alone — falsifier: a fixture-only proof"
+evidence_requirements:
+  - kind: tests
+    description: The umbrella's default-deny sweep tests.
+    command: uv run --frozen pytest tests/ci/test_ci_summary_gate.py -k "TestExternalDefaultDenySweep or TestExternalSweepExclusions or TestExternalSweepAgainstRealHeads" -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn18960-ac1-red-external-fails-umbrella
+    description: >-
+      The same head payload with one unregistered row at failure fails the umbrella and with that row at success passes, so the verdict flip is attributable to that one row. The control that waives the name in layer 5 turns the red back to green, which is the pre-change behaviour, so the first assertion is about layer 5 and nothing else. Every non-success conclusion (failure, timed_out, action_required, startup_failure, stale, skipped, neutral) fails and only success is in the good set.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest "tests/ci/test_ci_summary_gate.py::TestExternalDefaultDenySweep::test_red_unregistered_context_fails_and_the_same_set_green_passes" "tests/ci/test_ci_summary_gate.py::TestExternalDefaultDenySweep::test_the_pre_change_behaviour_is_reproducible_and_is_the_defect" "tests/ci/test_ci_summary_gate.py::TestExternalDefaultDenySweep::test_the_bar_is_strict_and_only_success_passes" "tests/ci/test_ci_summary_gate.py::TestExternalDefaultDenySweep::test_only_success_is_in_the_good_set" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn18960-ac2-registry-validation-and-expiry
+    description: >-
+      An entry with an empty reason, a ticket that is not an OMN reference, an unparsable added date, an empty expiry, an expiry not after the added date, or an expiry past the 90-day cap is refused, and a malformed entry fails the gate with the registry REFUSED line instead of warning. An expired entry stops excluding and the report names it as EXPIRED. A missing clock admits nothing. Every shipped entry is well formed, and a malformed registry file raises instead of admitting everything.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest "tests/ci/test_ci_summary_gate.py::TestExternalSweepExclusions::test_a_malformed_entry_is_refused" "tests/ci/test_ci_summary_gate.py::TestExternalSweepExclusions::test_a_malformed_entry_fails_the_gate_rather_than_warning" "tests/ci/test_ci_summary_gate.py::TestExternalSweepExclusions::test_an_expired_entry_stops_excluding_and_says_so" "tests/ci/test_ci_summary_gate.py::TestExternalSweepExclusions::test_a_missing_clock_admits_nothing" "tests/ci/test_ci_summary_gate.py::TestExternalSweepExclusions::test_every_shipped_entry_is_wellformed" "tests/ci/test_ci_summary_gate.py::TestExternalSweepExclusions::test_every_entry_carries_a_reason_an_owner_and_both_dates" "tests/ci/test_ci_summary_gate.py::TestSweepExclusionRegistryFileOmn22478" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn18960-ac3-event-scoping
+    description: >-
+      A failing row whose workflow run is a schedule event is not swept and the umbrella passes, while the same row on a pull_request run fails it. A row with no run URL, a row whose run is absent from the run index, and a call that omits the workflow runs entirely are all swept and fail, so an unattributable row never passes unseen. The event resolver reads both URL fields and returns none when it cannot attribute, and the captured real heads exercise every attribution branch.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest "tests/ci/test_ci_summary_gate.py::TestExternalDefaultDenySweep::test_a_non_pull_request_event_row_is_not_swept" "tests/ci/test_ci_summary_gate.py::TestExternalDefaultDenySweep::test_a_pull_request_event_row_is_swept" "tests/ci/test_ci_summary_gate.py::TestExternalDefaultDenySweep::test_an_unattributable_row_is_swept_not_exempted" "tests/ci/test_ci_summary_gate.py::TestExternalDefaultDenySweep::test_a_row_whose_run_is_absent_from_the_index_is_swept" "tests/ci/test_ci_summary_gate.py::TestExternalDefaultDenySweep::test_omitting_the_workflow_runs_argument_enforces_rather_than_exempts" "tests/ci/test_ci_summary_gate.py::TestExternalDefaultDenySweep::test_resolve_check_run_event_reads_both_url_fields_and_fails_open_to_none" "tests/ci/test_ci_summary_gate.py::TestExternalSweepAgainstRealHeads::test_the_real_head_exercises_every_attribution_branch" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn18960-ac4-report-names-sweep
+    description: >-
+      A clean sweep over two unregistered rows prints the line "external default-deny sweep: 2 unregistered context(s) judged". An applied exclusion is named on the "external sweep exclusions applied" line. The added test puts three excluded rows and two judged rows on one head, with a fourth registry entry for a name that is not on the head, and asserts that all three applied names appear sorted on that line, that the unapplied name does not appear, and that the population line reads 2 and does not count the excluded rows. A report that named only the first excluded name fails it. That mutation was run and the existing single-name test stayed green under it.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest "tests/ci/test_ci_summary_gate.py::TestExternalDefaultDenySweep::test_a_clean_sweep_records_what_it_looked_at" "tests/ci/test_ci_summary_gate.py::TestExternalSweepExclusions::test_an_applied_exclusion_is_named_in_the_report" "tests/ci/test_ci_summary_gate.py::TestExternalSweepExclusions::test_every_applied_exclusion_is_named_not_just_the_first" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn18960-ac5-real-pre-change-heads
+    description: >-
+      The sweep is run over the captured, unfiltered check-run lists, workflow runs and in-run job names of three real pull-request heads (3894, 3893, 3892) taken before the layer existed. The fixture is first shown to be real (more than 100 check-runs, more than 40 workflow runs and more than 40 in-run job names per head, a 40-character head sha). The sweep then judges at least 30 unregistered names on each head and fails exactly the retired change-control rows that were not success. Removing the live registry adds its rows to the swept population. The ticket records the measurement behind these fixtures: 16 dev pull requests, 40 to 55 unregistered names per head, 70 distinct names, 0 of 16 heads red at merge time, and 8 of 16 red on the post-merge state as the positive control for that zero.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest "tests/ci/test_ci_summary_gate.py::TestExternalSweepAgainstRealHeads" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
