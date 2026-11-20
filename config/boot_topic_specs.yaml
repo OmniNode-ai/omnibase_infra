@@ -42,5 +42,7 @@ lanes:
     # terminal topics (2 more specs).
     # OMN-25796 adds the runner-image-roll command and -completed terminal
     # topics (2 more specs).
-    repo_specs: 227
+    # OMN-26105 adds the runner-pool-retire command and -completed terminal
+    # topics (2 more specs).
+    repo_specs: 229
     repo_specs_measured_at: "bf76c6681c90088fb9ca6dbca626d226c327c529"
