@@ -1,0 +1,69 @@
+schema_version: 1.0.0
+ticket_id: OMN-26287
+title: runner-routing-audit declares the private infra repository on the hosted seam value it now runs on
+summary: >-
+  runner-routing-audit / Runner Routing Audit failed on omnibase_infra pull requests 6102, 6113, 6116, 6117 and 6118 with one live finding: the trusted-seam variable OMNI_TRUSTED_CI_RUNS_ON_JSON of the private infra repository drifted to '["ubuntu-latest"]' against an expected fleet pair. The repository variable is the organisation value because that repository's CI moved to GitHub-hosted runners; config/runner_routing_policy.yaml still declared the retired fleet-pair override for it. The override is removed so the repository inherits the organisation value, and the repository stays in the audited list so a fleet-pair shadow there is still reported as drift. No check is weakened, skipped or removed and no required-check list changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26287-runner-routing-audit
+    statement: The runner routing audit asserts the placement the private infra repository actually runs on, and still reports any other value.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the red is classed as base or PR-introduced from the failure text read on at least two of PRs 6102, 6113, 6116, 6117, 6118 and on omnibase_infra dev, with job ids and quoted lines in the lane STATUS row"
+      - id: AC2
+        statement: "AC2: one pull request on the default branch of omnibase_infra fixes the cause at its source, with a test that fails on the unfixed code and passes on the fix"
+      - id: AC3
+        statement: "AC3: the fix widens or bypasses no check, so the diff removes no assertion and adds no skip, xfail, loosened threshold or changed required-check list"
+      - id: AC4
+        statement: "AC4: the PR is open ready with a Lab line in its body, the lane handed it off with needs=land, and a STATUS cause=runner-routing-audit row lists the member PRs"
+evidence_requirements:
+  - kind: tests
+    description: The runner routing audit tests, including the two hosted-infra tests added with the fix.
+    command: uv run --frozen pytest tests/ci/test_runner_routing_audit.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26287-ac1-failure-text-reproduced
+    description: >-
+      The failure text read on the audit job of PR 6102 (job 136572023406) and PR 6117 (job 136551580203) is the same single live finding, and it is on the base, not introduced by the PRs, because the finding names a repository variable and a policy row, neither of which those PRs touch. The first new test fails on the unfixed policy with exactly that finding and passes on the fix. The ledger STATUS row of the lane carries the job ids and quoted lines.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest "tests/ci/test_runner_routing_audit.py::test_hosted_infra_trusted_seam_is_the_declared_state" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26287-ac2-fix-with-red-green-test
+    description: >-
+      The policy no longer declares the fleet-pair override for the private infra repository, so a hosted value there is the declared state and a fleet-pair shadow is still drift. The positive control test fails on the unfixed policy, because the unfixed policy accepted the fleet pair, and passes on the fix.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest "tests/ci/test_runner_routing_audit.py::test_hosted_infra_trusted_seam_is_the_declared_state" "tests/ci/test_runner_routing_audit.py::test_hosted_infra_fleet_pair_shadow_is_still_drift" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26287-ac3-no-check-weakened
+    description: >-
+      The whole audit test file passes with every earlier assertion in place, the shape test over every remaining override still runs, and the local-workflow audit still reports zero findings. The diff adds two tests, removes one policy override entry and touches no workflow file and no required-check list.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runner_routing_audit.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26287-ac4-handoff
+    description: >-
+      The hand-off facts (ready pull request, Lab line, needs=land message, STATUS cause=runner-routing-audit row) are ledger and pull-request facts that a hosted runner cannot read. This entry binds the behaviour they hand off: the fixed policy declares the hosted seam value for the private infra repository, a test that fails on the unfixed policy.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest "tests/ci/test_runner_routing_audit.py::test_hosted_infra_trusted_seam_is_the_declared_state" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
