@@ -2879,6 +2879,37 @@ class TestExternalSweepExclusions:
         )
         assert "exclusions applied: Some Unregistered Gate" in report
 
+    def test_every_applied_exclusion_is_named_not_just_the_first(self) -> None:
+        """OMN-18960 AC-4, the 'every excluded name' half.
+
+        Three excluded rows are on the head, so a report that named only the
+        first (or only one of several) fails this. Two more rows are judged and
+        green, so the population line must read 2 and must not count the
+        excluded rows. A registry entry whose name is absent from the head is
+        not an applied exclusion and must not be named.
+        """
+        excluded_names = ("Zeta Excluded Gate", "Alpha Excluded Gate", "Mid Excluded")
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows += [_row("Judged One"), _row("Judged Two")]
+        rows += [_row(n, "failure") for n in excluded_names]
+        waivers: dict[str, SweepExclusion] = {}
+        for n in (*excluded_names, "Not On This Head"):
+            waivers.update(_sweep_waiver(n))
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            sweep_exclusions=waivers,
+            now=NOW,
+        )
+        assert code == EXIT_SUCCESS, report
+        assert (
+            "external sweep exclusions applied: "
+            "Alpha Excluded Gate, Mid Excluded, Zeta Excluded Gate"
+        ) in report
+        assert "Not On This Head" not in report
+        assert "external default-deny sweep: 2 unregistered context(s) judged" in report
+
 
 class TestExternalSweepAgainstRealHeads:
     """AC-5 — proven on the real pre-change tree, with the counts recorded."""

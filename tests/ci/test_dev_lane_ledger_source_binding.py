@@ -44,7 +44,7 @@ pytestmark = [pytest.mark.unit]
 CONFIG_ROOT_PREFIX = "env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config"
 LEDGER_ENV = {
     "ONEX_LEDGER_BUS_READ_COMMAND": (
-        f"{CONFIG_ROOT_PREFIX} OMNIBASE_PATH=/app onex ledger query --bus-lane dev --stdin"
+        f"{CONFIG_ROOT_PREFIX} OMNIBASE_PATH=/app python -m omnibase_core.cli.cli_commands ledger query --bus-lane dev --stdin"
     ),
     "ONEX_LEDGER_BUS_APPEND_COMMAND": (
         f"{CONFIG_ROOT_PREFIX} python -m omnimarket.work_ledger_bus.cli append "
@@ -597,8 +597,9 @@ def _command_after_env_prefix(value: str) -> list[str]:
 
 def test_the_read_command_is_one_the_ledger_cli_accepts() -> None:
     tokens = _command_after_env_prefix(LEDGER_ENV["ONEX_LEDGER_BUS_READ_COMMAND"])
-    assert tokens == ["onex", "ledger", "query", "--bus-lane", "dev", "--stdin"]
-    ctx = ledger_query.make_context("query", tokens[3:])
+    assert tokens[:3] == ["python", "-m", "omnibase_core.cli.cli_commands"]
+    assert tokens[3:] == ["ledger", "query", "--bus-lane", "dev", "--stdin"]
+    ctx = ledger_query.make_context("query", tokens[5:])
     assert ctx.params["read_stdin"] is True
     assert ctx.params["bus_lane"] == "dev"
 

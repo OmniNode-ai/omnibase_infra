@@ -282,12 +282,12 @@ jobs:
               'config_path': 'c16-pinned-backends.yaml',
               'record_path': 'c16-pinned-backends.json',
               'timeout_seconds': 300,
-              'delegate_argv': ['uv', 'run', '--frozen', 'onex', 'delegate', 'Reply with the single word: alive.', '--task-type', 'test', '--ticket', 'OMN-23176', '--bus', 'kafka', '--lane', os.environ.get('LANE_NAME', ''), '--locus', 'deployed-lane', '--state-root', '.onex_state'],
+              'delegate_argv': ['uv', 'run', '--frozen', 'python', '-m', 'omnibase_core.cli.cli_commands', 'delegate', 'Reply with the single word: alive.', '--task-type', 'test', '--ticket', 'OMN-23176', '--bus', 'kafka', '--lane', os.environ.get('LANE_NAME', ''), '--locus', 'deployed-lane', '--state-root', '.onex_state'],
               'psql_argv': json.loads(os.environ.get('PSQL_ARGV_JSON') or '[]'),
           }
           json.dump(request, open('c16-pinned-backends-input.json', 'w', encoding='utf-8'))
           "
-          uv run --frozen onex node node_c16_pinned_backend_effect \
+          uv run --frozen python -m omnibase_core.cli.cli_commands node node_c16_pinned_backend_effect \
             --input c16-pinned-backends-input.json --backend event_bus=inmemory \
             --state-root .onex_state/c16-pinned-backends
           status=$?

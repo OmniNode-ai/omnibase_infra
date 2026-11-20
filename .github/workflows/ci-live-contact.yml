@@ -49,7 +49,7 @@ jobs:
               'head_ref': os.environ['HEAD_SHA'], 'pr_body': os.environ['PR_BODY'],
           }))
           PYCODE
-          uv run --frozen onex node node_ci_live_contact_effect \
+          uv run --frozen python -m omnibase_core.cli.cli_commands node node_ci_live_contact_effect \
             --input ci-live-contact-input.json --backend event_bus=inmemory \
             --state-root .onex_state/ci-live-contact
       - name: Execute changed live-contact tests

@@ -291,7 +291,8 @@ def test_the_schedule_reaches_the_node_as_a_typed_trigger() -> None:
     invocation = [
         line
         for line in run.splitlines()
-        if "onex" in line and "evidence_autoclose_sweep" in line
+        if "omnibase_core.cli.cli_commands" in line
+        and "evidence_autoclose_sweep" in line
     ]
     assert invocation, "could not find the `onex skill` invocation"
 
@@ -355,7 +356,8 @@ def test_apply_reaches_the_sweep_only_through_the_guard() -> None:
     invocation_lines = [
         line
         for line in run.splitlines()
-        if "onex" in line and "evidence_autoclose_sweep" in line
+        if "omnibase_core.cli.cli_commands" in line
+        and "evidence_autoclose_sweep" in line
     ]
     assert invocation_lines, "could not find the `onex skill` invocation"
     for line in invocation_lines:
@@ -510,7 +512,8 @@ def test_the_exclusion_reaches_the_sweep_only_through_a_guarded_array() -> None:
     invocation_lines = [
         line
         for line in run.splitlines()
-        if "onex" in line and "evidence_autoclose_sweep" in line
+        if "omnibase_core.cli.cli_commands" in line
+        and "evidence_autoclose_sweep" in line
     ]
     assert invocation_lines, "could not find the `onex skill` invocation"
     for line in invocation_lines:
@@ -732,7 +735,8 @@ def test_the_backfill_flag_reaches_the_sweep_only_through_a_guarded_array() -> N
     invocation_lines = [
         line
         for line in run.splitlines()
-        if "onex" in line and "evidence_autoclose_sweep" in line
+        if "omnibase_core.cli.cli_commands" in line
+        and "evidence_autoclose_sweep" in line
     ]
     assert invocation_lines, "could not find the `onex skill` invocation"
     for line in invocation_lines:
@@ -817,7 +821,8 @@ def test_the_disarm_marker_reaches_the_sweep_only_through_a_guarded_array() -> N
     invocation = [
         line
         for line in run.splitlines()
-        if "onex" in line and "evidence_autoclose_sweep" in line
+        if "omnibase_core.cli.cli_commands" in line
+        and "evidence_autoclose_sweep" in line
     ]
     assert invocation, "could not find the `onex skill` invocation"
     for line in invocation:
