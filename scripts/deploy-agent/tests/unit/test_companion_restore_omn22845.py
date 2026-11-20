@@ -30,8 +30,14 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from deploy_agent import executor as executor_mod
 from deploy_agent.events import EnumRuntimeLane
-from deploy_agent.executor import lane_config_for, load_dev_boot_guard
+from deploy_agent.executor import (
+    DEFAULT_DEV_INSTANCE,
+    DEV_INSTANCE_LANE_CONFIGS,
+    lane_config_for,
+    load_dev_boot_guard,
+)
 from deploy_agent.idle_converge import (
     COMPANION_RESTORE_AFTER,
     IDLE_RESTORE_REQUESTER,
@@ -49,11 +55,35 @@ from .test_dev_lane_outage_omn20864 import _agent, _jobs
 
 pytestmark = pytest.mark.unit
 
-DEV = lane_config_for(EnumRuntimeLane.DEV)
-MAIN_ONLY = DEV.model_copy(update={"disabled_services": frozenset({"runtime-effects"})})
+# OMN-22930 folded the dev effects role into the main runtime, so the dev lane the
+# agent runs on the lab needs ``omninode-runtime`` alone. The companion rule
+# (OMN-22845) still applies to a lane that runs a separate effects container. That
+# lane is built from the dev composition BEFORE any fold, straight from the table
+# the agent ships, so no host policy file decides it. Never ``lane_config_for(DEV)``
+# at import: that reads ``docker/runtime-policy.env`` of the host the suite runs on
+# (the lab hosts carry one, hosted CI does not), and the autouse fixture that hides
+# the file only applies once a test is running.
+SEPARATE = DEV_INSTANCE_LANE_CONFIGS[DEFAULT_DEV_INSTANCE]
+MAIN_ONLY = SEPARATE.model_copy(
+    update={"disabled_services": frozenset({"runtime-effects"})}
+)
 MAIN = "omninode-runtime"
 EFFECTS = "omninode-runtime-effects"
 NOW = datetime(2026, 11, 7, 20, 30, tzinfo=UTC)
+TRACKED_RUNTIME_POLICY = (
+    Path(__file__).resolve().parents[4] / "docker" / ("runtime-policy.env")
+)
+
+
+@pytest.fixture
+def folded_dev(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """The dev lane as the checked-in runtime policy folds it (OMN-22930).
+
+    The policy file is this checkout's tracked one, never the host's copy, so the
+    lane reads the same on a lab host and on a hosted runner.
+    """
+    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", TRACKED_RUNTIME_POLICY)
+    return lane_config_for(EnumRuntimeLane.DEV)
 
 
 def _containers(lane: Any) -> tuple[str, ...]:
@@ -79,14 +109,29 @@ def _docker(states: dict[str, str]) -> Any:
 # --- which containers the lane needs ------------------------------------------
 
 
-def test_the_default_dev_lane_needs_main_and_effects() -> None:
-    assert _containers(DEV) == (MAIN, EFFECTS)
+def test_the_default_dev_lane_needs_main_alone(folded_dev: Any) -> None:
+    # The fold put the effects role inside main: its health target is main's container.
+    assert folded_dev.runtime_health_targets[1][0] == MAIN
+    assert _containers(folded_dev) == (MAIN,)
+
+
+def test_a_lane_with_a_separate_effects_container_needs_main_and_effects() -> None:
+    assert SEPARATE.runtime_health_targets[1][0] != MAIN
+    assert _containers(SEPARATE) == (MAIN, EFFECTS)
+
+
+def test_the_prod_lane_needs_its_own_main_and_effects() -> None:
+    # Prod keeps a separate effects container; its names carry the lane.
+    assert _containers(lane_config_for(EnumRuntimeLane.PROD)) == (
+        "omninode-prod-runtime",
+        "omninode-prod-runtime-effects",
+    )
 
 
 def test_a_lane_that_folds_effects_into_main_needs_main_alone() -> None:
     # lane_config_for points a folded effects target at the main container.
-    (main, main_port), (_, effects_port) = DEV.runtime_health_targets
-    folded = DEV.model_copy(
+    (main, main_port), (_, effects_port) = SEPARATE.runtime_health_targets
+    folded = SEPARATE.model_copy(
         update={"runtime_health_targets": ((main, main_port), (main, effects_port))}
     )
 
@@ -94,7 +139,9 @@ def test_a_lane_that_folds_effects_into_main_needs_main_alone() -> None:
 
 
 def test_a_lane_that_switches_effects_off_needs_main_alone() -> None:
-    off = DEV.model_copy(update={"disabled_services": frozenset({"runtime-effects"})})
+    off = SEPARATE.model_copy(
+        update={"disabled_services": frozenset({"runtime-effects"})}
+    )
 
     assert _containers(off) == (MAIN,)
 
@@ -116,33 +163,87 @@ def test_a_lane_that_switches_effects_off_needs_main_alone() -> None:
 def test_read_lane_presence(
     states: dict[str, str], presence: EnumRuntimePresence
 ) -> None:
-    assert read_lane_presence(DEV, run=_docker(states))[0] is presence
+    assert read_lane_presence(SEPARATE, run=_docker(states))[0] is presence
 
 
-def test_the_dev_lane_reads_its_own_containers() -> None:
-    presence, detail = read_lane_presence(DEV, run=_docker({MAIN: "running"}))
+@pytest.mark.parametrize(
+    ("states", "presence"),
+    [
+        ({MAIN: "running"}, EnumRuntimePresence.RUNNING),
+        ({MAIN: "running", EFFECTS: "running"}, EnumRuntimePresence.RUNNING),
+        ({MAIN: "running", EFFECTS: "exited"}, EnumRuntimePresence.RUNNING),
+        ({MAIN: "exited"}, EnumRuntimePresence.DOWN),
+        ({MAIN: "created"}, EnumRuntimePresence.DOWN),
+        ({EFFECTS: "running"}, EnumRuntimePresence.DOWN),
+        ({}, EnumRuntimePresence.DOWN),
+    ],
+)
+def test_read_lane_presence_on_the_folded_dev_lane(
+    folded_dev: Any, states: dict[str, str], presence: EnumRuntimePresence
+) -> None:
+    assert read_lane_presence(folded_dev, run=_docker(states))[0] is presence
+
+
+def test_a_separate_effects_lane_reads_its_own_containers() -> None:
+    presence, detail = read_lane_presence(SEPARATE, run=_docker({MAIN: "running"}))
 
     assert presence is EnumRuntimePresence.COMPANION_DOWN
     assert EFFECTS in detail
 
 
 def test_the_down_container_is_named_in_the_detail() -> None:
-    _, detail = read_lane_presence(DEV, run=_docker({MAIN: "running"}))
+    _, detail = read_lane_presence(SEPARATE, run=_docker({MAIN: "running"}))
 
     assert EFFECTS in detail
 
 
-def test_an_unreadable_effects_container_never_restores() -> None:
-    def run(cmd: list[str], timeout: int, **_kw: object) -> Any:
-        if cmd[-1] == EFFECTS:
-            return subprocess.CompletedProcess(
-                cmd, 1, "", "Cannot connect to the Docker daemon"
-            )
-        return subprocess.CompletedProcess(cmd, 0, "running\n", "")
+def test_the_folded_dev_lane_never_names_or_reads_an_effects_container(
+    folded_dev: Any,
+) -> None:
+    asked: list[str] = []
+    fake = _docker({MAIN: "running"})
 
-    presence, _ = read_lane_presence(DEV, run=run)
+    def run(cmd: list[str], timeout: int, **_kw: object) -> Any:
+        asked.append(cmd[-1])
+        return fake(cmd, timeout)
+
+    up = read_lane_presence(folded_dev, run=run)
+    down = read_lane_presence(folded_dev, run=_docker({}))
+
+    assert asked == [MAIN]
+    assert EFFECTS not in up[1]
+    assert down[0] is EnumRuntimePresence.DOWN
+    assert EFFECTS not in down[1]
+
+
+def _effects_unreadable(cmd: list[str], timeout: int, **_kw: object) -> Any:
+    if cmd[-1] == EFFECTS:
+        return subprocess.CompletedProcess(
+            cmd, 1, "", "Cannot connect to the Docker daemon"
+        )
+    return subprocess.CompletedProcess(cmd, 0, "running\n", "")
+
+
+def test_an_unreadable_effects_container_never_restores() -> None:
+    presence, _ = read_lane_presence(SEPARATE, run=_effects_unreadable)
 
     assert presence is EnumRuntimePresence.UNKNOWN
+
+
+def test_an_unreadable_main_container_on_the_folded_dev_lane_never_restores(
+    folded_dev: Any,
+) -> None:
+    def run(cmd: list[str], timeout: int, **_kw: object) -> Any:
+        return subprocess.CompletedProcess(
+            cmd, 1, "", "Cannot connect to the Docker daemon"
+        )
+
+    assert read_lane_presence(folded_dev, run=run)[0] is EnumRuntimePresence.UNKNOWN
+    # The effects container is not read there, so its answer cannot matter.
+    assert (
+        read_lane_presence(folded_dev, run=_effects_unreadable)[0]
+        is EnumRuntimePresence.RUNNING
+    )
 
 
 def test_a_main_only_lane_reads_as_it_always_did() -> None:
@@ -275,3 +376,30 @@ def test_a_frozen_lane_missing_effects_is_not_restored(
         agent._maybe_idle_converge()
 
     assert _jobs(tmp_path) == []
+
+
+def test_a_folded_dev_lane_with_main_up_is_not_restored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, folded_dev: Any
+) -> None:
+    # The fold left no effects container to miss: main alone running is a healthy lane.
+    agent, docker = _agent_reading_docker(tmp_path, monkeypatch, {MAIN: "running"})
+    agent._idle_read_running_ref = lambda repo: "b" * 40  # up to date
+
+    with docker:
+        agent._maybe_idle_converge()
+
+    assert _jobs(tmp_path) == []
+
+
+def test_a_folded_dev_lane_with_main_gone_is_restored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, folded_dev: Any
+) -> None:
+    agent, docker = _agent_reading_docker(tmp_path, monkeypatch, {})
+
+    with docker:
+        agent._maybe_idle_converge()
+
+    jobs = _jobs(tmp_path)
+    assert len(jobs) == 1
+    assert jobs[0].command["requested_by"] == IDLE_RESTORE_REQUESTER
+    assert jobs[0].command["runtime_lane"] == "dev"
