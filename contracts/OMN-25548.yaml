@@ -54,3 +54,11 @@ dod_evidence:
       - check_type: command
         check_value: bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/tools/contract_topic_extractor.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F -- "_parse_declared_topic" > /dev/null'
         cwd: .
+  - id: dod-omn25548-ac11-integration
+    description: 'AC11: the extractor scans the real node contracts and keeps the tenant-prefixed topic from a declaring contract'
+    source: manual
+    binds_ac: [AC11]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/tools/test_tenant_prefixed_topic_scan_omn25548.py -q --no-cov
+        cwd: .
