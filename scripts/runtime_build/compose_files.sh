@@ -228,7 +228,7 @@ resolve_compose_file_args() {
     local overlay_filename layer; overlay_filename="$(resolve_lane_overlay_filename "${compose_project}")"
     if [[ -n "${overlay_filename}" ]]; then
         # OMN-24509: the node contract decides whether the lane gains its per-host broker layer, after its overlay.
-        layer="$(python3 "${BASH_SOURCE[0]%/*}/../../src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_host_broker_layer.py" layer "${BASH_SOURCE[0]%/*}/../../src/omnibase_infra/nodes/node_setup_local_provision_effect/contract.yaml" "${overlay_filename}")" || return 1
+        layer="$(UV_PROJECT="${BASH_SOURCE[0]%/*}/../.." uv run --frozen python "${BASH_SOURCE[0]%/*}/../../src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_host_broker_layer.py" layer "${BASH_SOURCE[0]%/*}/../../src/omnibase_infra/nodes/node_setup_local_provision_effect/contract.yaml" "${overlay_filename}")" || return 1
         compose_files_out+=(-f "${docker_dir}/${overlay_filename}" ${layer:+-f "${docker_dir}/${layer}"})
     else
         # Dev/lab lane (bare omnibase-infra project). OMN-15379: layer the
