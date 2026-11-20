@@ -18,6 +18,7 @@ from scripts.ci.check_sibling_compatible_range import violations
 ROOT = Path(__file__).resolve().parents[2]
 TAG = "dev-20261120075721-2a9efbda3548"
 COMMIT = "2a9efbda3548e9f4b4e008b9354dbcd9fa7d1ab9"
+OMNIMARKET_LINEAGE_TAG = "dev-20261118215158-8bb5b8be7316"
 # The published floor is the release that first ships every core module the infra
 # nodes import (OMN-21924: node_architecture_validator); the lock tracks the dev tag.
 VERSION = "0.47.62"
@@ -226,11 +227,18 @@ def test_ci_enforces_all_core_rules_and_keeps_cascade_identity_selection() -> No
         1
     ].split("- name:", 1)[0]
     assert "--package omnibase-core" in step
-    # The validator is the core this repository pins, read from pyproject.toml: a validator
-    # older than the pin cannot read a core that takes its version from git.
-    assert 'tomllib.load(open("pyproject.toml", "rb"))' in step
-    assert '"omnibase-core @ git+${CORE_REF}"' in step
-    assert "dev-2026" not in step
+    # Core 0.47.76 no longer ships the lineage node: it lives in omnimarket, run from the
+    # dev merge tag that core's own check-dev-tag-lineage hook pins. That tag reads a core
+    # that takes its version from git, and the step names no omnibase-core tag.
+    assert (
+        '--with "omnimarket @ git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY_OWNER}/omnimarket.git@'
+        f'{OMNIMARKET_LINEAGE_TAG}"'
+    ) in step
+    assert (
+        "python -m omnimarket.nodes.node_dev_tag_lineage_effect.runtime_dev_tag_lineage"
+    ) in step
+    assert "omnibase_core.nodes.node_dev_tag_lineage_effect" not in step
+    assert TAG not in step
     assert "--rules" not in step
     assert "CORE_LINEAGE_RULES" not in step
     cascade = (ROOT / ".github/workflows/dependency-cascade.yml").read_text()
