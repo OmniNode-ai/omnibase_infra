@@ -45,8 +45,8 @@ from deploy_agent.events import (
 )
 from deploy_agent.executor import (
     DEFAULT_DEV_INSTANCE,
-    DEV_INSTANCE_LANE_CONFIGS,
     ModelLaneConfig,
+    dev_instance_lane_configs,
 )
 
 pytestmark = pytest.mark.unit
@@ -68,7 +68,7 @@ def _lab_manifest() -> Path:
 #: The instances whose manifest entry is parity-checked against its overlay and
 #: therefore declares every service the composition runs.
 _OVERLAY_INSTANCES = tuple(
-    name for name in DEV_INSTANCE_LANE_CONFIGS if name != DEFAULT_DEV_INSTANCE
+    name for name in dev_instance_lane_configs() if name != DEFAULT_DEV_INSTANCE
 )
 
 
@@ -116,7 +116,7 @@ def _declared_running(compose_project: str) -> set[str]:
 def test_instance_lane_deploy_starts_every_declared_running_service(
     instance: str,
 ) -> None:
-    config = DEV_INSTANCE_LANE_CONFIGS[instance]
+    config = dev_instance_lane_configs()[instance]
     services = _merged_services(config)
     by_container = {
         spec.get("container_name", name): name for name, spec in services.items()
@@ -145,7 +145,7 @@ def test_instance_lane_deploy_starts_every_declared_running_service(
 
 def test_instance_lane_phoenix_stays_out_of_the_201_deps_leg() -> None:
     """Control: the .201 composition is unchanged; its Phoenix stays runtime-only."""
-    config = DEV_INSTANCE_LANE_CONFIGS["dev-201"]
+    config = dev_instance_lane_configs()["dev-201"]
     services = _merged_services(config)
     assert "phoenix" in services
     assert "phoenix" not in _deps_leg(services, config.disabled_services)

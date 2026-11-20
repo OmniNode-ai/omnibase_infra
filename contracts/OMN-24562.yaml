@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-24562
 title: "A failed deploy-agent job, or a code-ref pin within six hours of expiry, writes an alarm row with an owner line"
-summary: "Stacked on the job reading of OMN-24617 (omnibase_infra#6012, related, not superseded). The node_deploy_job_reading_effect handler now also writes one ledger STATUS row with src=alarm and an owner line for a failed dev or stability job (alarm=deploy-job-failed), and the agent's idle tick writes one for a live code-ref pin inside the contract's six-hour window before its expiry (alarm=pin-near-expiry). Prod writes nothing."
+summary: "Stacked on the job reading of OMN-24617 (omnibase_infra#6012, related, not superseded). The node_deploy_job_reading_effect handler now also writes one ledger STATUS row with src=alarm and an owner line for a failed dev or stability job (alarm=deploy-job-failed), and the agent's idle tick writes one for a live code-ref pin inside the contract's six-hour window before its expiry (alarm=pin-near-expiry). Prod writes nothing. The deploy agent also resets only its own deploy-source clone: the clone is a declared path under its state directory, created on first start at the commit the agent was serving, and a guard refuses a deploy-source path that resolves to a canonical clone."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -89,6 +89,22 @@ requirements:
     acceptance:
       - id: AC27
         statement: 'AC27: a dev agent whose stability fold policy cannot resolve starts, and its stability reader answers None without raising; the agent''s own stability reader reads the stability runtime container and reads an unhealthy one as the empty ref -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py -k "bad_stability_fold_policy or stability_reader_reads" fails at the merge base'
+  - id: req-omn24562-agent-own-clone
+    statement: >-
+      The deploy agent runs git fetch, reset and checkout only in its own clone, creates it on start without losing the served commit, and refuses a canonical clone as its deploy source.
+    acceptance:
+      - id: AC28
+        statement: >-
+          AC28: A pinned job through the real git_pull leaves the canonical clone's HEAD, branch and working tree unchanged and puts the agent's own clone on the pinned ref; a deploy source configured as the canonical clone runs nothing. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k PinnedJob -q
+      - id: AC29
+        statement: >-
+          AC29: First start with no agent clone creates it at the previously served commit; a second start leaves it and its pin untouched. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k MigrationOnStart -q
+      - id: AC30
+        statement: >-
+          AC30: An unreachable mirror falls back to origin, is counted and logged; a reachable mirror is the fetch url and origin stays the push url. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k Mirror -q
+      - id: AC31
+        statement: >-
+          AC31: A deploy-source path that resolves to a canonical clone (equal, symlinked, or the OMNI_HOME clone) is refused with a typed error, and unset settings have no default. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k Guard -q
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -105,6 +121,10 @@ evidence_requirements:
   - kind: tests
     description: Stability start wait within and past the declared budget, with the dev lookup, the two fences and prod unchanged.
     command: cd scripts/deploy-agent && uv run --frozen --extra dev python -m pytest tests/unit/test_verify_stability_start_wait_omn24562.py -q -p no:cacheprovider
+  - kind: tests
+    description: >-
+      Pinned job leaves the canonical clone byte-identical, migration on start, mirror fallback counted, and the canonical-clone guard.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0
 emergency_bypass:
   enabled: false
   justification: ""
@@ -340,3 +360,39 @@ dod_evidence:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py -q -p no:randomly --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac7-own-clone
+    description: >-
+      The pinned job runs in a child process configured as a unit configures it; against the executor at the merge base the canonical-clone case resets the canonical clone and fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k PinnedJob
+        cwd: .
+    binds_ac: [AC28]
+  - id: dod-omn24562-ac8-migration
+    description: >-
+      Creation is seeded from the canonical clone's HEAD, including an unpushed head, and an existing clone is never reset.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k MigrationOnStart
+        cwd: .
+    binds_ac: [AC29]
+  - id: dod-omn24562-ac9-mirror-fallback
+    description: >-
+      The fallback count is kept in a file beside the clone.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k Mirror
+        cwd: .
+    binds_ac: [AC30]
+  - id: dod-omn24562-ac10-guard
+    description: >-
+      The guard compares real paths.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k Guard
+        cwd: .
+    binds_ac: [AC31]

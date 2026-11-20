@@ -34,7 +34,8 @@ from deploy_agent import executor as executor_mod
 from deploy_agent.events import EnumRuntimeLane
 from deploy_agent.executor import (
     DEFAULT_DEV_INSTANCE,
-    DEV_INSTANCE_LANE_CONFIGS,
+    ModelLaneConfig,
+    dev_instance_lane_configs,
     lane_config_for,
     load_dev_boot_guard,
 )
@@ -63,10 +64,6 @@ pytestmark = pytest.mark.unit
 # at import: that reads ``docker/runtime-policy.env`` of the host the suite runs on
 # (the lab hosts carry one, hosted CI does not), and the autouse fixture that hides
 # the file only applies once a test is running.
-SEPARATE = DEV_INSTANCE_LANE_CONFIGS[DEFAULT_DEV_INSTANCE]
-MAIN_ONLY = SEPARATE.model_copy(
-    update={"disabled_services": frozenset({"runtime-effects"})}
-)
 MAIN = "omninode-runtime"
 EFFECTS = "omninode-runtime-effects"
 NOW = datetime(2026, 11, 7, 20, 30, tzinfo=UTC)
@@ -76,13 +73,20 @@ TRACKED_RUNTIME_POLICY = (
 
 
 @pytest.fixture
+def separate_dev() -> ModelLaneConfig:
+    return dev_instance_lane_configs()[DEFAULT_DEV_INSTANCE]
+
+
+@pytest.fixture
 def folded_dev(monkeypatch: pytest.MonkeyPatch) -> Any:
     """The dev lane as the checked-in runtime policy folds it (OMN-22930).
 
     The policy file is this checkout's tracked one, never the host's copy, so the
     lane reads the same on a lab host and on a hosted runner.
     """
-    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", TRACKED_RUNTIME_POLICY)
+    monkeypatch.setattr(
+        executor_mod, "runtime_policy_env_file", lambda: TRACKED_RUNTIME_POLICY
+    )
     return lane_config_for(EnumRuntimeLane.DEV)
 
 
@@ -115,9 +119,11 @@ def test_the_default_dev_lane_needs_main_alone(folded_dev: Any) -> None:
     assert _containers(folded_dev) == (MAIN,)
 
 
-def test_a_lane_with_a_separate_effects_container_needs_main_and_effects() -> None:
-    assert SEPARATE.runtime_health_targets[1][0] != MAIN
-    assert _containers(SEPARATE) == (MAIN, EFFECTS)
+def test_a_lane_with_a_separate_effects_container_needs_main_and_effects(
+    separate_dev: ModelLaneConfig,
+) -> None:
+    assert separate_dev.runtime_health_targets[1][0] != MAIN
+    assert _containers(separate_dev) == (MAIN, EFFECTS)
 
 
 def test_the_prod_lane_needs_its_own_main_and_effects() -> None:
@@ -128,18 +134,22 @@ def test_the_prod_lane_needs_its_own_main_and_effects() -> None:
     )
 
 
-def test_a_lane_that_folds_effects_into_main_needs_main_alone() -> None:
+def test_a_lane_that_folds_effects_into_main_needs_main_alone(
+    separate_dev: ModelLaneConfig,
+) -> None:
     # lane_config_for points a folded effects target at the main container.
-    (main, main_port), (_, effects_port) = SEPARATE.runtime_health_targets
-    folded = SEPARATE.model_copy(
+    (main, main_port), (_, effects_port) = separate_dev.runtime_health_targets
+    folded = separate_dev.model_copy(
         update={"runtime_health_targets": ((main, main_port), (main, effects_port))}
     )
 
     assert _containers(folded) == (MAIN,)
 
 
-def test_a_lane_that_switches_effects_off_needs_main_alone() -> None:
-    off = SEPARATE.model_copy(
+def test_a_lane_that_switches_effects_off_needs_main_alone(
+    separate_dev: ModelLaneConfig,
+) -> None:
+    off = separate_dev.model_copy(
         update={"disabled_services": frozenset({"runtime-effects"})}
     )
 
@@ -161,9 +171,11 @@ def test_a_lane_that_switches_effects_off_needs_main_alone() -> None:
     ],
 )
 def test_read_lane_presence(
-    states: dict[str, str], presence: EnumRuntimePresence
+    separate_dev: ModelLaneConfig,
+    states: dict[str, str],
+    presence: EnumRuntimePresence,
 ) -> None:
-    assert read_lane_presence(SEPARATE, run=_docker(states))[0] is presence
+    assert read_lane_presence(separate_dev, run=_docker(states))[0] is presence
 
 
 @pytest.mark.parametrize(
@@ -184,15 +196,19 @@ def test_read_lane_presence_on_the_folded_dev_lane(
     assert read_lane_presence(folded_dev, run=_docker(states))[0] is presence
 
 
-def test_a_separate_effects_lane_reads_its_own_containers() -> None:
-    presence, detail = read_lane_presence(SEPARATE, run=_docker({MAIN: "running"}))
+def test_a_separate_effects_lane_reads_its_own_containers(
+    separate_dev: ModelLaneConfig,
+) -> None:
+    presence, detail = read_lane_presence(separate_dev, run=_docker({MAIN: "running"}))
 
     assert presence is EnumRuntimePresence.COMPANION_DOWN
     assert EFFECTS in detail
 
 
-def test_the_down_container_is_named_in_the_detail() -> None:
-    _, detail = read_lane_presence(SEPARATE, run=_docker({MAIN: "running"}))
+def test_the_down_container_is_named_in_the_detail(
+    separate_dev: ModelLaneConfig,
+) -> None:
+    _, detail = read_lane_presence(separate_dev, run=_docker({MAIN: "running"}))
 
     assert EFFECTS in detail
 
@@ -224,8 +240,10 @@ def _effects_unreadable(cmd: list[str], timeout: int, **_kw: object) -> Any:
     return subprocess.CompletedProcess(cmd, 0, "running\n", "")
 
 
-def test_an_unreadable_effects_container_never_restores() -> None:
-    presence, _ = read_lane_presence(SEPARATE, run=_effects_unreadable)
+def test_an_unreadable_effects_container_never_restores(
+    separate_dev: ModelLaneConfig,
+) -> None:
+    presence, _ = read_lane_presence(separate_dev, run=_effects_unreadable)
 
     assert presence is EnumRuntimePresence.UNKNOWN
 
@@ -246,12 +264,17 @@ def test_an_unreadable_main_container_on_the_folded_dev_lane_never_restores(
     )
 
 
-def test_a_main_only_lane_reads_as_it_always_did() -> None:
+def test_a_main_only_lane_reads_as_it_always_did(
+    separate_dev: ModelLaneConfig,
+) -> None:
+    main_only = separate_dev.model_copy(
+        update={"disabled_services": frozenset({"runtime-effects"})}
+    )
     assert (
-        read_lane_presence(MAIN_ONLY, run=_docker({MAIN: "running"}))[0]
+        read_lane_presence(main_only, run=_docker({MAIN: "running"}))[0]
         is EnumRuntimePresence.RUNNING
     )
-    assert read_lane_presence(MAIN_ONLY, run=_docker({}))[0] is EnumRuntimePresence.DOWN
+    assert read_lane_presence(main_only, run=_docker({}))[0] is EnumRuntimePresence.DOWN
 
 
 # --- the decision ---------------------------------------------------------------

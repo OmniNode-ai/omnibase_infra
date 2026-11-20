@@ -27,14 +27,14 @@ POLICY = Path(__file__).resolve().parents[4] / "docker/runtime-policy.env"
 
 
 def _targets(policy: Path) -> dict[str, tuple[str, int]]:
-    with patch("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy):
+    with patch("deploy_agent.executor.runtime_policy_env_file", lambda: policy):
         config = lane_config_for(EnumRuntimeLane.DEV)
     names = {index: name for name, index in SERVICE_HEALTH_TARGET_INDEX.items()}
     return {names[i]: target for i, target in enumerate(config.runtime_health_targets)}
 
 
 def test_committed_policy_reads_the_effects_port_from_main() -> None:
-    with patch("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", POLICY):
+    with patch("deploy_agent.executor.runtime_policy_env_file", lambda: POLICY):
         assert "effects" in lane_folded_profiles(EnumRuntimeLane.DEV)
     targets = _targets(POLICY)
     main_container, main_port = targets["omninode-runtime"]

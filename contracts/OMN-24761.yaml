@@ -1,0 +1,61 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24761
+title: "Deploy agent restart-on-merge: the host env stores carry the three names so merging omnibase_infra#6027 stops no agent"
+summary: >-
+  Round 5 of omnibase_infra#6027. The blocking finding is host state (the three names missing from the agent env stores on h201 and h202); the four further findings are judged in a pull request comment and the ones that cost under twenty minutes are fixed with a test each that fails at c9f626af2538: the rollback resets the failed state before each restart, the per-host reading counts only bare assignments for an EnvironmentFile= source, a failed ledger append no longer raises out of self_update, and the node contract no longer says a gap blocks a merge that nothing checks.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24761-round5
+    statement: >-
+      The review of omnibase_infra#6027 at c9f626af2538 is answered: the host reading is taken, every finding is judged, and each fixed finding has a test that fails at that head.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: `check_host` run at the pull request head on h201 and h202 reports restartable=true for every installed agent unit, and a comment starting `Lab: head=<head sha>` on omnibase_infra#6027 carries both readings
+      - id: AC2
+        statement: >-
+          AC2: findings 2, 3, 4 and 5 of the review are each judged in a pull request comment as BLOCKING with a fix and a test that fails before it and passes after it, or as NON-BLOCKING with the reason, and every BLOCKING one is fixed
+      - id: AC3
+        statement: >-
+          AC3: the pull request's required suites are run on the lab at the new head, in parts if a whole run times out, and the new head with the parts and their results is commented on the pull request
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The unit tests of the round 5 findings, red at c9f626af2538 and green at the new head.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24761.py -q -p no:randomly --no-cov -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24761-ac1-check-host-readings
+    description: >-
+      Reads the pull request through the bus and finds a Lab comment carrying restartable=true. Runs where the lane has the bus, not on the hosted runner.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: onex scm pr-view OmniNode-ai/omnibase_infra#6027 --source bus | grep -qF "restartable=true"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn24761-ac2-findings-fixed
+    description: >-
+      The rollback resets the failed state before each restart, an EnvironmentFile= source counts only bare assignments, a failed refusal append is logged and leaves no marker, and the node contract does not claim a blocking caller.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24761.py -q -p no:randomly --no-cov -n 0
+        cwd: .
+    binds_ac: [AC2]
+  - id: dod-omn24761-ac3-head-commented
+    description: >-
+      Reads the pull request through the bus and finds a comment naming the pushed head. Runs where the lane has the bus, not on the hosted runner.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: onex scm pr-view OmniNode-ai/omnibase_infra#6027 --source bus | grep -qF "$(git rev-parse HEAD)"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]

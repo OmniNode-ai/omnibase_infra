@@ -260,7 +260,10 @@ STABILITY_LANE_WRITER_SERVICES: tuple[str, ...] = (
 def stability_lane_writer_services(execution: ModuleType, lane: str) -> tuple[str, ...]:
     """The writers this lane runs: none unless its compose files carry the overlay."""
     config = execution.lane_config_for(lane)
-    if execution._STABILITY_OVERLAY not in config.compose_files:
+    lane_configs = execution._lane_configs()
+    stability_config = lane_configs[execution.EnumRuntimeLane.STABILITY_TEST]
+    overlay = stability_config.compose_files[-1]
+    if overlay not in config.compose_files:
         return ()
     return tuple(
         service

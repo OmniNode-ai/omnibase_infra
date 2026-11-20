@@ -29,13 +29,12 @@ from deploy_agent.events import (
     services_for_scope,
 )
 from deploy_agent.executor import (
-    _LANE_CONFIGS,
     DEFAULT_DEV_INSTANCE,
-    DEV_INSTANCE_LANE_CONFIGS,
     DeployExecutor,
     EnumInstancePhase,
     GatewayDeployScriptUnavailableError,
     _requested_services_for_up,
+    dev_instance_lane_configs,
     lane_config_for,
     lane_runs_phase,
     lane_with_phases_off,
@@ -55,9 +54,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.gateway_lane]
 SHA = "a" * 40
 GATEWAY = EnumInstancePhase.GATEWAY_DEPLOY
 #: The composition no flag touches: what the default instance ran before.
-HISTORICAL = _LANE_CONFIGS[EnumRuntimeLane.DEV]
-#: What the module built from the SHIPPED table at import, before any fixture.
-BUILT_AT_IMPORT = DEV_INSTANCE_LANE_CONFIGS[DEFAULT_DEV_INSTANCE]
+HISTORICAL = executor_mod._lane_configs()[EnumRuntimeLane.DEV]
 
 
 def _noop(phase: Phase, status: PhaseStatus) -> None:
@@ -80,8 +77,11 @@ class TestTheShippedTable:
         assert flags.disabled_phases == (GATEWAY.value,)
 
     def test_the_executor_built_its_composition_from_that_declaration(self) -> None:
-        assert lane_with_phases_off(HISTORICAL, (GATEWAY.value,)) == BUILT_AT_IMPORT
-        assert BUILT_AT_IMPORT != HISTORICAL
+        assert (
+            lane_with_phases_off(HISTORICAL, (GATEWAY.value,))
+            == dev_instance_lane_configs()[DEFAULT_DEV_INSTANCE]
+        )
+        assert dev_instance_lane_configs()[DEFAULT_DEV_INSTANCE] != HISTORICAL
 
     def test_the_declaration_turns_off_that_phase_and_no_other(self) -> None:
         cfg = lane_config_for(EnumRuntimeLane.DEV)
@@ -91,7 +91,7 @@ class TestTheShippedTable:
             assert lane_runs_phase(EnumRuntimeLane.DEV, phase) is (phase is not GATEWAY)
 
     def test_the_other_instances_declare_no_flag_phases(self) -> None:
-        for name in DEV_INSTANCE_LANE_CONFIGS:
+        for name in dev_instance_lane_configs():
             if name != DEFAULT_DEV_INSTANCE:
                 flags = lane_flags_for_instance(AGENT_CLONE_ROOT, name)
                 assert flags.disabled_phases == ()
@@ -165,7 +165,9 @@ class TestThePhaseStaysAvailable:
     def test_an_instance_without_the_flag_runs_the_gateway_phase(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setitem(DEV_INSTANCE_LANE_CONFIGS, DEFAULT_DEV_INSTANCE, HISTORICAL)
+        monkeypatch.setitem(
+            dev_instance_lane_configs(), DEFAULT_DEV_INSTANCE, HISTORICAL
+        )
         monkeypatch.setattr(
             executor_mod, "deploy_gateway_script", lambda: "/nonexistent/deploy.sh"
         )

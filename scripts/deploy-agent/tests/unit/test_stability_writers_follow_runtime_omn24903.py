@@ -787,7 +787,7 @@ def _main(services: object) -> dict[str, object]:
 
 def test_both_lanes_resolve_their_compose_files_from_one_project_directory() -> None:
     assert _project_directory(EnumRuntimeLane.DEV) == _project_directory(LANE)
-    assert _project_directory(LANE) == Path(execution.COMPOSE_FILE).parent, (
+    assert _project_directory(LANE) == Path(execution.compose_file()).parent, (
         "the relative default of the store directory is read from this directory"
     )
 

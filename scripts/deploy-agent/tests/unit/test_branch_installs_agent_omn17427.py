@@ -28,8 +28,9 @@ from uuid import uuid4
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from deploy_agent import agent as agent_mod
-from deploy_agent.agent import BRANCH_INSTALL_ENTRY, DeployAgent
+from deploy_agent.agent import DeployAgent
 from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested, Scope
+from deploy_agent.executor import deploy_repo_dir
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
 
@@ -65,7 +66,7 @@ class _Exec:
     def __call__(
         self, argv: list[str], timeout: int, env: dict[str, str]
     ) -> subprocess.CompletedProcess[str]:
-        command = argv[argv.index(BRANCH_INSTALL_ENTRY) + 1]
+        command = argv[argv.index(branch_install_entry()) + 1]
         self.calls.append((argv, timeout, env))
         self.timeline.append(f"handler {command}")
         return self.results.get(
@@ -73,7 +74,9 @@ class _Exec:
         )
 
     def commands(self) -> list[str]:
-        return [argv[argv.index(BRANCH_INSTALL_ENTRY) + 1] for argv, _, _ in self.calls]
+        return [
+            argv[argv.index(branch_install_entry()) + 1] for argv, _, _ in self.calls
+        ]
 
 
 class _FakeExecutor:
@@ -120,6 +123,11 @@ REAPPLY_ENTRY = (
     "omnibase_infra/nodes/node_dev_roll_events_effect/"
     "runtime_dev_branch_install_reapply.py"
 )
+
+
+def branch_install_entry() -> str:
+    """The entry the agent runs, from the deploy-source clone's own src tree."""
+    return f"{deploy_repo_dir()}/src/{REAPPLY_ENTRY}"
 
 
 def _declare(state: Path, tmp_path: Path) -> None:
@@ -211,12 +219,12 @@ def test_a_dev_job_applies_the_record_after_the_recreate_and_the_verify(
     assert job is not None and job.status == "success"
     assert timeline == ["recreate", "verify", "handler apply"]
     argv, timeout, env = runner.calls[0]
-    assert argv[:3] == [sys.executable, BRANCH_INSTALL_ENTRY, "apply"]
+    assert argv[:3] == [sys.executable, branch_install_entry(), "apply"]
     assert argv[argv.index("--state-dir") + 1] == str(tmp_path / "state")
     assert argv[argv.index("--compose-project") + 1] == (
         agent_mod.lane_config_for(EnumRuntimeLane.DEV).compose_project
     )
-    assert env["PYTHONPATH"].split(":")[0] == f"{agent_mod.REPO_DIR}/src"
+    assert env["PYTHONPATH"].split(":")[0] == f"{agent_mod.deploy_repo_dir()}/src"
     assert timeout == agent_mod.BRANCH_INSTALL_APPLY_TIMEOUT_SECONDS
 
 
@@ -489,7 +497,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 def test_omn24013_the_agent_runs_the_reapply_entry_not_the_bare_handler() -> None:
-    assert BRANCH_INSTALL_ENTRY.endswith(f"/src/{REAPPLY_ENTRY}")
+    assert branch_install_entry().endswith(f"/src/{REAPPLY_ENTRY}")
     assert (REPO_SRC / REAPPLY_ENTRY).is_file()
 
 

@@ -1,0 +1,53 @@
+schema_version: "1.0.0"
+ticket_id: OMN-26193
+title: unblock omnibase_infra PR 6027 (merge conflict with its base)
+summary: Reconcile the deploy-source changes with dev and verify the combined deploy-agent tests, service wiring and dispatch-parity fixtures.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26193-reconcile-pr
+    statement: Reconcile the pull request with its base and record proof for the revision.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: omnibase_infra PR 6027 has a new head with no merge conflict against its base, or a STATUS row names the single cause outside the pull request with shared=yes -- falsifier: `onex scm pr-view OmniNode-ai/omnibase_infra#6027` shows a merge state of DIRTY at the lane's final head, and no STATUS row carries cause= and shared=yes
+      - id: AC2
+        statement: >-
+          AC2: a pull request comment starting `Lab:` names `head=<full new head sha>`, with installed=<host>:<revision> observed=<what ran> where the change touches a lab host unit or the plugin -- falsifier: the newest `Lab:` comment on the pull request names a head other than the pull request's current head
+      - id: AC3
+        statement: >-
+          AC3: no check was widened, skipped or bypassed and no shared dev runtime restart was made by the lane -- falsifier: `git diff <base> <new head> -- tests/ .github/` shows a removed assert, a new skip or xfail marker or a changed required-check list
+evidence_requirements:
+  - kind: tests
+    description: A pinned deploy changes only the deploy-source clone, and the dev-202 build uses its own compose project.
+    command: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py scripts/deploy-agent/tests/unit/test_dev_202_executor_lane_omn19522.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26193-ac1-parity
+    description: The combined node corpus matches the three committed dispatch fixtures. Read live mergeability or the shared blocker in the watcher and ledger.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: uv run --frozen python -m tests.fixtures.dispatch_parity.harness --check
+        cwd: .
+  - id: dod-omn26193-ac2-service-contract
+    description: The tracked unit wiring is checked on the hosted runner. Verify the installed revision and runtime observation in the Lab comment for the live head.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_service_source.py -q
+        cwd: .
+  - id: dod-omn26193-ac3-deploy-agent-assertions
+    description: Run the pinned-clone, dev-202 and sibling-ref assertions. Read the test and workflow diff and the runtime observation to verify the scope of the lane.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py scripts/deploy-agent/tests/unit/test_dev_202_executor_lane_omn19522.py scripts/deploy-agent/tests/unit/test_executor_sibling_ref_omn17135.py -q
+        cwd: .

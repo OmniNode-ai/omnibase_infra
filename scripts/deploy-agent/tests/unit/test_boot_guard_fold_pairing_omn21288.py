@@ -42,7 +42,9 @@ WRITERS = {
 def _policy(monkeypatch: pytest.MonkeyPatch, folded: str) -> None:
     """Read this checkout's fold overlay with the policy of the revision on disk."""
     monkeypatch.setattr(
-        executor_mod, "RUNTIME_POLICY_ENV_FILE", REPO_ROOT / "docker/runtime-policy.env"
+        executor_mod,
+        "runtime_policy_env_file",
+        lambda: REPO_ROOT / "docker/runtime-policy.env",
     )
     policy = executor_mod._load_dotenv_file(REPO_ROOT / "docker/runtime-policy.env")
     monkeypatch.setattr(

@@ -32,8 +32,8 @@ SHA = "a" * 40
 @pytest.fixture(autouse=True)
 def _committed_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "deploy_agent.executor.RUNTIME_POLICY_ENV_FILE",
-        REPO_ROOT / "docker/runtime-policy.env",
+        "deploy_agent.executor.runtime_policy_env_file",
+        lambda: REPO_ROOT / "docker/runtime-policy.env",
     )
 
 

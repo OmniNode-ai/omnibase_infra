@@ -74,7 +74,7 @@ def test_release_build_invokes_promotion_guard(
     )
 
     # Guard ran on the build source repo, and the build proceeded.
-    assert guard.calls == [Path(executor_mod.REPO_DIR)]
+    assert guard.calls == [Path(executor_mod.deploy_repo_dir())]
     assert any("build" in cmd for cmd in captured)
 
 
@@ -104,7 +104,7 @@ def test_release_build_fails_closed_when_guard_rejects(
 
     # No docker build ran — the guard fired before any side effect.
     assert calls == []
-    assert guard.calls == [Path(executor_mod.REPO_DIR)]
+    assert guard.calls == [Path(executor_mod.deploy_repo_dir())]
 
 
 def test_workspace_build_skips_promotion_guard(

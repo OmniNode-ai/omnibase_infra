@@ -255,7 +255,9 @@ def dev_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A dev-lane agent whose deployment fragment holds a non-source key."""
     fragment = _fragment_clone(tmp_path, MODE)
     monkeypatch.setattr(
-        executor_mod, "REPO_DIR", str(Path(__file__).resolve().parents[4])
+        executor_mod,
+        "deploy_repo_dir",
+        lambda: str(Path(__file__).resolve().parents[4]),
     )
     monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(tmp_path))
     monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", "dev")

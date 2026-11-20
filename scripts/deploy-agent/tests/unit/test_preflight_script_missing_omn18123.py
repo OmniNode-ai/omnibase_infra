@@ -32,9 +32,9 @@ import pytest
 from deploy_agent import executor as executor_mod
 from deploy_agent.events import EnumRuntimeLane, Phase, PhaseStatus
 from deploy_agent.executor import (
-    REPO_DIR,
     DeployExecutor,
     PreflightScriptUnavailableError,
+    deploy_repo_dir,
 )
 from deploy_agent.job_state import JobState
 from deploy_agent.publisher import build_completion_payload
@@ -81,7 +81,7 @@ class TestMissingScript:
 
         message = str(excinfo.value)
         assert absent_script in message
-        assert REPO_DIR in message
+        assert deploy_repo_dir() in message
         # AC1: it must NOT claim the compose environment is the problem.
         assert "REQUIRED_COMPOSE_ENV_MISSING" not in message
 
@@ -182,7 +182,7 @@ class TestTerminalEvent:
         monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
         failure = PreflightScriptUnavailableError(
             "PREFLIGHT_SCRIPT_UNAVAILABLE: "
-            f"{REPO_DIR}/scripts/preflight_required_compose_env.py is not a file"
+            f"{deploy_repo_dir()}/scripts/preflight_required_compose_env.py is not a file"
         )
         job = JobState(
             correlation_id=uuid4(),

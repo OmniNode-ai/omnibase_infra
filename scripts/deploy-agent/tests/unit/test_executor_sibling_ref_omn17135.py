@@ -94,7 +94,7 @@ def test_sha_form_ref_pins_infra_and_gives_siblings_their_own_tracking_head(
     repo = tmp_path / "repo"
     repo.mkdir()
     record = _install_recording_stage_script(repo, resolved={})
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(repo))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(repo))
     monkeypatch.setenv("OMNI_HOME", str(tmp_path / "omni_home"))
     monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
     monkeypatch.delenv("ALLOW_UNPINNED_DEPLOY_SOURCE", raising=False)
@@ -128,7 +128,7 @@ def test_symbolic_ref_still_reaches_staging_verbatim(
     repo = tmp_path / "repo"
     repo.mkdir()
     record = _install_recording_stage_script(repo, resolved={})
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(repo))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(repo))
     monkeypatch.setenv("OMNI_HOME", str(tmp_path / "omni_home"))
     monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
     monkeypatch.setattr(executor_mod, "_run", lambda cmd, timeout, **kwargs: _ok())
@@ -159,7 +159,7 @@ def test_compose_build_records_the_per_repo_resolved_shas(
     repo = tmp_path / "repo"
     repo.mkdir()
     _install_recording_stage_script(repo, resolved=resolved)
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(repo))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(repo))
     monkeypatch.setenv("OMNI_HOME", str(tmp_path / "omni_home"))
     monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
     monkeypatch.setattr(executor_mod, "_run", lambda cmd, timeout, **kwargs: _ok())
@@ -248,7 +248,7 @@ def test_build_args_carry_the_rt1_resolved_shas_not_the_canonical_heads(
     canonical_head = subprocess.run(
         [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, env=env
     ).stdout.strip()
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(repo))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(repo))
     monkeypatch.setenv("OMNI_HOME", str(source_root))
     monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
     commands: list[list[str]] = []

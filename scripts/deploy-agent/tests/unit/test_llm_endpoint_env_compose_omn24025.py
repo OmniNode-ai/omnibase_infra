@@ -90,7 +90,7 @@ def dev_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
     (tmp_path / LANE_DECLARATION_FILE).write_text("lanes: {}\n", encoding="utf-8")
     state = tmp_path / "state"
     state.mkdir()
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(REPO_ROOT))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(REPO_ROOT))
     monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(lane_dir))
     # A shell that sourced the refresh holds the declaration folder; these tests own it.
     monkeypatch.delenv("ONEX_LANE_DECLARATION_DIR", raising=False)
@@ -592,16 +592,18 @@ def test_seam_only_the_lanes_that_layer_a_dev_lane_file_take_the_declaration_dir
     default and every dev instance; its jobs hold the variable. The other lanes layer neither
     file, and their compose files never name the variable, so they hold none.
     """
-    dev_files = {executor_mod._DEV_LANE_OVERLAY, executor_mod._DEV_TENANT_FOLD_OVERLAY}
-    configs = dict(executor_mod._LANE_CONFIGS)
+    dev_files = {"docker-compose.dev-lane.yml", "docker-compose.dev-tenant-fold.yml"}
+    configs = executor_mod._lane_configs()
     layering = {
         lane
         for lane, config in configs.items()
-        if dev_files & set(config.compose_files)
+        if dev_files & {Path(file).name for file in config.compose_files}
     }
     assert layering == {executor_mod.EnumRuntimeLane.DEV}
-    for name, instance_config in executor_mod.DEV_INSTANCE_LANE_CONFIGS.items():
-        assert dev_files & set(instance_config.compose_files), name
+    for name, instance_config in executor_mod.dev_instance_lane_configs().items():
+        assert dev_files & {
+            Path(file).name for file in instance_config.compose_files
+        }, name
         assert instance_config.lane == executor_mod.EnumRuntimeLane.DEV, name
     for lane in configs:
         with executor_mod.active_deploy_lane(lane):

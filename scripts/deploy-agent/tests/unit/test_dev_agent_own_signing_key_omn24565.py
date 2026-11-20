@@ -989,7 +989,7 @@ _ARGV_FILES = (
 #: fails the scan until the command is traced and listed here.
 _ENV_FILE_ARGV_ALLOWED: dict[tuple[str, str], str] = {
     ("scripts/deploy-agent/deploy_agent/executor.py", '"--env-file",'): (
-        "`python3 <REPOINT_ONEX_API_SCRIPT> --env-file <store>`: the onex-api pin repoint script, not a compose command (traced by the AST test below)"
+        "`python3 <repoint script> --env-file <store>`: the onex-api pin repoint script, not a compose command (traced by the AST test below)"
     ),
     (
         "scripts/preflight_required_compose_env.py",
@@ -1172,10 +1172,10 @@ def test_the_executor_env_file_argv_is_the_repoint_script_and_no_compose_command
     ]
     assert words[0] == "python3", words
     assert "compose" not in words and "docker" not in words, words
-    # The script it runs is the repoint script, named in the list by its constant.
+    # The script it runs is the repoint script, named in the list by its resolver.
     assert any(
         isinstance(element, ast.Call)
-        and ast.unparse(element) == "str(REPOINT_ONEX_API_SCRIPT)"
+        and ast.unparse(element) == "str(repoint_onex_api_script())"
         for element in argv.elts
     )
 
@@ -1353,7 +1353,7 @@ def test_the_runtime_policy_env_file_carries_no_signing_key() -> None:
         encoding="utf-8"
     )
     assert (
-        '"--runtime-policy-env",\n            f"{REPO_DIR}/docker/runtime-policy.env",'
+        '"--runtime-policy-env",\n            f"{deploy_repo_dir()}/docker/runtime-policy.env",'
         in executor
     )
 

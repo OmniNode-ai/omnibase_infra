@@ -89,8 +89,9 @@ def test_golden_sigterm_restart_killed_by_the_unit_stop_does_not_reexec(
     execv.assert_not_called()
     assert "restarting via systemd" in caplog.text
     assert len(seen) == 1
-    assert seen[0][-4:] == ["systemctl", "--user", "restart", UNIT]
     assert seen[0][:2] == ["systemd-run", "--user"]
+    assert seen[0][-3:-1] == ["bash", "-c"]
+    assert f"systemctl --user restart {UNIT}" in seen[0][-1]
 
 
 def test_clean_restart_ends_the_update_without_reexec(

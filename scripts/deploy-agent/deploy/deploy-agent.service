@@ -100,6 +100,12 @@ WorkingDirectory=/data/omninode/omnibase_infra/scripts/deploy-agent
 EnvironmentFile=/home/jonah/.omnibase/.env
 Environment=DEPLOY_AGENT_DIR=/data/omninode/omnibase_infra/scripts/deploy-agent
 Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs
+# OMN-24562: the agent's OWN deploy-source clone (under its state dir), created on
+# first start at the commit the agent was serving (the canonical clone gives its origin
+# url only, never a commit). The agent resets and cleans only this
+# path. The canonical clone it never mutates (DEPLOY_AGENT_CANONICAL_CLONE) and the
+# overlay source (DEPLOY_AGENT_LAB_OVERLAY_SOURCE) are declared in the host env store.
+Environment=DEPLOY_AGENT_REPO_DIR=/data/omninode/deploy-agent/state/jobs/deploy-source/omnibase_infra
 Environment=DEPLOY_AGENT_PORT=8099
 Environment=DEPLOY_AGENT_TRACKING_REF=dev
 ExecStartPre=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/preflight_port_free.sh 8099

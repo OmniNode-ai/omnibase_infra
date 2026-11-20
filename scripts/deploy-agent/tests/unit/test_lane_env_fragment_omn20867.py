@@ -353,7 +353,7 @@ def test_an_instance_without_a_receipt_lane_is_refused() -> None:
 @pytest.mark.unit
 def test_the_shipped_table_names_a_runtime_lane_for_every_dev_instance() -> None:
     assert set(executor_mod.DEV_INSTANCE_RUNTIME_LANES) == set(
-        executor_mod.DEV_INSTANCE_LANE_CONFIGS
+        executor_mod.dev_instance_lane_configs()
     )
 
 
@@ -366,7 +366,9 @@ def dev_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     clone = _overlay_clone(tmp_path, {_fragment_path(): _fragment(NON_ACTING)})
     # Compose also reads broker policy from its deploy source (OMN-20275).
     monkeypatch.setattr(
-        executor_mod, "REPO_DIR", str(Path(__file__).resolve().parents[4])
+        executor_mod,
+        "deploy_repo_dir",
+        lambda: str(Path(__file__).resolve().parents[4]),
     )
     monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(tmp_path))
     monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", "dev")
