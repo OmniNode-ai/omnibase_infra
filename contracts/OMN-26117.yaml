@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-26117
+title: The M4 beta board check C11 (probe c11-negative-paths) reads green against what exists now, or its real product defect is named with a ticket
+summary: >-
+  The C11 probe resolved the dev lane by gateway_url, the separate HTTP API on port 8090 that the one-runtime rulings removed (RULING 2026-11-02T15:02:01Z, RULING 2026-11-10T13:26:22Z), so every run since 2026-11-15 failed at the lane-resolve step with connection refused before an arm ran. The probe now resolves the lane by ingress_url, the runtime's own port, and aims its arms at the routes omnimarket's workflow gateway serves there. Every arm keeps its declared status and code; no clause is removed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26117-c11-reads-current-front-door
+    statement: The C11 probe grades the runtime's own front door and keeps every clause it asserted.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the cause of the red is named from the probe''s newest failure text, with the run id and the failure lines read -- falsifier: the lane report names a cause with no run id or no quoted failure line'
+      - id: AC2
+        statement: 'AC2: the probe''s next run reads green against what exists now, with no retired thing restored and no clause removed unless a ruling retired the fact it graded -- falsifier: the newest c11-negative-paths run reads red, or the clause table in the report lists a removed assertion that no ruling retires'
+      - id: AC3
+        statement: 'AC3: the lane writes one STATUS row `crit=C11 probe=c11-negative-paths verdict=<green|red> read_at=<UTC>` -- falsifier: a ledger grep for `crit=C11 probe=c11-negative-paths` finds no STATUS row after this ticket''s creation'
+evidence_requirements:
+  - kind: tests
+    description: The C11 replay grading, the workflow's lane resolution by ingress_url and the pin that every arm keeps its declared status and code.
+    command: uv run --frozen pytest tests/ci/test_c11_negative_paths_probe_omn19175.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26117-ac1-cause-named
+    description: >-
+      The cause (run 44659932837, job 136035386940: lane skipped -- dev-201: gateway_url on port 8090 no answer, Connection refused) is stated in the pull request body and the lane report; the pin below holds that the workflow no longer resolves by gateway_url or names port 8090.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c11_negative_paths_probe_omn19175.py -q --no-cov -n 0 -p no:randomly -k "resolves_the_lane_by_its_runtime_ingress"
+        cwd: .
+  - id: dod-omn26117-ac2-arms-and-clauses-kept
+    description: >-
+      Every arm and the control keep their declared status and code, each arm targets a route the runtime gateway serves, and the replay fixtures that must grade FAIL (codes collapsed, cross-tenant leak) still do. The run ids read after the change are posted as a pull request comment naming the head and are not claimed by a static check.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c11_negative_paths_probe_omn19175.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26117-ac3-status-row
+    description: >-
+      The STATUS row crit=C11 probe=c11-negative-paths is written to the ledger by the lane after it reads the run; the pins that decide what the run grades are the test file above.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c11_negative_paths_probe_omn19175.py -q --no-cov -n 0 -p no:randomly -k "keeps_every_arm"
+        cwd: .
