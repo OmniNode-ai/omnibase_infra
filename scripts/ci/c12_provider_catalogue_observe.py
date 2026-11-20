@@ -1,44 +1,32 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""OMN-19195 -- the C12 OBSERVER. Runs INSIDE the deployed onex-api container.
+"""OMN-19195 -- the C12 OBSERVER. Runs INSIDE the deployed runtime container.
 
 WHAT THIS IS
     The half of the C12 producer that executes in the deployed interpreter,
-    against the deployed ``omnimarket`` package and the deployed ``onex-api``
-    router. ``c12_provider_catalogue_probe.py`` pipes this file to
+    against the deployed ``omnimarket`` package and the runtime's contract-owned
+    intake mount (``node_inference_credentials``; the route left onex-api).
+    ``c12_provider_catalogue_probe.py`` pipes this file to
     ``docker exec -i -u appuser <container> python -`` and grades what it
-    prints. This file GRADES NOTHING: it reports what the deployed code
-    returned, and the verdict is decided on the runner, in a grader that is
-    tested offline against recorded observations. A program that both runs the
-    subject and decides whether it passed is a grader grading itself.
+    prints. This file GRADES NOTHING: a program that both runs the subject and
+    decides whether it passed is a grader grading itself.
 
 WHY INSIDE THE CONTAINER AND NOT OVER HTTP
-    No customer-visible HTTP rendering of the catalogue exists: the intake
-    route answers 401 before its body is validated, and its OpenAPI schema
-    carries only a charset regex. The 2026-09-19 hand readback recorded the
-    same limit. The strongest reading available is therefore the deployed
-    package through the deployed interpreter, plus the request model the
-    deployed route actually binds -- which is what this reads.
+    The intake route answers 401 before its body is validated, so nothing is
+    readable over HTTP; the deployed package, the mount's declared create route
+    and the model its create handler validates with are the strongest reading.
 
 IT WRITES NOTHING
-    Every injection below is an in-memory copy of a shipped row handed to a
-    PURE deployed function (``catalogue_parity_gap``,
-    ``find_house_keyed_catalogue_entries``, the request model's validator). No
-    file is written, no catalogue is reloaded from a rewritten path, no route
-    is called and no event is published. Constructing the request model runs
-    only its field validators; ``register_inference_credential`` is never
-    reached.
+    Every injection is an in-memory copy of a shipped row handed to a PURE
+    deployed function: no file written, no route called, no event published.
 
-OUTPUT
-    Exactly one JSON object on stdout, last line. An import or read failure is
-    reported as ``{"error": ...}`` rather than raised, so the runner can tell
-    "the subject could not be read" (exit 2) from "the subject is wrong"
-    (exit 1).
+OUTPUT: one JSON object on stdout, last line; a read failure is ``{"error": ...}``.
 """
 
 from __future__ import annotations
 
+import ast
 import copy
 import hashlib
 import importlib.metadata
@@ -47,21 +35,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# The customer route this criterion's catalogue is bound to. Declared here and
-# echoed back so the grader checks the observer looked at the right one.
+# The customer route this criterion's catalogue is bound to (the grader pins it).
 ROUTE_PREFIX = "/v1/tenants/me/inference-credentials"
 
-# A provider id no catalogue offers and no platform rung backs. Used as the
-# unbacked injection and as a refused-at-intake case. It was ``openai`` until
-# OMN-17373 offered openai as a customer-only row; an injection must name a
-# provider the catalogue does not carry, so it is ``mistral`` now.
+# A provider id no catalogue offers and no platform rung backs: the unbacked
+# injection and a refused-at-intake case (``openai`` until OMN-17373 offered it).
 UNBACKED_PROVIDER = "mistral"
 
-# The synthetic provider used for the un-registerable-key injection. It is
-# synthetic ON PURPOSE: a real one exists today (vertex), but the probe must
-# still be able to exercise the conjunct on the day vertex is removed, and an
-# injection that stops being constructible is a negative test that silently
-# stops running.
+# The un-registerable-key injection's provider, synthetic ON PURPOSE: a real one
+# exists today (vertex), but the injection must stay constructible the day it is
+# removed, or the negative test silently stops running.
 SYNTHETIC_TOKEN_PROVIDER = "c12probe"
 SYNTHETIC_TOKEN_RUNG = {
     "backend_id": "c12-probe-token-rung",
@@ -80,11 +63,8 @@ def _exc(exc: BaseException) -> dict[str, str]:
 def _customer_only(rows: list[dict[str, Any]]) -> list[str]:
     """Providers every one of whose rows declares ``mirrors_house_rung: false``.
 
-    The platform holds no key for these (OMN-17373 openai, omnimarket#3777 anthropic), so no house rung
-    can back them. The SAME derivation the deployed omnimarket parity test and
-    the no-house validator apply, read from the RAW rows. This reports which
-    providers the catalogue exempts; whether the exemption is legitimate is the
-    grader's call against its own declared list.
+    Reports which providers the catalogue exempts, from the RAW rows; whether the
+    exemption is legitimate is the grader's call against its own declared list.
     """
     mirroring: dict[str, bool] = {}
     for row in rows:
@@ -126,14 +106,44 @@ def _intake(model: Any, provider: str) -> dict[str, Any]:
     return {"accepted": True}
 
 
+def _create_route_and_models(pkg_dir: Path) -> tuple[str | None, list[Any]]:
+    """The mount contract's POST create path and the classes its handler validates with."""
+    import yaml
+
+    node_dir = pkg_dir / "nodes" / "node_inference_credentials"
+    contract = yaml.safe_load((node_dir / "contract.yaml").read_text(encoding="utf-8"))
+    routes = {(r["method"], r["operation"]): r["path"] for r in contract["http_routes"]}
+    path = routes.get(("POST", "create"))
+    handler = node_dir / "handlers" / "handler_inference_credentials.py"
+    tree = ast.parse(handler.read_text(encoding="utf-8"))
+    imported = {
+        (a.asname or a.name): (n.module, a.name)
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom) and n.module
+        for a in n.names
+    }
+    models: list[Any] = []
+    for n in ast.walk(tree):
+        f = n.func if isinstance(n, ast.Call) else None
+        if (
+            isinstance(f, ast.Attribute)
+            and f.attr in {"model_validate", "model_validate_json"}
+            and isinstance(f.value, ast.Name)
+            and f.value.id in imported
+        ):
+            module, name = imported[f.value.id]
+            models.append(getattr(importlib.import_module(module), name))
+    return path, models
+
+
 def observe(app_root: str) -> dict[str, Any]:
     if app_root and app_root not in sys.path:
         sys.path.insert(0, app_root)
 
+    from omnimarket.handlers.routing import byok_provider_backends as byok
     from omnimarket.projection.credential_publisher import (
         ModelInferenceCredentialCreateRequest,
     )
-    from omnimarket.routing import byok_provider_backends as byok
     from omnimarket.validators import byok_catalogue_no_house_entry as house
 
     obs: dict[str, Any] = {
@@ -171,32 +181,15 @@ def observe(app_root: str) -> dict[str, Any]:
     }
 
     # ---- the customer surface ----------------------------------------------
-    from routers import inference_credentials as route_mod
-
-    body_models: list[str] = []
-    bound = False
-    for route in route_mod.router.routes:
-        methods = getattr(route, "methods", set()) or set()
-        if getattr(route, "path", None) != ROUTE_PREFIX or "POST" not in methods:
-            continue
-        # The RESOLVED annotation FastAPI validates the body against. The
-        # endpoint's own ``__annotations__`` are strings under postponed
-        # evaluation and would compare unequal to the class they name.
-        dependant = getattr(route, "dependant", None)
-        for param in getattr(dependant, "body_params", None) or ():
-            candidate = getattr(getattr(param, "field_info", None), "annotation", None)
-            if candidate is None:
-                continue
-            body_models.append(
-                f"{getattr(candidate, '__module__', '?')}."
-                f"{getattr(candidate, '__qualname__', str(candidate))}"
-            )
-            if candidate is ModelInferenceCredentialCreateRequest:
-                bound = True
+    route_path, candidates = _create_route_and_models(
+        Path(byok.__file__).resolve().parents[2]
+    )
     obs["route"] = {
-        "prefix": ROUTE_PREFIX,
-        "body_models": body_models,
-        "bound_to_catalogue_model": bound,
+        "prefix": route_path,
+        "body_models": [f"{m.__module__}.{m.__qualname__}" for m in candidates],
+        "bound_to_catalogue_model": any(
+            m is ModelInferenceCredentialCreateRequest for m in candidates
+        ),
     }
     obs["intake"] = {
         p: _intake(ModelInferenceCredentialCreateRequest, p)

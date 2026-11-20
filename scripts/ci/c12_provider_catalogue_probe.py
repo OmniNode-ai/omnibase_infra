@@ -5,59 +5,54 @@
 
 WHAT THIS IS
     Beta criterion C12 reads "Provider catalogue equals the handler-backed
-    set; no house entry", proven by "catalogue readback +
-    negative test". This producer takes both, on the deployed lane, every run,
-    and its EXIT CODE is the verdict -- the shape C11 and C15 already use, so
-    the board reads a workflow conclusion and needs no second grader.
+    set; no house entry", proven by "catalogue readback + negative test".
+    This producer takes both, on the deployed lane, every run, and its EXIT
+    CODE is the verdict -- the shape C11 and C15 already use, so the board
+    reads a workflow conclusion and needs no second grader.
 
     ``0``  every check below held on the deployed code
     ``1``  at least one did not; the record names each one and why
     ``2``  the probe could not run at all (no container, docker refused, the
-           observer could not import the subject). Deliberately distinct from
-           ``1``: "I could not look" is not "the catalogue is wrong".
+           observer could not import the subject): "I could not look" is not
+           "the catalogue is wrong", so it is distinct from ``1``.
 
 HOW IT READS THE SUBJECT
     ``c12_provider_catalogue_observe.py`` is piped to
     ``docker exec -i -u appuser <container> python - /app`` on the lane's host,
-    so it runs in the DEPLOYED interpreter against the DEPLOYED package and the
-    DEPLOYED intake route, as the container's own unprivileged user. It prints
-    what the deployed code returned and grades nothing; the grading is here,
-    against expectations declared in THIS file, and is tested offline over
-    recorded observations. The observer writes nothing: every injection is an
-    in-memory copy handed to a pure function.
+    so it runs in the DEPLOYED runtime's interpreter against the DEPLOYED
+    package and intake mount, as the container's own unprivileged user. It
+    prints what the deployed code returned and grades nothing; grading is
+    here, against expectations declared in THIS file, tested offline over
+    recorded observations. The observer writes nothing (injections are
+    in-memory copies handed to pure functions).
 
 WHAT IS CHECKED, BY CLAUSE
     parity      the house-keyed slug set derived from the deployed platform
                 rungs equals offered + not_offered, the deployed parity
                 function agrees, and neither set is empty. The grader
-                re-derives the equality itself rather than trusting the
-                deployed function's own "clean".
-    (Claude)    not a clause. The criterion once read "no Claude entry"; the
-                operator ruling of 2026-10-11T15:05:50Z lifted it and
-                omnimarket#3777 offers ``anthropic`` as a customer-only
-                row. ``anthropic`` is an allowed BYOK provider, declared in
-                ``CUSTOMER_ONLY_PROVIDERS`` below, so it takes the same parity,
-                no-house-rung and intake-accepts checks as ``openai``.
+                re-derives the equality rather than trust that "clean".
+    (Claude)    not a clause: the operator ruling of 2026-10-11T15:05:50Z
+                lifted "no Claude entry"; ``anthropic`` is a declared
+                customer-only row (``CUSTOMER_ONLY_PROVIDERS``) like ``openai``.
     no_house    the deployed OMN-18311 validator returns zero findings.
-    surface     the intake route's resolved body model IS the model that
-                validates against the catalogue; it ACCEPTS every offered
+    surface     the runtime mount's create route validates its body with the
+                model the catalogue validates against; it ACCEPTS every offered
                 provider (the positive control: a gate that refuses
                 everything also refuses what it should) and refuses every
                 not-offered one and an unbacked one.
     negative    each clause is shown to bite in the same process: an unbacked
                 row, a dropped row, a self-declared customer-only exemption,
-                a laundered house reference,
-                a house rung identity collision, an un-registerable provider,
-                and an empty rung set that must fail closed.
+                a laundered house reference, a house rung identity collision,
+                an un-registerable provider, and an empty rung set that must
+                fail closed.
 
-    The finding-class names are declared HERE. Reading them back from the
-    observer would let a renamed class grade itself.
+    The finding-class names are declared HERE: read back from the observer, a
+    renamed class would grade itself.
 
 WHY THE NEGATIVE ARM IS GRADED, NOT LOGGED
-    The shipped reading alone is exactly what a checker that always answers
-    "clean" produces. The injections run the SAME deployed functions in the
-    SAME process, so a checker that stopped biting reds this probe instead of
-    reading as a proof.
+    The shipped reading alone is what a checker that always answers "clean"
+    produces. The injections run the SAME deployed functions in the SAME
+    process, so a checker that stopped biting reds this probe.
 """
 
 from __future__ import annotations
@@ -75,7 +70,7 @@ OBSERVER: Final[Path] = (
     Path(__file__).resolve().parent / "c12_provider_catalogue_observe.py"
 )
 
-DEFAULT_CONTAINER: Final[str] = "onex-api"
+DEFAULT_CONTAINER: Final[str] = "omninode-runtime"
 DEFAULT_USER: Final[str] = "appuser"
 DEFAULT_APP_ROOT: Final[str] = "/app"
 
@@ -83,13 +78,17 @@ DEFAULT_APP_ROOT: Final[str] = "/app"
 UNBACKED_PROVIDER: Final[str] = "mistral"
 
 # Providers the catalogue may offer with no house rung behind them: the platform
-# holds no key, the customer's own key pays (OMN-17373 openai, omnimarket#3777 anthropic,
-# omnimarket#4632 openai_compatible: a keyed endpoint the developer names by URL,
-# added to this list by OMN-21981). Declared HERE, not read
-# back from the catalogue: a row that declares ``mirrors_house_rung: false`` on
-# its own authority would otherwise exempt itself from the parity clause. An
-# exemption the catalogue declares for a provider not on this list stays RED.
-CUSTOMER_ONLY_PROVIDERS: Final = ("anthropic", "openai", "openai_compatible")
+# holds no key, the customer's own key pays (OMN-17373 openai, omnimarket#3777
+# anthropic, omnimarket#4632 openai_compatible, a keyed endpoint the developer
+# names by URL, added by OMN-21981; reflection, operator 2026-11-13). Declared
+# HERE, not read back: a row declaring ``mirrors_house_rung: false`` on its own
+# authority would otherwise exempt itself. An unlisted exemption stays RED.
+CUSTOMER_ONLY_PROVIDERS: Final = (
+    "anthropic",
+    "openai",
+    "openai_compatible",
+    "reflection",
+)
 SYNTHETIC_TOKEN_PROVIDER: Final[str] = "c12probe"
 ROUTE_PREFIX: Final[str] = "/v1/tenants/me/inference-credentials"
 
