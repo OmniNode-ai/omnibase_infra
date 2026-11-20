@@ -1469,11 +1469,11 @@ class DeployAgent:
             self._stability_follow_last_verdict = decision.verdict
         if decision.verdict is not EnumStabilityFollowVerdict.FOLLOW:
             return decision
-        if not self._idle_converge_gate_open():
-            return decision
         assert decision.followed_tag is not None  # FOLLOW names the tag
         assert decision.followed_tag_sha is not None
         cmd = stability_follow_command(decision.followed_tag, repository)
+        if not self._idle_converge_gate_open(cmd.requested_by):
+            return decision
         self._stability_follow_attempted.add(decision.followed_tag_sha)
         logger.info(
             "stability follow: running %s as %s: %s",
@@ -1797,7 +1797,9 @@ class DeployAgent:
         self._migration_converge_last_verdict = "changed"
         if fingerprint in self._migration_converge_attempted:
             return
-        if not self._idle_converge_gate_open():
+        # OMN-26106: the migration belongs to the idle converge, so the window sees
+        # that converge's requester; it runs no command of its own to name.
+        if not self._idle_converge_gate_open(converge_command().requested_by):
             return
         self._migration_converge_attempted.add(fingerprint)
         logger.info(
@@ -1819,7 +1821,7 @@ class DeployAgent:
                 exc,
             )
 
-    def _idle_converge_gate_open(self, who: str = "") -> bool:
+    def _idle_converge_gate_open(self, who: str) -> bool:
         """Whether the load gate (OMN-19507) and recreate window (OMN-25912) admit it."""
         if (gate := getattr(self, "_load_gate", None)) is not None:
             decision = gate.check()

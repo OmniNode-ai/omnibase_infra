@@ -432,7 +432,7 @@ def _fake_docker(tmp_path: Path, body: str) -> str:
 @pytest.mark.unit
 def test_an_unreachable_container_cannot_produce_a_pass(tmp_path: Path) -> None:
     docker = _fake_docker(
-        tmp_path, 'echo "error: no such object: onex-api" >&2; exit 1'
+        tmp_path, 'echo "error: no such object: omninode-runtime" >&2; exit 1'
     )
     record_path = tmp_path / "c12.json"
     rc = probe.main(["--docker-bin", docker, "--record", str(record_path)])
@@ -462,7 +462,7 @@ def test_the_live_path_grades_what_the_container_printed(tmp_path: Path) -> None
     rc = probe.main(["--docker-bin", docker, "--record", str(record_path)])
     assert rc == probe.EXIT_OK
     calls = argv_log.read_text(encoding="utf-8").splitlines()
-    assert calls[1] == "exec -i -u appuser onex-api python - /app"
+    assert calls[1] == "exec -i -u omniinfra omninode-runtime python - /app"
     written = json.loads(record_path.read_text(encoding="utf-8"))
     assert written["criterion"] == "C12"
     assert written["verdict"] == "pass"
@@ -518,7 +518,8 @@ def test_the_observer_is_standard_library_plus_the_subject() -> None:
             roots.update(a.name.split(".")[0] for a in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             roots.add(node.module.split(".")[0])
-    allowed_subject = {"omnimarket", "routers"}
+    # ``yaml`` is the subject's own dependency: the deployed runtime carries it.
+    allowed_subject = {"omnimarket", "yaml"}
     stdlib = set(getattr(__import__("sys"), "stdlib_module_names", ()))
     assert roots - stdlib - allowed_subject == set(), roots
 
@@ -535,3 +536,160 @@ def test_the_probe_is_standard_library_only() -> None:
                 assert a.name.split(".")[0] in stdlib, a.name
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             assert node.module.split(".")[0] in stdlib | {"__future__"}, node.module
+
+
+def _with_reflection(obs: dict[str, Any]) -> dict[str, Any]:
+    """The recording reshaped to the catalogue omnimarket now ships: a
+    customer-only ``reflection`` row (``mirrors_house_rung: false``) the
+    operator added on 2026-11-13, accepted by intake, backed by no house rung."""
+    obs = copy.deepcopy(obs)
+    shipped = obs["shipped"]
+    shipped["offered"] = sorted({*shipped["offered"], "reflection"})
+    shipped["customer_only"] = sorted({*shipped["customer_only"], "reflection"})
+    obs["intake"]["reflection"] = {"accepted": True}
+    return obs
+
+
+@pytest.mark.unit
+def test_the_reflection_row_is_a_declared_customer_only_provider() -> None:
+    record = probe.grade(_with_reflection(_healthy()))
+    assert record.verdict == "pass", record.failures
+    assert "intake_accepts_reflection" in {c.name for c in record.checks}
+    assert "reflection" in probe.CUSTOMER_ONLY_PROVIDERS
+
+
+@pytest.mark.unit
+def test_an_undeclared_reflection_exemption_still_grades_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative control: without the declaration the same reading is RED on the
+    exemption clause, so declaring the provider is what turns it green."""
+    monkeypatch.setattr(
+        probe, "CUSTOMER_ONLY_PROVIDERS", ("anthropic", "openai", "openai_compatible")
+    )
+    record = probe.grade(_with_reflection(_healthy()))
+    assert record.verdict == "fail"
+    assert _failed(record) == {"customer_only_exemptions_are_declared_here"}
+
+
+@pytest.mark.unit
+def test_a_house_rung_behind_reflection_still_grades_fail() -> None:
+    obs = _with_reflection(_healthy())
+    obs["shipped"]["house_keyed_slugs"] = sorted(
+        {*obs["shipped"]["house_keyed_slugs"], "reflection"}
+    )
+    record = probe.grade(obs)
+    assert record.verdict == "fail"
+    assert "customer_only_has_no_house_rung" in _failed(record)
+
+
+@pytest.mark.unit
+def test_an_undeclared_customer_only_provider_still_grades_fail() -> None:
+    """The declared list is not a wildcard: a customer-only row the grader does
+    not name is RED."""
+    obs = _with_reflection(_healthy())
+    obs["shipped"]["offered"] = sorted({*obs["shipped"]["offered"], "zzz-unlisted"})
+    obs["shipped"]["customer_only"] = sorted(
+        {*obs["shipped"]["customer_only"], "zzz-unlisted"}
+    )
+    obs["intake"]["zzz-unlisted"] = {"accepted": True}
+    record = probe.grade(obs)
+    assert record.verdict == "fail"
+    assert "customer_only_exemptions_are_declared_here" in _failed(record)
+
+
+_CONTRACT = """\
+http_routes:
+  - {operation: create, method: POST, path: "%s"}
+  - {operation: list, method: GET, path: "%s"}
+"""
+_HANDLER = """\
+from c12_fake_models import %s as Body
+
+
+def create(raw):
+    return Body.model_validate_json(raw)
+"""
+
+
+def _mount_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    route: str,
+    body_model: str,
+) -> Path:
+    """A package directory shaped like the deployed omnimarket's runtime mount:
+    the node's contract and create handler, plus the models the handler imports."""
+    pkg = tmp_path / "omnimarket"
+    node = pkg / "nodes" / "node_inference_credentials"
+    (node / "handlers").mkdir(parents=True)
+    (node / "contract.yaml").write_text(_CONTRACT % (route, route), encoding="utf-8")
+    (node / "handlers" / "handler_inference_credentials.py").write_text(
+        _HANDLER % body_model, encoding="utf-8"
+    )
+    models = tmp_path / "mods"
+    models.mkdir()
+    (models / "c12_fake_models.py").write_text(
+        "class CatalogueModel: ...\n\nclass OtherModel: ...\n", encoding="utf-8"
+    )
+    monkeypatch.syspath_prepend(str(models))
+    return pkg
+
+
+@pytest.mark.unit
+def test_the_observer_reads_the_runtime_mount_route_and_its_body_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pkg = _mount_package(
+        tmp_path,
+        monkeypatch,
+        route=observer.ROUTE_PREFIX,
+        body_model="CatalogueModel",
+    )
+    path, models = observer._create_route_and_models(pkg)
+    assert path == observer.ROUTE_PREFIX
+    assert [m.__name__ for m in models] == ["CatalogueModel"]
+
+
+@pytest.mark.unit
+def test_a_handler_validating_another_model_is_not_bound_to_the_catalogue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control for ``route_body_is_catalogue_model``: the observer's
+    reading of a handler that validates a different class reports that class,
+    and the grader fails the clause on it."""
+    pkg = _mount_package(
+        tmp_path, monkeypatch, route=observer.ROUTE_PREFIX, body_model="OtherModel"
+    )
+    _, models = observer._create_route_and_models(pkg)
+    assert [m.__name__ for m in models] == ["OtherModel"]
+    obs = _healthy()
+    obs["route"]["bound_to_catalogue_model"] = False
+    assert "route_body_is_catalogue_model" in _failed(probe.grade(obs))
+
+
+@pytest.mark.unit
+def test_a_mount_declaring_another_create_path_fails_the_route_clause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pkg = _mount_package(
+        tmp_path, monkeypatch, route="/v1/elsewhere", body_model="CatalogueModel"
+    )
+    path, _ = observer._create_route_and_models(pkg)
+    assert path == "/v1/elsewhere"
+    obs = _healthy()
+    obs["route"]["prefix"] = path
+    assert "route_is_the_intake_route" in _failed(probe.grade(obs))
+
+
+@pytest.mark.unit
+def test_the_workflow_resolves_a_lane_by_the_runtime_not_the_removed_gateway() -> None:
+    text = (
+        Path(__file__).resolve().parents[2]
+        / ".github/workflows/chain-canary-c12-provider-catalogue.yml"
+    ).read_text(encoding="utf-8")
+    assert "require: ingress_url docker_runs_on" in text
+    assert "gateway_url" not in text.replace("port 8090", "")
+    assert "default: 'omninode-runtime'" in text
+    assert probe.DEFAULT_CONTAINER == "omninode-runtime"

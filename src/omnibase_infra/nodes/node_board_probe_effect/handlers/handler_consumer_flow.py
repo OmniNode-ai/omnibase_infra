@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TypeGuard
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -284,8 +284,29 @@ def grade_cursor(
     )
 
 
+def expected_runtime_roles(
+    boot_identity: Mapping[str, object] | None,
+) -> list[str | None]:
+    """The runtime roles this lane's logs must cover, sorted.
+
+    The lane's own boot identity names the runtime containers it was expected
+    to run (a lane that folds effects into main runs no effects container), so
+    the logs must cover exactly those roles and always the main ``-runtime``.
+    Without an identity every role is expected.
+    """
+    roles = sorted(
+        {runtime_role(c) for c in boot_identity or {} if runtime_role(c) is not None},
+        key=str,
+    )
+    if "-runtime" not in roles:
+        return sorted(RUNTIME_ROLES, key=str)
+    return roles
+
+
 def grade_boot(
-    rec: list[ModelConsumerFlowCheck], boot: TypedDictConsumerFlowBoot
+    rec: list[ModelConsumerFlowCheck],
+    boot: TypedDictConsumerFlowBoot,
+    boot_identity: Mapping[str, object] | None = None,
 ) -> None:
     before, after = boot.get("applied_hwm_before"), boot.get("applied_hwm_after")
     _add(
@@ -301,7 +322,8 @@ def grade_boot(
         rec,
         "boot",
         "runtime_logs_read",
-        sorted(map(runtime_role, logs), key=str) == sorted(RUNTIME_ROLES)
+        sorted(map(runtime_role, logs), key=str)
+        == expected_runtime_roles(boot_identity)
         and all(_is_int(lines := v.get("lines")) and lines > 0 for v in logs.values()),
         "log lines read per container: "
         + ", ".join(f"{c}={v.get('lines')}" for c, v in sorted(logs.items())),
@@ -370,7 +392,7 @@ def grade_consumer_flow(
         grade_kinds(checks, observation.kinds.get("samples") or [])
         grade_negative(checks, observation.negative)
         grade_cursor(checks, observation.cursor)
-        grade_boot(checks, observation.boot)
+        grade_boot(checks, observation.boot, observation.boot_identity)
         failures = tuple(
             f"{c.clause}/{c.name}: {c.evidence}" for c in checks if not c.ok
         )

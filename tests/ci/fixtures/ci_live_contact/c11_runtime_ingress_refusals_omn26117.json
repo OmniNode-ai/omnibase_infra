@@ -1,0 +1,247 @@
+{
+ "_provenance": {
+  "captured_utc": "2026-11-20T02:45:23Z",
+  "source": "GET reads of the dev lane runtime ingress (the workflow gateway served by the one runtime), taken from lab host h053 with the probe's own header form and never-valid key; the credential-bearing arms are not recorded because their key is a CI secret",
+  "ticket": "OMN-26117"
+ },
+ "response": {
+  "observations": {
+   "absent_key": {
+    "body": {
+     "code": "auth.credential.absent",
+     "detail": "Unauthorized"
+    },
+    "status": 401
+   },
+   "positive_control": {
+    "body": {
+     "details": {
+      "batch_response_enabled": false,
+      "batch_response_pending": 0,
+      "components": {
+       "db": {
+        "details": {
+         "healthy": true,
+         "note": "no health_check method"
+        },
+        "last_healthy": "2026-11-20T02:45:23.032402+00:00",
+        "name": "db",
+        "status": "healthy"
+       },
+       "event_bus": {
+        "details": {
+         "bootstrap_servers": "redpanda:9092",
+         "circuit_state": "closed",
+         "consumer_count": 501,
+         "degraded": false,
+         "dispatch_deadline": {
+          "deadline_expiries_total": 2,
+          "deadline_seconds": 600.0,
+          "degrading_orphans": 0,
+          "oldest_orphan_age_seconds": 0.0,
+          "orphan_limit": 3,
+          "orphaned_dispatches": 0,
+          "orphans": []
+         },
+         "environment": "local",
+         "healthy": true,
+         "started": true,
+         "subscriber_count": 501,
+         "topic_count": 352
+        },
+        "last_healthy": "2026-11-20T02:45:23.032402+00:00",
+        "name": "event_bus",
+        "status": "healthy"
+       },
+       "http": {
+        "details": {
+         "healthy": true,
+         "note": "no health_check method"
+        },
+        "last_healthy": "2026-11-20T02:45:23.032402+00:00",
+        "name": "http",
+        "status": "healthy"
+       },
+       "runtime_wiring": {
+        "details": {
+         "attached_contracts": 239,
+         "not_ready_contract_count": 0,
+         "registered_handler_count": 2,
+         "required_contracts": 239,
+         "state": "ready"
+        },
+        "last_healthy": "2026-11-20T02:45:23.032402+00:00",
+        "name": "runtime_wiring",
+        "status": "healthy"
+       }
+      },
+      "config_prefetch_status": "skipped",
+      "degraded": false,
+      "event_bus": {
+       "bootstrap_servers": "redpanda:9092",
+       "circuit_state": "closed",
+       "consumer_count": 501,
+       "degraded": false,
+       "dispatch_deadline": {
+        "deadline_expiries_total": 2,
+        "deadline_seconds": 600.0,
+        "degrading_orphans": 0,
+        "oldest_orphan_age_seconds": 0.0,
+        "orphan_limit": 3,
+        "orphaned_dispatches": 0,
+        "orphans": []
+       },
+       "environment": "local",
+       "healthy": true,
+       "started": true,
+       "subscriber_count": 501,
+       "topic_count": 352
+      },
+      "event_bus_healthy": true,
+      "failed_handlers": {},
+      "handler_pool_size": 4,
+      "handler_pools": {
+       "db": {
+        "available": 4,
+        "avg_checkout_wait_ms": 0.0,
+        "checkin_count": 0,
+        "checkout_count": 0,
+        "handler_type": "db",
+        "healthy": true,
+        "pool_size": 4,
+        "recycle_count": 0,
+        "total_instances": 4
+       },
+       "http": {
+        "available": 4,
+        "avg_checkout_wait_ms": 0.0,
+        "checkin_count": 0,
+        "checkout_count": 0,
+        "handler_type": "http",
+        "healthy": true,
+        "pool_size": 4,
+        "recycle_count": 0,
+        "total_instances": 4
+       }
+      },
+      "handlers": {
+       "db": {
+        "healthy": true,
+        "note": "no health_check method"
+       },
+       "http": {
+        "healthy": true,
+        "note": "no health_check method"
+       }
+      },
+      "healthy": true,
+      "in_flight_tasks": 0,
+      "is_draining": false,
+      "is_running": true,
+      "local_ingress": {
+       "active_packages": [
+        "omnibase_infra",
+        "omnimarket",
+        "omniclaude",
+        "omniintelligence"
+       ],
+       "enabled": true,
+       "request_model": "ModelLocalRuntimeIngressRequest",
+       "response_model": "ModelLocalRuntimeIngressResponse",
+       "route_count": 6321,
+       "running": true,
+       "socket_path": "/run/onex-runtime/onex-runtime.sock"
+      },
+      "max_concurrent_handlers": 10,
+      "no_handlers_registered": false,
+      "pending_message_count": 0,
+      "registered_handlers": [
+       "db",
+       "http"
+      ],
+      "runtime_attached": true,
+      "runtime_health": {
+       "age_seconds": 228.96,
+       "consumer_group_count": 1561,
+       "contract_count": 1421,
+       "dimensions": [
+        {
+         "detail": "1421 contracts loaded cleanly",
+         "name": "discovery_errors",
+         "status": "HEALTHY"
+        },
+        {
+         "detail": "All 1561 consumer groups active",
+         "name": "empty_consumer_groups",
+         "status": "HEALTHY"
+        },
+        {
+         "detail": "All 501 expected consumer group(s) covered",
+         "name": "topic_coverage",
+         "status": "HEALTHY"
+        },
+        {
+         "detail": "All 55 declared projection(s) attached",
+         "name": "projection_attachment",
+         "status": "HEALTHY"
+        },
+        {
+         "detail": "No projection is fully DLQ-routed over 10 flow window(s) [56 consumer group(s) carried flow on a declared projection topic and were excluded from projection attribution \u2014 not a declared projection (declares no db_io.db_tables projection target), so its flow is not a projection's to account for: alert_channel_liveness_effect, autopilot_orchestrator, node_audit_trail_compact_schedule_compute, node_branch_prune_effect, node_bus_login_exposure_scheduled_effect, node_c32_probe_scheduled_effect, node_code_eval_trial_orchestrator, node_commitment_check_scheduled_effect, +48 more]",
+         "name": "projection_dlq_saturation",
+         "status": "HEALTHY"
+        },
+        {
+         "detail": "4 declared projection(s) have no in-process dispatcher here and are deliberately not subscribed (OMN-17562), so their events stay replayable; their rows depend entirely on a dedicated writer this process cannot see, whose presence is asserted by the static lane writer-coverage gate rather than by this runtime: node_projection_cost_by_repo, node_projection_instruction_eval, node_projection_skill_executions, projection_llm_cost",
+         "name": "projection_write_path",
+         "status": "HEALTHY"
+        },
+        {
+         "detail": "501 consumer group(s) in sync; max lag 15 record(s), last advance 0s ago",
+         "name": "consumer_sync",
+         "status": "HEALTHY"
+        },
+        {
+         "detail": "0 abandoned dispatch(es) still running (limit 3, deadline 600s, 2 expired since start)",
+         "name": "dispatch_deadline",
+         "status": "HEALTHY"
+        },
+        {
+         "detail": "All 94 dispatching projection(s) that consumed also wrote, over 10 apply window(s) (34216 consumed, 137205 row(s) upserted, 109 refused by an ordering guard)",
+         "name": "projection_apply_divergence",
+         "status": "HEALTHY"
+        },
+        {
+         "detail": "No projection's discarded-delta count rose across 10 apply window(s) (apply_flow_key_grain_unresolved: 36 projection(s) declare no resolvable key grain. Each is graded, and none is exempted on the strength of the missing declaration alone: AgentActionsProjectionWriter, AlertChannelLivenessProjectionWriter, BaselinesProjectionRunner, CiAttemptOutcomeProjectionWriter, ClaudeHookEventsProjectionWriter, ContextAuditProjectionWriter, DelegationBudgetReadingsProjectionWriter, DodVerdictProjectionWriter, +28 more) [2 exposure(s) declare an immutable, content-addressed key grain, for which a discarded delta is intended idempotence, and are excluded from this dimension: HandlerProjectionSessionReplay, HandlerProjectionWorkEvents]",
+         "name": "projection_delta_dropped",
+         "status": "HEALTHY"
+        }
+       ],
+       "discovery_error_count": 0,
+       "dlq_saturated_projection_count": 0,
+       "empty_consumer_group_count": 0,
+       "nonwriting_projection_count": 4,
+       "observed_at": "2026-11-20T02:41:34.071900+00:00",
+       "projection_count": 55,
+       "status": "HEALTHY",
+       "subscribe_topic_count": 352,
+       "unattached_projection_count": 0,
+       "uncovered_topic_count": 0
+      },
+      "skipped_handlers": {},
+      "startup_in_progress": false
+     },
+     "status": "healthy",
+     "version": "0.38.79"
+    },
+    "status": 200
+   },
+   "wrong_key": {
+    "body": {
+     "code": "auth.credential.invalid",
+     "detail": "Unauthorized"
+    },
+    "status": 401
+   }
+  }
+ }
+}
