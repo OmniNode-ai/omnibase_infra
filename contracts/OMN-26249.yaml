@@ -75,3 +75,13 @@ dod_evidence:
       - check_type: command
         check_value: bash -c 'docker exec omnibase-infra-redpanda rpk topic consume onex.evt.omnibase-infra.runtime-loop-reading-recorded.v1 --offset -3 --num 3 --format json | grep -c max_loop_gap_ms | grep -qx 3'
         cwd: .
+  - id: dod-omn26249-ac3-integration-proof-reading-on-contracted-topic
+    description: >-
+      The real publisher against a real in-memory bus: a subscriber of the topic the on-disk node contract declares receives a reading that validates as the reading model and carries the gap of a 0.6 s block on the loop.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_runtime_loop_reading_publish_omn26249.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .

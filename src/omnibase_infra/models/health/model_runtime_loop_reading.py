@@ -31,7 +31,7 @@ class ModelRuntimeLoopReading(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Identifies this reading.")
-    member_id: str = Field(
+    runtime_member: str = Field(
         ...,
         min_length=1,
         description="Identity of the runtime member that took the reading.",

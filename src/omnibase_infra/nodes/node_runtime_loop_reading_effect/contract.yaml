@@ -55,7 +55,7 @@ handler_routing:
         module: "omnibase_infra.models.health.model_runtime_loop_window_request"
         description: "The member identity, host, window end and abandoned-dispatch count."
       output_fields:
-        - member_id
+        - runtime_member
         - host
         - window_start
         - window_end
@@ -68,12 +68,12 @@ io_operations:
   - operation: "runtime_loop_reading.close_window"
     description: "Close the open reading window of this member."
     input_fields:
-      - member_id
+      - runtime_member
       - host
       - window_end
       - abandoned_dispatches
     output_fields:
-      - member_id
+      - runtime_member
       - host
       - window_start
       - window_end

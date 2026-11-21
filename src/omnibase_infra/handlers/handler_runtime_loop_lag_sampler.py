@@ -155,7 +155,7 @@ class RuntimeLoopLagSampler:
             tick_lag_ms, reason = self._newest_tick_lag_ms, None
         reading = ModelRuntimeLoopReading(
             correlation_id=request.correlation_id,
-            member_id=request.member_id,
+            runtime_member=request.runtime_member,
             host=request.host,
             window_start=self._window_start,
             window_end=request.window_end,
@@ -256,7 +256,7 @@ class RuntimeLoopReadingPublisher:
         reading = self._handler.handle(
             ModelRuntimeLoopWindowRequest(
                 correlation_id=uuid4(),
-                member_id=(
+                runtime_member=(
                     f"{node_identity.env}.{node_identity.service}"
                     f".{node_identity.node_name}.{resolve_runtime_profile_name()}"
                 ),

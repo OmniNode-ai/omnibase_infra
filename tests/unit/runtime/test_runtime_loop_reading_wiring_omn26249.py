@@ -136,7 +136,7 @@ async def test_reading_carries_member_host_and_the_bus_abandoned_count(
         bus.publish_envelope.await_args.args[0]
     )
     assert reading.abandoned_dispatches == 2
-    assert reading.member_id.startswith("dev.omnibase-infra.runtime-main.")
+    assert reading.runtime_member.startswith("dev.omnibase-infra.runtime-main.")
     assert reading.host
     assert reading.tick_subscriber is False
     assert reading.tick_lag_not_applicable_reason == NOT_A_TICK_SUBSCRIBER_REASON

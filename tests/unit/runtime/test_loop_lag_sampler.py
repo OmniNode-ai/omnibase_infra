@@ -39,7 +39,7 @@ pytestmark = pytest.mark.unit
 def _request(abandoned: int = 0) -> ModelRuntimeLoopWindowRequest:
     return ModelRuntimeLoopWindowRequest(
         correlation_id=uuid4(),
-        member_id="dev.omnibase-infra.runtime-main",
+        runtime_member="dev.omnibase-infra.runtime-main",
         host="host-a",
         window_end=datetime.now(UTC) + timedelta(seconds=1),
         abandoned_dispatches=abandoned,
@@ -50,7 +50,7 @@ def _valid_reading_fields() -> dict[str, Any]:
     start = datetime(2026, 11, 21, 0, 0, 0, tzinfo=UTC)
     return {
         "correlation_id": uuid4(),
-        "member_id": "dev.omnibase-infra.runtime-main",
+        "runtime_member": "dev.omnibase-infra.runtime-main",
         "host": "host-a",
         "window_start": start,
         "window_end": start + timedelta(seconds=60),

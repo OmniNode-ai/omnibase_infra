@@ -20,7 +20,9 @@ class ModelRuntimeLoopWindowRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Identifies the reading produced.")
-    member_id: str = Field(..., min_length=1, description="Identity of the member.")
+    runtime_member: str = Field(
+        ..., min_length=1, description="Identity of the member."
+    )
     host: str = Field(..., min_length=1, description="Host the member runs on.")
     window_end: datetime = Field(..., description="When the window closes (UTC).")
     abandoned_dispatches: int = Field(
