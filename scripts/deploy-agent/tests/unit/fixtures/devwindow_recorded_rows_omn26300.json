@@ -1,0 +1,45 @@
+{
+  "source": "rolling work ledger rows of lanes devwindow-2100, devwindow2-2215 and devwindow3-2340 (OMN-26152); facts only, no ledger text",
+  "stores": {
+    "old": "state/jobs/branch-installs",
+    "agent": "state/jobs-dev/branch-installs"
+  },
+  "recreate_window": {"window_seconds": 3600, "grace_seconds": 300},
+  "idle_restore_jobs": [
+    {"job": "5623655f", "started": "2026-11-20T19:00:30Z", "requested_by": "agent/idle-restore"},
+    {"job": "8648de6f", "started": "2026-11-20T21:00:33Z", "requested_by": "agent/idle-restore"}
+  ],
+  "pinned_fix_jobs": [
+    {
+      "job": "a9ecbe18-db99-45a9-861d-2a7bfad3ae83",
+      "lane": "devwindow2-2215",
+      "recreated": "2026-11-20T23:05:23Z",
+      "ended": "failed at the runtime health gate, HTTP 503"
+    },
+    {
+      "job": "f79001c5",
+      "lane": "devwindow3-2340",
+      "requested_by": "operator/pinned-fix/devwindow3-2340",
+      "recreated": "2026-11-21T00:27:37Z"
+    }
+  ],
+  "registered_installs": [
+    {
+      "id": "devwindow-omnimarket-6510",
+      "repo": "omnimarket",
+      "pr": 6510,
+      "head": "828262734ff36e1b57ceb8c7149085af843c953c",
+      "store": "old",
+      "restart": false
+    },
+    {
+      "id": "devwindow-omnimarket-6496",
+      "repo": "omnimarket",
+      "pr": 6496,
+      "head": "3d2e1873910ce384bd281e3f9d28fdc0d9701df2",
+      "store": "agent",
+      "restart": true
+    }
+  ],
+  "observed": {"keyerror_judge_run_id_lines": [542, 604]}
+}

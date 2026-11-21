@@ -19,6 +19,9 @@ from tests.scripts.ledger_reader_stub import LedgerReaderStub
 RUNTIME = (
     "omnibase_infra.nodes.node_ledger_open_claims_effect.runtime_ledger_open_claims"
 )
+# The hosted runner resolves omnibase_infra through PYTHONPATH=src (the package is not installed in
+# its venv), so the child process, which gets a minimal environment, is handed the same source root.
+SRC = str(Path(__file__).resolve().parents[2] / "src")
 CLAIM = (
     "2026-11-20T10:00:00Z",
     "lane-a",
@@ -36,7 +39,7 @@ def _run(stub: LedgerReaderStub, *args: str) -> subprocess.CompletedProcess[str]
         text=True,
         timeout=120,
         check=False,
-        env={**stub.env(), "PATH": "/usr/bin:/bin"},
+        env={**stub.env(), "PATH": "/usr/bin:/bin", "PYTHONPATH": SRC},
     )
 
 

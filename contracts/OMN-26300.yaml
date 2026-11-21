@@ -1,0 +1,90 @@
+schema_version: 1.0.0
+ticket_id: OMN-26300
+title: The omnibase_infra dev deploy agent reads one branch-install store and applies registered installs in the build its recreate window creates, before the health gate judges it, so a registered fix loads
+summary: >-
+  The dev deploy agent read one of two branch-install stores, applied registered installs only after the health gate had judged the build, and let its idle restore take the recreate window ahead of a waiting install. It now merges the old store into its own and retires it, applies the installs in the job's build before the boot guard and the health gate, leaves the window to a waiting install while the main runtime is up, and shows a reason for every held install. The health gate and the boot guard are not changed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26300-registered-installs
+    statement: A registered dev-lane branch install loads in the build the dev agent creates, and the agent says why any install is held.
+    acceptance:
+      - id: AC1
+        statement: "AC1: one store: a branch install registered under either state/jobs/branch-installs or state/jobs-dev/branch-installs is read by the agent (its /branch-installs listing and its apply step), and the old location is retired after its records are migrated -- falsifier: `uv run pytest tests/unit/scripts/test_deploy_agent_registered_installs.py -k single_store -q --no-cov` fails at origin/dev and passes at the fixed head"
+      - id: AC2
+        statement: "AC2: registered installs are applied in the build that the recreate window or a pinned-fix job creates, before its health gate judges that build, so an install that makes the runtime healthy is in the image the gate reads -- falsifier: `uv run pytest tests/unit/scripts/test_deploy_agent_registered_installs.py -k apply_before_health_gate -q --no-cov` fails at origin/dev and passes at the fixed head"
+      - id: AC3
+        statement: "AC3: the idle-restore job yields the recreate window while a registered install is waiting, and takes it again once none is waiting -- falsifier: `uv run pytest tests/unit/scripts/test_deploy_agent_registered_installs.py -k idle_restore_yields -q --no-cov` fails at origin/dev and passes at the fixed head"
+      - id: AC4
+        statement: "AC4: every registered install that is held carries a reason that /branch-installs and status.json show (the STATUS-visible reason), and an install with no reason is a test failure -- falsifier: `uv run pytest tests/unit/scripts/test_deploy_agent_registered_installs.py -k held_reason_visible -q --no-cov` fails at origin/dev and passes at the fixed head"
+      - id: AC5
+        statement: "AC5: the health gate and the boot guard are unchanged: a build whose health check fails is still refused and no install bypasses it -- falsifier: `uv run pytest tests/unit/scripts/test_deploy_agent_registered_installs.py -k gate_not_weakened -q --no-cov` fails if the gate admits a failing build"
+      - id: AC6
+        statement: "AC6: a regression test built from the recorded ledger rows and job ids of the three devwindow lanes (fixture path in the pull request) fails on the broken code and passes on the fix -- falsifier: `uv run pytest tests/unit/scripts/test_deploy_agent_registered_installs.py -k recorded_devwindow -q --no-cov`"
+evidence_requirements:
+  - kind: tests
+    description: The registered-install tests of the deploy-agent suite, the branch-install agent tests and the runtime module tests.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py scripts/deploy-agent/tests/unit/test_branch_installs_agent_omn17427.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26300-ac1-single-store
+    description: "A registered install in either store is read by the agent's listing and apply step; the old location is merged into the agent store and retired."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py -k single_store -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26300-ac2-apply-before-health-gate
+    description: "The recreate or pinned-fix job applies the registered installs after the rebuild and before the boot guard and the health gate judge the build."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py -k apply_before_health_gate -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26300-ac3-idle-restore-yields
+    description: "The idle restore leaves the recreate window to a waiting install while the main runtime is up, and takes it again once none is waiting; a down lane is still restored."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py -k idle_restore_yields -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26300-ac4-held-reason-visible
+    description: "Every held install shows a non-empty reason in /branch-installs and status.json, and an empty reason is refused."
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py -k held_reason_visible -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26300-ac5-gate-not-weakened
+    description: "A build whose health check fails is still refused after the installs went in; no install is applied after the gate; no bypass argument exists."
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py -k gate_not_weakened -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26300-ac6-recorded-devwindow
+    description: "The replay of the recorded devwindow rows and job ids passes on the fix; the fixture is scripts/deploy-agent/tests/unit/fixtures/devwindow_recorded_rows_omn26300.json."
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py -k recorded_devwindow -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26300-deploy
+    description: Hosted-runner probe that reads the committed deploy agent from GitHub at the checked-out commit and requires the in-job apply that runs before the gates and the registered-install listing.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/agent.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "def _apply_branch_installs_in_job" in src; assert src.index("self._apply_branch_installs_in_job(cmd.runtime_lane)") < src.index("dev_guard.wait(deployed_generation=True)")'
+        cwd: ${OMNI_HOME}/omnibase_infra
