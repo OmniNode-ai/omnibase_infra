@@ -51,6 +51,8 @@ pytestmark = pytest.mark.unit
 
 TOPIC = "onex.evt.omnibase-infra.lab-lane-health.v1"
 GROUP = "local.omnimarket.lab_lane_health_projection.consume.1.0.0"
+#: A second consumer group on the same topic, whose handler always returns.
+OTHER_GROUP = "local.omnimarket.other_projection.consume.1.0.0"
 PARTITION = 0
 TP = TopicPartition(TOPIC, PARTITION)
 #: The live hung coordinate on the .201 dev lane, 2026-09-23.
@@ -92,6 +94,10 @@ class _PartitionLog:
         if not batch:
             if self.on_drained is not None:
                 self.on_drained()
+            else:
+                # A bystander log never ends the run; without a suspension
+                # point its empty polls would starve the loop under test.
+                await asyncio.sleep(0.01)
             return {}
         self.fetch_position = batch[-1].offset + 1
         return {TP: batch}
@@ -148,10 +154,14 @@ class _Harness:
         handler: Callable[[int], Any],
         *,
         dlq_results: list[bool] | None = None,
+        bystander_group: str | None = None,
     ) -> None:
         self.config = config
         self.log = log
         self.handler = handler
+        #: A second subscription on ``TOPIC`` under another consumer group, with
+        #: its own consume loop and a handler that always returns (OMN-24779).
+        self.bystander_group = bystander_group
         self.dlq_calls: list[dict[str, Any]] = []
         self._dlq_results = list(dlq_results or [])
         self.bus: EventBusKafka | None = None
@@ -177,7 +187,23 @@ class _Harness:
             async def _callback(message: Any) -> None:
                 await self.handler(message.raw_offset)
 
-            bus._subscribers[TOPIC] = [(GROUP, "sub-1", _callback)]  # type: ignore[assignment]
+            subscribers = [(GROUP, "sub-1", _callback)]
+            loops = [bus._consume_loop(TOPIC, GROUP, uuid4())]
+            if self.bystander_group is not None:
+
+                async def _bystander_callback(message: Any) -> None:
+                    return None
+
+                # Listed BEFORE the hung subscription, so a group read from the
+                # first subscriber of the topic names the wrong one.
+                subscribers.insert(
+                    0, (self.bystander_group, "sub-0", _bystander_callback)
+                )
+                bus._group_consumers[(TOPIC, self.bystander_group)] = _PartitionLog(
+                    [HUNG, HUNG + 1]
+                )
+                loops.append(bus._consume_loop(TOPIC, self.bystander_group, uuid4()))
+            bus._subscribers[TOPIC] = subscribers  # type: ignore[assignment]
 
             def _to_model(msg: Any, _topic: str) -> MagicMock:
                 message = MagicMock()
@@ -200,7 +226,7 @@ class _Harness:
                 ),
             ):
                 await asyncio.wait_for(
-                    bus._consume_loop(TOPIC, GROUP, uuid4()),
+                    asyncio.gather(*loops),
                     timeout=LOOP_BOUND_SECONDS,
                 )
 
