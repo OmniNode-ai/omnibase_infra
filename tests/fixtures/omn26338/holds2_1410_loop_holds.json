@@ -2,7 +2,7 @@
   "source": "lab reproduction of the ONEX kernel main(), host h053, 1 CPU (systemd-run scope CPUQuota=100%), main-thread stack sampled every 1 s from sys._current_frames, loop lag from a 1 s heartbeat task, scratch redpanda v24.2.7 and scratch postgres 16 with the forward migrations (the dev broker and dev database were not used)",
   "refs": {
     "omnibase_infra_before": "f2e451a31a802b8d3e3ef90f2788c42ae602a21d (omnibase_infra#6134 head)",
-    "omnibase_infra_after": "branch omn-26338-startup-loop-holds-2, stacked on omnibase_infra#6134 at f2e451a3",
+    "omnibase_infra_after": "f64269a70a5e5e0e3e2f4b109103dbbeeeca825b (branch omn-26338-startup-loop-holds-2, stacked on omnibase_infra#6134 at f2e451a3; the run used a git archive of that head's src)",
     "omnimarket": "0.4.324 (installed in the reproduction venv)"
   },
   "environment": {
@@ -14,7 +14,7 @@
     "failed": 46,
     "topics_provisioned_by_the_migration_executor_provisioner": 2430
   },
-  "read_utc": "2026-11-21T14:49:17Z",
+  "read_utc": "2026-11-21T15:03:04Z",
   "holds_before": [
     {
       "name": "topic_migration_provisioner",
@@ -39,23 +39,23 @@
       "name": "topic_migration_provisioner",
       "call": "the same scan, run by warm_topic_migration_scan on worker thread asyncio_0 before the synchronous construction",
       "contiguous_s": 0.0,
-      "wall_s_on_worker_thread": 12.5,
-      "max_heartbeat_lag_s": 0.287,
+      "wall_s_on_worker_thread": 12.9,
+      "max_heartbeat_lag_s": 0.12,
       "main_thread_busy_samples": 0,
-      "start_utc": "2026-11-21T14:48:26.428446Z",
-      "end_utc": "2026-11-21T14:48:38.946090Z",
-      "read_utc": "2026-11-21T14:49:17Z"
+      "start_utc": "2026-11-21T15:01:42.680936Z",
+      "end_utc": "2026-11-21T15:01:55.534799Z",
+      "read_utc": "2026-11-21T15:03:04Z"
     },
     {
       "name": "local_ingress_route_discovery",
-      "call": "the same discovery, run through asyncio.to_thread on worker thread asyncio_25",
+      "call": "the same discovery, run through asyncio.to_thread on worker thread asyncio_1",
       "contiguous_s": 0.0,
-      "wall_s_on_worker_thread": 17.6,
-      "max_heartbeat_lag_s": 0.134,
+      "wall_s_on_worker_thread": 18.6,
+      "max_heartbeat_lag_s": 0.194,
       "main_thread_busy_samples_in_target_frame": 0,
-      "start_utc": "2026-11-21T14:48:55.253596Z",
-      "end_utc": "2026-11-21T14:49:12.882077Z",
-      "read_utc": "2026-11-21T14:49:17Z"
+      "start_utc": "2026-11-21T15:02:11.652307Z",
+      "end_utc": "2026-11-21T15:02:30.212369Z",
+      "read_utc": "2026-11-21T15:03:04Z"
     }
   ],
   "unchanged_by_this_change": [
@@ -74,7 +74,7 @@
   "time_to_health": {
     "before_first_answer_s": 57.4,
     "before_healthy_200_s": 110.7,
-    "after_first_answer_s": 57.6,
-    "after_healthy_200_s": 119.7
+    "after_first_answer_s": 62.5,
+    "after_healthy_200_s": 134.1
   }
 }
