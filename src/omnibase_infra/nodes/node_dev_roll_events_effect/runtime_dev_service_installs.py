@@ -63,7 +63,7 @@ from omnibase_infra.models.model_dev_lane_branch_install_release import (
 logger = logging.getLogger(__name__)
 
 
-class DevLaneServiceInstallStore(DevLaneBranchInstallStore):
+class DevLaneRolledInstallStore(DevLaneBranchInstallStore):
     """A read-only view of the declared installs that name one service, unexpired.
 
     Each install is narrowed to that service, so the handler reads and writes that
@@ -125,7 +125,7 @@ def apply_service_installs(
     sleep: Sleeper | None = None,
 ) -> ModelDevLaneBranchInstallReceipt:
     """Put every declared install of ``service`` into its running container and read it back."""
-    store = DevLaneServiceInstallStore(state_dir, service, clock)
+    store = DevLaneRolledInstallStore(state_dir, service, clock)
     return HandlerDevLaneBranchInstall(
         store, compose_project, run=run, clock=clock, sleep=sleep
     ).apply()
@@ -162,7 +162,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = [
-    "DevLaneServiceInstallStore",
+    "DevLaneRolledInstallStore",
     "apply_service_installs",
     "main",
 ]
