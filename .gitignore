@@ -363,3 +363,6 @@ build/
 docs/evidence/
 /merge-sweep/
 # === end onex-managed: public_repo_hygiene ===
+
+# OMN-26361: written by the runtime image build, never committed
+src/omnibase_infra/nodes/node_boot_catalog_effect/prebuilt_node_manifest.json
