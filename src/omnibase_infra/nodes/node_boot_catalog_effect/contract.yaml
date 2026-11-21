@@ -32,6 +32,17 @@ handler_routing:
         module: omnibase_infra.models.node_announce.model_package_announce_request
         description: Typed step 0 request.
       output_fields: [inventory, announcements, catalog, outcomes]
+    - operation: prebuilt_manifest.load
+      handler:
+        name: HandlerPrebuiltManifest
+        module: omnibase_infra.handlers.handler_prebuilt_manifest
+      description: Read the node catalog and auto-wiring manifest the image build wrote, after checking its stamp of installed distributions, versions and contract hashes against the installed packages, or name the stamp fields that differ.
+      supported_operations: [prebuilt_manifest.load]
+      input_model:
+        name: ModelPrebuiltManifestRequest
+        module: omnibase_infra.models.node_announce.model_prebuilt_manifest_request
+        description: The prebuilt file path and the announcement workload.
+      output_fields: [prebuilt, reason, differing_fields]
     - operation: registration_from_announcement.adapt
       handler:
         name: HandlerRegistrationFromAnnouncement
@@ -59,7 +70,13 @@ io_operations:
     description: Run boot step 0.
     input_fields: [topic, announcer_id, generation, announced_at, active_packages, policy]
     output_fields: [inventory, announcements, catalog, outcomes]
+  - operation: prebuilt_manifest.load
+    description: Load the image's prebuilt node manifest.
+    input_fields: [path, workload]
+    output_fields: [prebuilt, reason, differing_fields]
 capabilities:
+  - name: prebuilt_manifest.load
+    description: Load the node catalog and manifest the image build wrote, when the stamp holds.
   - name: registration_from_announcement.adapt
     description: Adapt an announcement to the introspection event the registration orchestrator consumes.
   - name: runtime_introspection.startup
@@ -109,4 +126,4 @@ metadata:
   author: OmniNode Team
   license: MIT
   tags: [effect, announce, catalog]
-  related_tickets: [OMN-21590]
+  related_tickets: [OMN-21590, OMN-26361]
