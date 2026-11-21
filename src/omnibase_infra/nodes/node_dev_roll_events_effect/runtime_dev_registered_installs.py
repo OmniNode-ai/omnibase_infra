@@ -31,7 +31,6 @@ import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +71,7 @@ def _atomic_write(path: Path, text: str) -> None:
         raise
 
 
-def _records(path: Path) -> dict[str, Any] | None:
+def _records(path: Path) -> dict[str, object] | None:
     """The record file as a mapping; ``None`` when absent, a ValueError when unreadable."""
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -81,6 +80,26 @@ def _records(path: Path) -> dict[str, Any] | None:
     if not isinstance(payload, dict) or not isinstance(payload.get("installs"), list):
         raise ValueError(f"{path} is not a branch-install record file")
     return payload
+
+
+def _dicts(value: object) -> list[dict[str, object]]:
+    """The mappings in ``value`` when it is a list; none when it is anything else."""
+    return (
+        [item for item in value if isinstance(item, dict)]
+        if isinstance(value, list)
+        else []
+    )
+
+
+def _installs_of(payload: dict[str, object] | None) -> list[dict[str, object]]:
+    """The installs of a record file mapping; a ValueError when one is not a mapping."""
+    raw = payload["installs"] if payload is not None else []
+    installs = _dicts(raw)
+    if not isinstance(raw, list) or len(installs) != len(raw):
+        raise ValueError(
+            "a branch-install record file holds installs that are not mappings"
+        )
+    return installs
 
 
 def migrate_legacy_store(state_dir: Path, legacy: Path | None) -> tuple[str, ...]:
@@ -113,12 +132,12 @@ def migrate_legacy_store(state_dir: Path, legacy: Path | None) -> tuple[str, ...
 def _merge_legacy(store: Path, legacy: Path) -> tuple[str, ...]:
     old = _records(legacy / RECORDS_FILE)
     new = _records(store / RECORDS_FILE)
-    old_installs: list[dict[str, Any]] = old["installs"] if old is not None else []
-    merged: dict[str, Any] = new or {
+    old_installs = _installs_of(old)
+    merged: dict[str, object] = new or {
         "schema_version": (old or {}).get("schema_version", ""),
         "installs": [],
     }
-    have = {str(i["id"]) for i in merged["installs"]}
+    have = {str(i["id"]) for i in _installs_of(merged)}
     moved = [i for i in old_installs if str(i["id"]) not in have]
     for blob in sorted((legacy / CONTENT_DIRNAME).glob("*")):
         target = store / CONTENT_DIRNAME / blob.name
@@ -132,14 +151,14 @@ def _merge_legacy(store: Path, legacy: Path) -> tuple[str, ...]:
         records_path = store / RECORDS_FILE
         if records_path.exists():
             shutil.copy2(records_path, records_path.with_suffix(".json.bak"))
-        merged["installs"] = [*merged["installs"], *moved]
+        merged["installs"] = [*_installs_of(merged), *moved]
         _atomic_write(records_path, json.dumps(merged, indent=2) + "\n")
     released = legacy / RELEASED_FILE
     if released.is_file():
         with (store / RELEASED_FILE).open("a", encoding="utf-8") as out:
             out.write(released.read_text(encoding="utf-8"))
     after = _records(store / RECORDS_FILE)
-    present = {str(i["id"]) for i in (after or {}).get("installs", [])}
+    present = {str(i["id"]) for i in _installs_of(after)}
     missing = {str(i["id"]) for i in old_installs} - present
     blobs = {p.name for p in (legacy / CONTENT_DIRNAME).glob("*") if p.is_file()}
     lost = {b for b in blobs if not (store / CONTENT_DIRNAME / b).is_file()}
@@ -158,11 +177,11 @@ def _merge_legacy(store: Path, legacy: Path) -> tuple[str, ...]:
     return ids
 
 
-def read_declared(state_dir: Path, legacy: Path | None) -> list[dict[str, Any]]:
+def read_declared(state_dir: Path, legacy: Path | None) -> list[dict[str, object]]:
     """Every declared install, after the legacy store is merged. Raises on an unreadable file."""
     migrate_legacy_store(state_dir, legacy)
     payload = _records(state_dir / STORE_DIRNAME / RECORDS_FILE)
-    return payload["installs"] if payload is not None else []
+    return _installs_of(payload)
 
 
 def declared_repos(state_dir: Path, legacy: Path | None) -> list[str]:
@@ -173,7 +192,7 @@ def declared_repos(state_dir: Path, legacy: Path | None) -> list[str]:
         return []
 
 
-def _status(state_dir: Path) -> dict[str, Any] | None:
+def _status(state_dir: Path) -> dict[str, object] | None:
     try:
         payload = json.loads(
             (state_dir / STORE_DIRNAME / STATUS_FILE).read_text(encoding="utf-8")
@@ -183,7 +202,7 @@ def _status(state_dir: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _unexpired(install: dict[str, Any], now: datetime) -> bool:
+def _unexpired(install: dict[str, object], now: datetime) -> bool:
     try:
         return datetime.fromisoformat(str(install["expires_at"])) > now
     except (KeyError, ValueError):
@@ -203,13 +222,12 @@ def held_installs(
     status = _status(state_dir) or {}
     written = {
         str(h["id"]): h
-        for h in status.get("held") or []
-        if isinstance(h, dict) and h.get("id") and h.get("reason")
+        for h in _dicts(status.get("held"))
+        if h.get("id") and h.get("reason")
     }
     states = {
         str(r.get("install_key")): str(r.get("state"))
-        for r in status.get("readbacks") or []
-        if isinstance(r, dict)
+        for r in _dicts(status.get("readbacks"))
     }
     out: list[dict[str, str]] = []
     for install in read_declared(state_dir, legacy):
@@ -299,15 +317,15 @@ def listing(state_dir: Path, legacy: Path | None) -> dict[str, object]:
     except (OSError, ValueError, KeyError, TypeError) as exc:
         return {"installs": None, "reason": f"{type(exc).__name__}: {exc}"}
     status = _status(state_dir)
-    readbacks = status.get("readbacks") if status is not None else None
+    readbacks = _dicts(status.get("readbacks")) if status is not None else []
     return {
         "read_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "declared": declared,
         "last_check": status,
         "missing": [
             str(r.get("install_key"))
-            for r in (readbacks if isinstance(readbacks, list) else [])
-            if isinstance(r, dict) and r.get("state") in ("missing", "failed")
+            for r in readbacks
+            if r.get("state") in ("missing", "failed")
         ],
         "held": held,
     }

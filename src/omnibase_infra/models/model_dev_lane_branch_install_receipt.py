@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -41,7 +40,7 @@ class ModelDevLaneBranchInstallReceipt(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _derive_held(cls, data: Any) -> Any:
+    def _derive_held(cls, data: object) -> object:
         """Name every install the readbacks show as not whole, unless the caller named them."""
         if not isinstance(data, dict) or "held" in data:
             return data
