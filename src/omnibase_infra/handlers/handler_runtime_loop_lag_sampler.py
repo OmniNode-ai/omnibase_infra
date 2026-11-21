@@ -201,13 +201,13 @@ class HandlerRuntimeLoopLagSampler:
 
     @property
     def handler_type(self) -> EnumHandlerType:
-        """Architectural role: compute handler."""
-        return EnumHandlerType.COMPUTE_HANDLER
+        """Architectural role: infrastructure handler for the effect node."""
+        return EnumHandlerType.INFRA_HANDLER
 
     @property
     def handler_category(self) -> EnumHandlerTypeCategory:
-        """Behavioral category: reads the clock and in-process state, no I/O."""
-        return EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE
+        """Behavioral category: effect; reads the clock and process-local state."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def handle(self, request: ModelRuntimeLoopWindowRequest) -> ModelRuntimeLoopReading:
         """Close the open window of this process's sampler and return its reading."""
