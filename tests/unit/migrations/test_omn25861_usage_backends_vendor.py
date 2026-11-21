@@ -4,9 +4,9 @@
 
 The digest was measured from the omnimarket source the vendor is copied from,
 node_projection_usage_by_model_day/migrations/0004 at omnimarket commit
-33c2400d4971eac4d711ca6528fa7c55676001f2, which adds the nullable
-usage_by_model_day_calls.backend and usage_by_model_day.backends columns the writer
-fills once both are in force. Source and vendor were compared byte for byte before
+d3f010f155c0ea43edb7f011321a9c3f9e6417fe, which adds the nullable usage_by_model_day_calls.backend and
+usage_by_model_day.backends columns. The usage writer stores a call's backend once
+the first exists and counts a row's backends once both do. Source and vendor were compared byte for byte before
 pinning. Failure modes: the vendored file drifts from its source, gives a column a
 default (a manufactured value where the source stated none), loses its
 checksum-bound ledger row, or is declared with a class other than the one the class
@@ -25,7 +25,7 @@ _ROOT = Path(__file__).resolve().parents[3]
 _FORWARD = _ROOT / "docker/migrations/forward"
 _NODE = "node_projection_usage_by_model_day"
 _NAME = "0004_usage_by_model_day_backends.sql"
-_SHA256 = "a2d7a33495ac402b86e6eda61f2f54a4f681109b855ca29dd51c2c9c92918435"
+_SHA256 = "5aeef6c0fbfefb21810276985ac27ba555ed796fa7d7408071b6e3fb3ca81cb1"
 
 
 def test_vendored_bytes_match_the_pinned_omnimarket_source() -> None:

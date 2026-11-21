@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-25861
 title: usage-by-model-day rows serve no backend, so the Usage page cannot show a model reached through an alias
 summary: >-
-  Infra half only: vendors usage migration 0004 of node_projection_usage_by_model_day byte for byte from the omnimarket source, which adds the nullable usage_by_model_day_calls.backend and usage_by_model_day.backends columns the usage writer fills once both are in force. The writer, the local store, the producer and the served exposure are omnimarket's half of this ticket and carry its own contract.
+  Infra half only: vendors usage migration 0004 of node_projection_usage_by_model_day byte for byte from the omnimarket source, which adds the nullable usage_by_model_day_calls.backend and usage_by_model_day.backends columns: the usage writer stores a call's backend once the first exists and counts a row's backends once both do. The writer, the local store, the producer and the served exposure are omnimarket's half of this ticket and carry its own contract.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
