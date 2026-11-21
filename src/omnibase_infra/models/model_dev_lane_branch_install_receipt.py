@@ -5,11 +5,18 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
+from omnibase_infra.enums.enum_dev_lane_branch_install_hold import (
+    EnumDevLaneBranchInstallHold,
+)
 from omnibase_infra.enums.enum_dev_lane_branch_install_state import (
     EnumDevLaneBranchInstallState,
+)
+from omnibase_infra.models.model_dev_lane_branch_install_held import (
+    ModelDevLaneBranchInstallHeld,
 )
 from omnibase_infra.models.model_dev_lane_branch_install_readback import (
     ModelDevLaneBranchInstallReadback,
@@ -29,6 +36,20 @@ class ModelDevLaneBranchInstallReceipt(BaseModel):
     readbacks: tuple[ModelDevLaneBranchInstallReadback, ...] = ()
     released: tuple[ModelDevLaneBranchInstallRelease, ...] = ()
     restarted: tuple[str, ...] = ()
+    held: tuple[ModelDevLaneBranchInstallHeld, ...] = ()
+    """Each install that is not whole, with the reason ``status.json`` shows (OMN-26300)."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_held(cls, data: Any) -> Any:
+        """Name every install the readbacks show as not whole, unless the caller named them."""
+        if not isinstance(data, dict) or "held" in data:
+            return data
+        readbacks = (
+            ModelDevLaneBranchInstallReadback.model_validate(r)
+            for r in data.get("readbacks", ())
+        )
+        return {**data, "held": tuple(_held_of(r) for r in readbacks if not _whole(r))}
 
     @property
     def missing(self) -> tuple[ModelDevLaneBranchInstallReadback, ...]:
@@ -47,3 +68,27 @@ class ModelDevLaneBranchInstallReceipt(BaseModel):
     def ok(self) -> bool:
         """True when every declared install is whole."""
         return not self.missing
+
+
+def _whole(readback: ModelDevLaneBranchInstallReadback) -> bool:
+    return readback.state in (
+        EnumDevLaneBranchInstallState.PRESENT,
+        EnumDevLaneBranchInstallState.REAPPLIED,
+    )
+
+
+def _held_of(
+    readback: ModelDevLaneBranchInstallReadback,
+) -> ModelDevLaneBranchInstallHeld:
+    detail = next((f.detail for f in readback.files if f.detail), "")
+    failed = readback.state is EnumDevLaneBranchInstallState.FAILED
+    what = "apply failed" if failed else "not in the running containers"
+    return ModelDevLaneBranchInstallHeld(
+        id=readback.install_key,
+        code=(
+            EnumDevLaneBranchInstallHold.APPLY_FAILED
+            if failed
+            else EnumDevLaneBranchInstallHold.NOT_APPLIED
+        ),
+        reason=f"{what} ({readback.state.value})" + (f": {detail}" if detail else ""),
+    )

@@ -59,6 +59,23 @@ def _load_events() -> ModuleType:
 
 
 events = _load_events()
+
+
+def registered_installs() -> ModuleType:
+    """The registered branch-install rules (OMN-26300), loaded by file path under their dotted name."""
+    name = "omnibase_infra.nodes.node_dev_roll_events_effect.runtime_dev_registered_installs"
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(
+        name, Path(__file__).with_name("runtime_dev_registered_installs.py")
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Cannot load the registered branch-install rules")
+    module = sys.modules[name] = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 EnumDevStartCause = events.EnumDevStartCause
 docker_started_at = events.docker_started_at
 

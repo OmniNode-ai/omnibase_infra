@@ -250,6 +250,10 @@ Environment=ONEX_LEDGER_WRITE_VIA=bus
 Environment=ONEX_LEDGER_HOST_NAME=h201
 Environment=DEPLOY_AGENT_DIR=/data/omninode/omnibase_infra/scripts/deploy-agent
 Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs-dev
+# OMN-26300: branch installs live in this unit's own store (state/jobs-dev/branch-installs).
+# The old state/jobs/branch-installs was never read; the agent merges what a lane registered
+# there into its own store and retires the directory.
+Environment=DEPLOY_AGENT_LEGACY_BRANCH_INSTALL_STORE=/data/omninode/deploy-agent/state/jobs/branch-installs
 Environment=DEPLOY_AGENT_PORT=8098
 Environment=DEPLOY_AGENT_TRACKING_REF=dev
 Environment=DEPLOY_AGENT_ALLOWED_LANES=dev

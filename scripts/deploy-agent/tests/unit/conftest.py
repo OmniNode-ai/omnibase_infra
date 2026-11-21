@@ -52,7 +52,8 @@ def _no_recreate_window_gate(monkeypatch: pytest.MonkeyPatch) -> None:
                 module.window_admits(agent, who)
                 if hasattr(agent, "_recreate_gate")
                 else True
-            )
+            ),
+            registered_installs=module.registered_installs,
         )
 
     monkeypatch.setattr(agent_mod, "load_dev_boot_guard", loader)
