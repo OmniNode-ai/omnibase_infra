@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_wiring_report_ratchet_compute"
+contract_name: "node_wiring_report_ratchet_compute"
+node_name: "node_wiring_report_ratchet_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+node_type: "COMPUTE_GENERIC"
+description: >
+  Shrink-only ratchet on the boot wiring report (OMN-26335). Reads the failed, duplicate and quarantined wiring counts and the subscriptions with no producer statically from the boot catalog and the handler sources, compares each to the baseline held in metadata.wiring_ratchet.baseline, and fails when a count is above its baseline or when the baseline is above the one the base ref holds. A count below its baseline passes and names the new baseline. The baseline is measured on the installed catalog of the CI environment, not on a lab runtime; the lab runtime report of 2026-11-21 is held beside it as a recorded reference.
+
+input_model:
+  name: "ModelWiringReportRatchetRequest"
+  module: "omnibase_infra.models.wiring_ratchet.model_wiring_report_ratchet_request"
+  description: "Observed counts, the contract baseline and the base ref's baseline."
+output_model:
+  name: "ModelValidationReport"
+  module: "omnibase_core.models.validation.model_validation_report"
+  description: "The canonical OMN-2362 validation report."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "wiring_report_counts.read"
+      handler_type: "wiring_report_counts_read"
+      handler:
+        name: "HandlerWiringReportCounts"
+        module: "omnibase_infra.handlers.handler_wiring_report_counts"
+      supported_operations:
+        - "wiring_report_counts.read"
+      input_model:
+        name: "ModelAutoWiringManifest"
+        module: "omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest"
+        description: "The boot catalog's auto-wiring manifest."
+      output_fields: [failed, duplicates, quarantined, unproduced_subscriptions]
+    - operation: "wiring_report_ratchet.check"
+      handler_type: "wiring_report_ratchet_check"
+      handler:
+        name: "HandlerWiringReportRatchet"
+        module: "omnibase_infra.handlers.handler_wiring_report_ratchet"
+      supported_operations:
+        - "wiring_report_ratchet.check"
+descriptor:
+  node_archetype: "compute"
+  purity: "pure"
+  idempotent: true
+  timeout_ms: 60000
+metadata:
+  description: "COMPUTE node: the boot wiring report's failed, duplicate, quarantined and unproduced counts can only fall."
+  author: "OmniNode Team"
+  license: "MIT"
+  ticket: "OMN-26335"
+  tags:
+    - compute
+    - validator
+    - ratchet
+  wiring_ratchet:
+    # Installed catalog of the CI environment (omnibase_infra and omnibase_core
+    # contracts), read statically. A pull request may only lower these values.
+    baseline:
+      failed: 0
+      duplicates: 12
+      quarantined: 0
+      unproduced_subscriptions: 73
+    # Recorded lab runtime wiring report of 2026-11-21, from the omnibase_infra#6133
+    # body (runtime counts, wired=436 skipped=332). Reference for the regression test only.
+    lab_report_2026_11_21:
+      failed: 43
+      duplicates: 40
+      quarantined: 4

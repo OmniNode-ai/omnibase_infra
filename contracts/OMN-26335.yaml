@@ -1,0 +1,73 @@
+schema_version: 1.0.0
+ticket_id: OMN-26335
+title: Wiring-report ratchet gate in CI
+summary: A contract and a compute node read the boot wiring report counts statically and hold failed, duplicate, quarantined and unproduced-subscription counts at a baseline in the node contract that only a lowering pull request may change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn-26335-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on OMN-26335.'
+      - id: AC2
+        statement: 'AC2: the labelled criterion of the same name on OMN-26335.'
+      - id: AC3
+        statement: 'AC3: the labelled criterion of the same name on OMN-26335.'
+      - id: AC4
+        statement: 'AC4: the labelled criterion of the same name on OMN-26335.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC1: a CI check reads the failed, duplicate and quarantined wiring counts and the subscriptions with no producer from the boot catalog and the code graph, and exits red when any count is above its recorded baseline'
+    command: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly -k 'wiring_ratchet_rises or wiring_ratchet_live_catalog'
+  - kind: tests
+    description: 'AC2: a pull request that adds a duplicate handler registration turns the check red'
+    command: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly -k 'wiring_ratchet_duplicate_registration'
+  - kind: tests
+    description: 'AC3: the baseline is a contract value that a pull request may only lower, and the check names the new baseline when a count falls'
+    command: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly -k 'wiring_ratchet_lowering'
+  - kind: tests
+    description: 'AC4: a regression test built from the recorded lab wiring report of 2026-11-21 (failed=43 duplicates=40 quarantined=4) fails when a count rises and passes at the recorded counts'
+    command: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly -k 'wiring_report_2026_11_21'
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26335-ac1
+    description: 'AC1: a CI check reads the failed, duplicate and quarantined wiring counts and the subscriptions with no producer from the boot catalog and the code graph, and exits red when any count is above its recorded baseline'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly -k 'wiring_ratchet_rises or wiring_ratchet_live_catalog'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn26335-ac2
+    description: 'AC2: a pull request that adds a duplicate handler registration turns the check red'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly -k 'wiring_ratchet_duplicate_registration'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn26335-ac3
+    description: 'AC3: the baseline is a contract value that a pull request may only lower, and the check names the new baseline when a count falls'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly -k 'wiring_ratchet_lowering'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn26335-ac4
+    description: 'AC4: a regression test built from the recorded lab wiring report of 2026-11-21 (failed=43 duplicates=40 quarantined=4) fails when a count rises and passes at the recorded counts'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly -k 'wiring_report_2026_11_21'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
