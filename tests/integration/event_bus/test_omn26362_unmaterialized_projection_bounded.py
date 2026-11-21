@@ -53,7 +53,7 @@ from omnibase_infra.handlers.handler_runtime_loop_lag_sampler import (
     RuntimeLoopLagSampler,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
 FIXTURE = json.loads(
     (

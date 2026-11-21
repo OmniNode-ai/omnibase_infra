@@ -21,22 +21,23 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The unmaterialized_projection_bounded regressions built from the offset 148150 fixture, driving the real consume loop and the real projection withhold arm.
-    command: uv run --frozen pytest tests/unit/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded -q --no-cov -n 0 -p no:randomly
+    command: uv run --frozen pytest tests/integration/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn26362-ac1-measured-stall
-    description: "The fixture names the recorded coordinate (topic, offset 148150, the savings consumer group, four records in flight) and the 15:21Z log sequence; the PR body quotes the lab stack at _consume_loop_concurrent._drain under Measured stall. The test replays that stall through the real _consume_loop: it fails at the merge base, where the loop is held, and passes at the head. The PR body section is read by the reviewer; no runner check reads a PR body."
+    description: "The fixture names the recorded coordinate (topic, offset 148150, the savings consumer group, four records in flight) and the 15:21Z log sequence, and the test reads it; the PR body quotes the lab stack at _consume_loop_concurrent._drain under Measured stall. The source check reads _drain and fails where it still awaits every in-flight task including done ones (the merge base) and passes where it waits only on tasks that are not done. The test replays that stall through the real _consume_loop: it fails at the merge base, where the loop is held, and passes at the head. The PR body section is read by the reviewer; no runner check reads a PR body."
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: command
-        check_value: python3 -c "import json; d = json.load(open('tests/unit/event_bus/fixtures/unmaterialized_projection_bounded_offset_148150.json')); assert d['offset'] == 148150 and d['topic'] == 'onex.evt.omnimarket.delegate-skill-completed.v1' and d['consume_concurrency'] == 4"
+        check_value: >-
+          python3 -c "import pathlib; s = pathlib.Path('src/omnibase_infra/event_bus/event_bus_kafka.py').read_text(); b = s.split('async def _drain() -> None')[1].split('async def _commit_low_watermark')[0]; assert 'while in_flight:' not in b and 'task.done()' in b"
         cwd: .
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26362-ac2-bounded-then-dlq
     description: "Six typed refusals of offset 148150 (bound 5 plus one), five awaited rewinds to 148150, then one DLQ publish with failure class projection_wedge_exhausted, and the consume loop finishes inside its budget for every release ordering swept."
@@ -44,7 +45,7 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded_ends_in_dlq -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded_ends_in_dlq -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26362-ac3-sampler-never-unresponsive
     description: "The loop-lag sampler, read off-loop, stays under 1 s (and so under the 4 s health wait budget) while the record is redelivered; at origin/dev it reads the whole scenario budget."
@@ -52,7 +53,7 @@ dod_evidence:
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded_sampler -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded_sampler -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26362-deploy-health-not-unresponsive
     description: >-
