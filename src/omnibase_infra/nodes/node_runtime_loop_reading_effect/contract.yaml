@@ -11,6 +11,7 @@
 #
 # Related Tickets:
 #   - OMN-26249: this node
+#   - OMN-26250: per-contract dispatch cost carried on the reading, and the ranking
 #   - OMN-19355: the dispatch-deadline status the abandoned count comes from
 name: "node_runtime_loop_reading_effect"
 contract_name: "node_runtime_loop_reading_effect"
@@ -64,7 +65,42 @@ handler_routing:
         - tick_lag_ms
         - tick_lag_not_applicable_reason
         - abandoned_dispatches
+        - contract_costs
+    - operation: "runtime_loop_reading.propose_shards"
+      handler:
+        name: "HandlerContractCostShardProposal"
+        module: "omnibase_infra.handlers.handler_contract_cost_shard_proposal"
+      description: >
+        Rank stored per-contract cost readings by loop time and state the share of the ten heaviest contracts.
+
+      supported_operations:
+        - "runtime_loop_reading.propose_shards"
+      input_model:
+        name: "ModelContractCostShardRequest"
+        module: "omnibase_infra.models.health.model_contract_cost_shard_request"
+        description: "The stored readings and the served contract names."
+      output_fields:
+        - window_start
+        - window_end
+        - reading_count
+        - total_on_loop_wall_ms
+        - top_10_share_of_loop_time
+        - contracts
+        - unread_contracts
 io_operations:
+  - operation: "runtime_loop_reading.propose_shards"
+    description: "Rank stored contract cost readings by loop time."
+    input_fields:
+      - readings
+      - served_contracts
+    output_fields:
+      - window_start
+      - window_end
+      - reading_count
+      - total_on_loop_wall_ms
+      - top_10_share_of_loop_time
+      - contracts
+      - unread_contracts
   - operation: "runtime_loop_reading.close_window"
     description: "Close the open reading window of this member."
     input_fields:
@@ -82,7 +118,10 @@ io_operations:
       - tick_lag_ms
       - tick_lag_not_applicable_reason
       - abandoned_dispatches
+      - contract_costs
 capabilities:
+  - name: "runtime_loop_reading.propose_shards"
+    description: "Rank the contracts a runtime attaches by measured loop time for a shard split."
   - name: "runtime_loop_reading.close_window"
     description: "Report a runtime member's event-loop lag, tick lag and abandoned dispatches for one window."
 event_bus:

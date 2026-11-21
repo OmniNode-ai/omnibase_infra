@@ -24,6 +24,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from omnibase_infra.models.health.model_contract_cost_reading import (
+    ModelContractCostReading,
+)
+
 
 class ModelRuntimeLoopReading(BaseModel):
     """Event-loop lag, tick lag and abandoned dispatches of one member in one window."""
@@ -85,6 +89,14 @@ class ModelRuntimeLoopReading(BaseModel):
         ),
     )
 
+    contract_costs: tuple[ModelContractCostReading, ...] = Field(
+        ...,
+        description=(
+            "One reading per contract this member has attached, for the same "
+            "window (OMN-26250), sorted by contract name."
+        ),
+    )
+
     @model_validator(mode="after")
     def _validate_reading(self) -> ModelRuntimeLoopReading:
         if (self.tick_lag_ms is None) == (self.tick_lag_not_applicable_reason is None):
@@ -96,6 +108,14 @@ class ModelRuntimeLoopReading(BaseModel):
             raise ValueError("a member that does not subscribe to the tick has no lag")
         if self.window_end <= self.window_start:
             raise ValueError("window_end must be after window_start")
+        for cost in self.contract_costs:
+            if (cost.window_start, cost.window_end) != (
+                self.window_start,
+                self.window_end,
+            ):
+                raise ValueError(
+                    f"contract cost {cost.contract_label!r} covers a different window"
+                )
         return self
 
 

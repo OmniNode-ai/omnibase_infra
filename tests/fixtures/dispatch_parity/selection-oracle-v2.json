@@ -3417,6 +3417,18 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_runtime_loop_reading_effect.HandlerContractCostShardProposal.runtime_loop_reading_propose_shards_cc6b74d7": {
+      "category": "event",
+      "contract_name": "node_runtime_loop_reading_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_runtime_loop_reading_effect.HandlerContractCostShardProposal.runtime_loop_reading_propose_shards_cc6b74d7",
+      "handler_module": "omnibase_infra.handlers.handler_contract_cost_shard_proposal",
+      "handler_name": "HandlerContractCostShardProposal",
+      "message_types": null,
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_runtime_loop_reading_effect.HandlerRuntimeLoopLagSampler.runtime_loop_reading_close_window_bf26a892": {
       "category": "event",
       "contract_name": "node_runtime_loop_reading_effect",
@@ -3925,7 +3937,7 @@
       "discovery_errors": 0,
       "distinct_subscribe_topics": 106,
       "probe_count": 1148,
-      "registered_dispatchers": 144,
+      "registered_dispatchers": 145,
       "registered_routes": 126,
       "type_scoped_dispatchers": 90
     },
@@ -3973,7 +3985,7 @@
       "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-11-21T05:32:32.871255+00:00",
+    "generated_at_utc": "2026-11-21T06:52:36.993542+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.76",
       "omnibase-infra": "0.38.80",

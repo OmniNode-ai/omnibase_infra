@@ -258,11 +258,11 @@ def test_unreadable_tick_payload_records_no_lag(
     sampler: RuntimeLoopLagSampler,
 ) -> None:
     sampler.observe_subscription(SUFFIX_RUNTIME_TICK)
-    sampler.observe_message(SUFFIX_RUNTIME_TICK, {"scheduled_at": "not-a-time"})
+    sampler.observe_message(SUFFIX_RUNTIME_TICK, {"scheduled_at": "not-a-time"}, 0)
     sampler.observe_message(
-        SUFFIX_RUNTIME_TICK, {"scheduled_at": "2026-11-21T00:00:00"}
+        SUFFIX_RUNTIME_TICK, {"scheduled_at": "2026-11-21T00:00:00"}, 0
     )
-    sampler.observe_message(SUFFIX_RUNTIME_TICK, {})
+    sampler.observe_message(SUFFIX_RUNTIME_TICK, {}, 0)
     assert sampler._newest_tick_lag_ms is None
     assert sampler._tick_subscriber is True
 
@@ -273,6 +273,7 @@ def test_message_on_another_topic_is_not_a_tick(
     sampler.observe_message(
         "onex.evt.test-service.other.v1",
         {"scheduled_at": datetime.now(UTC).isoformat()},
+        0,
     )
     assert sampler._tick_subscriber is False
     assert sampler._newest_tick_lag_ms is None

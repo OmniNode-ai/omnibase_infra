@@ -877,7 +877,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 envelope = self._deserialize_to_envelope(message, topic)
                 correlation_id = envelope.correlation_id or uuid4()
                 loop_lag.get_process_loop_lag_sampler().observe_message(
-                    topic, envelope.payload
+                    topic, envelope.payload, len(message.value)
                 )
 
                 self._logger.info(
