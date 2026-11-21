@@ -123,3 +123,27 @@ def test_health_port_binds_loopback_only() -> None:
     ports = services[SERVICE]["ports"]
     assert ports
     assert all(str(port).startswith("127.0.0.1:") for port in ports)
+
+
+def test_runtime_reads_no_lane_hotload_overlay() -> None:
+    """The standby must not inherit the dev lane's contract hot-load row.
+
+    The standby declares the dev lane (``ONEX_RUNTIME_LANE``) so it shares the dev
+    runtime's groups. A lane's ``runtime_contract_hotload`` overlay row, read from
+    ``ONEX_SKILL_OVERLAY_ROOTS``, turns the node-registration listener on. The
+    standby member principal has no READ on that topic, so the listener's subscribe
+    is refused on every retry, ``start()`` never reaches ``is_running`` and
+    ``/health`` answers 503 with ``startup_in_progress`` while both SCM consumers
+    answer. The standby loads exactly two contracts at boot and hot-loads nothing,
+    so it names no overlay root at all.
+    """
+    environment = _environment()
+    assert "ONEX_SKILL_OVERLAY_ROOTS" not in environment
+    services = _load(OVERLAY)["services"]
+    assert isinstance(services, dict)
+    targets = [
+        str(volume).split(":")[1]
+        for volume in services[SERVICE]["volumes"]
+        if ":" in str(volume)
+    ]
+    assert not [t for t in targets if t.startswith("/etc/onex/skill-overlays")]

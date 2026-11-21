@@ -18,6 +18,8 @@ requirements:
         statement: "AC3: the standby's definition is a declared file in a repository, with no hand-run docker command as the only record -- falsifier: `uv run pytest tests/unit/test_dev_member_overlay_omn26326.py -q` fails at origin/dev and passes at the pushed head"
       - id: AC4
         statement: "AC4: no credential value appears in any file, row, comment or log -- falsifier: `uv run pytest tests/unit/test_dev_member_overlay_omn26326.py -k credentials -q` fails when a password or token is a literal in the overlay"
+      - id: AC5
+        statement: "AC5: the standby names no overlay root and mounts no overlay, so the dev lane's contract hot-load row cannot start a node-registration listener its principal may not read, and /health is not held at 503 with startup_in_progress -- falsifier: `uv run pytest tests/unit/test_dev_member_overlay_omn26326.py -k hotload -q` fails when ONEX_SKILL_OVERLAY_ROOTS is set in the overlay"
 evidence_requirements:
   - kind: tests
     description: The dev-member overlay tests pass at the pushed head.
@@ -64,4 +66,13 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/test_dev_member_overlay_omn26326.py -k credentials -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26326-ac5-no-hotload-overlay
+    description: The overlay carries no ONEX_SKILL_OVERLAY_ROOTS and no overlay mount; the test fails at the pull request head before this change and passes after it.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/test_dev_member_overlay_omn26326.py -k hotload -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
