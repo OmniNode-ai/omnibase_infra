@@ -126,10 +126,13 @@ def test_control_removing_the_grant_is_reported_as_missing() -> None:
         assert _declared_from(broken, "floor_integration_rows") == set(), profile
 
 
-def test_both_floor_integration_rows_migrations_are_vendored() -> None:
+def test_every_floor_integration_migration_is_vendored() -> None:
+    """The rows table (0000-0001) and the held-pass marker (0002-0003, AC7)."""
     assert sorted(path.name for path in _VENDORED.glob("*.sql")) == [
         "0000_create_floor_integration_rows.sql",
         "0001_grant_omninode_runtime_floor_integration_rows.sql",
+        "0002_create_floor_integration_pass.sql",
+        "0003_grant_omninode_runtime_floor_integration_pass.sql",
     ]
 
 

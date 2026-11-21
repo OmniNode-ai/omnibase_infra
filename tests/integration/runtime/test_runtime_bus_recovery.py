@@ -120,8 +120,8 @@ async def test_http_probes_track_recovery_without_process_restart(
     try:
         await process.start()
         await server.start()
-        address = server._runner.addresses[0]
-        url = f"http://127.0.0.1:{address[1]}"
+        port = server._site.port
+        url = f"http://127.0.0.1:{port}"
         async with ClientSession() as client:
             async with client.get(f"{url}/health") as response:
                 assert response.status == 200

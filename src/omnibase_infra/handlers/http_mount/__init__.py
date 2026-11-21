@@ -6,5 +6,8 @@ from omnibase_infra.handlers.http_mount.asgi_mounts import (
     AsgiMounts,
     listener_runner,
 )
+from omnibase_infra.handlers.http_mount.health_probe_acceptor import (
+    HealthProbeAcceptor,
+)
 
-__all__ = ["AsgiMounts", "listener_runner"]
+__all__ = ["AsgiMounts", "HealthProbeAcceptor", "listener_runner"]

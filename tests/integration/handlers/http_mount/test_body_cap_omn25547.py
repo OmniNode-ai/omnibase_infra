@@ -40,7 +40,7 @@ async def test_contract_body_cap_on_runtime_listener(tmp_path: Path) -> None:
         assert server._mount_task is not None
         await server._mount_task
         assert server._runner is not None
-        port = int(server._runner.addresses[0][1])
+        port = int(server._site.port)
         url = f"http://127.0.0.1:{port}/api/v1/echo"
         headers = {"Content-Type": "application/json"}
         async with aiohttp.ClientSession(

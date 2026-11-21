@@ -22,6 +22,9 @@ def test_release_writer_replays_the_recorded_hygiene_failure(
     response = recorded_response["response"]
     subject = response["subject_line"]
     alias = response["private_repo_alias"]
+    # A repository that keeps a changelog: without one the node writes no file
+    # (OMN-25958).
+    (tmp_path / "CHANGELOG.md").write_text("", encoding="utf-8")
     entry = tmp_path / "entry.md"
     entry.write_text(
         f"{response['release_heading']}\n\n{response['included_since_heading']}\n{subject}\n",
