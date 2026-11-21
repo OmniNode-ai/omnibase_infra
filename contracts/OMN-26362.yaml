@@ -55,7 +55,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded_sampler -q --no-cov -n 0 -p no:randomly
         cwd: .
-  - id: dod-omn26362-ac4-no-unresponsive-reading-under-redelivery
+  - id: dod-omn26362-ac4-no-unresponsive-reading
     description: "Hosted-runnable half of AC4: the loop-lag sampler, read off-loop against the 4 s health wait budget, never reads unresponsive while the withheld record is redelivered; at origin/dev it reads the whole scenario budget. The live 30-minute /health reading after the deploy agent's roll is the local Done gate item below, which binds no criterion because a pull request runner cannot run it."
     source: manual
     binds_ac: [AC4]
