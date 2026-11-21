@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from typing import cast
 
 from omnibase_infra.handlers.contract_dispatch_cost import run_in_worker_timed
@@ -39,3 +39,26 @@ async def invoke_entry_method(
     if asyncio.iscoroutine(result):
         return await cast("Awaitable[object]", result)
     return result
+
+
+async def yield_each[T](items: Iterable[T]) -> AsyncIterator[T]:
+    """Yield each item, then give the event loop one turn before the next (OMN-26320).
+
+    ``wire_from_manifest`` prepares every discovered contract and imports every
+    handler class in plain loops whose steps are synchronous, so the one runtime
+    event loop was held for the whole pass: 12.4 s on a lab run of the real
+    kernel with the dev contract set (807 contracts, 1834 handler classes),
+    during which it served neither /health nor any bus consumer. Used as
+    ``async for item in yield_each(items):`` in place of ``for item in items:``
+    it hands the loop back after every item, so the longest hold becomes the
+    slowest single item instead of the sum.
+
+    Items run in the same order, on the loop thread, and an exception raised
+    while an item is handled propagates to the awaiting caller unchanged. The
+    work stays on the loop thread on purpose: preparing a contract constructs
+    handler instances and imports their modules, and none of that code has been
+    audited for loop or thread affinity.
+    """
+    for item in items:
+        yield item
+        await asyncio.sleep(0)

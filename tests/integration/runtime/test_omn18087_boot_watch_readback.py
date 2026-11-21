@@ -56,8 +56,8 @@ async def test_boot_watch_preserves_503_and_records_late_runtime_readiness(
     try:
         await asyncio.wait_for(process.start(), timeout=10)
         await server.start()
-        assert server._runner is not None
-        port = server._runner.addresses[0][1]
+        assert server._site is not None
+        port = server._site.port
         url = f"http://127.0.0.1:{port}/ready"
         polled = asyncio.Event()
 

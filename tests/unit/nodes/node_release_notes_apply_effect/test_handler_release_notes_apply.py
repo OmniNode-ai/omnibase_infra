@@ -145,9 +145,10 @@ def _readme_only_clone(tmp_path: Path, *, exceptions: str = "[]") -> Path:
 
 @pytest.mark.unit
 class TestReleaseNotesTarget:
-    def test_a_repo_without_the_policy_file_keeps_the_changelog(
+    def test_a_repo_without_the_policy_file_keeps_the_changelog_it_still_has(
         self, tmp_path: Path
     ) -> None:
+        (tmp_path / "CHANGELOG.md").write_text("## v0.1.0 (2026-01-01)\n", "utf-8")
         assert release_notes_target(tmp_path) == "CHANGELOG.md"
 
     def test_a_repo_carrying_the_policy_file_takes_its_notes_in_the_readme(
@@ -354,6 +355,8 @@ class TestApplyReleaseNotes:
         self, tmp_path: Path, readme_only: bool
     ) -> None:
         clone = _readme_only_clone(tmp_path) if readme_only else tmp_path
+        if not readme_only:
+            (clone / "CHANGELOG.md").write_text("## v0.47.62 (2026-11-02)\n", "utf-8")
         apply_release_notes(clone, _ENTRY)
         before = {p: p.read_bytes() for p in clone.rglob("*") if p.is_file()}
         with pytest.raises(ValueError, match="already has"):
@@ -530,7 +533,7 @@ class TestCutJobWiring:
         body = _WORKFLOW.read_text(encoding="utf-8")
         assert "mapfile -t staged" in body
         assert "jq -er '(.result.handler_result // .result)" in body
-        assert "select(.success == true)" in body
+        assert "select(.success == true and" in body
         assert "read -r -d '' -a staged < <(jq" not in body
         assert "release-notes-stderr.log" in body, (
             "a node that never reaches a receipt must still surface its stderr"

@@ -148,6 +148,7 @@ def test_public_repository_changelog_filters_private_subject_names(
     tmp_path: Path, repository_name_release: tuple[Path, Path, str]
 ) -> None:
     entry, vocabulary, original_subject = repository_name_release
+    (tmp_path / "CHANGELOG.md").write_text("", encoding="utf-8")
     code, output = _run_node(
         tmp_path,
         tmp_path,
@@ -172,6 +173,7 @@ def test_private_repository_changelog_preserves_the_release_block(
     tmp_path: Path, repository_name_release: tuple[Path, Path, str]
 ) -> None:
     entry, vocabulary, original_subject = repository_name_release
+    (tmp_path / "CHANGELOG.md").write_text("", encoding="utf-8")
     code, output = _run_node(
         tmp_path,
         tmp_path,
@@ -273,6 +275,17 @@ class TestRunThroughTheNodeCli:
         result = _read_staged_paths(tmp_path, receipt)
         assert result.returncode == 1
         assert b"does not report success with staged paths" in result.stdout
+
+    def test_the_cut_job_accepts_a_release_pr_body_receipt_with_no_staged_path(
+        self, tmp_path: Path
+    ) -> None:
+        receipt = (
+            '{"result": {"success": true, "target": "release-pr-body", '
+            '"staged": [], "notes": "## v0.4.324 (2026-11-21)"}}'
+        )
+        result = _read_staged_paths(tmp_path, receipt)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.strip(b"\0") == b""
 
     def test_the_node_writes_a_readme_only_clone_and_exits_zero(
         self, tmp_path: Path

@@ -55,6 +55,13 @@ logger = logging.getLogger(__name__)
 DEV_BOOT_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
 POLL_SECONDS = 5
 DOCKER_READ_SECONDS = 10
+# OMN-26314: the roll step applies a service's registered installs before its compose wait.
+ENV_STATE_DIR: Final = "DEPLOY_AGENT_STATE_DIR"
+# Run by path from the deploy-source clone, as the agent runs its own branch-install entry.
+SERVICE_INSTALLS_ENTRY: Final = (
+    "src/omnibase_infra/nodes/node_dev_roll_events_effect/"
+    "runtime_dev_service_installs.py"
+)
 REPORT_SECONDS = 20
 # A full container log (json-file rotation holds up to 30 MB) is read before recovery.
 LOG_READ_SECONDS = 60
@@ -250,6 +257,99 @@ def _step_failed(
     return DevBootFailedError(message)
 
 
+def _declares_installs_for(state_dir: Path, service: str) -> bool:
+    """Whether the agent's single store declares an install for ``service`` (OMN-26314).
+
+    Unreadable or absent reads as none: the roll then goes as it always did and the
+    post-rebuild apply and the idle apply still carry the install.
+    """
+    try:
+        records = json.loads(
+            (state_dir / "branch-installs" / "records.json").read_text(encoding="utf-8")
+        )
+        return any(
+            service in install["services"] for install in records.get("installs", [])
+        )
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False
+
+
+def apply_installs_before_wait(
+    argv: list[str],
+    timeout: int,
+    state_dir: Path,
+    *,
+    execution: ModuleType,
+    env: Mapping[str, str],
+) -> None:
+    """Start the replacement WITHOUT the wait and put its registered installs in (OMN-26314).
+
+    A registered install exists to make the replacement healthy, so it must be in the
+    container the compose wait reads. The caller issues the unchanged ``up --wait`` next;
+    the wait, its budget and the refusal on an unhealthy runtime are not touched here.
+    Never a verdict: an apply that fails or cannot read back whole is logged at ERROR
+    and the wait judges the runtime as it is. Dev lane only: the roll step is the dev
+    roll and the apply refuses a prod or stability compose project.
+    """
+    service = argv[-1]
+    try:
+        started = execution._run(argv, timeout=timeout, env=dict(env))
+    except execution.subprocess.TimeoutExpired as exc:
+        raise _step_failed(
+            service,
+            execution,
+            f"Runtime roll stopped at {service}: compose up timed out",
+        ) from exc
+    if started.returncode != 0:
+        raise _step_failed(
+            service,
+            execution,
+            f"Runtime roll stopped at {service}: "
+            f"{_safe(started.stderr) or 'compose up failed'}",
+        )
+    lane = execution.EnumRuntimeLane.DEV
+    apply_argv = [
+        sys.executable,
+        f"{execution.REPO_DIR}/{SERVICE_INSTALLS_ENTRY}",
+        "--state-dir",
+        str(state_dir),
+        "--compose-project",
+        execution.lane_config_for(lane).compose_project,
+        "--service",
+        service,
+    ]
+    apply_env = {
+        **env,
+        "PYTHONPATH": ":".join(
+            part
+            for part in (f"{execution.REPO_DIR}/src", env.get("PYTHONPATH", ""))
+            if part
+        ),
+    }
+    try:
+        applied = execution._run(apply_argv, timeout=timeout, env=apply_env)
+    except (OSError, execution.subprocess.TimeoutExpired):
+        logger.exception(
+            "branch install before the roll wait could not run for %s "
+            "friction_type=branch_install_failed",
+            service,
+        )
+        return
+    for line in applied.stderr.splitlines():
+        if "friction_type=" in line:
+            logger.error("%s", line)
+        elif line.strip():
+            logger.info("%s", line)
+    if applied.returncode != 0:
+        logger.error(
+            "branch install before the roll wait exited %s for %s: %s "
+            "friction_type=branch_install_failed",
+            applied.returncode,
+            service,
+            _safe(applied.stdout or applied.stderr)[-300:],
+        )
+
+
 def run_runtime_roll_step(
     argv: list[str],
     timeout: int,
@@ -278,13 +378,19 @@ def run_runtime_roll_step(
     command = list(argv)
     index = command.index("--no-deps")
     command[index:index] = ["--wait", "--wait-timeout", str(wait_budget)]
+    env = execution._compose_env(extra_env)
+    state_dir = env.get(ENV_STATE_DIR, "").strip()
+    if state_dir and _declares_installs_for(Path(state_dir), service):
+        apply_installs_before_wait(
+            argv, timeout, Path(state_dir), execution=execution, env=env
+        )
     try:
         result = execution._run(
             command,
             timeout=max(
                 timeout, wait_budget + execution.RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS
             ),
-            env=execution._compose_env(extra_env),
+            env=env,
         )
     except execution.subprocess.TimeoutExpired as exc:
         raise _step_failed(

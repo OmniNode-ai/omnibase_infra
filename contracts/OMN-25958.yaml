@@ -1,0 +1,41 @@
+schema_version: 1.0.0
+ticket_id: OMN-25958
+title: A release cut never writes CHANGELOG.md to a repository that removed it
+summary: >-
+  The release train's notes node treated a checkout with no .readme-only-docs.yaml as one that keeps a changelog and created CHANGELOG.md. The marketplace repository's 0.4.324 cut re-added the file its prose-removal test refuses. The node now writes the block into CHANGELOG.md only while the checkout still has one; otherwise it writes nothing and returns the block for the release pull request body, and the cut job commits an empty staged list. Whether GitHub accepts a squash merge of the resulting no-diff release pull request is a property of the next live cut and is not bound here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25958-no-changelog-on-dev
+    statement: A release cut writes no CHANGELOG.md into a checkout that has none and no policy file saying otherwise.
+    acceptance:
+      - id: AC1
+        statement: A regression test built from the recorded 0.4.324 cut inputs fails on the unfixed node, which creates CHANGELOG.md, and passes when the tree is unchanged and the block is returned for the pull request body.
+      - id: AC2
+        statement: A checkout that still has a CHANGELOG.md keeps receiving the prepend, and the cut job accepts a receipt with no staged path only for the release-pr-body target.
+evidence_requirements:
+  - kind: tests
+    description: Exercise the notes handler, the node CLI and the cut job's receipt readback.
+    command: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect tests/integration/cli/test_release_notes_apply_node_omn17427.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn25958-recorded-cut-writes-no-changelog
+    description: The recorded 0.4.324 cut inputs leave the tree unchanged and return the block for the release pull request body.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_release_notes_no_changelog_omn25958.py -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25958-changelog-repos-and-receipt
+    description: A repository that still has a changelog keeps the prepend, and the cut job's receipt readback refuses an empty staged list for any other target.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py tests/integration/cli/test_release_notes_apply_node_omn17427.py -q -n 0 --no-cov
+        cwd: .

@@ -24,7 +24,7 @@ contract_version:
   patch: 0
 node_version: "1.0.0"
 description: >
-  Writes a rendered release block into a checkout where the repository's documentation policy accepts it, and returns the repo-relative paths to stage. The policy is the checkout's own .readme-only-docs.yaml: absent, or listing CHANGELOG.md under exceptions, keeps the CHANGELOG.md prepend; otherwise the block goes into root README.md above the newest release section, a root CHANGELOG.md is removed, and a checkout carrying contracts/OMN-18595.yaml and tests/ci/test_release_cut_identity_omn18595.py also gets the dod_evidence item and the pinned identity test. Refuses on an unparseable policy file, a missing README, a block in another shape, or a contract that does not end in dod_evidence. For public repositories, filters private repository names from the new block's commit subjects using the hygiene vocabulary and refuses a missing or invalid vocabulary before writing.
+  Writes a rendered release block into a checkout where the repository's documentation policy accepts it, and returns the repo-relative paths to stage. The policy is the checkout's own .readme-only-docs.yaml: listing CHANGELOG.md under exceptions keeps the CHANGELOG.md prepend; absent, the checkout keeps the prepend only while it still carries a root CHANGELOG.md, and without one (OMN-25958) nothing is written and the block comes back in notes for the release pull request body; otherwise the block goes into root README.md above the newest release section, a root CHANGELOG.md is removed, and a checkout carrying contracts/OMN-18595.yaml and tests/ci/test_release_cut_identity_omn18595.py also gets the dod_evidence item and the pinned identity test. Refuses on an unparseable policy file, a missing README, a block in another shape, or a contract that does not end in dod_evidence. For public repositories, filters private repository names from the new block's commit subjects using the hygiene vocabulary and refuses a missing or invalid vocabulary before writing.
 
 input_model:
   name: "ModelReleaseNotesApplyRequest"
@@ -57,6 +57,7 @@ handler_routing:
         - success
         - target
         - staged
+        - notes
         - error_message
 io_operations:
   - operation: "apply_release_notes"
@@ -69,6 +70,7 @@ io_operations:
       - success
       - target
       - staged
+      - notes
       - error_message
 metadata:
   description: "Release-notes apply: write the release block where the target repository's documentation policy accepts it (OMN-17427)"
