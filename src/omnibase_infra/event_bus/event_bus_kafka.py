@@ -4799,9 +4799,9 @@ class EventBusKafka(
         commit_lock = asyncio.Lock()
 
         async def _drain() -> None:
-            """Wait for every dispatched record to finish."""
-            while in_flight:
-                await asyncio.gather(*list(in_flight), return_exceptions=True)
+            """Wait for every record to finish; done tasks never spin it (OMN-26362)."""
+            while pending := [task for task in in_flight if not task.done()]:
+                await asyncio.gather(*pending, return_exceptions=True)
 
         async def _commit_low_watermark(physical_topic: str) -> None:
             """Commit every partition whose finished prefix moved (OMN-20117).

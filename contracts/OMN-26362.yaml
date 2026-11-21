@@ -1,0 +1,65 @@
+schema_version: 1.0.0
+ticket_id: OMN-26362
+title: A projection write on an unmaterialized projection ends in a typed error, a bounded awaited retry and a DLQ or skip, so the savings projection writer never stalls the dev runtime event loop
+summary: >-
+  The concurrent consume driver drained in-flight records with "while in_flight: await asyncio.gather(*list(in_flight))". asyncio.gather over children that are all done completes eagerly and awaiting a done future does not yield, so when a dispatch task finished in the same loop iteration as the driver's wake-up, ahead of it, the finished task stayed in in_flight (its discard callback queued behind the driver's own step) and the drain spun on the loop thread forever. That is the stall the dev runtime showed after a projection withhold on delegate-skill-completed offset 148150. The drain now waits only on tasks that are not done, so it always yields and ends. The PROJECTION_WITHHOLD bound, the health gate, the boot guard and other writers' handling of a transient write-path failure are not changed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26362-withhold-never-stalls-loop
+    statement: A record withheld because its projection is not materialized is refused with a typed error, redelivered a bounded number of times with an await between tries, then dead-lettered, and the event loop keeps running throughout.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the call that stops the event loop after ProjectionNotMaterializedError is measured on a lab host from the record at delegate-skill-completed offset 148150 and named in the PR body under a section headed Measured stall, with the loop-lag sampler reading unresponsive and the host and UTC read time -- falsifier: onex scm pr-view of the PR shows no section headed Measured stall holding a sampler reading and a UTC read time"
+      - id: AC2
+        statement: "AC2: a regression test built from the recorded offset 148150 record and the 15:21Z log excerpt (fixture path named in the PR) shows that a write on an unmaterialized projection raises a typed error, retries a bounded number of times with an await between tries, and then goes to the DLQ or is skipped per the contract, while the event loop keeps running -- falsifier: uv run pytest tests -q -k unmaterialized_projection_bounded fails at origin/dev and passes on the PR branch"
+      - id: AC3
+        statement: "AC3: the same test shows the loop-lag sampler never reads unresponsive while the unmaterialized projection record is redelivered, and no handler holds the loop beyond one second -- falsifier: uv run pytest tests -q -k unmaterialized_projection_bounded with the sampler assertion removed passes at origin/dev"
+      - id: AC4
+        statement: "AC4: after the deploy agent applies the merged change on dev, /health of omninode-runtime does not read event_loop_unresponsive for 30 minutes of the dev broker backlog on delegate-skill-completed and the job record under jobs-dev shows no boot guard restore for that roll -- falsifier: curl of the dev runtime /health on omni-201 reads degraded with reason event_loop_unresponsive inside 30 minutes of the roll or the job record shows a restore of onex-boot-good"
+evidence_requirements:
+  - kind: tests
+    description: The unmaterialized_projection_bounded regressions built from the offset 148150 fixture, driving the real consume loop and the real projection withhold arm.
+    command: uv run --frozen pytest tests/unit/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26362-ac1-measured-stall
+    description: "The fixture names the recorded coordinate (topic, offset 148150, the savings consumer group, four records in flight) and the 15:21Z log sequence; the PR body quotes the lab stack at _consume_loop_concurrent._drain under Measured stall. The test replays that stall through the real _consume_loop: it fails at the merge base, where the loop is held, and passes at the head. The PR body section is read by the reviewer; no runner check reads a PR body."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: python3 -c "import json; d = json.load(open('tests/unit/event_bus/fixtures/unmaterialized_projection_bounded_offset_148150.json')); assert d['offset'] == 148150 and d['topic'] == 'onex.evt.omnimarket.delegate-skill-completed.v1' and d['consume_concurrency'] == 4"
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26362-ac2-bounded-then-dlq
+    description: "Six typed refusals of offset 148150 (bound 5 plus one), five awaited rewinds to 148150, then one DLQ publish with failure class projection_wedge_exhausted, and the consume loop finishes inside its budget for every release ordering swept."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded_ends_in_dlq -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26362-ac3-sampler-never-unresponsive
+    description: "The loop-lag sampler, read off-loop, stays under 1 s (and so under the 4 s health wait budget) while the record is redelivered; at origin/dev it reads the whole scenario budget."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_omn26362_unmaterialized_projection_bounded.py -k unmaterialized_projection_bounded_sampler -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26362-deploy-health-not-unresponsive
+    description: >-
+      Post-deploy probe for AC4: after the deploy agent rolls dev with this change, /health of omninode-runtime does not answer event_loop_unresponsive. It reads the live dev container, which carries the change only after the deploy agent has rebuilt it, so a pull request runner cannot pass it; only the local Done gate runs it, and the orchestrator reads it for 30 minutes and checks the jobs-dev record for a boot guard restore.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: bash -c '! docker exec omninode-runtime curl -s -m 5 http://localhost:8085/health | grep -q event_loop_unresponsive'
