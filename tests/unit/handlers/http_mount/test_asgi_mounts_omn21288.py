@@ -73,8 +73,8 @@ async def _mounted(server: ServiceHealth, manifest: ModelAutoWiringManifest) -> 
 
 
 def _bound_port(server: ServiceHealth) -> int:
-    assert server._runner is not None
-    return int(server._runner.addresses[0][1])
+    assert server._site is not None
+    return int(server._site.port)
 
 
 async def _serve_body_cap_probe(port_file: Path) -> None:

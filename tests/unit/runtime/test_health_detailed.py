@@ -523,11 +523,8 @@ class TestServiceHealthDetailedIntegration:
             # Get actual port
             site = server._site
             assert site is not None
-            internal_server = site._server
-            assert internal_server is not None
-            sockets = getattr(internal_server, "sockets", None)
-            assert sockets is not None and len(sockets) > 0
-            actual_port: int = sockets[0].getsockname()[1]
+            actual_port: int = site.port
+            assert actual_port > 0
 
             import aiohttp
 

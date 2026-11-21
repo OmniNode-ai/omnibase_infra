@@ -419,7 +419,10 @@ def test_release_train_dependency_refresh_workflow_shape() -> None:
     )
     assert run.count("staged+=(uv.lock)") == 1
     assert '--title "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})"' in run
-    assert 'git commit -m "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})"' in run
+    assert (
+        'git commit --allow-empty -m "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})"'
+        in run
+    )
     assert (
         "- Dependency refresh: ${dep_refresh_status} (${dep_refresh_moved} third-party packages moved; ${dep_refresh_detail})"
         in run
