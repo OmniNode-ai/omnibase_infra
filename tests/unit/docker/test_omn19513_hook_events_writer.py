@@ -181,4 +181,5 @@ def test_other_lanes_neither_start_the_writer_nor_exclude_the_node(
     for service in services.values():
         env = (service or {}).get("environment") or {}
         if isinstance(env, dict):
-            assert "ONEX_RUNTIME_NODE_EXCLUSION" not in env
+            # OMN-26232: a value-less passthrough is allowed; a value is not.
+            assert not env.get("ONEX_RUNTIME_NODE_EXCLUSION")

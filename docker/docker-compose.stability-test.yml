@@ -128,6 +128,15 @@ x-stability-test-tenant-projection-env: &stability_test_tenant_projection_env
   ONEX_TENANT_DB_URL: "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?TENANT_PROJECTION_WRITER_PASSWORD must be set for the stability-test tenant projection binding}@postgres:5432/omnidash_analytics"
 x-stability-test-internal-projection-env: &stability_test_internal_projection_env
   OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set for the stability-test internal projection binding}@postgres:5432/omnidash_analytics"
+# OMN-26151: the lab workflow gateway's database (omnimarket node_workflow_gateway_effect,
+# secret gateway.database.dsn, mapped to this env by the stability profile of
+# contracts/services/runtime_policy.contract.yaml). It connects to omninode_cloud on this
+# lane's own postgres as gateway_runtime, a login-only role holding nine grants and no
+# CREATE, TRUNCATE or DELETE (run-forward-migrations.sh, gateway runtime grant seam).
+# Declared in this overlay, never in docker-compose.infra.yml: every lane layers the
+# base, and a fail-closed reference there would refuse prod's compose render.
+x-gateway-database-env: &stability_test_gateway_env
+  GATEWAY_DATABASE_DSN: "postgresql://gateway_runtime:${GATEWAY_RUNTIME_PASSWORD:?GATEWAY_RUNTIME_PASSWORD must be set — the lab workflow gateway connects to omninode_cloud as the least-grant gateway_runtime principal (OMN-26151), never as role_omninode or the postgres superuser}@postgres:5432/omninode_cloud"
 # OMN-20932: a lane's Bifrost overlay is private deployment config; this
 # repository ships none (only lane-overlays/local.bifrost.example.yaml, the
 # neutral template). Every runtime service mounts the overlay named for its
@@ -405,7 +414,7 @@ services:
       redpanda-partition-cap:
         condition: service_completed_successfully
     environment:
-      !!merge <<: [*stability_test_strict_wiring_env, *stability_test_lane_identity_env, *stability_test_broker_sasl_env]
+      !!merge <<: [*stability_test_strict_wiring_env, *stability_test_gateway_env, *stability_test_lane_identity_env, *stability_test_broker_sasl_env]
       KAFKA_SASL_USERNAME: "omninode-runtime"
       KAFKA_SASL_PASSWORD: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_OMNINODE_RUNTIME:?STABILITY_TEST_KAFKA_SASL_PASSWORD_OMNINODE_RUNTIME must be set - the stability lane authenticates omninode-runtime to its own broker as principal omninode-runtime (OMN-25927); resolved from Infisical through the operator env, never inlined here}
       # OMN-21288: carried over unchanged from runtime-effects.

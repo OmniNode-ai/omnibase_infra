@@ -242,6 +242,8 @@ COMPOSE_RENDER_ENV = {
     "OMNINODE_RUNTIME_PASSWORD": "render-only-omninode-runtime-password",
     # OMN-15425: TENANT-domain counterpart, same `:?` seam in x-runtime-env.
     "TENANT_PROJECTION_WRITER_PASSWORD": "render-only-tenant-projection-writer-password",
+    # OMN-26151: the lab gateway login, fail-closed in the lane overlay. Render-only.
+    "GATEWAY_RUNTIME_PASSWORD": "d" * 64,
     "OMNI_HOME": "/data/omninode/omni_home",
     "ONEX_REGISTRATION_AUTO_ACK": "false",
     "ONEX_INFRA_HOST": "192.168.86.201",

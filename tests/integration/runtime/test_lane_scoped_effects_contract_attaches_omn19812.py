@@ -43,7 +43,13 @@ def _render_environments(files: tuple[str, ...]) -> dict[str, dict[str, str]]:
             environment = document["services"].get(name, {}).get("environment", {})
             assert isinstance(environment, dict)
             environments.setdefault(name, {}).update(
-                {str(key): str(value) for key, value in environment.items()}
+                # A bare compose key (`NAME:`) passes the host value through and
+                # is unset in the container when the host has none.
+                {
+                    str(key): str(value)
+                    for key, value in environment.items()
+                    if value is not None
+                }
             )
     for environment in environments.values():
         if "ONEX_RUNTIME_LANE" in environment:

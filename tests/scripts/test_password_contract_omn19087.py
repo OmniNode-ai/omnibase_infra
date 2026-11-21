@@ -123,13 +123,14 @@ def _run_checker(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
 # --------------------------------------------------------------------------
 
 
-def test_contract_covers_exactly_the_five_compose_passwords() -> None:
+def test_contract_covers_exactly_the_six_compose_passwords() -> None:
     assert set(_ALL_VARS) == {
         "POSTGRES_PASSWORD",
         "VALKEY_PASSWORD",
         "OMNINODE_RUNTIME_PASSWORD",
         "TENANT_PROJECTION_WRITER_PASSWORD",
         "CHAIN_CANARY_READER_PASSWORD",
+        "GATEWAY_RUNTIME_PASSWORD",
     }
     for var in _CONTRACT.LOGIN_ROLE_VARS:
         assert _CONTRACT.CONTRACT[var] is _CONTRACT.HEX
@@ -191,7 +192,7 @@ def test_every_violation_is_named_in_one_message() -> None:
     env = {var: _malformed_value(var) for var in _ALL_VARS}
     result = _run_checker(env)
     assert result.returncode == 1
-    assert f"5 of {len(_ALL_VARS)}" in result.stderr
+    assert f"{len(_ALL_VARS)} of {len(_ALL_VARS)}" in result.stderr
     for var in _ALL_VARS:
         assert f"    {var}\n" in result.stderr
 

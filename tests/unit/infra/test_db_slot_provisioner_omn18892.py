@@ -107,6 +107,7 @@ LOGIN_ONLY_ROLES = (
     "omninode_runtime",
     "tenant_projection_writer",
     "chain_canary_reader",
+    "gateway_runtime",
 )
 
 

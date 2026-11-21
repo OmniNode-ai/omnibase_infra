@@ -459,6 +459,9 @@ class TestRuntimeLaneActSwitchPassthrough:
     LANE_CLASS_KEYS: frozenset[str] = frozenset(
         {"ONEX_RUNTIME_LANE_CLASS", "ONEX_RUNTIME_LANE_CLASS_CONTRACTS"}
     )
+    # The nodes a lane turns off (OMN-26232), read by the same filter: set by the
+    # lane's overlay, never by a default.
+    NODE_EXCLUSION_KEYS: frozenset[str] = frozenset({"ONEX_RUNTIME_NODE_EXCLUSION"})
     # The deployment's provenance overlay (OMN-23981, OMN-25116): the names the
     # envelope publish seam reads. It stamps when LANE, HOST, INSTALL_SOURCE and
     # REVISION are all set; LANE_KIND is empty for lane dev or stability and one
@@ -477,7 +480,7 @@ class TestRuntimeLaneActSwitchPassthrough:
         }
     )
     PASSTHROUGH_KEYS: frozenset[str] = (
-        LANE_ACT_SWITCH_KEYS | LANE_CLASS_KEYS | PROVENANCE_KEYS
+        LANE_ACT_SWITCH_KEYS | LANE_CLASS_KEYS | NODE_EXCLUSION_KEYS | PROVENANCE_KEYS
     )
 
     @pytest.mark.unit
