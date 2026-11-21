@@ -22,6 +22,12 @@ heartbeat task on the loop records when the loop last ran a task:
 A claim and a withdrawal take the same lock, so exactly one side answers a
 connection, including one offered just before the loop stalls.
 
+Each accepted connection is routed on its own short-lived thread. A stalled
+loop makes every connection wait out ``wait_budget_seconds``; routing them one
+after another on the accept thread served a second probe at about twice the
+budget, past the container healthcheck's 5 s timeout, so it read
+``probe_unreachable`` for a runtime that was alive (OMN-26417).
+
 The 503 fails ``curl -sf`` and the semantic container healthcheck just as a
 silent socket did, so no gate becomes easier to pass. The difference is that
 the probe gets an answer within its timeout, and the answer names the cause.
@@ -54,6 +60,9 @@ DEFAULT_WAIT_BUDGET_SECONDS = 4.0
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 0.25
 _ACCEPT_POLL_SECONDS = 0.25
 _REQUEST_READ_SECONDS = 0.5
+# Connections routed at once. Each waits at most the wait budget, so a stalled
+# loop holds at most this many short-lived threads; one past the cap is closed.
+_MAX_INFLIGHT_CONNECTIONS = 32
 
 
 def render_event_loop_stall_response(
@@ -115,6 +124,7 @@ class HealthProbeAcceptor:
         self._last_beat: float | None = None
         self._beat_task: asyncio.Task[None] | None = None
         self._handoffs: set[asyncio.Task[object]] = set()
+        self._inflight = threading.BoundedSemaphore(_MAX_INFLIGHT_CONNECTIONS)
 
     @property
     def port(self) -> int:
@@ -178,11 +188,37 @@ class HealthProbeAcceptor:
                 continue
             except OSError:
                 return
-            try:
-                self._route(conn)
-            except Exception:
-                logger.exception("health acceptor failed to route a connection")
-                conn.close()
+            self._dispatch(conn)
+
+    def _dispatch(self, conn: socket.socket) -> None:
+        """Route ``conn`` on its own thread so a stalled wait blocks no other probe."""
+        if not self._inflight.acquire(blocking=False):
+            logger.warning(
+                "health acceptor has %d connections in flight; closing one",
+                _MAX_INFLIGHT_CONNECTIONS,
+            )
+            conn.close()
+            return
+        try:
+            threading.Thread(
+                target=self._route_connection,
+                args=(conn,),
+                name="onex-health-route",
+                daemon=True,
+            ).start()
+        except RuntimeError:
+            self._inflight.release()
+            logger.exception("health acceptor failed to start a routing thread")
+            conn.close()
+
+    def _route_connection(self, conn: socket.socket) -> None:
+        try:
+            self._route(conn)
+        except Exception:
+            logger.exception("health acceptor failed to route a connection")
+            conn.close()
+        finally:
+            self._inflight.release()
 
     def _route(self, conn: socket.socket) -> None:
         loop = self._loop
