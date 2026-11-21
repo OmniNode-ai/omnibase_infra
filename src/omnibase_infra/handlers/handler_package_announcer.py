@@ -59,6 +59,7 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors.error_contract_content_hash import (
     ContractContentHashError,
 )
+from omnibase_infra.handlers.entry_method_offload import yield_each
 from omnibase_infra.models.node_announce.model_boot_runtime_config import (
     ModelBootRuntimeConfig,
 )
@@ -466,7 +467,12 @@ class HandlerPackageAnnouncer:
         settle_timeout_seconds: float,
     ) -> ModelPackageAnnounceResult:
         """Read the metadata, publish the announcements, return the catalog."""
-        inventory = read_package_inventory(request.active_packages)
+        # OMN-26322: the inventory read imports every node entry point and hashes
+        # every contract (the boot's longest hold of the loop, 42 s on one CPU);
+        # it touches no loop object, so it runs on a worker thread.
+        inventory = await asyncio.to_thread(
+            read_package_inventory, request.active_packages
+        )
         announcements = build_announcements(inventory, request)
         policy = request.policy or tier0_policy(inventory, request.announcer_id)
         read_installed = installed_file_reader(inventory)
@@ -500,7 +506,9 @@ class HandlerPackageAnnouncer:
             request.topic, on_message=on_message, group_id=request.catalog_group
         )
         try:
-            for announcement in announcements:
+            # The in-memory bus folds each message inside publish without
+            # suspending, so the loop gets one turn per announcement (OMN-26322).
+            async for announcement in yield_each(announcements):
                 await bus.publish(
                     request.topic,
                     announcement.entity_id.encode("utf-8"),

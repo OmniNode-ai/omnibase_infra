@@ -1,0 +1,82 @@
+schema_version: 1.0.0
+ticket_id: OMN-26322
+title: The omnibase_infra runtime kernel startup holds the asyncio loop under one second per call at cpus 1, so the dev runtime serves /health inside its compose start period
+summary: >-
+  A lab reproduction of the kernel on one CPU measured two calls that held the event loop for over one second before /health was served on the omnibase_infra#6133 head: boot step 0 (the package inventory read that imports every node entry point and hashes every contract, then the fold of every announcement on the in-memory bus) and the topic provisioner's constructor (which reads every installed contract to build the topic specs). The inventory read and the provisioner construction now run on a worker thread through asyncio.to_thread, audited as thread safe, and the fold gives the loop one turn per announcement through yield_each. Errors raised in that work reach the caller as the same error object. The health gate, the boot guard, the compose wait and the compose start period are not changed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26322-startup-loop-holds
+    statement: No kernel startup call holds the event loop for over one second at cpus 1, an error in the moved work still fails startup, and no gate is weakened.
+    acceptance:
+      - id: AC1
+        statement: "AC1: every call that holds the loop for over one second during kernel startup is measured from a lab reproduction at cpus 1 against the dev broker and dev database reached read-only, with its file:line and contiguous seconds, before and after the fix, and written in each PR body under a section headed Measured loop holds with the host, the source refs and a UTC read time -- falsifier: onex scm pr-view of each PR shows no section headed Measured loop holds holding per-call file:line and seconds before and after and a UTC read time"
+      - id: AC2
+        statement: "AC2: after the fix no listed call holds the loop for over one second in the reproduction, the package announcer read and apply_announcement included, so a startup with the dev contract set serves /health inside the compose start period -- falsifier: uv run pytest tests -q -k startup_loop_hold_under_one_second fails at origin/dev and at the omnibase_infra#6133 branch and passes on the PR branch"
+      - id: AC3
+        statement: "AC3: an error raised in the changed wiring or announcer work still fails startup with the same typed error -- falsifier: uv run pytest tests -q -k startup_wiring_error_fails_startup fails if the error is swallowed"
+      - id: AC4
+        statement: "AC4: the health gate, the boot guard, the compose wait and the compose start period are unchanged by each PR -- falsifier: git diff origin/dev --stat on the PR branch lists no health gate setting, no boot guard file, no compose file and no wait setting, run with uv run pytest tests -q -k startup_loop_hold_under_one_second"
+      - id: AC5
+        statement: "AC5: a regression test built from the recorded reproduction data (fixture path named in the PR) fails on the broken code and passes on the fix -- falsifier: uv run pytest tests -q -k startup_loop_hold_under_one_second"
+      - id: AC6
+        statement: "AC6: the lane STATUS row names the measured holds before and after, the pushed branch of each PR and the path of its ready PR body -- falsifier: grep of the rolling work ledger for lane=devboot3-1250 shows no STATUS row with the holds before and after and each branch name"
+evidence_requirements:
+  - kind: tests
+    description: The startup_loop_hold_under_one_second and startup_wiring_error_fails_startup regressions built from the recorded one-CPU reproduction.
+    command: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26322.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26322-ac1-measured-loop-holds
+    description: "The recorded fixture holds the host, the reproduction refs, the UTC read time and each hold over one second with its call site and contiguous seconds; the PR body quotes them, before and after, under Measured loop holds. The PR body section itself is read by the reviewer; no runner check reads a PR body."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c "import json; d = json.load(open('tests/fixtures/omn26322/devboot3_1250_loop_holds.json')); h = {x['name']: x['contiguous_s'] for x in d['holds_before']}; assert h['boot_step0'] > 1 and h['topic_provisioner_init'] > 1 and d['read_utc']"
+        cwd: .
+  - id: dod-omn26322-ac2-loop-hold-under-one-second
+    description: "The recorded boot step 0 inventory read, the announcement fold and the topic provisioner construction are replayed beside a heartbeat on the same loop; the longest heartbeat gap stays under one second, and the tests fail where the work runs on the loop."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26322.py -k startup_loop_hold_under_one_second -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26322-ac3-error-fails-startup
+    description: "An error raised by the inventory read, by a publish in the yielding fold, or by the topic provisioner constructor reaches the awaiting caller as the same error object."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26322.py -k startup_wiring_error_fails_startup -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26322-ac4-gates-unchanged
+    description: "The change edits no compose file, boot guard, healthcheck setting, start period or wait setting: it changes handler_package_announcer.py and the TopicProvisioner call in service_kernel.py (no line growth), and adds a test, a fixture and this contract."
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26322.py -k startup_loop_hold_under_one_second -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26322-ac5-recorded-fixture-regression
+    description: "The regression replays the recorded holds from tests/fixtures/omn26322/devboot3_1250_loop_holds.json and fails at origin/dev and at the omnibase_infra#6133 head."
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26322.py -k startup_loop_hold_under_one_second -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26322-ac6-status-row
+    description: "The lane STATUS row on the rolling work ledger names the measured holds before and after, the pushed branch and the ready PR body path. It is a ledger read, so no runner check reads it."
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: command
+        check_value: test -f contracts/OMN-26322.yaml
+        cwd: .

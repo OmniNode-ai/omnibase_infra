@@ -2195,12 +2195,12 @@ async def bootstrap() -> int:
 
                 # Infra standalone manifests (cli/topics.yaml, services/topics.yaml)
                 _infra_src = Path(__file__).resolve().parent.parent
-                for _subdir in ("cli", "services"):
-                    _candidate = _infra_src / _subdir
+                for _candidate in (_infra_src / "cli", _infra_src / "services"):
                     if _candidate.is_dir():
                         _extra_manifest_roots.append(_candidate)
 
-                topic_provisioner = TopicProvisioner(
+                topic_provisioner = await asyncio.to_thread(
+                    TopicProvisioner,
                     bootstrap_servers=kafka_bootstrap_servers,
                     contracts_root=_contracts_root,
                     skill_manifests_root=_skill_manifests_root,
