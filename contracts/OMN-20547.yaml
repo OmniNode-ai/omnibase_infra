@@ -1,0 +1,44 @@
+# OMN-20547 contract file for omnibase_infra: the two code readers of the rolling ledger file ask the reader node instead.
+schema_version: "1.0.0"
+ticket_id: "OMN-20547"
+title: "scripts/git-maintenance.sh and scripts/reconcile_verify_movement.py read open CLAIMs from the ledger reader node, never the file"
+summary: "A ledger on the event bus with one writer and many readers of a file copy is two ledgers. Two scripts of this repository still opened the ledger file: git-maintenance.sh grepped it for CLAIM and TERMINAL rows before pruning worktrees and deleting remote branches, and reconcile_verify_movement.py read it to name the owner of a refused clone's dirty paths. Both now call HandlerLedgerOpenClaims (node_ledger_open_claims_effect), which asks omnimarket's node_work_ledger_reader_effect for open-claims and CLAIM rows over a 72 h window under the readers git-maintenance and reconcile-verify-movement. A reader that exits 3, 1 or 69 refuses the run; the file is not read in its place and its branch is deleted."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20547-infra-ledger-readers
+    statement: "No code in omnibase_infra opens the rolling ledger file to learn which CLAIMs are open."
+    acceptance:
+      - id: AC1
+        statement: "AC1: scripts/git-maintenance.sh keeps a worktree or remote branch named by a CLAIM that the reader node reports open, removes one whose claim the reader reports closed, and refuses the destructive phases when the reader exits 3 or 69 -- falsifier: uv run pytest tests/scripts/test_git_maintenance_prune_safety_omn19396.py -k 'open_ledger_claim or cannot_answer or never_read', which fails at the merge base where the script greps the file and ignores the reader"
+      - id: AC2
+        statement: "AC2: scripts/reconcile_verify_movement.py clone-refusal names the owner from the reader's open claims, reports unowned for a closed claim, and reports the owner unknown (not a file read) when the reader exits 3 or 69 -- falsifier: uv run pytest tests/scripts/test_reconcile_verify_movement_owner_omn20547.py, which fails at the merge base where the owner is the lane of a CLAIM row in the file"
+      - id: AC3
+        statement: "AC3: the handler joins each open-claims line to its CLAIM row by stamp and lane, matches keys as whole tokens, and raises a refusal on reader exit 1, 3 or 69 -- falsifier: uv run pytest tests/unit/handlers/test_handler_ledger_open_claims_omn20547.py, which cannot import the handler at the merge base"
+evidence_requirements:
+  - kind: tests
+    description: "The prune-safety suite and the owner suite drive the real scripts with a stub interpreter that answers the reader node from canned files and logs each call; the ledger file the old code read is planted with a different answer. The handler suite drives the join, the matching and every refusal."
+    command: "uv run --frozen pytest tests/unit/handlers/test_handler_ledger_open_claims_omn20547.py tests/scripts/test_reconcile_verify_movement_owner_omn20547.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "git-maintenance.sh honours the reader's open CLAIMs, reads once per run, and refuses on a reader that cannot answer."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: 'uv run --frozen pytest tests/scripts/test_git_maintenance_prune_safety_omn19396.py -q -p no:cacheprovider -k "open_ledger_claim or cannot_answer or read_once or only_the_branch or never_read"'
+  - id: dod-002
+    description: "clone-refusal names its owner from the reader and never from the file."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: 'uv run --frozen pytest tests/scripts/test_reconcile_verify_movement_owner_omn20547.py -q -p no:cacheprovider'
+  - id: dod-003
+    description: "The handler joins, matches and refuses."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: 'uv run --frozen pytest tests/unit/handlers/test_handler_ledger_open_claims_omn20547.py -q -p no:cacheprovider'

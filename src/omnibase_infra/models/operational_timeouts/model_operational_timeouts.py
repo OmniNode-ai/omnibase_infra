@@ -47,6 +47,7 @@ class ModelOperationalTimeouts(BaseModel):
         dev_lane_restart_poll_seconds: Poll period while a restart settles.
         done_write_verify_seconds: Wait of one done-write verifier run.
         kill_wait_seconds: Wait for a killed verifier to exit.
+        ledger_reader_seconds: Wait of one ledger reader node call.
         tool_execution_seconds: Wait of one tool execution orchestrator call.
         boundary_dlq_max_attempts: Dispatch attempts of one delivery before the DLQ.
         not_ready_retry_max_attempts: Attach attempts of a NOT_READY contract.
@@ -76,6 +77,7 @@ class ModelOperationalTimeouts(BaseModel):
     dev_lane_restart_poll_seconds: float = Field(gt=0)
     done_write_verify_seconds: float = Field(gt=0)
     kill_wait_seconds: float = Field(gt=0)
+    ledger_reader_seconds: float = Field(gt=0)
     tool_execution_seconds: float = Field(gt=0)
     boundary_dlq_max_attempts: int = Field(ge=1)
     not_ready_retry_max_attempts: int = Field(ge=1)

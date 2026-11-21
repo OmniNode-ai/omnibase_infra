@@ -300,8 +300,8 @@ MSG_TICKET = "OMN-20403"
 OPERATOR = "operator"
 REFUSAL_STATE_FILE = "clone-refusals.json"
 BACKUP_DIRNAME = "dirty-clone-backups"
-_LEDGER_ROW_RE = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ \| ([A-Z][A-Z-]*) \|")
-_LANE_RE = re.compile(r"(?<![\w-])lane=([^\s|]+)")
+OWNER_READER = "reconcile-verify-movement"
+OWNER_WINDOW_HOURS = 72
 
 
 @dataclass(frozen=True)
@@ -373,39 +373,36 @@ def observe_dirty_state(clone: Path) -> DirtyState | None:
     return DirtyState(tuple(lines), mtime_ns, digest)
 
 
-def _ledger_files(ledger: Path) -> list[Path]:
-    """The live ledger first, then its archive newest-first."""
-    files = [ledger]
-    archive = ledger.parent / "archive"
-    if archive.is_dir():
-        files.extend(sorted(archive.glob("*.md"), reverse=True))
-    return files
-
-
-def find_owner(ledger: Path, repo: str, paths: tuple[str, ...]) -> str | None:
-    """The lane of the newest CLAIM row naming this clone and one of ``paths``.
-
-    A reader only: it never opens the ledger for writing. A row owns the work
-    when it names the clone AND a dirty path (the bare path or ``<repo>/<path>``),
-    so a path such as ``README.md`` alone never claims every clone's staged
-    README. Rows are read newest first; the first match wins.
-    """
-    needles = {p[3:] for p in paths}
-    for file in _ledger_files(ledger):
-        try:
-            rows = file.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        for row in reversed(rows):
-            match = _LEDGER_ROW_RE.match(row)
-            if not match or match.group(1) != "CLAIM" or repo not in row:
-                continue
-            if not any(needle in row for needle in needles):
-                continue
-            lane = _LANE_RE.search(row)
-            if lane:
-                return lane.group(1)
-    return None
+def find_owner(repo: str, paths: tuple[str, ...]) -> str:
+    """Newest open CLAIM's lane naming ``repo`` and a path, else ``unowned``: the reader node, never the file."""
+    reader = os.environ.get("ONEX_LEDGER_READER_COMMAND", "")
+    if not reader:
+        raise RuntimeError("ONEX_LEDGER_READER_COMMAND is not set")
+    src = Path(__file__).resolve().parents[1] / "src"
+    node = src / "omnibase_infra" / "nodes" / "node_ledger_open_claims_effect"
+    proc = subprocess.run(
+        [
+            reader.split()[0],
+            str(node / "runtime_ledger_open_claims.py"),
+            "owner",
+            "--reader-command",
+            reader,
+            "--reader",
+            OWNER_READER,
+            "--window-hours",
+            str(OWNER_WINDOW_HOURS),
+            "--repo",
+            repo,
+            *[arg for path in paths for arg in ("--path", path)],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PYTHONPATH": str(src)},
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or f"exit {proc.returncode}")
+    return proc.stdout.strip()
 
 
 def _load_refusal_state(path: Path) -> dict[str, dict[str, Any]]:
@@ -573,15 +570,11 @@ def _cmd_clone_refusal(args: argparse.Namespace) -> int:
 
     owner: str | None = None
     ledger = Path(args.ledger) if args.ledger else None
-    if ledger is None:
-        print(
-            "owner\towner: unknown — ONEX_LEDGER_PATH is not set, so the ledger was not read"
-        )
-    elif not ledger.is_file():
-        print(f"owner\towner: unknown — no ledger at {ledger}")
-    else:
-        owner = find_owner(ledger, repo, tuple(p[3:] for p in dirty.paths)) or "unowned"
+    try:
+        owner = find_owner(repo, tuple(p[3:] for p in dirty.paths))
         print(f"owner\towner: {owner}")
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        print(f"owner\towner: unknown — the ledger reader did not answer: {exc}")
 
     if not args.record:
         return EXIT_OK

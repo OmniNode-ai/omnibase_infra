@@ -14,8 +14,9 @@ set -euo pipefail
 #   --delete-remote-branches  Phase 1: delete remote branches merged into origin/main.
 #                             Without this flag, phase 1 only reports, even with --execute.
 #   --prune-worktrees         Phase 2: remove finished worktrees under WORKTREE_ROOT.
-#                             Requires WORKTREE_ROOT and ONEX_LEDGER_PATH to be set
-#                             explicitly; there is no derived default for a destructive step.
+#                             Requires WORKTREE_ROOT to be set explicitly and the ledger
+#                             reader to answer; there is no derived default for a
+#                             destructive step.
 #
 # The governed, claim-aware and content-keyed worktree pruner is the morning
 # worktree prune (omniclaude scripts/worktree_auto_prune.py). Prefer it. Phase 2
@@ -28,8 +29,8 @@ set -euo pipefail
 #       * HEAD is reachable from a remote-tracking ref (nothing unpushed);
 #       * the owning clone holds no stash for the worktree's branch;
 #       * `gh` reports no open pull request for the branch;
-#       * the rolling ledger holds no open CLAIM naming the ticket dir, the
-#         branch or the ticket id;
+#       * the ledger reader reports no open CLAIM naming the ticket dir, the
+#         branch or the ticket id (OMN-20547: never the ledger file);
 #   - a secrets-shaped file (.env, a key, settings.local.json) is never
 #     regenerable, wherever it sits: a `.env` inside an ignored `dist/` keeps the
 #     worktree although `git status --ignored` names only `dist/` (OMN-19539);
@@ -57,7 +58,6 @@ set -euo pipefail
 # No machine-path defaults (rules 6 and 8, OMN-19396): OMNI_HOME is required.
 OMNI_HOME="${OMNI_HOME:?OMNI_HOME must be set to the registry root; git-maintenance.sh has no default}"
 WORKTREE_ROOT="${WORKTREE_ROOT:-}"
-ONEX_LEDGER_PATH="${ONEX_LEDGER_PATH:-}"
 DRY_RUN=true
 PRUNE_WORKTREES=false
 DELETE_REMOTE_BRANCHES=false
@@ -84,12 +84,6 @@ refuse() {
 if [ "$PRUNE_WORKTREES" = true ]; then
   [ -n "$WORKTREE_ROOT" ] || refuse "--prune-worktrees needs WORKTREE_ROOT set explicitly; there is no default root"
   [ -d "$WORKTREE_ROOT" ] || refuse "WORKTREE_ROOT is not a directory: $WORKTREE_ROOT"
-  [ -n "$ONEX_LEDGER_PATH" ] || refuse "--prune-worktrees needs ONEX_LEDGER_PATH set, so open CLAIMs can be honoured"
-  [ -r "$ONEX_LEDGER_PATH" ] && [ -f "$ONEX_LEDGER_PATH" ] || refuse "ONEX_LEDGER_PATH is not a readable file: $ONEX_LEDGER_PATH"
-fi
-if [ "$DELETE_REMOTE_BRANCHES" = true ] && [ "$DRY_RUN" = false ]; then
-  [ -n "$ONEX_LEDGER_PATH" ] || refuse "--delete-remote-branches needs ONEX_LEDGER_PATH set, so open CLAIMs can be honoured"
-  [ -r "$ONEX_LEDGER_PATH" ] && [ -f "$ONEX_LEDGER_PATH" ] || refuse "ONEX_LEDGER_PATH is not a readable file: $ONEX_LEDGER_PATH"
 fi
 
 # Names that can carry credentials or local secret configuration. Match on the
@@ -150,51 +144,30 @@ is_regenerable_ignored() {
 
 SNAPSHOT_HELPER="$OMNI_HOME/omniclaude/scripts/worktree_removal_snapshot.py"
 
-# Print the open CLAIM rows (by timestamp) that mention any of the given keys as
-# a whole token. A CLAIM is closed by a TERMINAL whose closes-CLAIM token ends
-# with the CLAIM's timestamp, or, when a TERMINAL carries no closes-CLAIM, by any
-# later TERMINAL of the same lane. Returns non-zero if the ledger cannot be read.
-open_claims_for() {
-  [ -n "$ONEX_LEDGER_PATH" ] && [ -r "$ONEX_LEDGER_PATH" ] || return 3
-  # Keys never hold spaces (ticket dir names, branch names, ticket ids), so a
-  # space-joined list crosses into awk safely.
-  local keys="$*"
-  # grep exits 1 on a ledger with no CLAIM or TERMINAL row; that is not an error.
-  { grep -E '^[^|]+\| (CLAIM|TERMINAL) \|' "$ONEX_LEDGER_PATH" || [ "$?" -eq 1 ]; } | awk -v keys="$keys" '
-    function mentions(row,   i, k, pos, rest, before, after, off) {
-      for (i = 1; i <= nkeys; i++) {
-        k = K[i]; rest = row; off = 0
-        while ((pos = index(rest, k)) > 0) {
-          before = (off + pos > 1) ? substr(row, off + pos - 1, 1) : ""
-          after = substr(row, off + pos + length(k), 1)
-          if (before !~ /[A-Za-z0-9_.-]/ && after !~ /[A-Za-z0-9_.-]/) return 1
-          off += pos; rest = substr(row, off + 1)
-        }
-      }
-      return 0
-    }
-    function field(row, name,   re, m) {
-      re = "(^|\\| )" name "=[^ |]+"
-      if (match(row, re)) { m = substr(row, RSTART, RLENGTH); sub(/^\| /, "", m); sub(name "=", "", m); return m }
-      return ""
-    }
-    BEGIN { nkeys = split(keys, K, " ") }
-    {
-      split($0, cells, " \\| "); ts = cells[1]; gsub(/ /, "", ts); type = cells[2]; lane = field($0, "lane")
-      if (type == "CLAIM") {
-        if (mentions($0)) { open[ts] = lane }
-      } else if (type == "TERMINAL") {
-        closes = field($0, "closes-CLAIM")
-        if (closes != "") {
-          for (t in open) if (length(closes) >= length(t) && substr(closes, length(closes) - length(t) + 1) == t) delete open[t]
-        } else if (lane != "") {
-          for (t in open) if (open[t] == lane) delete open[t]
-        }
-      }
-    }
-    END { for (t in open) print t " lane=" open[t] }
-  '
+# Open CLAIMs come from the ledger reader node (OMN-20547), never from the ledger
+# file: a file copy is a second ledger. The reader decides which CLAIMs are open
+# (a TERMINAL, a closes-CLAIM token or a later lane TERMINAL closes one). One
+# snapshot is read per run, because a reader call takes seconds, and every
+# open_claims_for call matches against it. A reader that cannot answer (exit 3:
+# not moved, 1: stale, 69: unreadable) refuses the run: a destructive phase must
+# not run on an unread ledger. 72 h, because a prune must honour a live lane
+# whose CLAIM is days old; a CLAIM opened longer ago than that is not honoured.
+CLAIM_WINDOW_HOURS=72
+ledger_handler() {
+  PYTHONPATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/../src" && pwd)${PYTHONPATH:+:$PYTHONPATH}" \
+    "${ONEX_LEDGER_BUS_APPEND_COMMAND%% *}" -m omnibase_infra.nodes.node_ledger_open_claims_effect.runtime_ledger_open_claims "$@"
 }
+if [ "$PRUNE_WORKTREES" = true ] || { [ "$DELETE_REMOTE_BRANCHES" = true ] && [ "$DRY_RUN" = false ]; }; then
+  [ -n "${ONEX_LEDGER_BUS_APPEND_COMMAND:-}" ] || refuse "ONEX_LEDGER_BUS_APPEND_COMMAND is not set, so the ledger reader cannot run and open CLAIMs cannot be honoured"
+  CLAIM_SNAPSHOT=$(mktemp)
+  trap 'rm -f "$CLAIM_SNAPSHOT"' EXIT
+  ledger_handler snapshot --reader-command "${ONEX_LEDGER_BUS_APPEND_COMMAND%% *} -m omnimarket.nodes.node_work_ledger_reader_effect" --reader git-maintenance \
+    --window-hours "$CLAIM_WINDOW_HOURS" --out "$CLAIM_SNAPSHOT" || refuse "the ledger was not read, so open CLAIMs cannot be honoured"
+fi
+
+# Print "<timestamp> lane=<lane>" for each open CLAIM whose row names any of the
+# given keys as a whole token. Non-zero if the snapshot cannot be matched.
+open_claims_for() { ledger_handler match "$CLAIM_SNAPSHOT" -- "$@"; }
 
 # Keys a ledger CLAIM would use for a ticket dir or a branch: the name itself and
 # any OMN ticket id inside it, upper-cased.
