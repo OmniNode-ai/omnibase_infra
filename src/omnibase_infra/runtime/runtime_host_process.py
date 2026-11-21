@@ -239,6 +239,7 @@ if TYPE_CHECKING:
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
     ProtocolEventBusSubscriber,
 )
+from omnibase_infra.handlers import handler_runtime_loop_lag_sampler as loop_lag
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (
     LiteralHandlerKind,
@@ -1389,6 +1390,7 @@ class RuntimeHostProcess:
         self._is_starting: bool = False
         self._startup_task: asyncio.Task[None] | None = None
         self._shutdown_requested: asyncio.Event = asyncio.Event()
+        self._loop_reading = loop_lag.RuntimeLoopReadingPublisher()
 
         # Subscription handle (callable to unsubscribe)
         self._subscription: Callable[[], Awaitable[None]] | None = None
@@ -2200,6 +2202,10 @@ class RuntimeHostProcess:
             self._is_running = False
             raise
 
+        await self._loop_reading.start(
+            self._event_bus, self._node_identity, self._get_or_create_container()
+        )
+
         logger.info(
             "RuntimeHostProcess started successfully",
             extra={
@@ -2280,6 +2286,7 @@ class RuntimeHostProcess:
             self._is_starting = False
 
         logger.info("Stopping RuntimeHostProcess")
+        await self._loop_reading.stop()
 
         # Stop local ingress first so new host-local work cannot enter while
         # the runtime drains and shuts down.
@@ -4711,29 +4718,6 @@ class RuntimeHostProcess:
             await self._handle_execution_error(
                 e, handler_type, operation, correlation_id
             )
-
-    async def _publish_response(self, envelope: dict[str, object], topic: str) -> None:
-        """Publish a response envelope, optionally through the batch publisher (OMN-478).
-
-        When batch publishing is enabled and running, responses are enqueued
-        into the batch publisher's buffer for deferred batch publishing.
-        When disabled or not running, responses are published immediately
-        via _publish_envelope_safe.
-
-        Error responses and system responses bypass the batch publisher
-        and are always published immediately to maintain low latency for
-        error reporting.
-
-        Args:
-            envelope: The response envelope to publish.
-            topic: Target topic to publish to.
-        """
-        if self._batch_publisher is not None and self._batch_publisher.is_running:
-            # Serialize envelope before enqueuing to match _publish_envelope_safe behavior
-            json_safe_envelope = self._serialize_envelope(envelope)
-            await self._batch_publisher.enqueue(json_safe_envelope)
-        else:
-            await self._publish_envelope_safe(envelope, topic)
 
     async def _publish_handler_response(
         self,

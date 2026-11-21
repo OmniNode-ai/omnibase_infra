@@ -125,6 +125,7 @@ from omnibase_infra.event_bus.topic_constants import (
     get_dlq_topic_for_original,
     is_dlq_topic,
 )
+from omnibase_infra.handlers import handler_runtime_loop_lag_sampler as loop_lag
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus import (
     ModelConsumerRetryConfig,
@@ -865,24 +866,19 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
             Async callback function compatible with event bus subscribe().
         """
 
+        loop_lag.get_process_loop_lag_sampler().observe_subscription(topic)
+
         async def callback(message: ProtocolEventMessage) -> None:
             """Process incoming Kafka message and dispatch to engine."""
             envelope: ModelEventEnvelope[object] | None = None
             correlation_id: UUID = uuid4()  # Default if not in envelope
 
-            self._logger.info(
-                "[WIRING-CALLBACK] Message received on topic=%s, "
-                "consumer_group=%s, node=%s, "
-                "message_value_len=%d",
-                topic,
-                consumer_group,
-                self._node_name,
-                len(message.value) if message.value else 0,
-            )
-
             try:
                 envelope = self._deserialize_to_envelope(message, topic)
                 correlation_id = envelope.correlation_id or uuid4()
+                loop_lag.get_process_loop_lag_sampler().observe_message(
+                    topic, envelope.payload
+                )
 
                 self._logger.info(
                     "[WIRING-CALLBACK] Deserialized envelope: "
