@@ -46,12 +46,12 @@ from pydantic import BaseModel, ConfigDict
 
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.contracts.contract_completion_bound import read_completion_bound
 from omnibase_infra.enums.enum_runtime_restart_policy import (
     EnumRuntimeRestartPolicy,
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _make_stateful_dispatch_callback,
-    _read_completion_bound,
 )
 from omnibase_infra.runtime.state_io.model_completion_bound import (
     ModelCompletionBound,
@@ -348,7 +348,7 @@ def test_completion_bound_is_a_typed_contract_field_not_a_loose_number(
         '  failure_class: "runtime_restart_during_delegation"\n'
         '  failure_code: "ONEX_MARKET_DELEGATION_RUNTIME_RESTART"\n'
     )
-    bound = _read_completion_bound(good)
+    bound = read_completion_bound(good)
     assert bound is not None
     assert bound.max_wall_seconds == 900
     assert bound.on_runtime_restart is EnumRuntimeRestartPolicy.TERMINALISE_FAILED
@@ -356,7 +356,7 @@ def test_completion_bound_is_a_typed_contract_field_not_a_loose_number(
 
     absent = tmp_path / "absent.yaml"
     absent.write_text("name: n\n")
-    assert _read_completion_bound(absent) is None
+    assert read_completion_bound(absent) is None
 
     for body in (
         "completion_bound:\n  max_wall_seconds: 0\n  on_runtime_restart: terminalise_failed\n  failure_class: x\n",
@@ -367,7 +367,7 @@ def test_completion_bound_is_a_typed_contract_field_not_a_loose_number(
         bad = tmp_path / "bad.yaml"
         bad.write_text("name: n\n" + body)
         with pytest.raises(ModelOnexError):
-            _read_completion_bound(bad)
+            read_completion_bound(bad)
 
 
 # --------------------------------------------------------------------------

@@ -23,7 +23,8 @@ import logging
 import re
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
+from uuid import UUID
 
 import yaml
 
@@ -37,6 +38,9 @@ from omnibase_infra.protocols.protocol_topic_provisioner import (
 )
 
 if TYPE_CHECKING:
+    from omnibase_infra.event_bus.model_topic_validation_result import (
+        ModelTopicValidationResult,
+    )
     from omnibase_infra.runtime.auto_wiring.models import (
         ModelAutoWiringManifest,
         ModelDiscoveredContract,
@@ -237,3 +241,76 @@ __all__: list[str] = [
     "ensure_topics_exist",
     "provision_unattached_publish_topics",
 ]
+
+
+class ProtocolProvisionedTopicsEnsurer(Protocol):
+    """The kernel's one ``TopicProvisioner``, as the auto-create pass uses it."""
+
+    async def ensure_provisioned_topics_exist(
+        self, correlation_id: UUID | None = None
+    ) -> Mapping[str, list[str] | str]: ...
+
+
+class ProtocolTopicValidator(Protocol):
+    """The kernel's ``TopicStartupValidator``, as the auto-create pass uses it."""
+
+    async def validate(
+        self, correlation_id: UUID | None = None, *, log_missing: bool = True
+    ) -> ModelTopicValidationResult: ...
+
+
+async def auto_create_missing_topics(
+    provisioner: ProtocolProvisionedTopicsEnsurer | None,
+    validator: ProtocolTopicValidator,
+    validation_result: ModelTopicValidationResult,
+    *,
+    correlation_id: UUID | None,
+    strict_validation: bool,
+) -> ModelTopicValidationResult:
+    """Create the topics a failed startup validation found missing (OMN-7810).
+
+    Handles topics added to the provisioning registry but not yet created on the
+    broker (first startup after adding new topic suffixes), then validates again
+    and returns the new result. The pass reuses the kernel's one
+    ``TopicProvisioner`` (OMN-26359) rather than building a second one and
+    scanning every contract again; with no provisioner (the kernel's
+    construction failed) the original result stands. A durability-policy
+    violation (``TopicReplicationPolicyError``) re-raises (OMN-15395); any other
+    failure is logged and leaves the original result in place.
+    """
+    if provisioner is None:
+        logger.warning(
+            "Auto-create missing topics skipped: the kernel built no topic "
+            "provisioner (correlation_id=%s)",
+            correlation_id,
+        )
+        return validation_result
+    try:
+        auto_result = await provisioner.ensure_provisioned_topics_exist(
+            correlation_id=correlation_id,
+        )
+        if auto_result["created"]:
+            logger.info(
+                "Auto-created %d missing topics after validation: %s "
+                "(correlation_id=%s)",
+                len(auto_result["created"]),
+                auto_result["created"],
+                correlation_id,
+            )
+        validation_result = await validator.validate(
+            correlation_id=correlation_id,
+            log_missing=strict_validation,
+        )
+        if validation_result.status == "success":
+            logger.info(
+                "Topic validation recovered after auto-create (correlation_id=%s)",
+                correlation_id,
+            )
+    except TopicReplicationPolicyError:
+        raise
+    except Exception:
+        logger.exception(
+            "Auto-create missing topics failed (best-effort) (correlation_id=%s)",
+            correlation_id,
+        )
+    return validation_result

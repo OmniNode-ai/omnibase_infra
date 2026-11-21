@@ -32,6 +32,7 @@ from typing import Literal, cast
 import yaml
 from pydantic import BaseModel, field_validator
 
+from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.models.event_bus.model_contract_topic_entry import (
     TENANT_SLUG_PATTERN,
     ModelContractTopicEntry,
@@ -737,8 +738,7 @@ class ContractTopicExtractor:
 
         for contract_path in contract_files:
             try:
-                with contract_path.open(encoding="utf-8") as fh:
-                    raw_yaml = yaml.safe_load(fh)
+                raw_yaml = read_contract_yaml(contract_path)
             except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                 _warn(f"Could not parse {contract_path}: {exc} — skipping")
                 continue
@@ -1021,8 +1021,7 @@ class ContractTopicExtractor:
 
             for contract_path in contract_paths:
                 try:
-                    with contract_path.open(encoding="utf-8") as fh:
-                        raw_yaml = yaml.safe_load(fh)
+                    raw_yaml = read_contract_yaml(contract_path)
                 except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                     _warn(
                         f"Could not parse {contract_path} from package "

@@ -97,6 +97,9 @@ if TYPE_CHECKING:
     from omnibase_infra.event_bus.model_topic_readiness_config import (
         ModelTopicReadinessConfig,
     )
+    from omnibase_infra.handlers.boot_topic_provisioning import (
+        ProtocolProvisionedTopicsEnsurer,
+    )
     from omnibase_infra.protocols import ProtocolEventBusLike
     from omnibase_infra.protocols.protocol_runtime_log_producer import (
         ProtocolRuntimeLogProducer,
@@ -144,6 +147,8 @@ from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.handlers import boot_readiness_checks
+from omnibase_infra.handlers import topic_migration_dependencies as tmd
+from omnibase_infra.handlers.boot_topic_provisioning import auto_create_missing_topics
 from omnibase_infra.handlers.event_bus_recovering import EventBusRecovering
 from omnibase_infra.handlers.handler_package_announcer import (
     build_registered_events,
@@ -779,6 +784,7 @@ def _build_runtime_handler_dependencies(
     savings_correlation_pool: object | None = None,
     savings_correlation_publisher: object | None = None,
     dlq_tracking: object | None = None,
+    topic_provisioner: object | None = None,
 ) -> dict[str, dict[str, object]] | None:
     """Build constructor dependencies for runtime-owned handlers.
 
@@ -828,7 +834,8 @@ def _build_runtime_handler_dependencies(
             ``tests/integration/test_omn18111_dlq_tracking_dependency_wired.py``,
             which discovers the required names from ``contract.yaml``.
     """
-    dependencies: dict[str, dict[str, object]] = {}
+    # OMN-26359: the topic-migration executor reuses the kernel's one provisioner.
+    dependencies = tmd.provisioner_dependencies(topic_provisioner)
     if postgres_pool is not None:
         dependencies.update(
             {
@@ -2276,54 +2283,17 @@ async def bootstrap() -> int:
                     validation_is_valid=validation_result.is_valid,
                     universe_warm_enabled=_universe_warm_enabled,
                 ):
-                    # OMN-7810: Auto-create missing topics before failing strict
-                    # validation. This handles topics that were added to the
-                    # provisioning registry but not yet created on the broker
-                    # (e.g. first startup after adding new topic suffixes).
-                    try:
-                        from omnibase_infra.event_bus.service_topic_manager import (
-                            TopicProvisioner as _AutoCreateProvisioner,
-                        )
-
-                        _auto_provisioner = _AutoCreateProvisioner(
-                            bootstrap_servers=kafka_bootstrap_servers,
-                            contracts_root=_contracts_root,
-                            skill_manifests_root=_skill_manifests_root,
-                            skill_manifests_roots=_extra_manifest_roots,
-                        )
-                        _auto_result = (
-                            await _auto_provisioner.ensure_provisioned_topics_exist(
-                                correlation_id=correlation_id,
-                            )
-                        )
-                        if _auto_result["created"]:
-                            logger.info(
-                                "Auto-created %d missing topics after validation: %s "
-                                "(correlation_id=%s)",
-                                len(_auto_result["created"]),
-                                _auto_result["created"],
-                                correlation_id,
-                            )
-                        validation_result = await validator.validate(
-                            correlation_id=correlation_id,
-                            log_missing=strict_topic_validation,
-                        )
-                        if validation_result.status == "success":
-                            logger.info(
-                                "Topic validation recovered after auto-create "
-                                "(correlation_id=%s)",
-                                correlation_id,
-                            )
-                    except TopicReplicationPolicyError:
-                        # OMN-15395: fail-closed past the best-effort boundary.
-                        raise
-                    except Exception:  # noqa: BLE001
-                        logger.warning(
-                            "Auto-create missing topics failed (best-effort) "
-                            "(correlation_id=%s)",
-                            correlation_id,
-                            exc_info=True,
-                        )
+                    # OMN-7810: auto-create missing topics before failing strict
+                    # validation, through the kernel's one TopicProvisioner.
+                    validation_result = await auto_create_missing_topics(
+                        cast(
+                            "ProtocolProvisionedTopicsEnsurer | None", topic_provisioner
+                        ),
+                        validator,
+                        validation_result,
+                        correlation_id=correlation_id,
+                        strict_validation=strict_topic_validation,
+                    )
 
                 if strict_topic_validation and not validation_result.is_valid:
                     raise RuntimeError(
@@ -4092,6 +4062,7 @@ async def bootstrap() -> int:
                     savings_correlation_pool=_savings_correlation_pool,
                     savings_correlation_publisher=_savings_correlation_publisher,
                     dlq_tracking=_dlq_replay_tracking,
+                    topic_provisioner=topic_provisioner,
                 )
 
                 # 5. Wire handlers into dispatch engine

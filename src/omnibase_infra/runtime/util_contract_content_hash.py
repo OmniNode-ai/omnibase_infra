@@ -66,10 +66,10 @@ Related:
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from uuid import UUID
 
+from omnibase_infra.contracts.contract_read_cache import ContractReadCache
 from omnibase_infra.errors.error_contract_content_hash import ContractContentHashError
 
 __all__ = [
@@ -124,7 +124,7 @@ def contract_content_hash(
             in this case.
     """
     try:
-        raw = Path(contract_path).read_bytes()
+        return ContractReadCache.read_hash(contract_path, canonical_contract_bytes)
     except OSError as exc:
         raise ContractContentHashError(
             f"Contract file could not be read for content hashing: {contract_path}",
@@ -132,5 +132,3 @@ def contract_content_hash(
             correlation_id=correlation_id,
             original_error_type=type(exc).__name__,
         ) from exc
-
-    return hashlib.sha256(canonical_contract_bytes(raw)).hexdigest()
