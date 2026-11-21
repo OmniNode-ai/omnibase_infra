@@ -1,0 +1,103 @@
+schema_version: 1.0.0
+ticket_id: OMN-26361
+title: The runtime image carries one prebuilt node catalog and auto-wiring manifest, so a boot of that image parses no contract YAML for the packages it ships
+summary: >-
+  Every boot announced every installed contract in boot step 0 and parsed each one again in discover_contracts, although the packages an image ships are fixed. The runtime image build now runs both once and writes the node catalog and the ModelAutoWiringManifest as one file stamped with the installed distributions, their versions and every contract's content hash. The kernel loads that file after a cheap stamp check and parses no contract; a stamp that differs makes it fall back to the announce-and-discover path and log the field that differed. A package hot-loaded at runtime announces and merges into the loaded catalog. The health gate, the boot guard, the compose wait and the compose start period are not changed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26361-prebuilt-manifest
+    statement: The image carries one stamped file holding the node catalog and manifest, the kernel serves it only when the stamp holds, and no gate is weakened.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the runtime image build runs the package announcer and contract discovery once and writes the node catalog and the ModelAutoWiringManifest as one file in the image, stamped with the installed distributions and their versions and the content hash of every contract, from a declared step in docker/Dockerfile.runtime or the existing build path and no new script outside it -- falsifier: uv run pytest tests/unit/runtime -q -k prebuilt_manifest_stamp fails at origin/dev and passes on the branch"
+      - id: AC2
+        statement: "AC2: at boot the kernel loads that file instead of announcing and parsing, after a check that the installed distributions still match the stamp, and a boot from the prebuilt file calls yaml load for zero contract files -- falsifier: uv run pytest tests/unit/runtime -q -k boot_from_prebuilt_manifest_zero_yaml_loads fails at origin/dev and passes on the branch"
+      - id: AC3
+        statement: "AC3: a stamp that no longer matches the installed distributions (a changed version, an added or a removed distribution, a changed contract hash) makes the kernel fall back to the announce and discover path and log which stamp field differed -- falsifier: uv run pytest tests/unit/runtime -q -k prebuilt_manifest_stale_stamp_falls_back fails at origin/dev and passes on the branch"
+      - id: AC4
+        statement: "AC4: the manifest loaded from the file equals the manifest built at runtime for the same installed packages -- falsifier: uv run pytest tests/unit/runtime -q -k prebuilt_manifest_equals_runtime_manifest fails at origin/dev and passes on the branch"
+      - id: AC5
+        statement: "AC5: a package hot-loaded at runtime (not baked into the image) still announces at runtime and merges into the loaded catalog, and the PR body has a section headed Reconciliation with OMN-21318 that says how the prebuilt catalog and the registry path combine -- falsifier: uv run pytest tests/unit/runtime -q -k hotloaded_package_merges_into_prebuilt_catalog fails at origin/dev and passes on the branch"
+      - id: AC6
+        statement: "AC6: the lab measurement of boot step 0 plus discovery time before and after is in the PR body under a section headed Measured boot, with the host, the source refs, the parse counts and a UTC read time -- falsifier: onex scm pr-view of the PR shows no section headed Measured boot holding before and after seconds, before and after yaml parse counts and a UTC read time"
+      - id: AC7
+        statement: "AC7: the health gate, the boot guard, the compose wait and the compose start period are unchanged, and no baselined file grows -- falsifier: git diff origin/dev --stat on the branch lists no health gate setting, no boot guard file and no compose file, and uv run pytest tests -q -k file_shape passes"
+evidence_requirements:
+  - kind: tests
+    description: The prebuilt manifest regressions in tests/unit/runtime/test_prebuilt_manifest_omn26361.py.
+    command: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_omn26361.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26361-ac1-prebuilt-stamp
+    description: The build writes the file from the fixture package set with the distributions, versions and every contract's canonical hash, and docker/Dockerfile.runtime declares the build step after the node inventory guard. Both fail at the merge base, where the handler does not exist.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_omn26361.py -k prebuilt_manifest_stamp -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26361-ac2-zero-yaml-loads
+    description: A boot from the prebuilt file counts zero contract YAML reads and loads no entry point; the same counter moves on the announce path.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_omn26361.py -k boot_from_prebuilt_manifest_zero_yaml_loads -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26361-ac3-stale-stamp-falls-back
+    description: A changed version, an added distribution, a removed distribution, an edited contract, a changed active package set and an unreadable file each make the boot take the announce path and log the stamp field that differed.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_omn26361.py -k prebuilt_manifest_stale_stamp_falls_back -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26361-ac4-equals-runtime-manifest
+    description: The manifest the file serves equals the manifest discovery builds for the fixture packages and for the real installed packages.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_omn26361.py -k prebuilt_manifest_equals_runtime_manifest -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26361-ac5-hotloaded-merge
+    description: An announcement from a package that is not in the file folds into the loaded catalog and leaves the baked entries in place.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_omn26361.py -k hotloaded_package_merges_into_prebuilt_catalog -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26361-ac6-measured-boot
+    description: The recorded measurement holds the lab host, the source refs, before and after seconds and parse counts and a UTC read time; the PR body quotes it under Measured boot. No runner check reads a PR body.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_prebuilt_manifest_boot_omn26361.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26361-ac7-gates-unchanged
+    description: The change adds the prebuilt build step after the node inventory guard and leaves the HEALTHCHECK line, its start period, the compose files and the boot guard as they were, and adds no file outside the canonical locations.
+    source: manual
+    binds_ac: [AC7]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_omn26361.py -k prebuilt_manifest_gates_unchanged -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_canonical_file_shape_ratchet_omn21523.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26361-deploy-prebuilt-file-in-image
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime container carries the prebuilt node manifest file the image build wrote. It reads the live container, which carries the file only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime test -s /app/src/omnibase_infra/nodes/node_boot_catalog_effect/prebuilt_node_manifest.json
