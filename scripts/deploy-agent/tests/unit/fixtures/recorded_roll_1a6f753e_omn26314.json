@@ -1,0 +1,31 @@
+{
+  "source": "journal lines of the dev deploy agent read by lane devloop-0805 on 2026-11-21 (journal clock EST = UTC minus 5 h), scrubbed: no host, token or path; install details were not recorded, only their count",
+  "job": "1a6f753e",
+  "requested_by": "agent/idle-restore",
+  "rolls": [
+    {
+      "job": "7c4427d8",
+      "started_est": "2026-11-20 22:00:50",
+      "line": "idle restore: running 7c4427d8... lane down (54 consecutive failed health probes), OMNIMARKET_REF=c827969f2ce2",
+      "failed_est": "2026-11-20 23:18:23"
+    },
+    {
+      "job": "1a6f753e",
+      "started_est": "2026-11-21 01:00:09",
+      "line": "idle restore: running 1a6f753e... lane down (51 consecutive failed health probes), OMNIMARKET_REF=0941025271b4",
+      "compose_up_non_zero_est": "2026-11-21 01:42:07",
+      "compose_up_ran_minutes": 34,
+      "failed_est": "2026-11-21 02:16:43"
+    }
+  ],
+  "roll_failure": "Runtime roll stopped at omninode-runtime: Waiting container omninode-runtime is unhealthy; health=unhealthy streak=5 FAIL [http_error] health endpoint returned HTTP 503",
+  "compose_wait_stderr": "Container omninode-runtime Waiting\ncontainer omninode-runtime is unhealthy; health=unhealthy streak=5 FAIL [http_error] health endpoint returned HTTP 503",
+  "boot_guard_after": [
+    "2026-11-21 01:43:46 Dev boot window project=omnibase-infra seconds=2000",
+    "Dev recovery failed ... DevBootFailedError: container exited or became unhealthy before boot completed"
+  ],
+  "declared_install_count": 7,
+  "branch_install_apply_lines_between_est": ["01:07", "02:17"],
+  "branch_install_apply_lines_seen": 0,
+  "service": "omninode-runtime"
+}
