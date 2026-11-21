@@ -53,7 +53,6 @@ dod_evidence:
     description: The production merge readers over a real git history and real job records on disk, no double.
     source: manual
     execution_scope: local_done_gate
-    binds_ac: [AC3]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/scripts/test_deploy_agent_merge_restore_omn26369.py -q --no-cov -n 0 -p no:cacheprovider
