@@ -39,6 +39,9 @@ dod_evidence:
       - check_type: command
         check_value: python3 -c "import json;d=json.load(open('tests/fixtures/omn26356/gwroot_0335_gateway_attach.json'));assert [r['attach_seconds'] for r in d['rolls']]==[234,247]"
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -qE '^DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS=.*,node_github_repo_gateway_effect,' docker/runtime-policy.env
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn26356-ac2-policy-names-the-gateway
     description: >-
       The dev main boot priority list in contracts/services/runtime_policy.contract.yaml names node_github_repo_gateway_effect and docker/runtime-policy.env is rendered from it; precedent OMN-23535 and OMN-24426 made the same change for other nodes. The new test fails at the merge base, where the list holds 13 names without the gateway.
