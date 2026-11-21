@@ -31,6 +31,9 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.constants.constants_runtime_lanes import REGISTERED_RUNTIME_LANES
+from omnibase_infra.models.runtime.model_runtime_lane_use_path import (
+    ModelRuntimeLaneUsePath,
+)
 
 ENV_CONTRACTS_DIR: Final = "ONEX_CONTRACTS_DIR"
 ENV_RUNTIME_LANE: Final = "ONEX_RUNTIME_LANE"
@@ -74,7 +77,22 @@ class ModelRuntimeLaneNodeExclusionEntry(BaseModel):
         ),
     )
 
-    @field_validator("excluded_contracts", "required_contracts")
+    delegation_check_paths: tuple[ModelRuntimeLaneUsePath, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "The paths this lane's work uses, as seeds. Never read at boot: the "
+            "lane's regression fails when a contract they reach is also excluded."
+        ),
+    )
+    reached_contracts: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "The contracts the declared paths reach through topics, as read from "
+            "every shipped contract file. Never read at boot."
+        ),
+    )
+
+    @field_validator("excluded_contracts", "required_contracts", "reached_contracts")
     @classmethod
     def _names_are_unique(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _checked_names(value)

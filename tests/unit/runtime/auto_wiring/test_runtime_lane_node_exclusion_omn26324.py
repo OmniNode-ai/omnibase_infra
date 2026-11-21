@@ -11,8 +11,10 @@ that file or from ``runtime_policy.contract.yaml``, never spelled in the test.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 import shutil
+from collections import defaultdict, deque
 from pathlib import Path
 
 import pytest
@@ -256,3 +258,179 @@ def test_dev_required_contracts_wired_fails_when_one_is_excluded(
     dropped = _dropped_required(_mutated_contracts_dir(tmp_path, victim))
 
     assert dropped == {victim}
+
+
+# --- OMN-26357: no contract a declared delegation-check path uses is excluded -------------------
+
+_TOPIC = re.compile(r"^onex\.(cmd|evt|snapshot)\.")
+_IGNORED_KEYS = (
+    "broker_acl",
+    "dlq",
+    "widget_topics",
+    "seams",
+    "probed_topics",
+    "chain_scenarios",
+    "config/",
+    "projection_api",
+    "snapshot_reads",
+)
+_SUBSCRIBE_KEYS = (
+    "subscribe",
+    "command_topic",
+    "input_subscriptions",
+    "consumed_events",
+    "subscriptions",
+    "externally_consumed",
+    "handler_routing",
+    "response_topic",
+    "reply_topic",
+)
+_PUBLISH_KEYS = (
+    "publish",
+    "terminal_event",
+    "externally_produced",
+    "request_topic",
+    "emit",
+)
+
+
+def _topics_of(node: object, path: tuple[str, ...] = ()) -> list[tuple[str, str]]:
+    """Every topic string in a parsed contract with its direction: sub, pub or both."""
+    found: list[tuple[str, str]] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            found += _topics_of(value, (*path, str(key)))
+    elif isinstance(node, list):
+        for value in node:
+            found += _topics_of(value, path)
+    elif isinstance(node, str) and _TOPIC.match(node):
+        where = "/".join(path).lower()
+        if any(key in where for key in _IGNORED_KEYS):
+            return found
+        if any(key in where for key in _SUBSCRIBE_KEYS):
+            found.append((node, "sub"))
+        elif any(key in where for key in _PUBLISH_KEYS):
+            found.append((node, "pub"))
+        else:
+            found.append((node, "both"))
+    return found
+
+
+def _visible_contract_files() -> list[Path]:
+    """The contract files this environment ships: this repo's nodes and omnibase_core's."""
+    roots = [REPO_ROOT / "src"]
+    spec = importlib.util.find_spec("omnibase_core")
+    if spec is not None and spec.submodule_search_locations:
+        roots += [Path(location) for location in spec.submodule_search_locations]
+    return sorted(path for root in roots for path in root.rglob("contract.yaml"))
+
+
+def _topic_edges() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """(subscribers by topic, publishers by topic) read from the visible contract files."""
+    subscribers: dict[str, set[str]] = defaultdict(set)
+    publishers: dict[str, set[str]] = defaultdict(set)
+    for path in _visible_contract_files():
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not data.get("name"):
+            continue
+        for topic, direction in _topics_of(data):
+            if direction in ("sub", "both"):
+                subscribers[topic].add(data["name"])
+            if direction in ("pub", "both"):
+                publishers[topic].add(data["name"])
+    return subscribers, publishers
+
+
+def _computed_use_set(contracts_dir: Path) -> set[str]:
+    """Contracts the declared paths use, by topic chains over the visible contract files.
+
+    The seeds (contract names and topics per path) are read from the declaration;
+    a used contract's published topics bring in the contracts that subscribe to them,
+    to a fixed point.
+    """
+    entry = _declaration(contracts_dir).entry_for(DEV_LANE)
+    subscribers, publishers = _topic_edges()
+    published: dict[str, set[str]] = defaultdict(set)
+    for topic, names in publishers.items():
+        for name in names:
+            published[name].add(topic)
+    used: set[str] = set()
+    queue: deque[str] = deque()
+
+    def add(name: str) -> None:
+        if name not in used:
+            used.add(name)
+            queue.append(name)
+
+    for use_path in entry.delegation_check_paths:
+        for name in use_path.nodes:
+            add(name)
+        for topic in use_path.topics:
+            for name in subscribers.get(topic, ()):
+                add(name)
+    while queue:
+        for topic in published.get(queue.popleft(), ()):
+            for name in subscribers.get(topic, ()):
+                add(name)
+    return used
+
+
+def _excluded_but_used(contracts_dir: Path) -> set[str]:
+    """Excluded contracts that a declared path uses (seeds, the declared reached set, topic chains)."""
+    entry = _declaration(contracts_dir).entry_for(DEV_LANE)
+    used = _computed_use_set(contracts_dir) | set(entry.reached_contracts)
+    return used & set(entry.excluded_contracts)
+
+
+def test_dev_delegation_path_not_excluded() -> None:
+    """No contract a declared delegation-check path uses is in the dev exclusion."""
+    entry = _declaration().entry_for(DEV_LANE)
+    assert entry.delegation_check_paths, (
+        "the dev lane declares no delegation-check path"
+    )
+
+    assert _excluded_but_used(CONTRACTS_DIR) == set()
+
+
+def test_dev_delegation_path_not_excluded_seeds_are_declared_data() -> None:
+    entry = _declaration().entry_for(DEV_LANE)
+
+    assert all(path.nodes or path.topics for path in entry.delegation_check_paths)
+    assert len({path.id for path in entry.delegation_check_paths}) == len(
+        entry.delegation_check_paths
+    )
+    seeded = {name for path in entry.delegation_check_paths for name in path.nodes}
+    assert seeded <= set(entry.reached_contracts)
+
+
+def test_dev_delegation_path_not_excluded_reached_set_covers_visible_chains() -> None:
+    """A contract the visible files reach from the seeds is in the declared reached set."""
+    entry = _declaration().entry_for(DEV_LANE)
+
+    assert _computed_use_set(CONTRACTS_DIR) - set(entry.reached_contracts) == set()
+
+
+def test_dev_delegation_path_not_excluded_fails_when_a_seed_is_excluded(
+    tmp_path: Path,
+) -> None:
+    """Control: excluding one contract a path calls by name is caught here, not on dev."""
+    entry = _declaration().entry_for(DEV_LANE)
+    victim = next(name for path in entry.delegation_check_paths for name in path.nodes)
+
+    caught = _excluded_but_used(_mutated_contracts_dir(tmp_path, victim))
+
+    assert caught == {victim}
+
+
+def test_dev_delegation_path_not_excluded_fails_when_a_chained_contract_is_excluded(
+    tmp_path: Path,
+) -> None:
+    """Control: excluding a contract only a topic chain reaches is caught too."""
+    entry = _declaration().entry_for(DEV_LANE)
+    seeded = {name for path in entry.delegation_check_paths for name in path.nodes}
+    chained = sorted(_computed_use_set(CONTRACTS_DIR) - seeded)
+    assert chained, "no contract is reached through a topic chain"
+
+    caught = _excluded_but_used(_mutated_contracts_dir(tmp_path, chained[0]))
+
+    assert caught == {chained[0]}
