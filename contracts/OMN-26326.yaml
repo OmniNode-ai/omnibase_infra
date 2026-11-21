@@ -1,0 +1,67 @@
+schema_version: 1.0.0
+ticket_id: OMN-26326
+title: The scm write consumer and the job-log read path run on a standby runtime other than dev, so a lab lane creates a pull request and reads CI logs while dev is unhealthy
+summary: >-
+  docker/docker-compose.dev-member.yml declares one runtime service for the standby host: the dev runtime's image under the existing effects role, ONEX_RUNTIME_NODE_SELECTION naming node_github_repo_write_effect and node_github_repo_gateway_effect, KAFKA_INSTANCE_ID runtime-main so it joins the dev runtime's two consumer groups, authenticating as the standby member broker principal. No profile name, node or script is added; the file carries no credential value and no host address.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26326-standby-member
+    statement: A declared compose file starts a runtime on the standby host that holds the SCM write group and the gateway read group beside the dev runtime.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a runtime on h053 holds the write group and the gateway read group as a member -- falsifier: the dev broker group read shows no standby member in either group while the standby runs"
+      - id: AC2
+        statement: "AC2: `onex scm pr-create` and `onex scm job-log` answer while the dev runtime is unhealthy, with the terminal naming the standby member -- falsifier: the terminal names the dev runtime or the dev /health reading is absent"
+      - id: AC3
+        statement: "AC3: the standby's definition is a declared file in a repository, with no hand-run docker command as the only record -- falsifier: `uv run pytest tests/unit/test_dev_member_overlay_omn26326.py -q` fails at origin/dev and passes at the pushed head"
+      - id: AC4
+        statement: "AC4: no credential value appears in any file, row, comment or log -- falsifier: `uv run pytest tests/unit/test_dev_member_overlay_omn26326.py -k credentials -q` fails when a password or token is a literal in the overlay"
+evidence_requirements:
+  - kind: tests
+    description: The dev-member overlay tests pass at the pushed head.
+    command: uv run pytest tests/unit/test_dev_member_overlay_omn26326.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26326-ac1-group-membership
+    description: The dev broker group read after the standby boots lists a member from h053 in the write group and the gateway read group; the group ids and member counts are in the pull request and the STATUS row.
+    source: manual
+    binds_ac:
+      - AC1
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker inspect -f '{{.State.Running}}' omninode-dev-member-runtime
+        cwd: .
+  - id: dod-omn26326-ac2-answered-while-dev-unhealthy
+    description: One pull request creation request and one job-log read are answered with the terminal naming the standby member, beside the dev /health reading and its UTC time; both are in the pull request and the STATUS row.
+    source: manual
+    binds_ac:
+      - AC2
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker inspect -f '{{.State.Running}}' omninode-dev-member-runtime
+        cwd: .
+  - id: dod-omn26326-ac3-declared-file
+    description: The overlay is a declared file and its test fails before the file exists and passes after.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/test_dev_member_overlay_omn26326.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26326-ac4-no-credential-value
+    description: The password and both GitHub token variables are required interpolations in the overlay, never literals.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/test_dev_member_overlay_omn26326.py -k credentials -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
