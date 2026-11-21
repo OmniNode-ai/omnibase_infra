@@ -63,7 +63,7 @@ __all__: list[str] = ["LazyStartRuntimeTransaction"]
 logger = logging.getLogger(__name__)
 
 
-class _RecordingBus:
+class RecordingBus:
     """The runtime bus, recording each subscription handle a subscribe returns."""
 
     def __init__(self, bus: ProtocolLazyStartBus) -> None:
@@ -95,11 +95,11 @@ class _RecordingBus:
 
 
 @dataclass
-class _NodeStart:
+class NodeStart:
     engine: MessageDispatchEngine
     manifest: ModelAutoWiringManifest
     report: ModelAutoWiringReport
-    bus: _RecordingBus
+    bus: RecordingBus
     dispatcher_ids: tuple[str, ...] = ()
     attach_results: list[ModelContractAttachResult] = field(default_factory=list)
 
@@ -122,7 +122,7 @@ class LazyStartRuntimeTransaction:
         self._provisioner = provisioner
         self._container = container
         self._readiness_config = readiness_config
-        self._starts: dict[str, _NodeStart] = {}
+        self._starts: dict[str, NodeStart] = {}
 
     def node_engine(self, contract_name: str) -> MessageDispatchEngine | None:
         """The started node's own dispatch engine, or None."""
@@ -144,11 +144,11 @@ class LazyStartRuntimeTransaction:
             reasons = [f"{r.outcome.value} {r.reason}" for r in report.results]
             msg = f"contract '{contract_name}' did not wire: {reasons}"
             raise RuntimeError(msg)
-        self._starts[contract_name] = _NodeStart(
+        self._starts[contract_name] = NodeStart(
             engine=engine,
             manifest=manifest,
             report=report,
-            bus=_RecordingBus(self._bus),
+            bus=RecordingBus(self._bus),
             dispatcher_ids=tuple(report.results[0].dispatchers_registered),
         )
 

@@ -952,6 +952,22 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11": {
+      "category": "command",
+      "contract_name": "node_lazy_start_ingress",
+      "event_model_module": "omnibase_infra.models.lazy_start.model_lazy_start_request",
+      "event_model_name": "ModelLazyStartRequest",
+      "handler_id": "dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11",
+      "handler_module": "omnibase_infra.handlers.handler_lazy_start_ingress",
+      "handler_name": "HandlerLazyStartIngress",
+      "message_types": [
+        "ModelLazyStartRequest",
+        "${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}",
+        "platform.node-start-requested"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86": {
       "category": "command",
       "contract_name": "node_ledger_projection_compute",
@@ -3931,15 +3947,15 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 171
+        "omnibase_infra": 172
       },
-      "contracts_discovered": 192,
+      "contracts_discovered": 193,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 106,
-      "probe_count": 1148,
-      "registered_dispatchers": 145,
-      "registered_routes": 126,
-      "type_scoped_dispatchers": 90
+      "distinct_subscribe_topics": 107,
+      "probe_count": 1151,
+      "registered_dispatchers": 146,
+      "registered_routes": 127,
+      "type_scoped_dispatchers": 91
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3985,10 +4001,10 @@
       "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-11-21T06:52:36.993542+00:00",
+    "generated_at_utc": "2026-11-21T18:24:45.298777+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.76",
-      "omnibase-infra": "0.38.80",
+      "omnibase-infra": "0.38.81",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
@@ -4696,6 +4712,21 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:contract:platform.CMD_NODE_REGISTRATION_ACKED_V1}"
+    },
+    "P1a::${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.node-start-requested",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_PLATFORM_V1}",
+        "message_category": "command",
+        "message_type": "platform.node-start-requested",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}"
     },
     "P1a::${topic:contract:platform.CMD_REQUEST_INTROSPECTION_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -6310,6 +6341,21 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:contract:platform.CMD_NODE_REGISTRATION_ACKED_V1}"
+    },
+    "P1b::${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}"
     },
     "P1b::${topic:contract:platform.CMD_REQUEST_INTROSPECTION_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -8035,6 +8081,26 @@
         "status": "success"
       },
       "topic": "${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}"
+    },
+    "P4::dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11::${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11",
+      "event_model": "omnibase_infra.models.lazy_start.model_lazy_start_request.ModelLazyStartRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-start-requested",
+        "payload": "ModelLazyStartRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.node-start-requested",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86::${topic:contract:omnibase-infra.CMD_BUILD_LOOP_APPEND_V1}": {
       "construct_only": true,
@@ -26429,6 +26495,16 @@
       "route_id": "route.auto.node_lane_entry_point_census_effect.HandlerLaneEntryPointCensus.lane_entry_point_census_run_8b4784a4.onex_cmd_omnibase_infra_lane_entry_point_census_v1",
       "topic": "${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}",
       "topic_pattern": "*.cmd.omnibase-infra.lane-entry-point-census.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_lazy_start_ingress",
+      "dispatcher_id": "dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11",
+      "handler_id": "dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11",
+      "message_category": "command",
+      "route_id": "route.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11.onex_cmd_platform_node_start_requested_v1",
+      "topic": "${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}",
+      "topic_pattern": "*.cmd.platform.node-start-requested.*",
       "type_scoped": true
     },
     {

@@ -31,7 +31,7 @@ from omnibase_infra.runtime.auto_wiring.models import (
 )
 
 __all__: list[str] = [
-    "RegistryLazyStartDormant",
+    "StoreLazyStartDormant",
     "boot_manifest",
     "boot_universe_warm_enabled",
     "lazy_start_policy_of_this_lane",
@@ -41,7 +41,7 @@ __all__: list[str] = [
 logger = logging.getLogger(__name__)
 
 
-class RegistryLazyStartDormant:
+class StoreLazyStartDormant:
     """The dormant contracts and policy of this process's boot, for the front door."""
 
     _policy: ModelLazyStartPolicy | None = None
@@ -108,7 +108,7 @@ def boot_manifest(
     if policy is None:
         return manifest
     boot, dormant = split_boot_manifest(manifest, policy)
-    RegistryLazyStartDormant.record(policy, dormant, provisioner)
+    StoreLazyStartDormant.record(policy, dormant, provisioner)
     missing = sorted(policy.boot_set - {c.name for c in boot.contracts})
     logger.info(
         "Lazy start: %d contract(s) wired at boot, %d dormant until their first "

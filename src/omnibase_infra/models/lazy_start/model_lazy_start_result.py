@@ -22,7 +22,7 @@ class ModelLazyStartResult(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
 
-    contract_name: str
+    contract_id: str
     correlation_id: UUID
     outcome: EnumLazyStartOutcome
     held: bool = False

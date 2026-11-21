@@ -61,7 +61,7 @@ class LazyStartFrontDoor:
 
     async def handle(self, request: ModelLazyStartRequest) -> ModelLazyStartResult:
         """Deliver ``request`` to its node, starting the node first when dormant."""
-        name = request.contract_name
+        name = request.contract_id
         if name not in self._dormant:
             # A5 owns the full refusal set (NOT_ADMITTED, HASH_DRIFT); nothing is built.
             return _result(request, EnumLazyStartOutcome.CONTRACT_NOT_ANNOUNCED)
@@ -137,7 +137,7 @@ class LazyStartFrontDoor:
         except Exception as exc:
             logger.exception(
                 "Lazy start: held request for '%s' answered START_FAILED (OMN-21592)",
-                request.contract_name,
+                request.contract_id,
             )
             result = _result(
                 request,
@@ -152,7 +152,7 @@ class LazyStartFrontDoor:
 
     async def _deliver(self, request: ModelLazyStartRequest) -> ModelLazyStartResult:
         answer = await self._transaction.deliver(
-            request.contract_name, request.topic, request.envelope
+            request.contract_id, request.topic, request.envelope
         )
         return _result(request, EnumLazyStartOutcome.DELIVERED, answer=answer)
 
@@ -172,7 +172,7 @@ def _result(
     detail: str = "",
 ) -> ModelLazyStartResult:
     return ModelLazyStartResult(
-        contract_name=request.contract_name,
+        contract_id=request.contract_id,
         correlation_id=request.correlation_id,
         outcome=outcome,
         held=held,

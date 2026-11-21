@@ -9,7 +9,7 @@ contract and carries the envelope for it; this handler starts the contract on
 that first request through ``LazyStartFrontDoor`` over the runtime's start
 transaction, and delivers the envelope to the node's own dispatcher. The
 dormant contracts, the policy and the topic provisioner are the ones the
-kernel's boot recorded (``RegistryLazyStartDormant``); the bus is the runtime's
+kernel's boot recorded (``StoreLazyStartDormant``); the bus is the runtime's
 subscriber bus from the container.
 """
 
@@ -26,7 +26,7 @@ from omnibase_infra.enums.enum_lazy_start_outcome import EnumLazyStartOutcome
 from omnibase_infra.event_bus.model_topic_readiness_config import (
     ModelTopicReadinessConfig,
 )
-from omnibase_infra.handlers.lazy_start_boot_split import RegistryLazyStartDormant
+from omnibase_infra.handlers.lazy_start_boot_split import StoreLazyStartDormant
 from omnibase_infra.handlers.lazy_start_front_door import LazyStartFrontDoor
 from omnibase_infra.handlers.lazy_start_runtime_transaction import (
     LazyStartRuntimeTransaction,
@@ -64,10 +64,10 @@ class HandlerLazyStartIngress:
         return EnumHandlerTypeCategory.EFFECT
 
     def _front_door_of_this_boot(self) -> LazyStartFrontDoor | None:
-        policy = RegistryLazyStartDormant.policy()
+        policy = StoreLazyStartDormant.policy()
         if self._front_door is None and policy is not None:
-            contracts = RegistryLazyStartDormant.contracts()
-            provisioner = RegistryLazyStartDormant.provisioner()
+            contracts = StoreLazyStartDormant.contracts()
+            provisioner = StoreLazyStartDormant.provisioner()
             self._front_door = LazyStartFrontDoor(
                 LazyStartRuntimeTransaction(
                     contracts,
@@ -88,7 +88,7 @@ class HandlerLazyStartIngress:
         front_door = self._front_door_of_this_boot()
         if front_door is None:
             return ModelLazyStartResult(
-                contract_name=request.contract_name,
+                contract_id=request.contract_id,
                 correlation_id=request.correlation_id,
                 outcome=EnumLazyStartOutcome.CONTRACT_NOT_ANNOUNCED,
                 detail="this runtime booted with no lazy-start policy",

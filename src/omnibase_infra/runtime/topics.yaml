@@ -64,3 +64,6 @@ topics:
   # OMN-21924: the generic node CLI publishes the architecture-validation
   # request through RuntimeLocal; the allowed-command tests exercise that bus path.
   - onex.cmd.platform.architecture-validate.v1
+  # OMN-21592: the lazy-start front door's request topic. The generic node CLI
+  # publishes the request on its runtime bus, as for the check commands above.
+  - onex.cmd.platform.node-start-requested.v1

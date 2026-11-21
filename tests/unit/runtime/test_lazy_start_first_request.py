@@ -40,7 +40,7 @@ from omnibase_infra.event_bus.model_topic_readiness_config import (
 )
 from omnibase_infra.event_bus.model_topic_set_readiness import ModelTopicSetReadiness
 from omnibase_infra.handlers.lazy_start_boot_split import (
-    RegistryLazyStartDormant,
+    StoreLazyStartDormant,
     boot_manifest,
     boot_universe_warm_enabled,
 )
@@ -186,7 +186,7 @@ def lane_overlay(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("ONEX_SKILL_OVERLAY_ROOTS", str(root))
     monkeypatch.setenv("ONEX_RUNTIME_LANE", "dogfood")
     monkeypatch.delenv("ONEX_BOOT_UNIVERSE_PROVISION", raising=False)
-    RegistryLazyStartDormant.clear()
+    StoreLazyStartDormant.clear()
     return root
 
 
@@ -316,7 +316,7 @@ def _front_door(
 
 def _booted() -> tuple[ModelAutoWiringManifest, tuple[ModelDiscoveredContract, ...]]:
     boot = boot_manifest(_manifest())
-    return boot, tuple(RegistryLazyStartDormant.contracts().values())
+    return boot, tuple(StoreLazyStartDormant.contracts().values())
 
 
 def _request(name: str = TARGET) -> ModelLazyStartRequest:
@@ -324,7 +324,7 @@ def _request(name: str = TARGET) -> ModelLazyStartRequest:
         payload={"ask": "first"}, correlation_id=uuid4(), event_type="FixtureRequest"
     )
     return ModelLazyStartRequest(
-        contract_name=name, topic=_cmd(name), correlation_id=uuid4(), envelope=envelope
+        contract_id=name, topic=_cmd(name), correlation_id=uuid4(), envelope=envelope
     )
 
 
