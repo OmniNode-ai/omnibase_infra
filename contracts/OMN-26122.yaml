@@ -16,6 +16,11 @@ requirements:
         statement: 'AC2: the probe''s next run reads green against what exists now, with no retired thing restored and no clause removed unless a ruling retired the fact it graded -- falsifier: the newest c16-receipt-identity run reads red, or the clause table in the report lists a removed assertion that no ruling retires'
       - id: AC3
         statement: 'AC3: the lane writes one STATUS row `crit=C16 probe=c16-receipt-identity verdict=<green|red> read_at=<UTC>` -- falsifier: a ledger grep for `crit=C16 probe=c16-receipt-identity` finds no STATUS row after this ticket''s creation'
+  - id: req-omn26122-stability-probe-waits-for-its-own-lane
+    statement: A stability proof waits only for a deploy job of the stability lane, never for another lane's job on the shared deploy agent; a job whose lane the agent does not name stays a reason to wait.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: the resolver reads a deploy job that rolls another named lane as not busy for the graded lane, and the deploy agent names the lane of its active and last job in /health -- falsifier: the resolver waits out a dev job for the stability lane, or reads a job with no named lane as not busy'
 evidence_requirements:
   - kind: tests
     description: The stability lane declaration seam test and the stability proofs workflow pins, including the control that a lane with no ingress_url is refused naming the field.
@@ -55,3 +60,16 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_stability_proof_lane_declaration_omn24191.py -q --no-cov -n 0 -p no:randomly -k "c16"
         cwd: .
+  - id: dod-omn26122-ac4-own-lane-wait
+    description: >-
+      Run 44919897557 (2026-11-21T15:34Z) spent its 2400 s lane-resolve budget behind a dev idle-restore job; the agent job store held fourteen jobs from 2026-11-20T15:21Z to 2026-11-21T17:42Z, all of the dev lane. The check holds that the resolver ignores another named lane's job, still waits for the graded lane's own job and for a job that names no lane, and that the agent's health names the lane of its active and last job.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_resolve_lab_lane_other_lane_job_omn26122.py tests/ci/test_resolve_lab_lane_deploy_wait_omn19811.py tests/ci/test_resolve_lab_lane_wait_while_busy_omn20410.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen --all-extras pytest tests/unit/test_health_active_job_runtime_lane_omn26122.py -q -p no:randomly
+        cwd: scripts/deploy-agent
