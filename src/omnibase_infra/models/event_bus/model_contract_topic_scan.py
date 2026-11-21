@@ -21,6 +21,7 @@ when a start began or whether a contract is new.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import time
@@ -112,6 +113,31 @@ class ModelContractTopicScan(BaseModel):
                     request=request, fingerprint=hash(key), entries=tuple(found)
                 )
             return list(cls._stored[key].entries)
+
+    @classmethod
+    async def read_off_loop(
+        cls,
+        *,
+        contracts_root: Path,
+        skill_manifests_root: Path | None = None,
+        skill_manifests_roots: Sequence[Path] | None = None,
+        include_installed_packages: bool = True,
+    ) -> list[ModelContractTopicEntry]:
+        """:meth:`read` on a worker thread, so a new scan never holds the loop.
+
+        A scan of every installed contract held the loop for about 12 s at one CPU
+        (OMN-26338). A later synchronous :meth:`read` of the same request then finds
+        the stored scan, and the entries it returns are the entries a synchronous
+        first read would have found. Errors raised by the scan reach the awaiting
+        caller as the same error object.
+        """
+        return await asyncio.to_thread(
+            cls.read,
+            contracts_root=contracts_root,
+            skill_manifests_root=skill_manifests_root,
+            skill_manifests_roots=skill_manifests_roots,
+            include_installed_packages=include_installed_packages,
+        )
 
     @classmethod
     def runs(cls) -> int:

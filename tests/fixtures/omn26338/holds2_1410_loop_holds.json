@@ -1,0 +1,80 @@
+{
+  "source": "lab reproduction of the ONEX kernel main(), host h053, 1 CPU (systemd-run scope CPUQuota=100%), main-thread stack sampled every 1 s from sys._current_frames, loop lag from a 1 s heartbeat task, scratch redpanda v24.2.7 and scratch postgres 16 with the forward migrations (the dev broker and dev database were not used)",
+  "refs": {
+    "omnibase_infra_before": "f2e451a31a802b8d3e3ef90f2788c42ae602a21d (omnibase_infra#6134 head)",
+    "omnibase_infra_after": "branch omn-26338-startup-loop-holds-2, stacked on omnibase_infra#6134 at f2e451a3",
+    "omnimarket": "0.4.324 (installed in the reproduction venv)"
+  },
+  "environment": {
+    "ONEX_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra,omnimarket",
+    "RUNTIME_PROFILE": "main",
+    "contracts_discovered": 1383,
+    "wired": 443,
+    "skipped": 331,
+    "failed": 46,
+    "topics_provisioned_by_the_migration_executor_provisioner": 2430
+  },
+  "read_utc": "2026-11-21T14:49:17Z",
+  "holds_before": [
+    {
+      "name": "topic_migration_provisioner",
+      "call": "handler_wiring.py:8947 _build_topic_migration_executor_dependencies -> TopicProvisioner(...) -> service_topic_manager.py _build_topic_specs (second contract-topic scan, request without the kernel's manifest roots)",
+      "contiguous_s": 12.5,
+      "max_heartbeat_lag_s": 11.112,
+      "start_utc": "2026-11-21T14:42:47.439323Z",
+      "read_utc": "2026-11-21T14:43:00Z",
+      "scan_seconds_logged": 11.835
+    },
+    {
+      "name": "local_ingress_route_discovery",
+      "call": "runtime_host_process.py:2519 _start_local_ingress -> runtime_local_ingress.py:112 discover_runtime_local_ingress_routes (yaml.safe_load of every nodes/*/contract.yaml of the active packages)",
+      "contiguous_s": 11.6,
+      "max_heartbeat_lag_s": 11.855,
+      "start_utc": "2026-11-21T14:43:08.676366Z",
+      "read_utc": "2026-11-21T14:43:20Z"
+    }
+  ],
+  "holds_after": [
+    {
+      "name": "topic_migration_provisioner",
+      "call": "the same scan, run by warm_topic_migration_scan on worker thread asyncio_0 before the synchronous construction",
+      "contiguous_s": 0.0,
+      "wall_s_on_worker_thread": 12.5,
+      "max_heartbeat_lag_s": 0.287,
+      "main_thread_busy_samples": 0,
+      "start_utc": "2026-11-21T14:48:26.428446Z",
+      "end_utc": "2026-11-21T14:48:38.946090Z",
+      "read_utc": "2026-11-21T14:49:17Z"
+    },
+    {
+      "name": "local_ingress_route_discovery",
+      "call": "the same discovery, run through asyncio.to_thread on worker thread asyncio_25",
+      "contiguous_s": 0.0,
+      "wall_s_on_worker_thread": 17.6,
+      "max_heartbeat_lag_s": 0.134,
+      "main_thread_busy_samples_in_target_frame": 0,
+      "start_utc": "2026-11-21T14:48:55.253596Z",
+      "end_utc": "2026-11-21T14:49:12.882077Z",
+      "read_utc": "2026-11-21T14:49:17Z"
+    }
+  ],
+  "unchanged_by_this_change": [
+    {
+      "name": "discover_contracts window",
+      "call": "service_kernel.py:3663 discover_contracts (discovery.py)",
+      "contiguous_s": 2.0,
+      "start_utc": "2026-11-21T14:42:24.365790Z"
+    },
+    {
+      "name": "aiokafka metadata decode while subscribing",
+      "call": "main thread in aiokafka/protocol decode after the wiring, seen as heartbeat lag 2.9 s and 3.3 s",
+      "start_utc": "2026-11-21T14:45:42Z"
+    }
+  ],
+  "time_to_health": {
+    "before_first_answer_s": 57.4,
+    "before_healthy_200_s": 110.7,
+    "after_first_answer_s": 57.6,
+    "after_healthy_200_s": 119.7
+  }
+}

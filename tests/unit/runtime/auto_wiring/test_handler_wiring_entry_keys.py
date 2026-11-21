@@ -12,8 +12,8 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _derive_dispatcher_id,
     _derive_handler_entry_key,
     _derive_route_id,
-    _required_handler_init_params,
     _should_skip_sync_container_resolution,
+    required_handler_init_params,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelHandlerRef,
@@ -89,7 +89,7 @@ class TestRequiredHandlerInitParams:
         class HandlerZeroArg:
             pass
 
-        assert _required_handler_init_params(HandlerZeroArg) == frozenset()
+        assert required_handler_init_params(HandlerZeroArg) == frozenset()
 
     @pytest.mark.unit
     def test_required_params_include_required_positional_dependency(self) -> None:
@@ -97,7 +97,7 @@ class TestRequiredHandlerInitParams:
             def __init__(self, service: object) -> None:
                 self.service = service
 
-        assert _required_handler_init_params(HandlerWithDependency) == frozenset(
+        assert required_handler_init_params(HandlerWithDependency) == frozenset(
             {"service"}
         )
 
@@ -107,7 +107,7 @@ class TestRequiredHandlerInitParams:
             def __init__(self, *, service: object) -> None:
                 self.service = service
 
-        assert _required_handler_init_params(HandlerWithKeywordDependency) == (
+        assert required_handler_init_params(HandlerWithKeywordDependency) == (
             frozenset({"service"})
         )
 
@@ -117,7 +117,7 @@ class TestRequiredHandlerInitParams:
             def __init__(self, service: object | None = None) -> None:
                 self.service = service
 
-        assert _required_handler_init_params(HandlerWithOptionalDependency) == (
+        assert required_handler_init_params(HandlerWithOptionalDependency) == (
             frozenset()
         )
 
