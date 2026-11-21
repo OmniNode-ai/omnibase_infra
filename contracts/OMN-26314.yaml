@@ -1,0 +1,80 @@
+schema_version: 1.0.0
+ticket_id: OMN-26314
+title: The omnibase_infra dev deploy agent applies registered installs into the recreated runtime before the roll's compose wait judges health, so a roll that carries a registered fix reaches healthy
+summary: >-
+  The dev roll's compose wait (run_runtime_roll_step) ran inside the rebuild, so a replacement runtime that was unhealthy without its registered install raised there and the in-job apply never ran. The roll step now starts the replacement without the wait, applies that service's registered installs into the new container, then issues the same compose wait with the same budget. The wait, the boot guard and the refusal of an unhealthy runtime are not changed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26314-installs-before-roll-wait
+    statement: A registered dev-lane branch install is in the recreated runtime container before the roll's compose wait judges its health.
+    acceptance:
+      - id: AC1
+        statement: "AC1: in a dev roll the registered installs are applied into the build or the recreated container before the runtime roll step's compose `--wait` judges health, so the wait reads the runtime that carries them -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_installs_before_roll_wait.py -k apply_before_roll_wait -q` fails at origin/dev and passes at the fixed head"
+      - id: AC2
+        statement: "AC2: the wait, its budget and the boot guard are unchanged: a roll whose runtime is still unhealthy after the installs are applied is refused exactly as before, and no install path skips or shortens the wait -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_installs_before_roll_wait.py -k wait_not_weakened -q` fails if the wait is skipped, shortened or bypassed for an unhealthy runtime"
+      - id: AC3
+        statement: "AC3: the apply is dev lane only and never runs for the stability or prod lane, and a failed apply is logged at ERROR and never turns into a pass verdict -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_installs_before_roll_wait.py -k dev_lane_only -q` fails if a non-dev lane applies installs"
+      - id: AC4
+        statement: "AC4: a regression test built from the recorded roll of job 1a6f753e (fixture path in the pull request: the journal lines of the 01:00 EST roll and its 7 declared installs, scrubbed) fails on the broken code and passes on the fix -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_installs_before_roll_wait.py -k recorded_roll_1a6f753e -q`"
+      - id: AC5
+        statement: "AC5: the existing registered-install tests still pass, so the single store, the held reason and the idle-restore yield of OMN-26300 are intact -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py -q`"
+evidence_requirements:
+  - kind: tests
+    description: The installs-before-roll-wait tests and the registered-install tests of the deploy-agent suite.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_installs_before_roll_wait.py scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26314-ac1-apply-before-roll-wait
+    description: "The roll step starts the replacement without the wait, applies the service's registered installs into the new container, then issues the compose wait; the wait reads a runtime that carries its installs."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_installs_before_roll_wait.py -k apply_before_roll_wait -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26314-ac2-wait-not-weakened
+    description: "An unhealthy runtime with its installs applied is refused with the same wait and wait-timeout budget; one place issues the wait and no skip flag exists."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_installs_before_roll_wait.py -k wait_not_weakened -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26314-ac3-dev-lane-only
+    description: "A roll of any lane but dev applies nothing, the apply refuses a compose project that is not the dev lane's, and a failed apply is logged at ERROR while the wait still judges the runtime."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_installs_before_roll_wait.py -k dev_lane_only -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26314-ac4-recorded-roll
+    description: "The replay of the recorded roll (fixture scripts/deploy-agent/tests/unit/fixtures/recorded_roll_1a6f753e_omn26314.json) with 7 declared installs has all 7 in the container when the wait runs."
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_installs_before_roll_wait.py -k recorded_roll_1a6f753e -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26314-ac5-registered-installs
+    description: "The OMN-26300 registered-install tests still pass: single store, held reason, idle-restore yield, gate not weakened."
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26314-deploy
+    description: Hosted-runner probe that reads the committed boot guard from GitHub at the checked-out commit and requires the roll step to apply the service installs before it issues the compose wait, and the apply handler to exist.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); body = src[src.index("def run_runtime_roll_step"):]; assert "def apply_installs_before_wait" in src; assert body.index("apply_installs_before_wait(") < body.index("execution._run(\n            command")'
+        cwd: ${OMNI_HOME}/omnibase_infra
