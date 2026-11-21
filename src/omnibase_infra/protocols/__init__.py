@@ -17,6 +17,7 @@ Protocols:
     - ProtocolRegistryMetrics: Interface for registry metrics collection (optional)
     - ProtocolSnapshotPublisher: Interface for snapshot publishing services (F2)
     - ProtocolSnapshotStore: Interface for snapshot storage backends
+    - ProtocolTopicDemandSource: Interface for the boot demand measure and idle-topic watch
     - ProtocolTopicRegistry: Interface for topic key to Kafka topic string resolution
     - ProtocolNodeHeartbeat: Interface for node heartbeat DI resolution
     - ProtocolValidationLedgerRepository: Interface for validation event ledger persistence
@@ -113,6 +114,9 @@ from omnibase_infra.protocols.protocol_snapshot_publisher import (
     ProtocolSnapshotPublisher,
 )
 from omnibase_infra.protocols.protocol_snapshot_store import ProtocolSnapshotStore
+from omnibase_infra.protocols.protocol_topic_demand_source import (
+    ProtocolTopicDemandSource,
+)
 from omnibase_infra.protocols.protocol_topic_registry import ProtocolTopicRegistry
 from omnibase_infra.protocols.protocol_validation_ledger_repository import (
     ProtocolValidationLedgerRepository,
@@ -142,6 +146,7 @@ __all__: list[str] = [
     "ProtocolRuntimeLogProducer",
     "ProtocolSnapshotPublisher",
     "ProtocolSnapshotStore",
+    "ProtocolTopicDemandSource",
     "ProtocolTopicRegistry",
     "ProtocolValidationLedgerRepository",
 ]

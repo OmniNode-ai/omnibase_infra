@@ -30,6 +30,9 @@ from omnibase_infra.models.model_boot_roster_partition import ModelBootRosterPar
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.auto_wiring.report import ModelContractWiringResult
+    from omnibase_infra.runtime.health.contract_attach_readiness_gate import (
+        ContractAttachReadinessGate,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +153,31 @@ def report_roster_partition(
             partition.describe_violations(),
         )
     return partition
+
+
+def record_attach_gate(
+    gate: ContractAttachReadinessGate,
+    attach_results: Sequence[ModelContractAttachResult],
+    exclusions: Sequence[ModelContractAttachExclusion],
+    correlation_id: object,
+) -> None:
+    """Fold the interleave's exclusions and results into the readiness gate and log it (OMN-17372)."""
+    gate.exclude(tuple(exclusions))
+    gate.record(tuple(attach_results))
+    status = gate.status()
+    logger.info(
+        "Contract-attach readiness gate: required=%d attached=%d "
+        "not_ready=%d failed=%d pending=%d excluded=%d ready=%s "
+        "(OMN-17372, correlation_id=%s)",
+        len(status.required_contracts),
+        len(status.attached_contracts),
+        len(status.not_ready_contracts),
+        len(status.failed_contracts),
+        len(status.pending_contracts),
+        len(status.excluded_contracts),
+        status.ready,
+        correlation_id,
+    )
 
 
 async def watch_ready_bound(

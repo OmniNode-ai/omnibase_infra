@@ -8,9 +8,11 @@ costs no group join (each join costs the broker's group_initial_rebalance_delay,
 3 s on the dev lane) and moves no offset a real consumer will later read from.
 
 A topic is in use when any of its partitions holds a retained record (its high
-watermark is above its low watermark), or when it cannot be read at all, so that
-a topic not yet provisioned keeps its contract on the boot path. The measure is
-the broker's own state at boot; nothing in it is a list of topics or nodes.
+watermark is above its low watermark), or when it cannot be read at all (missing
+or not visible), so that a topic not yet provisioned keeps its contract on the
+boot path. Only a broker that cannot be reached or described is refused: the
+measure then raises its own error and the boot stops (OMN-21318). The measure is the broker's
+own state at boot; nothing in it is a list of topics or nodes.
 """
 
 from __future__ import annotations
@@ -89,14 +91,10 @@ class HandlerKafkaTopicDemandSource:
         topics: Collection[str],
         on_first_record: Callable[[str], Awaitable[None]],
     ) -> tuple[frozenset[str], Callable[[], Awaitable[None]]]:
-        try:
-            return await self._measure_and_watch(topics, on_first_record)
-        except Exception:  # boundary: an unmeasurable broker keeps the boot path
-            logger.exception(
-                "Boot subscription demand measure failed; every contract joins "
-                "at boot (OMN-18087)"
-            )
-            return frozenset(topics), nothing_to_stop
+        # A broker that cannot be read is not a reason to boot every contract:
+        # the error propagates, the kernel's boot fails and the runtime exits
+        # non-zero, loudly (OMN-21318).
+        return await self._measure_and_watch(topics, on_first_record)
 
     async def _measure_and_watch(
         self,

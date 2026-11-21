@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_boot_wiring_deferral_compute"
+contract_name: "node_boot_wiring_deferral_compute"
+node_name: "node_boot_wiring_deferral_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+node_type: "COMPUTE_GENERIC"
+description: >
+  Decide which contracts the runtime leaves unwired at boot: a deferrable contract none of whose subscribe topics is in use (a retained record, or unreadable) costs nothing at boot, and its first request wires it. Pure: the broker's reading is an input; no I/O.
+
+input_model:
+  name: "ModelBootWiringDeferralRequest"
+  module: "omnibase_infra.models.contract_hotload.model_boot_wiring_deferral_request"
+  description: "Deferrable contracts with their subscribe topics, and the topics the broker reports in use."
+output_model:
+  name: "ModelBootWiringDeferralResult"
+  module: "omnibase_infra.models.contract_hotload.model_boot_wiring_deferral_result"
+  description: "Names of the contracts to leave unwired at boot."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "boot_wiring.defer"
+      handler_type: "boot_wiring_deferral"
+      handler:
+        name: "NodeBootWiringDeferralCompute"
+        module: "omnibase_infra.nodes.node_boot_wiring_deferral_compute.handler"
+      supported_operations:
+        - "boot_wiring.defer"
+descriptor:
+  node_archetype: "compute"
+  purity: "pure"
+  idempotent: true
+  timeout_ms: 30000
+metadata:
+  description: "Pure COMPUTE decision of which contracts boot leaves unwired. No I/O."
+  author: "OmniNode Team"
+  license: "MIT"
+  ticket: "OMN-21318"
+  tags:
+    - compute
+    - boot
+    - hot-loading
+    - pure-function
