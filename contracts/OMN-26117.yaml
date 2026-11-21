@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-26117
 title: The M4 beta board check C11 (probe c11-negative-paths) reads green against what exists now, or its real product defect is named with a ticket
 summary: >-
-  The C11 probe resolved the dev lane by gateway_url, the separate HTTP API on port 8090 that the one-runtime rulings removed (RULING 2026-11-02T15:02:01Z, RULING 2026-11-10T13:26:22Z), so every run since 2026-11-15 failed at the lane-resolve step with connection refused before an arm ran. The probe now resolves the lane by ingress_url, the runtime's own port, and aims its arms at the routes omnimarket's workflow gateway serves there. Every arm keeps its declared status and code; no clause is removed.
+  The C11 probe resolved the dev lane by gateway_url, the separate HTTP API on port 8090 that the one-runtime rulings removed (RULING 2026-11-02T15:02:01Z, RULING 2026-11-10T13:26:22Z), so every run since 2026-11-15 failed at the lane-resolve step with connection refused before an arm ran. The probe now resolves the lane by ingress_url, the runtime's own port, and aims its arms at the routes omnimarket's workflow gateway serves there. Every arm keeps its declared status and code; no clause is removed. The wrong_tenant arm then read 404 resource.not_found from the runtime gateway (run 44860286184), where the arm still expected the 403 auth.tenant.forbidden of the retired onex-api route /v1/tenants/<slug>/api-keys; the arm now expects the 404 the runtime gateway's contract and beta requirement N-2 declare, and a 403 grades FAIL as an existence leak.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -54,4 +54,14 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_c11_negative_paths_probe_omn19175.py -q --no-cov -n 0 -p no:randomly -k "every_arm_targets_a_route"
+        cwd: .
+  - id: dod-omn26117-ac2-wrong-tenant-documented-404
+    description: >-
+      The wrong_tenant arm expects the runtime gateway's documented cross-tenant answer, 404 resource.not_found, and a 403 auth.tenant.forbidden answer (the retired onex-api route's) grades FAIL as an existence leak; the clause is regraded against the successor route, not removed.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c11_negative_paths_probe_omn19175.py -q --no-cov -n 0 -p no:randomly -k "answers_403_is_refused_as_an_existence_leak"
         cwd: .
