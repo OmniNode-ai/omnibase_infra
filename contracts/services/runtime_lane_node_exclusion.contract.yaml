@@ -10,7 +10,8 @@
 # The file reaches the runtime through the image's contracts/ directory (and the
 # ../contracts bind mount), so no compose file names a contract.
 #
-# Evidence for the dev profile (read 2026-11-21T13:57Z from the dev broker, SASL, read-only):
+# Evidence for the dev profile (read 2026-11-21T13:57Z from the dev broker, SASL, read-only;
+# every name also read from the running dev image's contract files):
 # a contract is listed only when it subscribes to at least one topic, every topic it
 # subscribes to received no message in the broker's whole retention window of 7 days
 # (1098 distinct topics read, 213 active, 884 idle, 1 absent), it declares no schedule
@@ -66,8 +67,6 @@ profiles:
       - node_claude_review_batch_effect
       - node_closeout_verifier_compute
       - node_codegen_handler_test_effect
-      - node_codex_gitlink_compute
-      - node_codex_landing_compute
       - node_compaction_arm_assignment_compute
       - node_compaction_arm_run_effect
       - node_compaction_continuation_replay_effect
@@ -233,7 +232,6 @@ profiles:
       - swarm_supervisor_orchestrator
       - verify_effect
       - volume_config_drift_sweep
-      - worktree_prune_workflow_effect
       - worktree_reconcile_compute
     required_contracts:
       - node_gateway_attach_effect
