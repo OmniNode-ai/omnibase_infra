@@ -124,7 +124,7 @@ from omnibase_infra.handlers.boot_topic_provisioning import (
     provision_unattached_publish_topics,
 )
 from omnibase_infra.handlers.contract_dispatch_cost import attach_contract_dispatcher
-from omnibase_infra.handlers.entry_method_offload import invoke_entry_method
+from omnibase_infra.handlers.entry_method_offload import invoke_entry_method, yield_each
 from omnibase_infra.handlers.handler_projection_derived_write import (
     HandlerProjectionDerivedWrite,
 )
@@ -9973,7 +9973,7 @@ async def wire_from_manifest(
     # can skip its container Step 3 entirely for these handlers.
     pre_resolved_handlers: dict[str, object] = {}
     if container is not None:
-        for contract in manifest.contracts:
+        async for contract in yield_each(manifest.contracts):
             if _is_raw_event_projection_contract(
                 contract
             ) and not _raw_event_projection_enabled(
@@ -10016,7 +10016,7 @@ async def wire_from_manifest(
     prepared_contracts: list[PreparedContractWiring] = []
     failed_results: list[ModelContractWiringResult] = []
     dispatcher_coverage_failed_gaps: list[str] = []
-    for contract in manifest.contracts:
+    async for contract in yield_each(manifest.contracts):
         try:
             prepared = _prepare_contract_wiring(
                 contract=contract,
