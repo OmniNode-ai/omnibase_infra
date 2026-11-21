@@ -221,15 +221,16 @@ def _sibling_clone(repository: str) -> Path | None:
     return Path(registry_root) / repository
 
 
+def _registered_installs() -> Any:
+    """The registered branch-install rules (OMN-26300): one store, a reason for every hold."""
+    module = load_dev_boot_guard(DEV_ROLL_EVENTS).registered_installs()
+    legacy = os.environ.get("DEPLOY_AGENT_LEGACY_BRANCH_INSTALL_STORE", "").strip()
+    return module.RegisteredInstalls(STATE_DIR, Path(legacy) if legacy else None)
+
+
 def _declared_branch_install_repos() -> list[str]:
     """The repositories of the dev lane's declared branch installs; none when unreadable (OMN-17427)."""
-    try:
-        payload = json.loads(
-            (STATE_DIR / "branch-installs" / "records.json").read_text(encoding="utf-8")
-        )
-        return sorted({str(install["repo"]) for install in payload["installs"]})
-    except (OSError, ValueError, KeyError, TypeError):
-        return []
+    return list(_registered_installs().declared_repos())
 
 
 def _read_dev_tags(repository: str) -> list[ModelDevTag] | None:
@@ -1185,7 +1186,7 @@ class DeployAgent:
 
         self._self_update_guarded(EnumSelfUpdateBoundary.IDLE_HEARTBEAT, "idle")
 
-    def _branch_install_argv(self, command: str) -> list[str]:
+    def _branch_install_argv(self, command: str, in_job: bool = False) -> list[str]:
         """The handler's argv; a merge probe gets each declared repository's clone and running ref."""
         argv = [
             sys.executable,
@@ -1196,6 +1197,8 @@ class DeployAgent:
             "--compose-project",
             lane_config_for(EnumRuntimeLane.DEV).compose_project,
         ]
+        if in_job:
+            argv.append("--in-job")
         if command in ("apply", "release-due"):
             for repository in _declared_branch_install_repos():
                 clone = (
@@ -1214,7 +1217,7 @@ class DeployAgent:
         return argv
 
     def _run_branch_installs(
-        self, command: str
+        self, command: str, in_job: bool = False
     ) -> subprocess.CompletedProcess[str] | None:
         """Run one handler command and relay its log lines into the agent's log (OMN-17427).
 
@@ -1235,7 +1238,7 @@ class DeployAgent:
         )
         try:
             result = self._branch_install_exec(
-                self._branch_install_argv(command), timeout, env
+                self._branch_install_argv(command, in_job), timeout, env
             )
         except (OSError, subprocess.TimeoutExpired):
             logger.exception(
@@ -1257,12 +1260,14 @@ class DeployAgent:
             )
         return result
 
-    def _reapply_branch_installs(self, lane: EnumRuntimeLane) -> bool:
-        """Re-apply the declared dev-lane branch installs inside a job (OMN-17427).
+    def _apply_branch_installs_in_job(self, lane: EnumRuntimeLane) -> bool:
+        """Apply the declared dev-lane branch installs to the build a job just created (OMN-26300).
 
-        Called with the lane lock held, after the compose verdict. Dev lane
-        only; a failure is logged at ERROR and never changes the job's verdict.
-        Returns whether every declared install read back whole.
+        Called with the lane lock held, after the rebuild and BEFORE the boot guard and the
+        health gate judge the build, so an install that makes the runtime healthy is in what
+        the gate reads. The job's own recreate took the recreate window, so the apply is not
+        held for another. Never a verdict: the gate judges whatever is running, and a failed
+        apply is logged at ERROR. Dev lane only; returns whether every install read back whole.
         """
         if (
             lane is not EnumRuntimeLane.DEV
@@ -1270,7 +1275,7 @@ class DeployAgent:
             or not _declared_branch_install_repos()
         ):
             return True
-        result = self._run_branch_installs("apply")
+        result = self._run_branch_installs("apply", in_job=True)
         return result is not None and result.returncode == 0
 
     def _job_reading(self, call: str, *args: object) -> None:
@@ -1315,33 +1320,13 @@ class DeployAgent:
                 self._run_branch_installs("apply")
         except LaneLockContendedError as exc:
             logger.info("branch install apply waits for the dev lane lock: %s", exc)
+            _registered_installs().record_hold(
+                "lane_lock_held_by_deploy", f"a deploy holds the dev lane: {exc}"
+            )
 
     def _latest_branch_installs(self) -> dict[str, object]:
-        """The declared installs and the last readback, for ``/branch-installs``."""
-        root = STATE_DIR / "branch-installs"
-        try:
-            declared = json.loads((root / "records.json").read_text(encoding="utf-8"))[
-                "installs"
-            ]
-        except FileNotFoundError:
-            declared = []
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            return {"installs": None, "reason": f"{type(exc).__name__}: {exc}"}
-        try:
-            status = json.loads((root / "status.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            status = None
-        readbacks = status.get("readbacks") if isinstance(status, dict) else None
-        return {
-            "read_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "declared": declared,
-            "last_check": status,
-            "missing": [
-                str(r.get("install_key"))
-                for r in (readbacks if isinstance(readbacks, list) else [])
-                if isinstance(r, dict) and r.get("state") in ("missing", "failed")
-            ],
-        }
+        """The declared installs, the last readback and each held install's reason, for ``/branch-installs``."""
+        return dict(_registered_installs().listing())
 
     def _maybe_idle_converge(self) -> None:
         # Converge on a followed repository's dev head when idle (OMN-19509, rule in
@@ -1528,6 +1513,9 @@ class DeployAgent:
         if not presence.restorable:
             return False
         if decision.verdict is not EnumIdleRestoreVerdict.RESTORE:
+            return True
+        if waiting := _registered_installs().restore_yield(presence.value):
+            logger.info("idle restore: leaves the recreate window to %s", waiting)
             return True
         cmd = restore_command()
         if not self._idle_converge_gate_open(cmd.requested_by):
@@ -2069,6 +2057,10 @@ class DeployAgent:
                         sibling_tags=cmd.sibling_tags,
                     )
 
+                    # OMN-26300: a registered install goes into this build BEFORE the
+                    # boot guard and the health gate judge it; neither is skipped or relaxed.
+                    self._apply_branch_installs_in_job(cmd.runtime_lane)
+
                     if dev_guard is not None:
                         dev_guard.wait(deployed_generation=True)
 
@@ -2108,13 +2100,6 @@ class DeployAgent:
                 lane_mirror = self.executor.run_lane_mirror(
                     lane=cmd.runtime_lane, materialize_root=STATE_DIR / "lane-mirror"
                 )
-
-                # OMN-17427: a fix installed into a dev-lane container from its
-                # branch lives in the container's layer, and this job may have
-                # recreated that container. Put every declared install back,
-                # read it back, and say in the job log which are missing. Never
-                # part of the verdict: the receipt is logged and served.
-                self._reapply_branch_installs(cmd.runtime_lane)
 
                 # OMN-18496: runtime restarted, verified and keeps serving. Fail
                 # loudly on the job and terminal event before lab apply/promotion;
