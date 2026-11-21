@@ -62,7 +62,7 @@ dod_evidence:
         cwd: .
   - id: dod-omn26122-ac4-own-lane-wait
     description: >-
-      Run 44919897557 (2026-11-21T15:34Z) spent its 2400 s lane-resolve budget behind a dev idle-restore job; the agent job store held fourteen jobs from 2026-11-20T15:21Z to 2026-11-21T17:42Z, all of the dev lane. The check holds that the resolver ignores another named lane's job, still waits for the graded lane's own job and for a job that names no lane, and that the agent's health names the lane of its active and last job.
+      Run 44919897557 (2026-11-21T15:34Z) spent its 2400 s lane-resolve budget behind a dev idle-restore job; the agent job store held fourteen jobs from 2026-11-20T15:21Z to 2026-11-21T18:15Z, all of the dev lane. The check holds that the resolver ignores another named lane's job, still waits for the graded lane's own job and for a job that names no lane, and that the agent's health names the lane of its active and last job.
     source: manual
     binds_ac:
       - AC4

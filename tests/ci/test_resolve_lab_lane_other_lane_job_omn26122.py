@@ -3,9 +3,9 @@
 """OMN-26122: a probe does not wait for another lane's deploy job.
 
 One deploy agent rolls every lane single-flight. On 2026-11-21 its job store held
-fourteen jobs from the 20th 15:21Z to the 21st 17:42Z, all fourteen of the dev
+fourteen jobs from the 20th 15:21Z to the 21st 18:15Z, all fourteen of the dev
 lane and all ending ``failed``; ten were ``agent/idle-restore`` (one every two
-hours, each between 43 and 79 minutes) and the agent's ``/queue`` reported a mean
+hours, each between 61 and 79 minutes) and the agent's ``/queue`` reported a mean
 service time of 4325 s. The resolver of the C15 and C16 proofs read the agent as
 busy for the whole of each, so C16 run 44919897557 (2026-11-21 15:34Z) spent its
 2400 s budget behind the 15:00Z job and ended RED without submitting anything,
