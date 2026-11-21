@@ -12,6 +12,7 @@
 topics:
   - onex.evt.omnibase-infra.llm-endpoint-health.v1
   - onex.evt.omnibase-infra.runtime-health-check.v1
+  - onex.evt.omnibase-infra.runtime-loop-reading-recorded.v1
   # --- Platform topics not owned by any node contract (OMN-5633) ---
   - onex.evt.platform.service-heartbeat.v1
   - onex.evt.platform.feature-flag-changed.v1

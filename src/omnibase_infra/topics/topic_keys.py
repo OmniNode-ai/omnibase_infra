@@ -165,6 +165,9 @@ CONSUMER_RESTART_CMD: Final[str] = "CONSUMER_RESTART_CMD"
 RUNTIME_HEALTH_CHECK: Final[str] = "RUNTIME_HEALTH_CHECK"
 """Runtime health check events from ServiceRuntimeHealthMonitor."""
 
+RUNTIME_LOOP_READING_RECORDED: Final[str] = "RUNTIME_LOOP_READING_RECORDED"
+"""Per-window runtime event-loop readings from RuntimeLoopReadingPublisher."""
+
 PROJECTION_FRESHNESS_DEGRADED: Final[str] = "PROJECTION_FRESHNESS_DEGRADED"
 """Projection freshness SLA breach events from ServiceFreshnessMonitor."""
 
@@ -326,6 +329,7 @@ __all__: list[str] = [
     "DELEGATION_TASK_DELEGATED",
     "DISPATCH_OUTCOME_EVALUATED",
     "PROJECTION_FRESHNESS_DEGRADED",
+    "RUNTIME_LOOP_READING_RECORDED",
     "PROJECTION_FRESHNESS_RECOVERED",
     "EFFECTIVENESS_INVALIDATION",
     "EVAL_COMPLETED",

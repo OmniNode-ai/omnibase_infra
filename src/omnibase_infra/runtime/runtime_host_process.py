@@ -176,6 +176,12 @@ from omnibase_infra.runtime.runtime_profile import (
 )
 from omnibase_infra.runtime.secret_resolver import SecretResolver
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
+from omnibase_infra.runtime.util_loop_lag_sampler import (
+    LoopLagSampler,
+    RuntimeLoopReadingPublisher,
+    default_host,
+    default_member_id,
+)
 from omnibase_infra.runtime.util_mcp_auth import inject_mcp_api_keys
 from omnibase_infra.runtime.util_wiring import wire_default_handlers
 from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
@@ -1403,6 +1409,10 @@ class RuntimeHostProcess:
         # When pool_size == 1 (default), pools are not created and _handlers is used directly.
         self._handler_pools: dict[str, HandlerPool] = {}
 
+        # OMN-26249: the loop sampler and the per-window reading publisher.
+        self._loop_lag_sampler = LoopLagSampler()
+        self._loop_reading_publisher: RuntimeLoopReadingPublisher | None = None
+
         # Track failed handler instantiations (handler_type -> error message)
         # Used by health_check() to report degraded state
         self._failed_handlers: dict[str, str] = {}
@@ -2184,6 +2194,21 @@ class RuntimeHostProcess:
                 self._local_ingress_server = None
             raise
 
+        # OMN-26249: one event-loop reading per window under this member's id.
+        self._loop_reading_publisher = RuntimeLoopReadingPublisher(
+            sampler=self._loop_lag_sampler,
+            event_bus=self._event_bus,
+            member_id=default_member_id(
+                self._node_identity.env,
+                self._node_identity.service,
+                self._node_identity.node_name,
+                self._node_identity.version,
+                os.getpid(),
+            ),
+            host=default_host(),
+        )
+        await self._loop_reading_publisher.start()
+
         self._is_running = True
 
         # Step 6: Publish introspection event with jitter (OMN-1930)
@@ -2280,6 +2305,10 @@ class RuntimeHostProcess:
             self._is_starting = False
 
         logger.info("Stopping RuntimeHostProcess")
+
+        if self._loop_reading_publisher is not None:
+            await self._loop_reading_publisher.stop()
+            self._loop_reading_publisher = None
 
         # Stop local ingress first so new host-local work cannot enter while
         # the runtime drains and shuts down.
@@ -5365,8 +5394,15 @@ class RuntimeHostProcess:
             "no_handlers_registered": no_handlers_registered,
             "config_prefetch_status": self._config_prefetch_status,
             "local_ingress": local_ingress_health.model_dump(mode="json"),
+            "loop_reading": self._last_loop_reading(),
             "components": components,
         }
+
+    def _last_loop_reading(self) -> dict[str, object] | None:
+        """The newest event-loop reading this member built (OMN-26249)."""
+        publisher = self._loop_reading_publisher
+        reading = publisher.last_reading if publisher is not None else None
+        return reading.model_dump(mode="json") if reading is not None else None
 
     def _build_local_ingress_health(self) -> ModelLocalRuntimeIngressHealth:
         """Build typed health details for local runtime ingress."""
@@ -5933,6 +5969,7 @@ class RuntimeHostProcess:
             service=self._node_identity.service,
             version=self._node_identity.version,
             topic_deny_patterns=topic_deny_patterns,
+            tick_observer=self._loop_lag_sampler,
         )
 
         # Wire subscriptions for each handler with a contract.
@@ -6092,6 +6129,7 @@ class RuntimeHostProcess:
                 service=self._node_identity.service,
                 version=self._node_identity.version,
                 topic_deny_patterns=topic_deny_patterns,
+                tick_observer=self._loop_lag_sampler,
             )
 
         (

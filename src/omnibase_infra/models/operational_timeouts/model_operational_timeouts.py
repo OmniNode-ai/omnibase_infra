@@ -31,6 +31,8 @@ class ModelOperationalTimeouts(BaseModel):
         circuit_breaker_reset_seconds: Wait before an open circuit resets.
         tick_stop_seconds: Wait for the scheduler tick task on stop.
         freshness_interval_seconds: Period of the projection freshness sweep.
+        loop_reading_window_seconds: Window of one published event-loop reading.
+        loop_lag_sample_interval_seconds: Sleep the event-loop lag sampler times.
         optimistic_retry_initial_backoff_seconds: First backoff after a conflict.
         optimistic_retry_max_backoff_seconds: Ceiling of the conflict backoff.
         optimistic_retry_backoff_multiplier: Growth factor of the conflict backoff.
@@ -60,6 +62,8 @@ class ModelOperationalTimeouts(BaseModel):
     circuit_breaker_reset_seconds: float = Field(gt=0)
     tick_stop_seconds: float = Field(gt=0)
     freshness_interval_seconds: float = Field(gt=0)
+    loop_reading_window_seconds: float = Field(gt=0)
+    loop_lag_sample_interval_seconds: float = Field(gt=0)
     optimistic_retry_initial_backoff_seconds: float = Field(gt=0)
     optimistic_retry_max_backoff_seconds: float = Field(gt=0)
     optimistic_retry_backoff_multiplier: float = Field(ge=1)

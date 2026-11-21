@@ -21,6 +21,10 @@ timeouts:
   tick_stop_seconds: 5.0
   # Projection freshness monitor: period between freshness sweeps.
   freshness_interval_seconds: 60.0
+  # Runtime event-loop reading (OMN-26249): the window one published reading
+  # covers, and the short sleep the lag sampler schedules and times.
+  loop_reading_window_seconds: 15.0
+  loop_lag_sample_interval_seconds: 0.05
   # Optimistic-conflict retry backoff.
   optimistic_retry_initial_backoff_seconds: 0.1
   optimistic_retry_max_backoff_seconds: 5.0

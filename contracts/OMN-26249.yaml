@@ -1,0 +1,58 @@
+schema_version: 1.0.0
+ticket_id: OMN-26249
+title: Each dev runtime member publishes its event-loop lag, tick lag and abandoned-dispatch count every window, so a stalled loop reads as a number
+summary: >-
+  The runtime host process now runs a sampler that schedules a short sleep and records how late it returns, and a publisher that closes a contiguous window every interval into one ModelRuntimeLoopReading (member id, host, window start and end, maximum gap in ms, tick lag in ms or the reason it is absent, abandoned-dispatch count) and publishes it on onex.evt.omnibase-infra.runtime-loop-reading-recorded.v1. The subscription wiring tells the sampler when the member subscribes to the runtime tick and when a tick is consumed, so only a tick subscriber reports a tick lag.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - onex.evt.omnibase-infra.runtime-loop-reading-recorded.v1
+requirements:
+  - id: req-omn26249-loop-reading-per-window
+    statement: Every runtime member publishes a complete loop reading each window.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the sampler reads a 0.6 s block as a gap of at least 0.48 s and an idle loop as under 0.1 s -- falsifier: `pytest tests/unit/runtime/test_loop_lag_sampler.py -k block` and `-k idle` (the first red on a build with the sampler removed)'
+      - id: AC2
+        statement: 'AC2: the reading carries member id, host, window start and end, maximum gap in ms, tick lag in ms (or the not-applicable reason for a non-subscriber), and the abandoned count; none of these fields is optional -- falsifier: a model test that omits each field in turn and expects a validation error'
+      - id: AC3
+        statement: 'AC3: on dev, 20 minutes of readings arrive at least once per window with no gap in the windows -- falsifier: `onex run-node` reading of the topic, count of windows against minutes, fewer than expected fails'
+evidence_requirements:
+  - kind: tests
+    description: The sampler's block and idle readings, the reading model's required fields, the publisher's contiguous windows and the wiring's tick observation.
+    command: uv run --frozen pytest tests/unit/runtime/test_loop_lag_sampler.py tests/unit/runtime/models/test_model_runtime_loop_reading.py tests/unit/runtime/test_event_bus_wiring_tick_lag.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26249-ac1-block-and-idle
+    description: >-
+      A handler that blocks the loop for 0.6 s reads as a maximum gap of at least 480 ms and the same loop idle reads under 100 ms. Both tests import the sampler, so on a build without it they fail at collection.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_loop_lag_sampler.py -q --no-cov -n 0 -p no:randomly -k "block or idle"
+        cwd: .
+  - id: dod-omn26249-ac2-required-fields
+    description: >-
+      The reading model refuses a payload that omits any one of its fields in turn, refuses tick lag and its absent reason set together or both unset, and refuses a window that ends before it starts.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/models/test_model_runtime_loop_reading.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26249-ac3-windows-on-dev
+    description: >-
+      The count of windows against minutes on dev is read from the topic after the branch runs there and is posted as a pull request comment naming the head. The tests below pin that the publisher emits one reading per window with each window starting where the previous one ended; the dev reading itself is not claimed by a static check.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_loop_lag_sampler.py tests/unit/runtime/test_event_bus_wiring_tick_lag.py -q --no-cov -n 0 -p no:randomly -k "windows_are_contiguous or window_loop_publishes or tick"
+        cwd: .

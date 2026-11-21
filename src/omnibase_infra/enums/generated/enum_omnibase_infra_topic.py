@@ -107,6 +107,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_RUNTIME_ERROR_V1 = contract_topic_value('nodes/node_runtime_error_triage_effect/contract.yaml', 'omnibase-infra', 'EVT_RUNTIME_ERROR_V1')  # onex.evt.omnibase-infra.runtime-error.v1
     EVT_RUNTIME_ERROR_ESCALATED_V1 = contract_topic_value('nodes/node_runtime_error_triage_effect/contract.yaml', 'omnibase-infra', 'EVT_RUNTIME_ERROR_ESCALATED_V1')  # onex.evt.omnibase-infra.runtime-error-escalated.v1
     EVT_RUNTIME_HEALTH_CHECK_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'EVT_RUNTIME_HEALTH_CHECK_V1')  # onex.evt.omnibase-infra.runtime-health-check.v1
+    EVT_RUNTIME_LOOP_READING_RECORDED_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'EVT_RUNTIME_LOOP_READING_RECORDED_V1')  # onex.evt.omnibase-infra.runtime-loop-reading-recorded.v1
     EVT_RUNTIME_MANIFEST_PUBLISHED_V1 = contract_topic_value('nodes/node_runtime_manifest_reducer/contract.yaml', 'omnibase-infra', 'EVT_RUNTIME_MANIFEST_PUBLISHED_V1')  # onex.evt.omnibase-infra.runtime-manifest-published.v1
     EVT_SAVINGS_ESTIMATED_V1 = contract_topic_value('nodes/node_runner_usage_effect/contract.yaml', 'omnibase-infra', 'EVT_SAVINGS_ESTIMATED_V1')  # onex.evt.omnibase-infra.savings-estimated.v1
     EVT_TOPIC_MIGRATION_LIFECYCLE_V1 = contract_topic_value('nodes/node_topic_migration_executor_effect/contract.yaml', 'omnibase-infra', 'EVT_TOPIC_MIGRATION_LIFECYCLE_V1')  # onex.evt.omnibase-infra.topic-migration-lifecycle.v1

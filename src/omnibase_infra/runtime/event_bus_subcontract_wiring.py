@@ -89,6 +89,7 @@ import json
 import logging
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -141,11 +142,16 @@ from omnibase_infra.runtime.delivery_context import (
 from omnibase_infra.runtime.dispatch_envelope_context import (
     bind_dispatch_envelope,
 )
-from omnibase_infra.topics import TopicResolver, create_topic_resolver
+from omnibase_infra.topics import (
+    SUFFIX_RUNTIME_TICK,
+    TopicResolver,
+    create_topic_resolver,
+)
 from omnibase_infra.utils import compute_consumer_group_id
 from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
 
 if TYPE_CHECKING:
+    from omnibase_infra.protocols.protocol_tick_observer import ProtocolTickObserver
     from omnibase_infra.runtime.service_dispatch_result_applier import (
         DispatchResultApplier,
     )
@@ -331,6 +337,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         retry_config: ModelConsumerRetryConfig | None = None,
         offset_policy: ModelOffsetPolicyConfig | None = None,
         topic_deny_patterns: tuple[str, ...] = (),
+        tick_observer: ProtocolTickObserver | None = None,
     ) -> None:
         """Initialize event bus wiring.
 
@@ -370,6 +377,10 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
             topic_deny_patterns: Regex deny patterns from
                 ``ModelRuntimeNodeGraphConfig.topic_deny_patterns``. Topics
                 matching any pattern are rejected before subscription.
+            tick_observer: Optional observer told when this member subscribes to
+                the runtime tick topic and when a tick is consumed, so the
+                member's loop sampler can report tick lag (OMN-26249). A member
+                that never subscribes to the tick is never told anything.
 
         Note:
             The dispatch_engine should be frozen before wiring subscriptions.
@@ -398,6 +409,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         self._retry_config = retry_config or ModelConsumerRetryConfig.create_standard()
         self._offset_policy = offset_policy or ModelOffsetPolicyConfig()
         self._topic_deny_patterns = topic_deny_patterns
+        self._tick_observer = tick_observer
         self._unsubscribe_callables: list[Callable[[], Awaitable[None]]] = []
         self._logger = logging.getLogger(__name__)
         # Track retry attempts per correlation_id for infrastructure errors.
@@ -532,6 +544,8 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 on_message=callback,
             )
             self._unsubscribe_callables.append(unsubscribe)
+            if self._tick_observer is not None and self._is_tick_topic(full_topic):
+                self._tick_observer.mark_tick_subscriber()
 
             self._logger.info(
                 "Wired subscription: topic=%s, consumer_group=%s, node=%s",
@@ -539,6 +553,32 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 consumer_group,
                 node_name,
             )
+
+    def _is_tick_topic(self, topic: str) -> bool:
+        return topic == self.resolve_topic(SUFFIX_RUNTIME_TICK)
+
+    def _observe_tick(self, topic: str, payload: object) -> None:
+        """Tell the tick observer a tick was consumed now (OMN-26249).
+
+        Measured at consume, before idempotency and dispatch, so the lag is the
+        bus-to-member delay and does not include the handler's own run time.
+        A payload without a readable ``scheduled_at`` is skipped: a missing
+        reading must not be replaced by a made-up zero.
+        """
+        if self._tick_observer is None or not self._is_tick_topic(topic):
+            return
+        raw = (
+            payload.get("scheduled_at")
+            if isinstance(payload, dict)
+            else getattr(payload, "scheduled_at", None)
+        )
+        try:
+            scheduled_at = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
+        except ValueError:
+            return
+        if scheduled_at.tzinfo is None:
+            scheduled_at = scheduled_at.replace(tzinfo=UTC)
+        self._tick_observer.record_tick(scheduled_at, datetime.now(UTC))
 
     def _should_commit_after_handler(self) -> bool:
         """Check if offset should be committed after handler execution.
@@ -883,6 +923,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
             try:
                 envelope = self._deserialize_to_envelope(message, topic)
                 correlation_id = envelope.correlation_id or uuid4()
+                self._observe_tick(topic, envelope.payload)
 
                 self._logger.info(
                     "[WIRING-CALLBACK] Deserialized envelope: "

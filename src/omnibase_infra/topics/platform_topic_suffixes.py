@@ -619,6 +619,18 @@ SUFFIX_SAVINGS_ESTIMATED: str = "onex.evt.omnibase-infra.savings-estimated.v1"
 SUFFIX_RUNNER_USAGE_RECORDED: str = "onex.evt.omninode.runner-usage-recorded.v1"
 """Topic suffix for self-hosted runner usage accounting events."""
 
+SUFFIX_RUNTIME_LOOP_READING_RECORDED: str = (
+    "onex.evt.omnibase-infra.runtime-loop-reading-recorded.v1"
+)
+"""Topic suffix for per-window runtime event-loop readings (OMN-26249).
+
+Each runtime member publishes one ModelRuntimeLoopReading per window: the
+maximum event-loop gap, the tick lag (or why it does not apply) and the count
+of dispatches abandoned at their deadline, under the member's identity.
+
+Producer: RuntimeLoopReadingPublisher (runtime host process)
+"""
+
 SUFFIX_PROJECTION_FRESHNESS_DEGRADED: str = (
     "onex.evt.omnibase-infra.projection-freshness-degraded.v1"
 )
@@ -1184,6 +1196,11 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ),
     ModelTopicSpec(
         suffix=SUFFIX_RUNNER_USAGE_RECORDED,
+        partitions=3,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_RUNTIME_LOOP_READING_RECORDED,
         partitions=3,
         kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
     ),

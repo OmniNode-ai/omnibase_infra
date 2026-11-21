@@ -153,6 +153,10 @@ class ServiceTopicRegistry:
             topic_keys.RUNTIME_HEALTH_CHECK: (
                 topic_suffixes.SUFFIX_RUNTIME_HEALTH_CHECK
             ),
+            # Runtime event-loop readings (OMN-26249)
+            topic_keys.RUNTIME_LOOP_READING_RECORDED: (
+                topic_suffixes.SUFFIX_RUNTIME_LOOP_READING_RECORDED
+            ),
             # Projection freshness SLA monitoring
             topic_keys.PROJECTION_FRESHNESS_DEGRADED: (
                 topic_suffixes.SUFFIX_PROJECTION_FRESHNESS_DEGRADED
