@@ -1,0 +1,60 @@
+schema_version: 1.0.0
+ticket_id: OMN-26369
+title: A dev merge that touches the runtime image starts a deploy-agent job within minutes, not at the next idle-restore window
+summary: >-
+  The dev deploy agent started no job for omnibase_infra#6131 (merged 13:45:48Z) or #6133 (14:06:14Z) until its idle restore c8fd5fda at 15:00:27Z. No merge command reached the agent (the chain that publishes it runs inside the dev runtime, which was down), restore 831062d1 held the lane until 14:15:56Z, and the dev recreate window then held every later restore tick to its next opening at 15:00Z. The window now admits an idle restore it would hold when a runtime-image commit is on the dev head that no dev job has built: the gate is asked again as agent/merge-restore, which the window policy declares. The health gate, the boot guard, the freeze, the load gate and the idle-restore timer are unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26369-merge-restore
+    statement: A merge that changes the runtime image starts a deploy-agent job on a down dev lane without waiting for the next recreate window.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the cause is named from the agent's own job record and trigger log for the 13:45Z and 14:06Z merges, with the job ids and times cited in the PR body -- falsifier: ssh h201 reading state/jobs-dev for those merges shows a job whose trigger is merge, or the cited reason none was created"
+      - id: AC2
+        statement: "AC2: a test built from the recorded merge times and the missing job (fixture path in the PR) fails on the broken trigger and passes on the fix -- falsifier: uv run pytest tests/unit/scripts/test_deploy_agent_merge_trigger.py -q --no-cov"
+      - id: AC3
+        statement: "AC3: after the change is installed on the dev lane, the next merge to origin/dev that touches the runtime image has a deploy-agent job started within 10 minutes of the merge, read from the job record -- falsifier: state/jobs-dev job created_at minus the merge time of that PR is over 600 seconds"
+evidence_requirements:
+  - kind: tests
+    description: The merge-trigger tests over the recorded 2026-11-21 merges and jobs, and the deploy-agent restore and recreate-window suites they sit beside.
+    command: uv run --frozen pytest tests/unit/scripts/test_deploy_agent_merge_trigger.py tests/unit/handlers/test_recreate_window_omn25912.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26369-ac1-cause
+    description: "The recorded cause: job 831062d1 (13:00:38Z to 14:15:56Z) held the lane over both merges, and the window policy holds an idle restore at 14:26:34Z to 15:00Z (fixture tests/unit/scripts/fixtures/deploy_agent_merge_trigger_omn26369.json)."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_deploy_agent_merge_trigger.py -k recorded_outage_idle_restore_was_held -q --no-cov
+        cwd: .
+  - id: dod-omn26369-ac2-red-green
+    description: "The merge-trigger tests over the recorded merge times and jobs: the base has no merge restore, so the module does not import there; the fix passes."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_deploy_agent_merge_trigger.py -q --no-cov
+        cwd: .
+  - id: dod-omn26369-ac3-restore-within-ten-minutes
+    description: "The window admits the idle restore off the hour for the recorded runtime-image merge (the replay of 14:26:34Z), asks as agent/merge-restore under the declared policy, and still holds it with no merge. The live job-record read waits for the next merge after install."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_deploy_agent_merge_trigger.py -k "off_the_window_for_the_recorded_merge or admits_the_merge_restore_requester or held_to_the_next_window_without" -q --no-cov
+        cwd: .
+  - id: dod-omn26369-deploy
+    description: Hosted-runner probe that reads the committed dev roll events host module from GitHub at the checked-out commit and requires the merge restore requester, the merge read and the window policy entry.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "def read_runtime_merge" in src; assert "MERGE_RESTORE_REQUESTER" in src; assert "agent/merge-restore" in src'
+        cwd: ${OMNI_HOME}/omnibase_infra
