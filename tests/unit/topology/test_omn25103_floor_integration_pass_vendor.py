@@ -55,10 +55,10 @@ _BRIDGES = _ROOT / "src" / "omnibase_infra" / "topology" / "vendored_table_bridg
 _SUPPLEMENTAL_EXPIRY_TEST = (
     _ROOT / "tests" / "ci" / "test_supplemental_declaration_expiry_omn18863.py"
 )
-# sha256 of omnimarket's files at omnimarket#6420 065d84ecdf138d4209fddd36d378c8cda08a77f1.
+# sha256 of omnimarket's files at omnimarket#6420 b12c5b44f73327b0d8504e5925016866b7254f32.
 _EXPECTED_SHAS: dict[str, str] = {
     "0002_create_floor_integration_pass.sql": (
-        "b875ffcee565f0709a45b74bd725fb5c512218b87244a6283c28820ced020949"
+        "b4433de1286a98682a0e822a2161ec4635f560bda279c1fba1da2252b7b885a4"
     ),
     "0003_grant_omninode_runtime_floor_integration_pass.sql": (
         "cba7e794f565468b29d01ee8d71df57b095ae59f7cc9245ef73a738fc6057dd6"
