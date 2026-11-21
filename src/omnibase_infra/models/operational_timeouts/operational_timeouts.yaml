@@ -46,6 +46,9 @@ timeouts:
   # verifier process to exit.
   done_write_verify_seconds: 300.0
   kill_wait_seconds: 5.0
+  # Ledger reader node (OMN-20547): wait of one reader call, made by the
+  # open-claims handler for git-maintenance.sh and the clone-refusal owner read.
+  ledger_reader_seconds: 150.0
   # Tool execution adapter: wait of one orchestrator call.
   tool_execution_seconds: 30.0
   # Auto-wired consume boundary: dispatch attempts of one delivery before the
