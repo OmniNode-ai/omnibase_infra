@@ -1144,9 +1144,17 @@ RUN --mount=type=bind,from=node_inventory,target=/node_inventory \
 # stamp no longer matches. The file is built under the lane filter the build args
 # name; a boot under another ONEX_ACTIVE_RUNTIME_PACKAGES, cloud-mirroring switch or
 # runtime profile reads that as a stamp difference and takes the fallback.
+#
+# OMN-26405: with no build argument the set is empty, and the runtime compose gives
+# the container ONEX_ACTIVE_RUNTIME_PACKAGES from docker/runtime-policy.env, so the
+# dev image's stamp read active_packages='' against 'omnibase_infra,omnimarket' and
+# every boot of the image read the file stale. The build reads that same file (the
+# --env-file compose reads) when no argument names the set; an argument still wins.
+# This RUN stays the last instruction that changes any stamp input.
 ARG PREBUILT_ACTIVE_RUNTIME_PACKAGES=""
 ARG PREBUILT_WORKLOAD=main
-RUN ONEX_ACTIVE_RUNTIME_PACKAGES="${PREBUILT_ACTIVE_RUNTIME_PACKAGES}" \
+RUN --mount=type=bind,source=docker/runtime-policy.env,target=/tmp/runtime-policy.env \
+    ONEX_ACTIVE_RUNTIME_PACKAGES="${PREBUILT_ACTIVE_RUNTIME_PACKAGES:-$(sed -n 's/^ONEX_ACTIVE_RUNTIME_PACKAGES=//p' /tmp/runtime-policy.env | tail -n 1)}" \
     python -m omnibase_infra.nodes.node_boot_catalog_effect.runtime_prebuilt_manifest build \
       --workload "${PREBUILT_WORKLOAD}"
 
