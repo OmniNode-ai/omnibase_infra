@@ -40,6 +40,9 @@ dod_evidence:
         check_value: >-
           python3 -c "import json; d = json.load(open('tests/fixtures/omn26322/devboot3_1250_loop_holds.json')); h = {x['name']: x['contiguous_s'] for x in d['holds_before']}; assert h['boot_step0'] > 1 and h['topic_provisioner_init'] > 1 and d['read_utc']"
         cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26322.py -k startup_loop_hold_under_one_second_topic_provisioner -q --no-cov -n 0 -p no:randomly
+        cwd: .
   - id: dod-omn26322-ac2-loop-hold-under-one-second
     description: "The recorded boot step 0 inventory read, the announcement fold and the topic provisioner construction are replayed beside a heartbeat on the same loop; the longest heartbeat gap stays under one second, and the tests fail where the work runs on the loop."
     source: manual
@@ -55,6 +58,9 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26322.py -k startup_wiring_error_fails_startup -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26322.py -k startup_loop_hold_under_one_second_topic_provisioner -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26322-ac4-gates-unchanged
     description: "The change edits no compose file, boot guard, healthcheck setting, start period or wait setting: it changes handler_package_announcer.py, the TopicProvisioner call in service_kernel.py and the contract-topic scan call in service_topic_startup_validator.py (no line growth in either baselined file), and adds a test, a fixture and this contract."
@@ -79,4 +85,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: test -f contracts/OMN-26322.yaml
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26322.py -k startup_loop_hold_under_one_second_topic_provisioner -q --no-cov -n 0 -p no:randomly
         cwd: .
