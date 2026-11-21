@@ -1,0 +1,62 @@
+schema_version: 1.0.0
+ticket_id: OMN-26316
+title: The dev runtime answers /health inside its compose start period on an image that carries the eval-results fixes, and a slow startup subsystem reports degraded instead of blocking the serve
+summary: >-
+  The runtime's /health server ran on the kernel's asyncio loop, so synchronous work on that loop left the probe with no answer and the container healthcheck read probe_unreachable. A new acceptor, HealthProbeAcceptor in handlers/http_mount, owns the health port and accepts on its own thread. It offers each connection to the loop. When the loop does not claim it within 4 s, the acceptor answers HTTP 503 with status degraded and the typed reason event_loop_unresponsive. The health gate, the boot guard, the compose wait and the start period are not changed, and the semantic healthcheck still fails that answer.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26316-health-answers-off-loop
+    statement: The runtime answers /health within the probe timeout while its event loop is blocked, with a typed degraded reason, and no gate is weakened.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the call the runtime blocks on before it serves /health is measured from a reproduction on a lab host at omnimarket 9f421237 and named in the PR body under a section headed Measured startup block, with a stack or task-dump excerpt, the host and the UTC read time -- falsifier: onex scm pr-view of the PR shows no section headed Measured startup block holding a stack excerpt and a UTC read time"
+      - id: AC2
+        statement: "AC2: a regression test built from the recorded 09:10Z job record and agent journal excerpt (fixture path named in the PR) shows that a runtime whose slow startup subsystem never completes still serves /health inside the compose start period and reports degraded with a typed reason -- falsifier: uv run pytest tests -q -k startup_health_degraded fails at origin/main or origin/dev and passes on the PR branch"
+      - id: AC3
+        statement: "AC3: the health gate, the boot guard, the compose wait and the compose start period are unchanged by the PR -- falsifier: git diff origin/dev --stat on the PR branch lists no health gate setting, no boot guard file, no compose file and no wait setting, run with uv run pytest tests -q -k startup_health_degraded"
+evidence_requirements:
+  - kind: tests
+    description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
+    command: uv run --frozen pytest tests/unit/services/test_startup_health_degraded_omn26316.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26316-ac1-measured-startup-block
+    description: "The recorded fixture holds the reproduction's main-thread stack excerpt, its UTC read time and the lab host; the PR body quotes it under Measured startup block."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: python3 -c "import json; r = json.load(open('tests/fixtures/omn26316/dev_roll_1e15179f_startup_block.json'))['reproduction']; assert r['host'] == 'h053' and r['main_thread_stack_utc'].endswith('Z') and any('in bootstrap' in line for line in r['main_thread_stack'])"
+        cwd: .
+  - id: dod-omn26316-ac2-startup-health-degraded
+    description: "With the loop blocked past the probe timeout, /health answers inside the timeout and the start period with status degraded and degraded_reason event_loop_unresponsive; the test fails at origin/dev with no answer."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/services/test_startup_health_degraded_omn26316.py -k startup_health_degraded -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-ac3-gate-unchanged
+    description: "The semantic container healthcheck still returns FAIL for the stalled-loop answer, and the change edits no compose file, boot guard, healthcheck setting or wait setting."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/services/test_startup_health_degraded_omn26316.py -k answers_while_loop_is_blocked -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-deploy-acceptor-live
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime container imports the health acceptor this change adds, and its /health answers within 5 s with a JSON status. It reads the live container, which carries the module only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime python -c 'from omnibase_infra.handlers.http_mount import HealthProbeAcceptor'
+      - check_type: command
+        check_value: bash -c 'docker exec omninode-runtime curl -s -m 5 http://localhost:8085/health | grep -q "\"status\""'

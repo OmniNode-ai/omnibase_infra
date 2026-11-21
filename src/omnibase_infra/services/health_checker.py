@@ -84,7 +84,11 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.enum_runtime_readiness_state import (
     EnumRuntimeReadinessState,
 )
-from omnibase_infra.handlers.http_mount import AsgiMounts, listener_runner
+from omnibase_infra.handlers.http_mount import (
+    AsgiMounts,
+    HealthProbeAcceptor,
+    listener_runner,
+)
 from omnibase_infra.handlers.mixin_shared_listener import MixinSharedListener
 from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
 from omnibase_infra.runtime.health.runtime_health_block import (
@@ -346,7 +350,7 @@ class ServiceHealth(MixinSharedListener):
         self._mount_task: asyncio.Task[None] | None = None
         self._app: web.Application | None = None
         self._runner: web.AppRunner | None = None
-        self._site: web.TCPSite | None = None
+        self._site: HealthProbeAcceptor | None = None
         self._is_running: bool = False
 
         # OMN-11198: Manifest attached after startup for introspection endpoint
@@ -675,7 +679,7 @@ class ServiceHealth(MixinSharedListener):
             2. Create aiohttp Application instance
             3. Register health check routes (/health, /ready)
             4. Initialize AppRunner and perform async setup
-            5. Create TCPSite bound to configured host and port
+            5. Bind the port in HealthProbeAcceptor (OMN-26316)
             6. Start listening for incoming health check requests
             7. Mark server as running and log startup with correlation tracking
 
@@ -725,16 +729,7 @@ class ServiceHealth(MixinSharedListener):
             >>> # Liveness:  curl http://localhost:8085/health
             >>> # Readiness: curl http://localhost:8085/ready
 
-        Example Error (Port In Use):
-            RuntimeHostError: Failed to start health server on 0.0.0.0:8085: [Errno 48] Address already in use
-            (correlation_id: 123e4567-e89b-12d3-a456-426614174000)
-
-        Docker Integration (liveness):
-            HEALTHCHECK --interval=30s --timeout=3s \\
-                CMD curl -f http://localhost:8085/health || exit 1
-
-            Kubernetes readiness probes should target ``/ready`` instead
-            of ``/health``.
+        Kubernetes readiness probes should target ``/ready``, not ``/health``.
         """
         if self._is_running:
             logger.debug("ServiceHealth already started, skipping")
@@ -755,8 +750,15 @@ class ServiceHealth(MixinSharedListener):
             self._runner = listener_runner(self._app)
             await self._runner.setup()
 
-            # Create site and start listening
-            self._site = web.TCPSite(self._runner, self._host, self._port)
+            # OMN-26316: accept on a thread, so a stalled loop still answers.
+            self._site = HealthProbeAcceptor(
+                host=self._host,
+                port=self._port,
+                version=self._version,
+                protocol_factory=cast(
+                    "Callable[[], asyncio.BaseProtocol]", self._runner.server
+                ),
+            )
             await self._site.start()
 
             self._is_running = True
@@ -815,7 +817,7 @@ class ServiceHealth(MixinSharedListener):
 
         Shutdown Process:
             1. Check if server is already stopped (idempotent safety check)
-            2. Stop TCPSite to reject new connections
+            2. Stop the health acceptor to reject new connections
             3. Clean up AppRunner to release resources
             4. Clear Application reference
             5. Mark server as not running
@@ -824,7 +826,7 @@ class ServiceHealth(MixinSharedListener):
         Resource Cleanup Order:
             The cleanup follows reverse initialization order to ensure proper
             resource release and prevent resource leaks:
-            - TCPSite (network binding)
+            - HealthProbeAcceptor (network binding)
             - AppRunner (request handlers)
             - Application (route definitions)
 
@@ -860,17 +862,9 @@ class ServiceHealth(MixinSharedListener):
         await self.drain_shared_listener()
         await self._http_mounts.stop()
 
-        # Cleanup in reverse order of creation
-        # Stop TCPSite first to reject new connections
+        # Stop the acceptor first to reject new connections (OMN-26316)
         if self._site is not None:
-            try:
-                await self._site.stop()
-            except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "Error stopping TCPSite during shutdown (correlation_id=%s)",
-                    correlation_id,
-                    extra={"error_type": type(e).__name__, "error": str(e)},
-                )
+            await self._site.stop()
             self._site = None
 
         # Clean up AppRunner to release resources
