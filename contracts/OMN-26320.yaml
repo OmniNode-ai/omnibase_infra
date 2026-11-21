@@ -30,12 +30,15 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn26320-ac1-measured-loop-blocks
-    description: "The recorded fixture holds the lab host, the reproduction refs, the contiguous wire_from_manifest loop block and the per-call durations of the 807 contract preparations and 1834 handler imports; the PR body quotes them under Measured loop blocks."
+    description: "The recorded fixture holds the lab host, the reproduction refs, the contiguous wire_from_manifest loop block and the per-call durations of the 807 contract preparations and 1834 handler imports; the PR body quotes them under Measured loop blocks. The second check replays those recorded durations through the real wire_from_manifest, so the item fails at the merge base, where the loop is held for the measured block, and passes at the head. The PR body section itself is read by the reviewer; no runner check reads a PR body."
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: command
         check_value: python3 -c "import json; d = json.load(open('tests/fixtures/omn26320/devboot_1000_wiring_block_profile.json')); r = d['reproduction']; assert r['host'] == 'h053' and r['wire_from_manifest_contiguous_loop_block_seconds'] > 10 and len(d['prepare_contract_wiring_ms']) == 807 and len(d['import_handler_class_ms']) == 1834"
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_off_loop_omn26320.py -k startup_wiring_off_loop -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26320-ac2-startup-wiring-off-loop
     description: "A /health probe on the wiring loop's own event loop is answered inside 0.8 s while the recorded dev-sized wiring pass runs; the test fails with a 3 s wait when wiring does not hand the loop back."
