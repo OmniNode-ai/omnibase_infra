@@ -1,0 +1,77 @@
+{
+  "ticket": "OMN-26316",
+  "source": "dev deploy-agent job record and deploy-agent-dev journal on the dev host, read 2026-11-21T09:50Z-09:58Z; reproduction stack read on lab host h053",
+  "job_record": {
+    "correlation_id": "1e15179f-6da2-45ca-911a-2c58b33c8bf4",
+    "requested_by": "agent/idle-restore",
+    "scope": "runtime",
+    "runtime_lane": "dev",
+    "build_source": "workspace",
+    "accepted_at": "2026-11-21T09:00:17.743944Z",
+    "completed_at": "2026-11-21T09:43:15.452047Z",
+    "status": "failed",
+    "phase_results": {
+      "preflight": "success",
+      "git": "success",
+      "compose_gen": "success",
+      "seed": "success",
+      "runtime": "failed",
+      "core": "skipped",
+      "verification": "skipped"
+    },
+    "settling_stage": "boot_recovery",
+    "container_started": "2026-11-21T09:10:40.84177509Z",
+    "health_streak": 5,
+    "restarts": 0,
+    "oom": false,
+    "last_probe_exit": 1,
+    "last_probe_output": "FAIL [probe_unreachable] health endpoint unreachable or unparseable"
+  },
+  "journal_excerpt_utc": [
+    "2026-11-21T09:00:52Z deploy_agent.executor: _compose_build: BUILD_SOURCE=workspace OMNIMARKET_REF=9f421237f6f4",
+    "2026-11-21T09:09:52Z deploy_agent.executor: Phase runtime compose-up ceiling 600s (floor 600s; no gated service in the compose model declares a healthcheck start_period)",
+    "2026-11-21T09:43:11Z deploy_agent.executor: Docker compose up returned non-zero; verifying live service state before failing: Runtime roll stopped at omninode-runtime: RuntimeError: ... Waiting container omninode-runtime is unhealthy",
+    "2026-11-21T09:43:17Z omnibase_infra.handlers.handler_dev_boot_guard: Dev boot window project=omnibase-infra seconds=2000"
+  ],
+  "dev_healthcheck": {
+    "test": [
+      "python",
+      "/usr/local/bin/onex-container-healthcheck",
+      "--degraded-policy",
+      "fail"
+    ],
+    "probe_http_timeout_seconds": 5.0,
+    "interval_seconds": 30,
+    "timeout_seconds": 10,
+    "retries": 5,
+    "start_period_seconds": 1800
+  },
+  "reproduction": {
+    "host": "h053",
+    "omnimarket_ref": "9f421237f6f4",
+    "omnibase_infra_ref": "104413538",
+    "stubbed": "in-memory event bus instead of the dev broker; empty scratch postgres with forward migrations instead of the dev database",
+    "health_samples_utc": [
+      "2026-11-21T10:05:36Z /health no answer within 10s (curl 000 after 9.85s)",
+      "2026-11-21T10:11:36Z /health 503 after 5.63s",
+      "2026-11-21T10:11:51Z /health 200 after 0.27s"
+    ],
+    "main_thread_stack_utc": "2026-11-21T10:11:35.055067Z",
+    "main_thread_stack": [
+      "File \"<scratch>/stackwatch.py\", line 17, in <module>",
+      "File \"omnibase_infra/runtime/service_kernel.py\", line 6010, in main",
+      "File \"<stdlib>/asyncio/runners.py\", line 196, in run",
+      "File \"<stdlib>/asyncio/runners.py\", line 119, in run",
+      "File \"<stdlib>/asyncio/base_events.py\", line 713, in run_until_complete",
+      "File \"<stdlib>/asyncio/base_events.py\", line 684, in run_forever",
+      "File \"<stdlib>/asyncio/base_events.py\", line 2061, in _run_once",
+      "File \"<stdlib>/asyncio/events.py\", line 89, in _run",
+      "File \"omnibase_infra/runtime/service_kernel.py\", line 4101, in bootstrap",
+      "File \"omnibase_infra/runtime/auto_wiring/handler_wiring.py\", line 10021, in wire_from_manifest",
+      "File \"omnibase_infra/runtime/auto_wiring/handler_wiring.py\", line 11128, in _prepare_contract_wiring",
+      "File \"omnibase_infra/runtime/auto_wiring/handler_wiring.py\", line 12313, in _prepare_handler_wiring",
+      "File \"omnibase_infra/runtime/event_bus_subcontract_wiring.py\", line 1492, in load_published_events_map",
+      "File \"omnibase_infra/contracts/contract_yaml.py\", line 22, in read_contract_yaml"
+    ]
+  }
+}

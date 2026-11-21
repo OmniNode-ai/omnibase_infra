@@ -83,7 +83,7 @@ class TestServiceHealthLifecycle:
                 "omnibase_infra.services.health_checker.web.AppRunner"
             ) as mock_runner:
                 with patch(
-                    "omnibase_infra.services.health_checker.web.TCPSite"
+                    "omnibase_infra.services.health_checker.HealthProbeAcceptor"
                 ) as mock_site:
                     mock_app_instance = MagicMock()
                     mock_app_instance.router = MagicMock()
@@ -122,7 +122,7 @@ class TestServiceHealthLifecycle:
                 "omnibase_infra.services.health_checker.web.AppRunner"
             ) as mock_runner:
                 with patch(
-                    "omnibase_infra.services.health_checker.web.TCPSite"
+                    "omnibase_infra.services.health_checker.HealthProbeAcceptor"
                 ) as mock_site:
                     mock_app_instance = MagicMock()
                     mock_app_instance.router = MagicMock()
@@ -172,7 +172,7 @@ class TestServiceHealthLifecycle:
                 "omnibase_infra.services.health_checker.web.AppRunner"
             ) as mock_runner:
                 with patch(
-                    "omnibase_infra.services.health_checker.web.TCPSite"
+                    "omnibase_infra.services.health_checker.HealthProbeAcceptor"
                 ) as mock_site:
                     mock_app_instance = MagicMock()
                     mock_app_instance.router = MagicMock()
@@ -589,11 +589,8 @@ class TestServiceHealthIntegration:
             # Get actual port after binding - use type assertions for mypy
             site = server._site
             assert site is not None
-            internal_server = site._server
-            assert internal_server is not None
-            sockets = getattr(internal_server, "sockets", None)
-            assert sockets is not None and len(sockets) > 0
-            actual_port: int = sockets[0].getsockname()[1]
+            actual_port: int = site.port
+            assert actual_port > 0
 
             # Make real HTTP request using aiohttp
             import aiohttp
@@ -1201,7 +1198,7 @@ class TestServiceHealthPrivateAttributeDocumentation:
       bound port when using port=0 (auto-assign). There is no public API to
       retrieve the actual port after binding.
 
-    - `server._site._server`: The underlying server object containing sockets,
+    - `server._site`: The HealthProbeAcceptor, whose `port` is the bound port,
       accessed to get socket information for verifying port binding.
 
     - `server._app`, `server._runner`: Internal aiohttp components, accessed
@@ -1232,7 +1229,7 @@ class TestServiceHealthPrivateAttributeDocumentation:
 
         Private attributes accessed in this test module:
         - _site: TCPSite instance for getting bound socket info
-        - _site._server: Server object containing sockets list
+        - _site.port: bound port from the HealthProbeAcceptor
         - _app: aiohttp Application instance
         - _runner: aiohttp AppRunner instance
         - _runtime: RuntimeHostProcess reference
@@ -1265,7 +1262,7 @@ class TestServiceHealthPrivateAttributeDocumentation:
         there is no public API to discover the actual assigned port. The only way
         to get this information is through private attribute access:
 
-            server._site._server.sockets[0].getsockname()[1]
+            server._site.port
 
         This pattern is necessary for integration tests that need to make real
         HTTP requests to the server after it binds to an auto-assigned port.

@@ -150,11 +150,7 @@ class TestShutdownHealthIntegration:
             # Get actual port after binding
             site = health_server._site
             assert site is not None
-            internal_server = site._server
-            assert internal_server is not None
-            sockets = getattr(internal_server, "sockets", None)
-            assert sockets is not None and len(sockets) > 0
-            actual_port: int = sockets[0].getsockname()[1]
+            actual_port: int = site.port
 
             try:
                 # Verify health returns 200 when runtime is running
@@ -211,11 +207,7 @@ class TestShutdownHealthIntegration:
             # Get actual port
             site = health_server._site
             assert site is not None
-            internal_server = site._server
-            assert internal_server is not None
-            sockets = getattr(internal_server, "sockets", None)
-            assert sockets is not None and len(sockets) > 0
-            actual_port: int = sockets[0].getsockname()[1]
+            actual_port: int = site.port
 
             try:
                 # Stop runtime completely
@@ -272,11 +264,7 @@ class TestShutdownHealthIntegration:
                 # Get actual port
                 site = health_server._site
                 assert site is not None
-                internal_server = site._server
-                assert internal_server is not None
-                sockets = getattr(internal_server, "sockets", None)
-                assert sockets is not None and len(sockets) > 0
-                actual_port: int = sockets[0].getsockname()[1]
+                actual_port: int = site.port
 
                 # Verify health returns 200
                 async with aiohttp.ClientSession() as session:
@@ -451,11 +439,7 @@ class TestServiceHealthShutdownBehavior:
         # Get actual port
         site = health_server._site
         assert site is not None
-        internal_server = site._server
-        assert internal_server is not None
-        sockets = getattr(internal_server, "sockets", None)
-        assert sockets is not None and len(sockets) > 0
-        actual_port: int = sockets[0].getsockname()[1]
+        actual_port: int = site.port
 
         try:
             # Act - request health when runtime never started
@@ -497,11 +481,7 @@ class TestServiceHealthShutdownBehavior:
             # Get actual port
             site = health_server._site
             assert site is not None
-            internal_server = site._server
-            assert internal_server is not None
-            sockets = getattr(internal_server, "sockets", None)
-            assert sockets is not None and len(sockets) > 0
-            actual_port: int = sockets[0].getsockname()[1]
+            actual_port: int = site.port
 
             try:
                 # Stop runtime
