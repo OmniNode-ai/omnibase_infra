@@ -22,7 +22,7 @@ class ModelLazyStartRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
 
     operation: Literal["node.start.requested"] = "node.start.requested"
-    contract_id: str = Field(min_length=1)
+    target_contract: str = Field(min_length=1)
     topic: str = Field(min_length=1)
     correlation_id: UUID
     envelope: object

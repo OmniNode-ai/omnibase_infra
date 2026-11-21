@@ -35,7 +35,7 @@ from omnibase_infra.models.lazy_start import (
     ModelLazyStartRequest,
     ModelLazyStartResult,
 )
-from omnibase_infra.protocols.protocol_lazy_start_transaction import (
+from omnibase_infra.protocols.protocol_lazy_start_bus import (
     ProtocolLazyStartBus,
 )
 from omnibase_infra.protocols.protocol_topic_provisioner import (
@@ -88,7 +88,7 @@ class HandlerLazyStartIngress:
         front_door = self._front_door_of_this_boot()
         if front_door is None:
             return ModelLazyStartResult(
-                contract_id=request.contract_id,
+                target_contract=request.target_contract,
                 correlation_id=request.correlation_id,
                 outcome=EnumLazyStartOutcome.CONTRACT_NOT_ANNOUNCED,
                 detail="this runtime booted with no lazy-start policy",

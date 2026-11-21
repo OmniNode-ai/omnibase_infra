@@ -41,7 +41,7 @@ from omnibase_infra.event_bus.model_contract_attach_result import (
 from omnibase_infra.event_bus.model_topic_readiness_config import (
     ModelTopicReadinessConfig,
 )
-from omnibase_infra.protocols.protocol_lazy_start_transaction import (
+from omnibase_infra.protocols.protocol_lazy_start_bus import (
     ProtocolLazyStartBus,
 )
 from omnibase_infra.protocols.protocol_topic_provisioner import (

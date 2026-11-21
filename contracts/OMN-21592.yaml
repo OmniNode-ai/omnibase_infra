@@ -91,7 +91,7 @@ dod_evidence:
         check_value: docker exec omninode-runtime python -c 'from omnibase_infra.handlers.lazy_start_front_door import LazyStartFrontDoor; from omnibase_infra.handlers.handler_lazy_start_ingress import HandlerLazyStartIngress'
       - check_type: command
         check_value: bash -c 'docker exec omninode-runtime curl -s -m 5 http://localhost:8085/health | grep -q "\"status\""'
-  - id: dod-omn21592-integration-proof-ingress-wires-from-disk
+  - id: dod-omn21592-integration-proof-ingress-wires
     description: "The ingress node's real contract.yaml loads from disk and wires through wire_from_manifest with the container and bus the kernel registers, with one handler wired and none failed."
     source: manual
     execution_scope: local_done_gate

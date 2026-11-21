@@ -52,7 +52,7 @@ from omnibase_infra.models.lazy_start import (
     ModelLazyStartPolicy,
     ModelLazyStartRequest,
 )
-from omnibase_infra.protocols.protocol_lazy_start_transaction import (
+from omnibase_infra.protocols.protocol_lazy_start_bus import (
     ProtocolLazyStartBus,
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
@@ -324,7 +324,10 @@ def _request(name: str = TARGET) -> ModelLazyStartRequest:
         payload={"ask": "first"}, correlation_id=uuid4(), event_type="FixtureRequest"
     )
     return ModelLazyStartRequest(
-        contract_id=name, topic=_cmd(name), correlation_id=uuid4(), envelope=envelope
+        target_contract=name,
+        topic=_cmd(name),
+        correlation_id=uuid4(),
+        envelope=envelope,
     )
 
 
