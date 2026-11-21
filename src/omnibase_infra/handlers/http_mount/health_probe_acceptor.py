@@ -76,7 +76,7 @@ def render_event_loop_stall_response(
     return head.encode("ascii") + payload
 
 
-class _Offer:
+class ConnectionOffer:
     """One connection offered to the loop; claimed by it or withdrawn."""
 
     __slots__ = ("claimed", "lock", "withdrawn")
@@ -187,7 +187,7 @@ class HealthProbeAcceptor:
         if loop is None or loop.is_closed():
             conn.close()
             return
-        offer = _Offer()
+        offer = ConnectionOffer()
         try:
             loop.call_soon_threadsafe(self._hand_off, conn, offer)
         except RuntimeError:
@@ -201,7 +201,7 @@ class HealthProbeAcceptor:
             offer.withdrawn = True
         self._answer_stalled(conn)
 
-    def _hand_off(self, conn: socket.socket, offer: _Offer) -> None:
+    def _hand_off(self, conn: socket.socket, offer: ConnectionOffer) -> None:
         with offer.lock:
             if offer.withdrawn:
                 return

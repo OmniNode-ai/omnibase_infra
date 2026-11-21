@@ -31,7 +31,7 @@ dod_evidence:
     binds_ac: [AC1]
     checks:
       - check_type: command
-        check_value: python3 -c "import json; r = json.load(open('tests/fixtures/omn26316/dev_roll_1e15179f_startup_block.json'))['reproduction']; assert r['host'] == 'h053' and r['main_thread_stack_utc'].endswith('Z') and any('in bootstrap' in line for line in r['main_thread_stack'])"
+        check_value: uv run --frozen python -c "import json; r = json.load(open('tests/fixtures/omn26316/dev_roll_1e15179f_startup_block.json'))['reproduction']; assert r['host'] == 'h053' and r['main_thread_stack_utc'].endswith('Z') and any('in bootstrap' in line for line in r['main_thread_stack']); from omnibase_infra.handlers.http_mount import HealthProbeAcceptor"
         cwd: .
   - id: dod-omn26316-ac2-startup-health-degraded
     description: "With the loop blocked past the probe timeout, /health answers inside the timeout and the start period with status degraded and degraded_reason event_loop_unresponsive; the test fails at origin/dev with no answer."
