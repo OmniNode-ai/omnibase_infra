@@ -1,10 +1,10 @@
 {
   "host": "h051",
-  "method": "one CPU (taskset -c 71), 3 runs each, step 0 plus discover_contracts, yaml parse count read at the contract reader inside the window",
+  "method": "one CPU (taskset -c 71), 3 runs each, median; boot step 0 plus discover_contracts; yaml parse count read at the contract reader inside the window",
   "installed_contracts": 192,
   "before_ref": "origin/dev 0dabf0c2c1d1ef384eea3f541d8faf6bbbb121e8",
-  "after_ref": "branch omn-26361-image-prebuilt-node-manifest",
-  "before": {"step0_s": 4.40, "discover_s": 0.27, "total_s": 4.67, "contract_yaml_parses": 391},
-  "after": {"load_s": 0.21, "total_s": 0.21, "contract_yaml_parses": 0},
-  "read_utc": "2026-11-21T15:59:33Z"
+  "after_ref": "branch omn-26361-image-prebuilt-node-manifest at 2840987aa6f4b8983476d73d2865cbb684c414cf",
+  "before": {"step0_s": 4.479, "discover_s": 0.282, "total_s": 4.761, "contract_yaml_parses": 391},
+  "after": {"load_s": 0.263, "total_s": 0.263, "contract_yaml_parses": 0},
+  "read_utc": "2026-11-21T16:32:20Z"
 }
