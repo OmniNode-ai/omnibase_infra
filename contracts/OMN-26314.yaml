@@ -19,7 +19,7 @@ requirements:
       - id: AC4
         statement: "AC4: a regression test built from the recorded roll of job 1a6f753e (fixture path in the pull request: the journal lines of the 01:00 EST roll and its 7 declared installs, scrubbed) fails on the broken code and passes on the fix -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_installs_before_roll_wait.py -k recorded_roll_1a6f753e -q`"
       - id: AC5
-        statement: "AC5: the existing registered-install tests still pass, so the single store, the held reason and the idle-restore yield of OMN-26300 are intact -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py -q`"
+        statement: "AC5: the existing registered-install tests still pass, so the single store, the held reason and the idle-restore yield of OMN-26300 are intact -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py scripts/deploy-agent/tests/unit/test_deploy_agent_installs_before_roll_wait.py -k 'registered_installs or apply_before_roll_wait_the_wait_reads' -q`"
 evidence_requirements:
   - kind: tests
     description: The installs-before-roll-wait tests and the registered-install tests of the deploy-agent suite.
@@ -67,7 +67,7 @@ dod_evidence:
     binds_ac: [AC5]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_deploy_agent_registered_installs.py scripts/deploy-agent/tests/unit/test_deploy_agent_installs_before_roll_wait.py -k 'registered_installs or apply_before_roll_wait_the_wait_reads' -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26314-deploy
     description: Hosted-runner probe that reads the committed boot guard from GitHub at the checked-out commit and requires the roll step to apply the service installs before it issues the compose wait, and the apply handler to exist.
