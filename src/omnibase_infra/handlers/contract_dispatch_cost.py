@@ -19,6 +19,7 @@ reading.
 from __future__ import annotations
 
 import asyncio
+import functools
 import time
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
@@ -135,10 +136,10 @@ def get_process_contract_cost_counter() -> ContractDispatchCostCounter:
     return _PROCESS_COUNTER
 
 
-def attach_contract_dispatcher[E, T](
+def attach_contract_dispatcher[T](
     owner_contract_label: str | None,
-    dispatcher: Callable[[E], Awaitable[T]],
-) -> Callable[[E], Awaitable[T]]:
+    dispatcher: Callable[..., Awaitable[T]],
+) -> Callable[..., Awaitable[T]]:
     """Return the dispatcher the engine registers for an attached contract.
 
     A dispatcher registered with an owner contract is registered with the
@@ -152,23 +153,32 @@ def attach_contract_dispatcher[E, T](
     return measure_contract_dispatch(owner_contract_label, dispatcher)
 
 
-def measure_contract_dispatch[E, T](
+def measure_contract_dispatch[T](
     contract_label: str,
-    dispatcher: Callable[[E], Awaitable[T]],
+    dispatcher: Callable[..., Awaitable[T]],
     counter: ContractDispatchCostCounter | None = None,
-) -> Callable[[E], Awaitable[T]]:
+) -> Callable[..., Awaitable[T]]:
     """Wrap a dispatcher so every dispatch is charged to ``contract_label``.
 
     A dispatch that raises is charged too: the time it held the member is real.
+
+    The wrapper has the signature of the dispatcher it wraps and passes every
+    argument through (OMN-26404). The engine decides at registration, from the
+    registered callable's signature, whether to hand a dispatcher the
+    ``delivery`` coordinates of the consumed record and a dispatch context. A
+    wrapper that declared only the envelope hid both: every projection writer
+    was called with no delivery context, logged an error per message and
+    published its snapshot deltas at a fixed offset.
     """
     target = counter if counter is not None else _PROCESS_COUNTER
 
-    async def _measured(envelope: E) -> T:
+    @functools.wraps(dispatcher)
+    async def _measured(*args: object, **kwargs: object) -> T:
         timer = DispatchTimer()
         token = _current_timer.set(timer)
         started = time.perf_counter()
         try:
-            return await dispatcher(envelope)
+            return await dispatcher(*args, **kwargs)
         finally:
             wall = time.perf_counter() - started
             _current_timer.reset(token)
