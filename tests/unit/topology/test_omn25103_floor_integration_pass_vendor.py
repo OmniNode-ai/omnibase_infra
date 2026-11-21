@@ -104,12 +104,30 @@ def test_declared_privileges_equal_what_the_vendored_marker_migration_grants(
     assert _declared(profile) == _migration_table_privileges()
 
 
-def test_control_removing_the_marker_grant_is_reported_as_missing() -> None:
-    for profile in sorted(SUPPORTED_TOPOLOGY_PROFILES):
-        grants = declared_acl(load_topology_profile(profile)).table_grants
-        assert _declared_from(grants), profile
-        broken = [entry for entry in grants if entry[1] != _TABLE]
-        assert _declared_from(broken) == set(), profile
+def _without_marker(value: object) -> object:
+    """The topology with floor_integration_pass taken out of every grant's objects."""
+    if isinstance(value, dict):
+        return {key: _without_marker(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_without_marker(item) for item in value if item != _TABLE)
+    return value
+
+
+@pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
+def test_control_a_profile_without_the_marker_grant_is_reported_as_missing(
+    profile: str,
+) -> None:
+    """The real ACL derivation, run on the profile with the grant removed, finds none.
+
+    So the check above reads the shipped instance and would report a profile
+    that lacks the grant, rather than passing whatever the profile says.
+    """
+    topology = load_topology_profile(profile)
+    assert _declared(profile), profile
+    stripped = type(topology).model_validate(
+        _without_marker(topology.model_dump(mode="python"))
+    )
+    assert _declared_from(declared_acl(stripped).table_grants) == set(), profile
 
 
 def test_vendored_marker_migrations_match_omnimarket_and_ledger() -> None:
