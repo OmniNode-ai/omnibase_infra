@@ -1,0 +1,124 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeRuntimeLoopReadingEffect
+#
+# Each runtime member publishes, every window, how late its event loop ran, how
+# late the newest runtime tick was when it consumed it, and how many dispatches
+# it abandoned at their deadline, so a stalled loop reads as a number.
+#
+# Related Tickets:
+#   - OMN-26249: this node
+#   - OMN-19355: the dispatch-deadline status the abandoned count comes from
+name: "node_runtime_loop_reading_effect"
+contract_name: "node_runtime_loop_reading_effect"
+node_name: "node_runtime_loop_reading_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+# Only node_archetype: the check-no-io-outside-effects hook keys its I/O rule on it.
+descriptor:
+  node_archetype: effect
+description: >
+  Close one event-loop reading window of a runtime member into a reading carrying the member id, host, window bounds, maximum loop gap, tick lag (or why there is none) and the abandoned-dispatch count.
+
+input_model:
+  name: "ModelRuntimeLoopWindowRequest"
+  module: "omnibase_infra.models.health.model_runtime_loop_window_request"
+  description: "The member identity, host, window end and abandoned-dispatch count."
+output_model:
+  name: "ModelRuntimeLoopReading"
+  module: "omnibase_infra.models.health.model_runtime_loop_reading"
+  description: "One window's loop gap, tick lag and abandoned-dispatch reading."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "runtime_loop_reading.close_window"
+      handler:
+        name: "HandlerRuntimeLoopLagSampler"
+        module: "omnibase_infra.handlers.handler_runtime_loop_lag_sampler"
+      description: >
+        Close the open window of the process's loop-lag sampler into a reading.
+
+      supported_operations:
+        - "runtime_loop_reading.close_window"
+      input_model:
+        name: "ModelRuntimeLoopWindowRequest"
+        module: "omnibase_infra.models.health.model_runtime_loop_window_request"
+        description: "The member identity, host, window end and abandoned-dispatch count."
+      output_fields:
+        - member_id
+        - host
+        - window_start
+        - window_end
+        - max_loop_gap_ms
+        - tick_subscriber
+        - tick_lag_ms
+        - tick_lag_not_applicable_reason
+        - abandoned_dispatches
+io_operations:
+  - operation: "runtime_loop_reading.close_window"
+    description: "Close the open reading window of this member."
+    input_fields:
+      - member_id
+      - host
+      - window_end
+      - abandoned_dispatches
+    output_fields:
+      - member_id
+      - host
+      - window_start
+      - window_end
+      - max_loop_gap_ms
+      - tick_subscriber
+      - tick_lag_ms
+      - tick_lag_not_applicable_reason
+      - abandoned_dispatches
+capabilities:
+  - name: "runtime_loop_reading.close_window"
+    description: "Report a runtime member's event-loop lag, tick lag and abandoned dispatches for one window."
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  publish_topics:
+    - "onex.evt.omnibase-infra.runtime-loop-reading-recorded.v1"
+topics:
+  produces:
+    - topic: "onex.evt.omnibase-infra.runtime-loop-reading-recorded.v1"
+      description: "One runtime member's event-loop reading for one window"
+      schema: "ModelRuntimeLoopReading"
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - "ValidationError"
+metadata:
+  description: >
+    The runtime host process runs this node's handler each window and publishes the reading it returns; the handler holds no bus access.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-11-21"
+  updated: "2026-11-21"
+  tags:
+    - effect
+    - runtime
+    - event-loop
+    - health
+  related_tickets:
+    - "OMN-26249"
+    - "OMN-19355"
