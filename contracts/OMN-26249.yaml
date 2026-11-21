@@ -1,0 +1,87 @@
+schema_version: 1.0.0
+ticket_id: OMN-26249
+title: Each dev runtime member publishes its event-loop lag, tick lag and abandoned-dispatch count every window, so a stalled loop reads as a number
+summary: >-
+  A runtime member whose event loop is stalled cannot report the stall through any path that runs on that loop, so the stall has to be read as a number after the fact. The runtime host process of every member now starts a publisher, owned by the node's handler module, that runs a sampler that schedules a short sleep and records how late the loop woke it, and every 60 s window it publishes one reading to onex.evt.omnibase-infra.runtime-loop-reading-recorded.v1 carrying the member id, host, window start and end, the maximum gap in milliseconds, the tick lag (or the reason there is none, which tells a member that does not subscribe to the tick from a subscriber that consumed none) and the abandoned-dispatch count from the dispatch-deadline status of OMN-19355. The topic is declared in the contract of the new node node_runtime_loop_reading_effect; the sampler, the window close and the per-window publisher live in the handler module that contract binds.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26249-runtime-loop-reading
+    statement: A runtime member publishes its event-loop lag, tick lag and abandoned-dispatch count every window under its own identity.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the sampler reads a 0.6 s block as a gap of at least 0.48 s and an idle loop as under 0.1 s -- falsifier: `pytest tests/unit/runtime/test_loop_lag_sampler.py -k block` and `-k idle` (the first red on a build with the sampler removed)"
+      - id: AC2
+        statement: "AC2: the reading carries member id, host, window start and end, maximum gap in ms, tick lag in ms (or the not-applicable reason for a non-subscriber), and the abandoned count; none of these fields is optional -- falsifier: a model test that omits each field in turn and expects a validation error"
+      - id: AC3
+        statement: "AC3: on dev, 20 minutes of readings arrive at least once per window with no gap in the windows -- falsifier: `onex run-node` reading of the topic, count of windows against minutes, fewer than expected fails"
+evidence_requirements:
+  - kind: tests
+    description: The loop-lag sampler and reading model tests, and the publisher, tick-wiring and contract-topic tests.
+    command: uv run --frozen pytest tests/unit/runtime/test_loop_lag_sampler.py tests/unit/runtime/test_runtime_loop_reading_wiring_omn26249.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26249-ac1-sampler-reads-block-and-idle
+    description: >-
+      A handler-shaped time.sleep(0.6) on the loop makes the sampler read a maximum gap of at least 480 ms, including when the block is still running as the window closes, and an idle loop reads under 100 ms. With the sampler module removed the test file fails at collection, which is the first red.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_loop_lag_sampler.py -k "block or idle" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26249-ac2-reading-fields-required
+    description: >-
+      The reading model refuses a reading missing any one of its ten fields (parametrized over every field), refuses both or neither of tick lag and its not-applicable reason, and refuses a tick lag on a member that does not subscribe. The sampler reports a non-subscriber as not applicable with the reason, and a subscriber that consumed no tick with a different reason.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_loop_lag_sampler.py -k "reading or subscriber or tick" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26249-ac3-one-reading-per-window
+    description: >-
+      The 20-minute reading on the dev runtime cannot be taken by a hosted runner and is recorded in the pull request's Lab line. This entry binds the behaviour it reads: the publisher publishes one reading per window on a fixed schedule, windows are contiguous (each window starts where the previous ended), the topic is the contracted one, the abandoned count comes from the bus's dispatch-deadline status, a tick consumed on the tick topic reaches the sampler as tick lag.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_runtime_loop_reading_wiring_omn26249.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26249-deploy-sampler-in-dev-runtime
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime container imports the sampler module this change adds, so the member can start its loop reading. It reads the live container, which carries the module only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion (AC1 and AC2 are bound by the unit tests).
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime python -c 'import omnibase_infra.handlers.handler_runtime_loop_lag_sampler'
+        cwd: .
+  - id: dod-omn26249-deploy-readings-on-the-topic
+    description: >-
+      Post-deploy probe: the contracted topic holds readings carrying the maximum loop gap, read from the broker the dev runtime publishes to. The 20-minute window count of AC3 is read with the same consume over 20 minutes and recorded as read_at evidence in the pull request and the ticket; this check is the live half a Done gate can repeat.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: bash -c 'docker exec omnibase-infra-redpanda rpk topic consume onex.evt.omnibase-infra.runtime-loop-reading-recorded.v1 --offset -3 --num 3 --format json | grep -c max_loop_gap_ms | grep -qx 3'
+        cwd: .
+  - id: dod-omn26249-ac3-integration-proof-reading-topic
+    description: >-
+      The real publisher against a real in-memory bus: a subscriber of the topic the on-disk node contract declares receives a reading that validates as the reading model and carries the gap of a 0.6 s block on the loop.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_runtime_loop_reading_publish_omn26249.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
