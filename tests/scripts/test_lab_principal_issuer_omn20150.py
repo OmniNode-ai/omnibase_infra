@@ -324,6 +324,7 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.evt.omnimarket.pr-landing-snapshot-failed.v1",
         "onex.evt.omnimarket.pr-landing-tick-compared.v1",
         "onex.evt.omnimarket.pr-landing-tick-compare-failed.v1",
+        "onex.evt.omnimarket.host-job-claim-run-completed.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
 

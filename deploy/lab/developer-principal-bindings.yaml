@@ -199,6 +199,10 @@
 # result on `onex.evt.omnimarket.pr-landing-tick-compared.v1` and a failure on
 # `onex.evt.omnimarket.pr-landing-tick-compare-failed.v1` (its contract's publish topics)
 # through the declared bus publisher, so the principal produces both; nothing here reads them.
+# HOST JOB CLAIM RUN (OMN-26302): node_host_job_claim_compute's hourly host tick publishes one record per run on
+# `onex.evt.omnimarket.host-job-claim-run-completed.v1` (its contract's topic) through the declared bus publisher
+# as the host's issued principal, so the principal produces it; nothing here reads it. Without the grant the broker
+# refuses the publish (TopicAuthorizationFailedError) and the tick exits 3 with emitted=false.
 # Machine-only writes live in machine-principal-bindings.yaml (OMN-21622).
 principal: "{principal}"
 bindings:
@@ -310,6 +314,7 @@ bindings:
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-snapshot-failed.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-tick-compared.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-landing-tick-compare-failed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.host-job-claim-run-completed.v1, direction: produce}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}

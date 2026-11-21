@@ -1117,6 +1117,20 @@
     {
       "broker": "dev",
       "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.host-job-claim-run-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.host-job-claim-run-completed.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.linear-ticket-write-completed.v1",
       "operation": "DESCRIBE",
       "pattern": "LITERAL"
