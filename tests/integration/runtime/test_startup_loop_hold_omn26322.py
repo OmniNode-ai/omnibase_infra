@@ -198,6 +198,51 @@ def test_startup_loop_hold_under_one_second_topic_provisioner() -> None:
     assert len(offloaded) == 1
 
 
+@pytest.mark.asyncio
+async def test_startup_loop_hold_under_one_second_topic_validator() -> None:
+    """The startup validator reads the recorded contract-topic scan off the loop."""
+    from omnibase_infra.event_bus.service_topic_startup_validator import (
+        TopicStartupValidator,
+    )
+
+    recorded = float(str(_hold("topic_startup_validator")["contiguous_s"]))
+    assert recorded > _HOLD_LIMIT_S
+    replay = min(recorded, _REPLAY_CAP_S)
+
+    def slow_required(self: object) -> tuple[str, ...]:
+        time.sleep(replay)
+        return ()
+
+    validator = TopicStartupValidator(
+        bootstrap_servers="127.0.0.1:1", request_timeout_ms=1000
+    )
+    with patch.object(TopicStartupValidator, "_required_topics", slow_required):
+        gap, _result = await _longest_gap(validator.validate(log_missing=False))
+    assert gap < _HOLD_LIMIT_S, (
+        f"the topic startup validator held the loop {gap:.2f}s replaying the "
+        f"recorded {recorded}s contract-topic scan"
+    )
+
+
+@pytest.mark.asyncio
+async def test_startup_wiring_error_fails_startup_topic_validator() -> None:
+    """A scan error raised on the worker thread reaches validate's caller unchanged."""
+    from omnibase_infra.event_bus.service_topic_startup_validator import (
+        TopicStartupValidator,
+    )
+
+    raised = _BootStepError("contract-topic scan failed")
+
+    def failing_required(self: object) -> tuple[str, ...]:
+        raise raised
+
+    validator = TopicStartupValidator(bootstrap_servers="127.0.0.1:1")
+    with patch.object(TopicStartupValidator, "_required_topics", failing_required):
+        with pytest.raises(_BootStepError) as caught:
+            await validator.validate(log_missing=False)
+    assert caught.value is raised
+
+
 class _BootStepError(RuntimeError):
     """A typed failure raised inside the work moved off the loop."""
 
