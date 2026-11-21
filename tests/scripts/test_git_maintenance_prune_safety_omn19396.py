@@ -14,7 +14,7 @@ remote branch merged into origin/main, `dev` included when dev equals main.
 
 Every test here drives the REAL script against a throwaway registry under
 pytest's `tmp_path`. `Sandbox.run` asserts, before it starts the script, that
-OMNI_HOME, WORKTREE_ROOT and ONEX_LEDGER_PATH all resolve inside `tmp_path`,
+OMNI_HOME and WORKTREE_ROOT both resolve inside `tmp_path`,
 and it refuses `--execute` unless WORKTREE_ROOT is set there explicitly, so no
 version of the script, old or new, can be pointed at a real directory by a
 test in this file. `test_control_*` are the positive controls: without them a
@@ -32,6 +32,7 @@ import pytest
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
+from tests.scripts.ledger_reader_stub import LedgerReaderStub
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "git-maintenance.sh"
@@ -77,12 +78,11 @@ class Sandbox:
         self.registry = tmp_path / "omni_home"
         self.worktrees = tmp_path / "omni_worktrees"
         self.origin = tmp_path / "origin.git"
-        self.ledger = tmp_path / "ledger.md"
+        self.reader = LedgerReaderStub(tmp_path / "ledger-reader")
         self.open_prs = tmp_path / "open_prs.txt"
         bindir = tmp_path / "bin"
         for d in (self.registry, self.worktrees, bindir):
             d.mkdir()
-        self.ledger.write_text("# ledger\n", encoding="utf-8")
         self.open_prs.write_text("", encoding="utf-8")
         gh = bindir / "gh"
         gh.write_text(FAKE_GH, encoding="utf-8")
@@ -99,7 +99,7 @@ class Sandbox:
         env["FAKE_GH_OPEN_PRS"] = str(self.open_prs)
         env["OMNI_HOME"] = str(self.registry)
         env["WORKTREE_ROOT"] = str(self.worktrees)
-        env["ONEX_LEDGER_PATH"] = str(self.ledger)
+        env.update(self.reader.env())
         for key in ("GIT_PREFIX", "FAKE_GH_EXIT"):
             env.pop(key, None)
         # git exports repo-scoping variables into hook processes and they
@@ -172,8 +172,6 @@ class Sandbox:
             pytest.fail(
                 "--execute without an explicit sandbox WORKTREE_ROOT is never run"
             )
-        if "ONEX_LEDGER_PATH" in env:
-            assert _inside(env["ONEX_LEDGER_PATH"], self.tmp), env["ONEX_LEDGER_PATH"]
         return subprocess.run(
             ["bash", str(SCRIPT), *args],
             env=scrub_git_location_env(env),
@@ -214,13 +212,19 @@ def test_prune_refuses_without_explicit_worktree_root(box: Sandbox) -> None:
     assert derived.exists()
 
 
-def test_prune_refuses_without_a_ledger(box: Sandbox) -> None:
-    """Open CLAIMs cannot be honoured without the ledger, so the phase refuses."""
+@pytest.mark.parametrize("code", [3, 69])
+def test_prune_refuses_when_the_reader_cannot_answer(box: Sandbox, code: int) -> None:
+    """Open CLAIMs cannot be honoured without the ledger, so the phase refuses.
+    Exit 3 is a reader the overlays do not name, 69 a bus read that failed; the
+    ledger file is never read in their place."""
     worktree = box.add_worktree("OMN-NOLEDGER")
-    result = box.run("--execute", "--prune-worktrees", ONEX_LEDGER_PATH=None)
+    box.reader.refuse_with(code)
+    result = box.run("--execute", "--prune-worktrees")
     assert result.returncode != 0, result.stdout
-    assert "ONEX_LEDGER_PATH" in result.stderr, result.stderr
+    assert "REFUSED" in result.stderr, result.stderr
+    assert f"ledger reader exit {code}" in result.stderr, result.stderr
     assert worktree.exists()
+    assert "[removed]" not in result.stdout, result.stdout
 
 
 def test_control_explicit_worktree_root_is_honoured(box: Sandbox) -> None:
@@ -314,12 +318,9 @@ def test_gh_that_cannot_answer_keeps_the_worktree(box: Sandbox) -> None:
 def test_open_ledger_claim_is_kept_and_a_closed_one_is_not(box: Sandbox) -> None:
     held = box.add_worktree("OMN-90001")
     released = box.add_worktree("OMN-90002")
-    box.ledger.write_text(
-        "2026-09-24T10:00:00Z | CLAIM | lane=held-lane | ticket=OMN-90001 | scope=x\n"
-        "2026-09-24T10:00:01Z | CLAIM | lane=done-lane | ticket=OMN-90002 | scope=y\n"
-        "2026-09-24T11:00:00Z | TERMINAL | lane=done-lane | ticket=OMN-90002 | "
-        "closes-CLAIM=LCT1-1-2-abc-2026-09-24T10:00:01Z | friction=none | done\n",
-        encoding="utf-8",
+    box.reader.set_claims(
+        ("2026-09-24T10:00:00Z", "held-lane", "OMN-90001", "scope=x", True),
+        ("2026-09-24T10:00:01Z", "done-lane", "OMN-90002", "scope=y", False),
     )
     result = box.run("--execute", "--prune-worktrees")
     out = result.stdout
@@ -327,31 +328,44 @@ def test_open_ledger_claim_is_kept_and_a_closed_one_is_not(box: Sandbox) -> None
     assert "open ledger CLAIM" in out, out
     assert not released.exists(), out
     assert "[removed] OMN-90002" in out, out
-
-
-def test_lane_terminal_without_claim_id_closes_all_earlier_claims(
-    box: Sandbox,
-) -> None:
-    """Canonical ledger semantics close every earlier CLAIM for the lane."""
-    first = box.add_worktree("OMN-90003")
-    second = box.add_worktree("OMN-90004")
-    box.ledger.write_text(
-        "2026-09-24T10:00:00Z | CLAIM | lane=done-lane | ticket=OMN-90003 | "
-        "scope=first\n"
-        "2026-09-24T10:00:01Z | CLAIM | lane=done-lane | ticket=OMN-90004 | "
-        "scope=second\n"
-        "2026-09-24T11:00:00Z | TERMINAL | lane=done-lane | friction=none | "
-        "done\n",
-        encoding="utf-8",
+    calls = box.reader.calls()
+    assert any("--reader git-maintenance --query open-claims" in c for c in calls), (
+        calls
     )
+    assert any("--query rows" in c and "--kind CLAIM" in c for c in calls), calls
 
+
+def test_ledger_is_read_once_for_the_whole_run(box: Sandbox) -> None:
+    """A reader call takes seconds; one run reads once, never per worktree."""
+    for ticket in ("OMN-90005", "OMN-90006", "OMN-90007"):
+        box.add_worktree(ticket)
+    box.reader.set_claims(
+        ("2026-09-24T10:00:00Z", "held-lane", "OMN-90005", "scope=x", True),
+    )
     result = box.run("--execute", "--prune-worktrees")
-
     assert result.returncode == 0, result.stderr
-    assert not first.exists(), result.stdout
-    assert not second.exists(), result.stdout
-    assert "[removed] OMN-90003" in result.stdout, result.stdout
-    assert "[removed] OMN-90004" in result.stdout, result.stdout
+    assert len(box.reader.calls()) == 2, box.reader.calls()
+
+
+def test_an_open_claim_naming_only_the_branch_keeps_the_worktree(box: Sandbox) -> None:
+    """The open-claims line carries lane and ticket, not the claim's text; the
+    claim's own row is what names a branch, so the join must reach it."""
+    held = box.add_worktree("OMN-90003")
+    other = box.add_worktree("OMN-90004")
+    branch = box.branch_of(held)
+    box.reader.set_claims(
+        (
+            "2026-09-24T10:00:00Z",
+            "branch-lane",
+            "none",
+            f"working on {branch} in a sandbox",
+            True,
+        ),
+    )
+    result = box.run("--execute", "--prune-worktrees")
+    assert held.exists(), result.stdout
+    assert "open ledger CLAIM" in result.stdout, result.stdout
+    assert not other.exists(), result.stdout
 
 
 def test_stash_for_the_branch_is_kept(box: Sandbox) -> None:
@@ -537,10 +551,33 @@ def test_branch_phase_keeps_dev_and_checked_out_branches(box: Sandbox) -> None:
 
 def test_branch_phase_keeps_a_branch_with_an_open_claim(box: Sandbox) -> None:
     _branch_world(box)
-    box.ledger.write_text(
-        "2026-09-24T10:00:00Z | CLAIM | lane=l | ticket=OMN-1 | scope=x\n",
-        encoding="utf-8",
-    )
+    box.reader.set_claims(("2026-09-24T10:00:00Z", "l", "OMN-1", "scope=x", True))
     result = box.run("--execute", "--delete-remote-branches")
     assert "jonah/omn-1-merged" in box.remote_branches(), result.stdout
     assert "open ledger CLAIM" in result.stdout, result.stdout
+
+
+def test_branch_phase_refuses_when_the_reader_cannot_answer(box: Sandbox) -> None:
+    _branch_world(box)
+    before = box.remote_branches()
+    box.reader.refuse_with(69)
+    result = box.run("--execute", "--delete-remote-branches")
+    assert result.returncode != 0, result.stdout
+    assert "REFUSED" in result.stderr, result.stderr
+    assert "ledger reader exit 69" in result.stderr, result.stderr
+    assert box.remote_branches() == before, result.stdout
+
+
+def test_the_ledger_file_is_never_read(box: Sandbox) -> None:
+    """A file at ONEX_LEDGER_PATH that names the ticket is not a ledger any more:
+    the reader's answer (no open claim) decides, so the worktree is removed."""
+    worktree = box.add_worktree("OMN-FILEONLY")
+    stale_copy = box.tmp / "ROLLING_WORK_LEDGER.md"
+    stale_copy.write_text(
+        "2026-09-24T10:00:00Z | CLAIM | lane=file-lane | ticket=OMN-FILEONLY | x\n",
+        encoding="utf-8",
+    )
+    result = box.run("--execute", "--prune-worktrees", ONEX_LEDGER_PATH=str(stale_copy))
+    assert result.returncode == 0, result.stderr
+    assert not worktree.exists(), result.stdout
+    assert "open ledger CLAIM" not in result.stdout, result.stdout

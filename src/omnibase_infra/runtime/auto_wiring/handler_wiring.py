@@ -123,6 +123,7 @@ from omnibase_infra.handlers.boot_topic_provisioning import (
     ensure_topics_exist,
     provision_unattached_publish_topics,
 )
+from omnibase_infra.handlers.contract_dispatch_cost import attach_contract_dispatcher
 from omnibase_infra.handlers.entry_method_offload import invoke_entry_method
 from omnibase_infra.handlers.handler_projection_derived_write import (
     HandlerProjectionDerivedWrite,
@@ -12458,6 +12459,7 @@ def _commit_handler_wiring(
         MessageDispatchEngine,
     )
 
+    dispatcher = attach_contract_dispatcher(owner_contract_name, prepared.dispatcher)
     engine = dispatch_engine
     if isinstance(engine, MessageDispatchEngine):
         if engine.is_frozen:
@@ -12469,7 +12471,7 @@ def _commit_handler_wiring(
                 )
             engine._register_dispatcher_dynamic(
                 dispatcher_id=prepared.dispatcher_id,
-                dispatcher=prepared.dispatcher,
+                dispatcher=dispatcher,
                 category=prepared.category,
                 message_types=prepared.message_types,
                 payload_type_matcher=prepared.payload_type_matcher,
@@ -12480,7 +12482,7 @@ def _commit_handler_wiring(
         else:
             engine.register_dispatcher(
                 dispatcher_id=prepared.dispatcher_id,
-                dispatcher=prepared.dispatcher,
+                dispatcher=dispatcher,
                 category=prepared.category,
                 message_types=prepared.message_types,
                 payload_type_matcher=prepared.payload_type_matcher,
@@ -12490,43 +12492,3 @@ def _commit_handler_wiring(
                 engine.register_route(route)
 
     return prepared.dispatcher_id, prepared.route_ids
-
-
-def _wire_handler_entry(
-    *,
-    contract: ModelDiscoveredContract,
-    entry: ModelHandlerRoutingEntry,
-    dispatch_engine: object,
-    event_bus: object | None = None,
-    container: object | None = None,
-    topology: ModelDeploymentTopology | None = None,
-    catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
-) -> tuple[str, list[str]]:
-    """Prepare and immediately commit one handler entry (single-contract shortcut).
-
-    Kept for backwards compatibility with call sites that don't need the
-    two-phase split.  New code should call _prepare_handler_wiring +
-    _commit_handler_wiring directly.
-    """
-    resolver = ServiceHandlerResolver()
-    ownership_query: object = ServiceLocalHandlerOwnershipQuery(
-        local_node_names=frozenset({contract.name})
-    )
-    _assert_is_ownership_query(ownership_query)
-
-    prepared = _prepare_handler_wiring(
-        contract=contract,
-        entry=entry,
-        dispatch_engine=dispatch_engine,
-        resolver=resolver,
-        ownership_query=ownership_query,
-        event_bus=event_bus,
-        container=container,
-        topology=topology,
-        catalog_binding_policy=catalog_binding_policy,
-    )
-    return _commit_handler_wiring(
-        prepared,
-        dispatch_engine,
-        owner_contract_name=contract.name,
-    )

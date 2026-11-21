@@ -23,6 +23,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from omnibase_infra.nodes.node_dev_roll_events_effect.runtime_dev_registered_installs import (
+    HOLD_WINDOW,
+    record_hold,
+)
 from omnibase_infra.nodes.node_dev_roll_events_effect.runtime_dev_roll_events import (
     EnumDevStartCause,
     ProtocolRecreateGate,
@@ -43,6 +47,8 @@ FRICTION = "friction_type=dev_event_publish_failed"
 REAPPLY_REQUESTER = "agent/branch-install-reapply"
 _ANNOUNCED_MARKER = "branch-installs/recreate-announced-for"
 _ACTIVE_STATUSES = {"accepted", "in_progress"}
+#: An apply run inside a deploy job: that job's own recreate took the window (OMN-26300).
+IN_JOB_FLAG = "--in-job"
 
 
 def active_job_id(state_dir: Path) -> str | None:
@@ -157,14 +163,24 @@ def main(
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--state-dir", default=None)
     parsed, _ = parser.parse_known_args(argv)
-    mode = (list(argv) if argv is not None else sys.argv[1:])[:1]
+    given = list(argv) if argv is not None else sys.argv[1:]
+    in_job = IN_JOB_FLAG in given
+    argv = [a for a in given if a != IN_JOB_FLAG]
+    mode = argv[:1]
     if (
         mode == ["apply"]
+        and not in_job
         and parsed.state_dir is not None
         and window(
             Path(parsed.state_dir), repo_root=Path(__file__).resolve().parents[4]
         )
     ):
+        record_hold(
+            Path(parsed.state_dir),
+            None,
+            HOLD_WINDOW,
+            "the reapply restart waits for the hourly recreate window",
+        )
         sys.stdout.write(
             "RECREATE-WINDOW-HOLD the reapply restart waits for the window\n"
         )

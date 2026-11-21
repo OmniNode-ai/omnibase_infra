@@ -31,6 +31,7 @@ import pytest
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
+from tests.scripts.ledger_reader_stub import LedgerReaderStub
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "git-maintenance.sh"
@@ -50,7 +51,9 @@ print(json.dumps({"ok": True, "directory": d}))
 """
 
 
-def _env(registry: Path, worktrees: Path, ledger: Path, bindir: Path) -> dict[str, str]:
+def _env(
+    registry: Path, worktrees: Path, reader: LedgerReaderStub, bindir: Path
+) -> dict[str, str]:
     env = dict(os.environ)
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_SYSTEM"] = os.devnull
@@ -60,9 +63,9 @@ def _env(registry: Path, worktrees: Path, ledger: Path, bindir: Path) -> dict[st
     env["GIT_COMMITTER_EMAIL"] = env["GIT_AUTHOR_EMAIL"]
     env["OMNI_HOME"] = str(registry)
     env["WORKTREE_ROOT"] = str(worktrees)
-    # OMN-19396: the worktree phase needs an explicit ledger and asks gh about
-    # open pull requests; both are sandboxed here.
-    env["ONEX_LEDGER_PATH"] = str(ledger)
+    # OMN-19396: the worktree phase asks the ledger reader for open CLAIMs
+    # (OMN-20547: the bus reader, stubbed here) and gh about open pull requests.
+    env.update(reader.env())
     env["PATH"] = f"{bindir}{os.pathsep}{env.get('PATH', '')}"
     env.pop("GIT_PREFIX", None)
     # git exports the repo-scoping variables into every hook process and they
@@ -99,16 +102,15 @@ class World:
         self.registry = tmp_path / "omni_home"
         self.worktrees = tmp_path / "omni_worktrees"
         self.origin = tmp_path / "origin.git"
-        ledger = tmp_path / "ledger.md"
+        reader = LedgerReaderStub(tmp_path / "ledger-reader")
         bindir = tmp_path / "bin"
         self.registry.mkdir()
         self.worktrees.mkdir()
         bindir.mkdir()
-        ledger.write_text("# ledger\n", encoding="utf-8")
         gh = bindir / "gh"
         gh.write_text(FAKE_GH, encoding="utf-8")
         gh.chmod(0o755)
-        self.env = _env(self.registry, self.worktrees, ledger, bindir)
+        self.env = _env(self.registry, self.worktrees, reader, bindir)
         # Every removal is saved first by the shared helper (OMN-19539); a
         # stand-in honouring its contract, the one the prune-safety suite uses.
         helper = (
@@ -164,7 +166,7 @@ class World:
     def run(self) -> subprocess.CompletedProcess[str]:
         # Sandbox assertion before the destructive run (OMN-19396).
         tmp = self.registry.parent.resolve()
-        for key in ("OMNI_HOME", "WORKTREE_ROOT", "ONEX_LEDGER_PATH"):
+        for key in ("OMNI_HOME", "WORKTREE_ROOT"):
             assert Path(self.env[key]).resolve().is_relative_to(tmp), self.env[key]
         return subprocess.run(
             ["bash", str(SCRIPT), "--execute", "--prune-worktrees"],

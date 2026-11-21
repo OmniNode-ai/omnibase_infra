@@ -149,15 +149,21 @@ CASES: Final[tuple[CaseSpec, ...]] = (
         name="wrong_tenant",
         method="GET",
         # A workflow id the credential's tenant does not own (the runtime scopes every read to the caller's tenant).
+        # The runtime gateway answers 404 resource.not_found for another tenant's
+        # workflow, the same as for an unknown id: an existence signal across
+        # tenants is itself a leak (node_workflow_gateway_effect contract; beta
+        # requirement N-2), so a 403 here grades FAIL. The 403 auth.tenant.forbidden
+        # this arm once expected came from the retired onex-api route
+        # /v1/tenants/<slug>/api-keys.
         path="/v1/workflows/00000000-0000-4000-8000-000000000011/status",
         credential="valid",
-        expected_status=403,
-        expected_code="auth.tenant.forbidden",
+        expected_status=404,
+        expected_code="resource.not_found",
         why=(
-            "A VALID credential against a tenant it does not own. Auth resolves "
-            "before the tenant comparison, so this arm is the only one that "
-            "needs a working credential -- which is also what makes it the arm "
-            "that proves the credential works."
+            "A VALID credential against a workflow its tenant does not own. "
+            "Auth resolves before the tenant-scoped read, so this arm is the only "
+            "one that needs a working credential -- which is also what makes it "
+            "the arm that proves the credential works."
         ),
     ),
     CaseSpec(
