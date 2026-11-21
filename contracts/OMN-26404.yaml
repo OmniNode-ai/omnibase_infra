@@ -33,7 +33,7 @@ dod_evidence:
     binds_ac: [AC1]
     checks:
       - check_type: command
-        check_value: bash -c 'test "$(grep -c "no delivery context" tests/fixtures/omn26404/dev_runtime_a7474c42_no_delivery_context.log)" = 38 && grep -q "contract_dispatch_cost.py" tests/fixtures/omn26404/dev_runtime_a7474c42_no_delivery_context.log'
+        check_value: bash -c 'test "$(grep -c "no delivery context" tests/fixtures/omn26404/dev_runtime_a7474c42_no_delivery_context.txt)" = 38 && grep -q "contract_dispatch_cost.py" tests/fixtures/omn26404/dev_runtime_a7474c42_no_delivery_context.txt'
         cwd: .
   - id: dod-omn26404-ac2-no-delivery-context-incident
     description: "Each handler and topic pair the incident recorded is dispatched through the real projection callback, the real registration function and the real engine; the writer receives its partition and offset and no error is logged. The test fails at origin/dev."

@@ -7,7 +7,7 @@ Recorded incident. The dev ``omninode-runtime`` container started
 context`` on every consumed message. The container's own log tail is kept by
 the boot guard as ``incident-a7474c42-...-omninode-runtime.log`` on the dev host
 and is the fixture here: ``tests/fixtures/omn26404/
-dev_runtime_a7474c42_no_delivery_context.log`` holds its traceback and every
+dev_runtime_a7474c42_no_delivery_context.txt`` holds its traceback and every
 such line in the kept tail (38 lines, 12 handler/topic pairs).
 
 Cause, read off the recorded traceback. The Kafka consume loop built the
@@ -56,7 +56,7 @@ _FIXTURE = (
     Path(__file__).resolve().parents[3]
     / "fixtures"
     / "omn26404"
-    / "dev_runtime_a7474c42_no_delivery_context.log"
+    / "dev_runtime_a7474c42_no_delivery_context.txt"
 )
 _RECORDED_LINE = re.compile(
     r"Projection writer dispatched with no delivery context: "
