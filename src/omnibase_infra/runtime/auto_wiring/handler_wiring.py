@@ -134,7 +134,6 @@ from omnibase_infra.handlers.handler_projection_write_cursor import (
 from omnibase_infra.handlers.projection_failure_classification import is_content_failure
 from omnibase_infra.handlers.topic_migration_dependencies import (
     TOPIC_MIGRATION_EXECUTOR_DEPS,
-    build_topic_migration_executor_dependencies,
     required_handler_init_params,
     warm_topic_migration_scan,
 )
@@ -8909,10 +8908,36 @@ def _contracts_root_for_runtime_dependencies() -> Path:
 
 
 def _build_topic_migration_executor_dependencies() -> dict[str, object]:
-    return build_topic_migration_executor_dependencies(
-        bootstrap_servers=os.environ["KAFKA_BOOTSTRAP_SERVERS"],  # ONEX_EXCLUDE: env
-        contracts_root=_contracts_root_for_runtime_dependencies(),
+    """Build concrete collaborators for HandlerTopicMigrationExecutor.
+
+    The handler declares these as required constructor services. Materializing
+    them here keeps generic resolver Step 2 deterministic while preserving the
+    handler's strict constructor contract.
+    """
+    from aiokafka import AIOKafkaConsumer
+    from aiokafka.admin import AIOKafkaAdminClient
+
+    from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
+    from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
+    from omnibase_infra.migration.adapter_kafka_admin_lag import AdapterKafkaAdminLag
+    from omnibase_infra.migration.service_consumer_lag_observer import (
+        ServiceConsumerLagObserver,
     )
+    from omnibase_infra.migration.service_drain_proof_gate import ServiceDrainProofGate
+
+    bootstrap_servers = os.environ["KAFKA_BOOTSTRAP_SERVERS"]  # ONEX_EXCLUDE: env
+    auth_kwargs = build_aiokafka_auth_kwargs_from_env()
+    admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers, **auth_kwargs)
+    consumer = AIOKafkaConsumer(bootstrap_servers=bootstrap_servers, **auth_kwargs)
+    lag_admin = AdapterKafkaAdminLag(admin, consumer)
+    observer = ServiceConsumerLagObserver(lag_admin)
+    return {
+        "provisioner": TopicProvisioner(
+            bootstrap_servers=bootstrap_servers,
+            contracts_root=_contracts_root_for_runtime_dependencies(),
+        ),
+        "drain_proof_gate": ServiceDrainProofGate(observer),
+    }
 
 
 def _handler_requires_delegation_dispatch_port(handler_cls: type) -> bool:

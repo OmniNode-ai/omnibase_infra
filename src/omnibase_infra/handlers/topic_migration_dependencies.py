@@ -3,8 +3,10 @@
 """Constructor collaborators of ``HandlerTopicMigrationExecutor`` (OMN-26338).
 
 Auto-wiring builds the handler's required ``provisioner`` and ``drain_proof_gate``
-services before it constructs the handler, so the handler keeps a strict
-constructor contract and generic resolver Step 2 stays deterministic.
+services before it constructs the handler (the builder stays in
+``runtime/auto_wiring/handler_wiring.py``, where its raw Kafka clients are not a
+freestanding module), so the handler keeps a strict constructor contract and
+generic resolver Step 2 stays deterministic.
 
 The provisioner scans every installed contract when it is constructed. That scan
 held the event loop for about 12 s at one CPU, so :func:`warm_topic_migration_scan`
@@ -47,40 +49,6 @@ def required_handler_init_params(handler_cls: type) -> frozenset[str]:
         }
         and param.default is inspect.Parameter.empty
     )
-
-
-def build_topic_migration_executor_dependencies(
-    *, bootstrap_servers: str, contracts_root: Path
-) -> dict[str, object]:
-    """Build concrete collaborators for HandlerTopicMigrationExecutor.
-
-    The handler declares these as required constructor services. Materializing
-    them here keeps generic resolver Step 2 deterministic while preserving the
-    handler's strict constructor contract.
-    """
-    from aiokafka import AIOKafkaConsumer
-    from aiokafka.admin import AIOKafkaAdminClient
-
-    from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
-    from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
-    from omnibase_infra.migration.adapter_kafka_admin_lag import AdapterKafkaAdminLag
-    from omnibase_infra.migration.service_consumer_lag_observer import (
-        ServiceConsumerLagObserver,
-    )
-    from omnibase_infra.migration.service_drain_proof_gate import ServiceDrainProofGate
-
-    auth_kwargs = build_aiokafka_auth_kwargs_from_env()
-    admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap_servers, **auth_kwargs)
-    consumer = AIOKafkaConsumer(bootstrap_servers=bootstrap_servers, **auth_kwargs)
-    lag_admin = AdapterKafkaAdminLag(admin, consumer)
-    observer = ServiceConsumerLagObserver(lag_admin)
-    return {
-        "provisioner": TopicProvisioner(
-            bootstrap_servers=bootstrap_servers,
-            contracts_root=contracts_root,
-        ),
-        "drain_proof_gate": ServiceDrainProofGate(observer),
-    }
 
 
 def _requires_migration_collaborators(entry: ModelHandlerRoutingEntry) -> bool:
