@@ -395,6 +395,12 @@ LANDING_TICK_COMPARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] 
     ("topic", LANDING_TICK_COMPARED, "literal", ("write", "describe")),
     ("topic", LANDING_TICK_COMPARE_FAILED, "literal", ("write", "describe")),
 )
+# The host job claim run record (OMN-26302): the host tick publishes one record per run on this topic
+# through the declared bus publisher as the host's issued principal. It writes and reads nothing back.
+HOST_JOB_CLAIM_RUN_COMPLETED = "onex.evt.omnimarket.host-job-claim-run-completed.v1"
+HOST_JOB_CLAIM_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("topic", HOST_JOB_CLAIM_RUN_COMPLETED, "literal", ("write", "describe")),
+)
 # The lane ticket mint (OMN-23410): a lab lane's principal asks the ticket node for the child
 # ticket its pull request needs. It writes the node's command topic and reads the completed and
 # failed terminals; it gets no write on either terminal, so it cannot answer for the node.
@@ -525,6 +531,7 @@ def typed_rows() -> set[tuple[str, str, str, str, str]]:
             + LANDING_DECISION_GRANTS
             + LANDING_SNAPSHOT_GRANTS
             + LANDING_TICK_COMPARED_GRANTS
+            + HOST_JOB_CLAIM_GRANTS
             + TICKET_WRITE_GRANTS
             + FLOOR_PROJECTION_GRANTS
             + FLOOR_TASK_TICKET_GRANTS
@@ -839,6 +846,24 @@ def test_the_tick_compared_grants_are_produce_only_and_nothing_wider() -> None:
         row[2] in (LANDING_TICK_COMPARED, LANDING_TICK_COMPARE_FAILED)
         and row[4] == "READ"
         for row in rows
+    )
+
+
+def test_the_host_job_claim_grants_are_produce_only_and_nothing_wider() -> None:
+    """The host tick writes its run record; no read."""
+    rows = derive(shipped_bindings())
+    claim = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "host-job-claim" in resource
+    }
+    assert claim == {
+        (resource.upper(), name, operation.upper())
+        for resource, name, _, operations in HOST_JOB_CLAIM_GRANTS
+        for operation in operations
+    }
+    assert not any(
+        row[2] == HOST_JOB_CLAIM_RUN_COMPLETED and row[4] == "READ" for row in rows
     )
 
 
