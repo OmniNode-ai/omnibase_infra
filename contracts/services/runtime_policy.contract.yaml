@@ -30,12 +30,15 @@ dev_redpanda_mem_limit: 16g
 # OMN-25912: the dev runtime is recreated at most once per window, at the window's start
 # (within the start grace), unless a requester with a pinned-fix prefix asks. The window,
 # its offset and the grace are seconds; the deploy agent reads them, never a literal.
+# OMN-26369: agent/merge-restore is the agent's restore of a DOWN lane for a runtime-image
+# merge no dev job has built; the window is why 6131 and 6133 waited until 15:00Z.
 dev_recreate_window:
   window_seconds: 3600
   offset_seconds: 0
   start_grace_seconds: 300
   pinned_fix_requester_prefixes:
     - operator/pinned-fix/
+    - agent/merge-restore
 profiles:
   dev:
     compose_project: omnibase-infra
@@ -387,6 +390,10 @@ profiles:
           # The dev roll window gate holds every dev deploy command on one hold
           # topic; a consumer group that joins after a command was sent skips
           # it, so the gate joins in the first wave too (OMN-24447).
+          # The GitHub repo gateway answers every `onex scm` read and pull
+          # request creation by bus request; on 2026-11-19 its consumer group
+          # joined 234 s and 247 s after two container starts, and a request
+          # sent 5 s after one start got no reply (OMN-26356).
           priority_contracts:
             - node_delegate_skill_orchestrator
             - node_delegation_orchestrator
@@ -400,6 +407,7 @@ profiles:
             - node_host_drift_plugin_revision_orchestrator
             - node_delegated_code_edit_orchestrator
             - node_delegation_routing_order_compute
+            - node_github_repo_gateway_effect
             - node_dev_roll_window_gate_effect
           memory_limit: 3072M
         # OMN-22930 (T8): the BYOK credential READ that only the separate

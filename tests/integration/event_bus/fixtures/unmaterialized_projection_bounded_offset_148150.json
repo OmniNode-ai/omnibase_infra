@@ -1,0 +1,26 @@
+{
+  "source": "dev runtime build c8fd5fda at omnibase_infra 0dabf0c2c, 2026-11-21; the record itself was not readable from the dev broker by this lane, so the payload is a scrubbed synthetic delegate-skill terminal with the recorded topic, offset and consumer group",
+  "topic": "onex.evt.omnimarket.delegate-skill-completed.v1",
+  "partition": 0,
+  "offset": 148150,
+  "consumer_group": "local.omnimarket.projection_savings.consume.1.0.0",
+  "consume_concurrency": 4,
+  "projection_type": "SavingsProjectionWriter",
+  "log_excerpt_15_21Z": [
+    "dlq_unpersisted_rewind_requested topic=onex.evt.omnimarket.delegate-skill-completed.v1 offset=148150 stage=handler_retries_exhausted",
+    "ProjectionNotMaterializedError: projection handler SavingsProjectionWriter consumed an event from onex.evt.omnimarket.delegate-skill-completed.v1 and wrote no row because its write path failed",
+    "health degraded_reason=event_loop_unresponsive"
+  ],
+  "payload": {
+    "tenant_id": "00000000-0000-4000-8000-000000000001",
+    "status": "completed",
+    "correlation_id": "00000000-0000-4000-8000-000000148150",
+    "task_type": "code_generation",
+    "provider": "fixture-provider",
+    "model_name": "fixture-model",
+    "response": "fixture",
+    "quality_gate_passed": true,
+    "quality_gates_failed": [],
+    "metrics": {"input_tokens": 11, "output_tokens": 22, "total_tokens": 33, "latency_ms": 42, "cost_usd": 0.0, "cost_savings_usd": 0.01}
+  }
+}

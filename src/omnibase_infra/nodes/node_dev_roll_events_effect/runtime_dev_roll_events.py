@@ -10,10 +10,12 @@ or in the publisher holds a topic or a bound.
 
 from __future__ import annotations
 
+import fnmatch
 import importlib
 import importlib.util
 import json
 import logging
+import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -225,12 +227,148 @@ def newest_dev_recreate(state_dir: Path) -> datetime | None:
     return newest
 
 
+#: ``requested_by`` of the deploy agent's restore of a dev lane whose runtime is not running.
+IDLE_RESTORE_REQUESTER = "agent/idle-restore"
+
+#: OMN-26369: the requester a restore asks the window under when a runtime-image merge is
+#: waiting. Declared in ``dev_recreate_window.pinned_fix_requester_prefixes`` of
+#: ``contracts/services/runtime_policy.contract.yaml``, so the window admits it off the hour.
+MERGE_RESTORE_REQUESTER = "agent/merge-restore"
+
+#: The clone's own upstream: the branch the deploy agent's checkout tracks.
+UPSTREAM_REF = "@{upstream}"
+
+#: OMN-26369: what ``docker/Dockerfile.runtime`` copies from this repository into the runtime
+#: image, plus the lane state a compose up applies. A commit that touches none of these
+#: changes nothing the runtime runs. ``tests/unit/scripts/test_deploy_agent_merge_trigger.py``
+#: fails when a ``COPY`` source of the Dockerfile is missing here. A trailing ``/**`` is a
+#: whole directory; any other entry is one file or a glob over one path.
+RUNTIME_IMAGE_PATHS: tuple[str, ...] = (
+    "pyproject.toml",
+    "README.md",
+    "uv.lock",
+    "src/**",
+    "contracts/**",
+    "config/runner_fleet.yaml",
+    "docker/Dockerfile.runtime",
+    "docker/entrypoint-runtime.sh",
+    "docker/catalog/**",
+    "docker/migrations/**",
+    "docker/runtime-policy.env",
+    "docker/docker-compose*.yml",
+    "docker/docker-compose*.yaml",
+    "scripts/run-forward-migrations.sh",
+    "scripts/runtime_build/**",
+)
+
+
+def is_runtime_image_path(path: str) -> bool:
+    """Whether a changed file is one the runtime image or its lane state is built from."""
+    for pattern in RUNTIME_IMAGE_PATHS:
+        if pattern.endswith("/**"):
+            if path.startswith(pattern[:-2]):
+                return True
+        elif fnmatch.fnmatchcase(path, pattern):
+            return True
+    return False
+
+
+def newest_dev_job_accepted(state_dir: Path) -> datetime | None:
+    """When the newest dev job was accepted, from the job records; ``None`` when none.
+
+    That job staged its source when it started, so a runtime merge committed after it is a
+    merge no job has built.
+    """
+    newest: datetime | None = None
+    for path in state_dir.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data["command"]["runtime_lane"] != "dev":
+                continue
+            accepted = datetime.fromisoformat(data["accepted_at"])
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue
+        if newest is None or accepted > newest:
+            newest = accepted
+    return newest
+
+
+def read_runtime_merge(
+    clone: Path,
+    ref: str,
+    since: datetime,
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> datetime | None:
+    """The commit time of the newest commit on ``ref`` after ``since`` that changes the runtime image.
+
+    Read from ``clone`` as it is, bounded by ``--max-count``. An unreadable clone is no merge,
+    never a guess.
+    """
+    try:
+        result = run(
+            [
+                "git",
+                "-C",
+                str(clone),
+                "log",
+                ref,
+                "--max-count=200",
+                "--format=%x01%ct",
+                "--name-only",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    newest: datetime | None = None
+    for block in result.stdout.split("\x01")[1:]:
+        stamp, *paths = block.splitlines()
+        try:
+            committed = datetime.fromtimestamp(int(stamp), tz=UTC)
+        except ValueError:
+            return None
+        if committed <= since:
+            continue
+        if any(is_runtime_image_path(p.strip()) for p in paths if p.strip()) and (
+            newest is None or committed > newest
+        ):
+            newest = committed
+    return newest
+
+
+def _runtime_merge_waiting(state_dir: Path) -> datetime | None:
+    """The newest runtime-image commit on the clone's tracked dev head that no dev job has built.
+
+    The tracked head is the clone's own upstream: the deploy agent's checkout follows the
+    branch ``DEPLOY_AGENT_TRACKING_REF`` declares, so no branch name is spelled here.
+    """
+    newest_job = newest_dev_job_accepted(state_dir)
+    if newest_job is None:
+        return None
+    return read_runtime_merge(
+        Path(__file__).resolve().parents[4], UPSTREAM_REF, newest_job
+    )
+
+
 def window_admits(agent: object, requested_by: str) -> bool:
     """Whether the dev recreate window admits ``requested_by`` now (OMN-25912).
 
     The agent holds one gate, built on first use from the checkout's rendered policy;
     an agent that carries none (a test double) admits. The newest recreate in the job
     records spends the window, so a merge's recreate counts too.
+
+    OMN-26369: the restore of a lane whose runtime is down is the agent's only path to a merge
+    it never hears about (the chain that publishes the merge's rebuild command runs inside
+    that runtime). The window held it from 14:26Z to 15:00Z on 2026-11-21 while omnibase_infra
+    merges of 13:45:48Z and 14:06:14Z waited. So an idle restore the window refuses is asked
+    again as ``agent/merge-restore`` when a runtime-image commit is on the dev head that no dev
+    job has built, and the window admits that requester off the hour. Nothing else changes:
+    the restore's own bounds (down lane, quiet, freeze, load gate) were already met to get here.
     """
     if not hasattr(agent, "_recreate_gate"):
         agent.__dict__["_recreate_gate"] = recreate_gate_at(
@@ -239,7 +377,21 @@ def window_admits(agent: object, requested_by: str) -> bool:
     gate = agent.__dict__["_recreate_gate"]
     store = getattr(agent, "job_store", None)
     observed = newest_dev_recreate(Path(store.state_dir)) if store else None
-    return gate is None or bool(gate.allow(requested_by, observed))
+    if gate is None or bool(gate.allow(requested_by, observed)):
+        return True
+    if requested_by != IDLE_RESTORE_REQUESTER or store is None:
+        return False
+    merged = _runtime_merge_waiting(Path(store.state_dir))
+    if merged is None:
+        return False
+    admitted = bool(gate.allow(MERGE_RESTORE_REQUESTER, observed))
+    if admitted:
+        logger.info(
+            "dev recreate window admits the idle restore for a runtime-image merge committed "
+            "%s that no dev job has built",
+            merged.isoformat(),
+        )
+    return admitted
 
 
 def announce_preflight_failure(

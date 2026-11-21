@@ -149,6 +149,7 @@ from omnibase_infra.handlers.handler_package_announcer import (
     build_registered_events,
     run_boot_step0,
 )
+from omnibase_infra.handlers.handler_prebuilt_manifest import run_boot_catalog
 from omnibase_infra.handlers.handler_runtime_introspection_startup import (
     HandlerRuntimeIntrospectionStartup as _Startup,
 )
@@ -2195,12 +2196,12 @@ async def bootstrap() -> int:
 
                 # Infra standalone manifests (cli/topics.yaml, services/topics.yaml)
                 _infra_src = Path(__file__).resolve().parent.parent
-                for _subdir in ("cli", "services"):
-                    _candidate = _infra_src / _subdir
+                for _candidate in (_infra_src / "cli", _infra_src / "services"):
                     if _candidate.is_dir():
                         _extra_manifest_roots.append(_candidate)
 
-                topic_provisioner = TopicProvisioner(
+                topic_provisioner = await asyncio.to_thread(
+                    TopicProvisioner,
                     bootstrap_servers=kafka_bootstrap_servers,
                     contracts_root=_contracts_root,
                     skill_manifests_root=_skill_manifests_root,
@@ -2798,18 +2799,16 @@ async def bootstrap() -> int:
                 )
                 runtime_health_monitor = None
 
-        # 3.9. Boot step 0 (OMN-21590): announce every installed package's
-        # contracts on an in-memory bus and build the node catalog BEFORE the
-        # container exists. Nothing here imports a handler or constructs a node,
-        # and the container below receives the catalog as an injected service;
-        # the runtime reads it instead of scanning entry points and pushing
-        # contracts to the registry. A failure degrades to the same catalog
-        # folded without a bus inside discover_contracts().
-        node_catalog_result: ModelPackageAnnounceResult | None = None
+        # 3.9. Boot step 0 (OMN-21590): the node catalog, built BEFORE the container
+        # exists: loaded from the image's prebuilt file when its stamp holds
+        # (OMN-26361), else announced from every installed package. The container
+        # gets it as an injected service; a failure degrades to discover_contracts().
+        node_catalog_result, prebuilt_manifest = None, None
         try:
-            node_catalog_result = await run_boot_step0(
-                workload=resolve_runtime_profile_name()
+            _boot = await run_boot_catalog(
+                workload=resolve_runtime_profile_name(), announce=run_boot_step0
             )
+            node_catalog_result, prebuilt_manifest = _boot.announced, _boot.manifest
             logger.info(
                 "Boot step 0: %d contracts announced, %d admitted (correlation_id=%s)",
                 len(node_catalog_result.announcements),
@@ -3660,10 +3659,8 @@ async def bootstrap() -> int:
 
             # 1. Discover all contracts from installed packages
             auto_wiring_start = time.time()
-            manifest = discover_contracts(node_catalog_result)
-            auto_wiring_manifest_discovered = (
-                manifest  # OMN-11198: captured for introspection
-            )
+            manifest = prebuilt_manifest or discover_contracts(node_catalog_result)
+            auto_wiring_manifest_discovered = manifest  # OMN-11198: introspection
             logger.info(
                 "Auto-wiring discovery: %d contracts found, %d errors "
                 "(correlation_id=%s)",
