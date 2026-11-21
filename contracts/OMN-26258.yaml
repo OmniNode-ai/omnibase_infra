@@ -1,0 +1,66 @@
+schema_version: "1.0.0"
+ticket_id: OMN-26258
+title: 'The dev ticket closer finds the PR watcher state file at its declared path and reads a non-zero candidate count'
+summary: >-
+  The scheduled ticket closer in the dev runtime on the lab host refused with "the PR watcher state file is absent at its declared path" and read no candidates, because the runtime's registry root is /app, ONEX_PR_WATCHER_STATE was empty, and nothing writes /app/.claude_scratch/pr-watcher/state.json. The host's own read-only PR watcher (the onex-pr-watcher-readonly user timer) already writes a current state.json every 300 s under its state directory. The primary dev runtime now mounts that directory read-only and names the file in ONEX_PR_WATCHER_STATE. No state is copied from another host and no host file is edited; the runtime picks the binding up through a deploy agent job.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26258-closer-reads-lab-watcher-state
+    statement: The dev ticket closer reads the lab host's own PR watcher state, declared in the dev compose overlay and loaded through the deploy agent.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the file at the closer's declared PR watcher state path exists inside the dev runtime on h201 and is fed by a lab-side watcher or the bus projection, never copied from the operator's Mac -- falsifier: docker exec omninode-runtime test -f on the declared path exits non-zero, or the file's producer is the operator's Mac
+      - id: AC2
+        statement: >-
+          AC2: the binding is declared as an overlay value plus the dev compose mount or the bus reader, with no hand edit of host files and a dev restart only through the deploy agent -- falsifier: the merged diff touches a host file outside the overlays repository and the compose file, or the restart is not a deploy agent job
+      - id: AC3
+        statement: >-
+          AC3: one closer run line in the dev runtime log on h201 reads a non-zero candidate count -- falsifier: the newest closer run line on h201 after the change reads zero candidates or names the absent state file
+evidence_requirements:
+  - kind: tests
+    description: The dev tenant-fold overlay sets ONEX_PR_WATCHER_STATE to a file under a read-only mount of the host watcher's state directory; the shared dev-lane overlay carries neither half; the neighbouring runtime compose tests stay green.
+    command: uv run --frozen pytest tests/ci/test_dev_runtime_pr_watcher_state_omn26258.py tests/ci/test_dev_runtime_product_clone_pin_omn25901.py tests/ci/test_compose_no_nested_expansion.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26258-ac1-watcher-state-mounted
+    description: 'AC1: the declaration half the hosted runner can run: the variable names state.json under the mounted directory and the directory is the read-only watcher unit state directory, mounted once and read-only. Before the change the variable is absent and the mount is missing, so the two binding tests fail (RED recorded in the pull request). The live half, docker exec omninode-runtime test -f at the declared path and the producer being the host unit, is read on the lab host after the deploy agent job and recorded in the ticket comment.'
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_runtime_pr_watcher_state_omn26258.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26258-ac2-declared-in-compose-only
+    description: 'AC2: the binding is one environment value and one read-only mount in docker/docker-compose.dev-tenant-fold.yml; the mount source is the unit user home through ${HOME}, never a typed home path, and the shared dev-lane overlay carries neither half. The deploy agent job that loads it is read from the agent record and recorded in the ticket comment.'
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_runtime_pr_watcher_state_omn26258.py tests/ci/test_compose_no_nested_expansion.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26258-ac3-closer-run-line
+    description: 'AC3: the closer run line on the lab host after the deploy agent job is a runtime log read, made by the live command check below and recorded as read_at evidence in a ledger STATUS row and a ticket comment. The first check runs the focused declaration tests the reading rests on.'
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_runtime_pr_watcher_state_omn26258.py tests/ci/test_dev_runtime_product_clone_pin_omn25901.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26258-integration-proof-live-runtime
+    description: 'Live half on the lab host after the deploy agent job: the declared state file exists inside the dev runtime and the newest closer run line reads candidates. The hosted runner has no omninode-runtime container, so these run at the local done gate only.'
+    source: manual
+    binds_ac: []
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime test -f /etc/onex/pr-watcher-state/state.json
+        cwd: .
+      - check_type: command
+        check_value: bash -c 'docker logs --since 6h omninode-runtime 2>&1 | grep "STATUS ticket-closer" | tail -1 | grep -E "candidates_read=true examined=[1-9]"'
+        cwd: .

@@ -154,6 +154,12 @@ INFRA_DATABASES=("infisical_db" "omniweb")
 # reader who follows a comment to a file that does not exist concludes the
 # authorization was applied by hand; that is what OMN-18115 was filed against.
 #
+# gateway_runtime (OMN-26151) is the fourth member: the login the lab workflow
+# gateway opens its pool with against omninode_cloud. Same reasoning, same split:
+# this map mints the credential and issues no grants; the nine grants it holds
+# (and nothing wider -- no CREATE, no TRUNCATE, no DELETE) come from the runner's
+# own gateway grant seam, which re-asserts and reads them back on every compose up.
+#
 # TWO LANES, AND THE MANAGED ONE HAS NEITHER SEAM. chain_canary_reader is a
 # compose-lane instrument: this script mints it on a fresh volume and
 # run-forward-migrations.sh's credential seam re-asserts it on a warm one, both
@@ -167,6 +173,7 @@ LOGIN_ONLY_ROLE_MAP=(
     "omninode_runtime:OMNINODE_RUNTIME_PASSWORD"
     "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD"
     "chain_canary_reader:CHAIN_CANARY_READER_PASSWORD"
+    "gateway_runtime:GATEWAY_RUNTIME_PASSWORD"
 )
 
 # =============================================================================
@@ -176,10 +183,7 @@ LOGIN_ONLY_ROLE_MAP=(
 validate_identifier() {
     local name="$1"
     local context="${2:-Identifier}"
-    if [ ${#name} -gt 63 ]; then
-        echo "ERROR: $context '$name' exceeds 63-character limit" >&2
-        return 1
-    fi
+    [ ${#name} -le 63 ] || { echo "ERROR: $context '$name' exceeds 63-character limit" >&2; return 1; }
     if ! echo "$name" | grep -qE '^[a-zA-Z_][a-zA-Z0-9_-]*$'; then
         echo "ERROR: Invalid $context '$name' - must match ^[a-zA-Z_][a-zA-Z0-9_-]*$" >&2
         return 1

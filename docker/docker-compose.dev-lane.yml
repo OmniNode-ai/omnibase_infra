@@ -181,6 +181,15 @@ x-dev-lane-composed-runtime-build: &dev_lane_composed_runtime_build
     INFRA_RUNTIME_IMAGE: infra-runtime
 x-dev-lane-analytics-env: &dev_lane_analytics_env
   OMNIDASH_ANALYTICS_DB_URL: "postgresql://role_omnidash:${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD must be set — the lab lane connects to omnidash_analytics as the non-BYPASSRLS role_omnidash (OMN-15363), never as the postgres superuser}@postgres:5432/omnidash_analytics"
+# OMN-26151: the lab workflow gateway's database (omnimarket node_workflow_gateway_effect,
+# secret gateway.database.dsn, mapped to this env by the dev profile of
+# contracts/services/runtime_policy.contract.yaml). It connects to omninode_cloud on this
+# lane's own postgres as gateway_runtime, a login-only role holding nine grants and no
+# CREATE, TRUNCATE or DELETE (run-forward-migrations.sh, gateway runtime grant seam).
+# Declared in this overlay, never in docker-compose.infra.yml: every lane layers the
+# base, and a fail-closed reference there would refuse prod's compose render.
+x-dev-lane-gateway-env: &dev_lane_gateway_env
+  GATEWAY_DATABASE_DSN: "postgresql://gateway_runtime:${GATEWAY_RUNTIME_PASSWORD:?GATEWAY_RUNTIME_PASSWORD must be set — the lab workflow gateway connects to omninode_cloud as the least-grant gateway_runtime principal (OMN-26151), never as role_omninode or the postgres superuser}@postgres:5432/omninode_cloud"
 # =============================================================================
 # THE INTERNAL-PROJECTION CONNECTION IDENTITY (OMN-18109)
 # =============================================================================
@@ -938,7 +947,7 @@ services:
   omninode-runtime:
     build: *dev_lane_composed_runtime_build
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_identity_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_gateway_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_identity_env]
       # OMN-20867: this lane's main runtime publishes the runtime tick
       # (onex.intent.platform.runtime-tick.v1), so every tick-subscribing
       # contract deployed here runs on its contract interval. Opt-in per lane

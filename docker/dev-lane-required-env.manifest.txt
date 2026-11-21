@@ -78,6 +78,9 @@ ROLE_OMNIDASH_PASSWORD
 # standalone writers. The base compose already requires this password for
 # ONEX_TENANT_DB_URL; the overlay now names that requirement too.
 TENANT_PROJECTION_WRITER_PASSWORD
+# OMN-26151 provenance: the password half of the gateway_runtime DSN the dev overlay renders
+# fail-closed as GATEWAY_DATABASE_DSN for the lab workflow gateway (omninode_cloud).
+GATEWAY_RUNTIME_PASSWORD
 # OMN-24854: the config/lab folder mounted read-only for the commitment ledger source.
 # The deploy agent and the warm refresh set it beside ONEX_LANE_OVERLAY_DIR.
 ONEX_LANE_DECLARATION_DIR

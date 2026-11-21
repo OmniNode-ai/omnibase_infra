@@ -531,6 +531,11 @@ def test_trajectory_rendered_file_adds_only_dharma_mappings(tmp_path: Path) -> N
                 "source_path": "OMNIDASH_ANALYTICS_DB_URL",
             },
         },
+        # OMN-26151: the lab workflow gateway's database.
+        "gateway.database.dsn": {
+            "logical_name": "gateway.database.dsn",
+            "source": {"source_type": "env", "source_path": "GATEWAY_DATABASE_DSN"},
+        },
     }
     before = {row["logical_name"]: row for row in baseline["mappings"]}
     after = {row["logical_name"]: row for row in observed["mappings"]}
