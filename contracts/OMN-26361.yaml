@@ -78,8 +78,8 @@ dod_evidence:
     source: manual
     binds_ac: [AC6]
     checks:
-      - check_type: command
-        check_value: python3 -c "import json; d = json.load(open('tests/fixtures/omn26361/boot_measurement.json')); assert d['host'] == 'h051' and d['after']['contract_yaml_parses'] == 0 and d['before']['contract_yaml_parses'] > 0 and d['read_utc'].endswith('Z')"
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_prebuilt_manifest_boot_omn26361.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26361-ac7-gates-unchanged
     description: The change adds the prebuilt build step after the node inventory guard and leaves the HEALTHCHECK line, its start period, the compose files and the boot guard as they were, and adds no file outside the canonical locations.
