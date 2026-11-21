@@ -114,7 +114,7 @@ class ModelRuntimeLoopReading(BaseModel):
                 self.window_end,
             ):
                 raise ValueError(
-                    f"contract cost {cost.contract_name!r} covers a different window"
+                    f"contract cost {cost.contract_label!r} covers a different window"
                 )
         return self
 

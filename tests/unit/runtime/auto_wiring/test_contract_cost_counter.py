@@ -72,7 +72,7 @@ async def test_two_contracts_each_read_their_own_wall_time() -> None:
     record_ingress_bytes(123)
     await asyncio.gather(sync_dispatch("record"), async_dispatch("record"))
 
-    by_name = {r.contract_name: r for r in counter.close_window(_START, _END)}
+    by_name = {r.contract_label: r for r in counter.close_window(_START, _END)}
     sync_reading = by_name["contract_sync"]
     async_reading = by_name["contract_async"]
 
@@ -110,7 +110,7 @@ def test_every_attached_contract_reads_every_window() -> None:
     counter.register("contract_a")
 
     first = counter.close_window(_START, _END)
-    assert [r.contract_name for r in first] == ["contract_a", "contract_b"]
+    assert [r.contract_label for r in first] == ["contract_a", "contract_b"]
     assert all(
         (r.dispatch_count, r.on_loop_wall_ms, r.off_loop_wall_ms, r.payload_bytes)
         == (0, 0.0, 0.0, 0)
@@ -121,7 +121,7 @@ def test_every_attached_contract_reads_every_window() -> None:
         "contract_a", wall_seconds=0.3, off_loop_seconds=0.1, payload_bytes=7
     )
     second = {
-        r.contract_name: r for r in counter.close_window(_END, _END + (_END - _START))
+        r.contract_label: r for r in counter.close_window(_END, _END + (_END - _START))
     }
     assert second["contract_a"].dispatch_count == 1
     assert second["contract_a"].on_loop_wall_ms == pytest.approx(200.0)
@@ -129,7 +129,7 @@ def test_every_attached_contract_reads_every_window() -> None:
     assert second["contract_a"].payload_bytes == 7
     # Closing zeroed the counters but kept the contract.
     third = {
-        r.contract_name: r for r in counter.close_window(_END, _END + timedelta(1))
+        r.contract_label: r for r in counter.close_window(_END, _END + timedelta(1))
     }
     assert third["contract_a"].dispatch_count == 0
     assert set(third) == {"contract_a", "contract_b"}
@@ -137,7 +137,7 @@ def test_every_attached_contract_reads_every_window() -> None:
 
 def _reading_fields() -> dict[str, Any]:
     return {
-        "contract_name": "contract_a",
+        "contract_label": "contract_a",
         "window_start": _START,
         "window_end": _END,
         "dispatch_count": 1,
@@ -257,12 +257,12 @@ async def test_attached_contract_is_registered_and_its_dispatch_is_charged() -> 
     engine = MagicMock(spec=MessageDispatchEngine)
     engine.is_frozen = False
     _commit_handler_wiring(prepared, engine, owner_contract_name=name)
-    attached = {r.contract_name: r for r in counter.close_window(_START, _END)}
+    attached = {r.contract_label: r for r in counter.close_window(_START, _END)}
     assert attached[name].dispatch_count == 0
 
     registered = engine.register_dispatcher.call_args.kwargs["dispatcher"]
     await registered(MagicMock())
-    charged = {r.contract_name: r for r in counter.close_window(_START, _END)}
+    charged = {r.contract_label: r for r in counter.close_window(_START, _END)}
     assert charged[name].dispatch_count == 1
     assert charged[name].on_loop_wall_ms == pytest.approx(50.0, rel=0.5)
 

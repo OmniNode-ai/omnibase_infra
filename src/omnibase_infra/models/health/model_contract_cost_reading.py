@@ -27,7 +27,7 @@ class ModelContractCostReading(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    contract_name: str = Field(
+    contract_label: str = Field(
         ..., min_length=1, description="Name of the attached contract."
     )
     window_start: datetime = Field(

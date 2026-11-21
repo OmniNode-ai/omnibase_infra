@@ -35,7 +35,7 @@ def _to_ms(seconds: float) -> float:
     return timedelta(seconds=seconds) / _MILLISECOND
 
 
-class _ContractTotals:
+class ContractTotals:
     """Mutable per-window accumulator of one contract."""
 
     def __init__(self) -> None:
@@ -45,14 +45,14 @@ class _ContractTotals:
         self.payload_bytes = 0
 
 
-class _DispatchTimer:
+class DispatchTimer:
     """Mutable per-dispatch record of the time spent on a worker thread."""
 
     def __init__(self) -> None:
         self.off_loop_seconds = 0.0
 
 
-_current_timer: ContextVar[_DispatchTimer | None] = ContextVar(
+_current_timer: ContextVar[DispatchTimer | None] = ContextVar(
     "contract_dispatch_timer", default=None
 )
 _ingress_bytes: ContextVar[int] = ContextVar("contract_ingress_bytes", default=0)
@@ -86,22 +86,22 @@ class ContractDispatchCostCounter:
     """Counts dispatch time, count and bytes per attached contract."""
 
     def __init__(self) -> None:
-        self._totals: dict[str, _ContractTotals] = {}
+        self._totals: dict[str, ContractTotals] = {}
 
-    def register(self, contract_name: str) -> None:
+    def register(self, contract_label: str) -> None:
         """Make the contract report from the next window on, even with no dispatch."""
-        self._totals.setdefault(contract_name, _ContractTotals())
+        self._totals.setdefault(contract_label, ContractTotals())
 
     def record(
         self,
-        contract_name: str,
+        contract_label: str,
         *,
         wall_seconds: float,
         off_loop_seconds: float,
         payload_bytes: int,
     ) -> None:
         """Add one finished dispatch to its contract's window totals."""
-        totals = self._totals.setdefault(contract_name, _ContractTotals())
+        totals = self._totals.setdefault(contract_label, ContractTotals())
         totals.dispatch_count += 1
         totals.off_loop_seconds += off_loop_seconds
         totals.on_loop_seconds += max(wall_seconds - off_loop_seconds, 0.0)
@@ -113,7 +113,7 @@ class ContractDispatchCostCounter:
         """Return one reading per attached contract, sorted by name, and zero them."""
         readings = tuple(
             ModelContractCostReading(
-                contract_name=name,
+                contract_label=name,
                 window_start=window_start,
                 window_end=window_end,
                 dispatch_count=totals.dispatch_count,
@@ -123,7 +123,7 @@ class ContractDispatchCostCounter:
             )
             for name, totals in sorted(self._totals.items())
         )
-        self._totals = {name: _ContractTotals() for name in self._totals}
+        self._totals = {name: ContractTotals() for name in self._totals}
         return readings
 
 
@@ -136,7 +136,7 @@ def get_process_contract_cost_counter() -> ContractDispatchCostCounter:
 
 
 def attach_contract_dispatcher[E, T](
-    owner_contract_name: str | None,
+    owner_contract_label: str | None,
     dispatcher: Callable[[E], Awaitable[T]],
 ) -> Callable[[E], Awaitable[T]]:
     """Return the dispatcher the engine registers for an attached contract.
@@ -146,25 +146,25 @@ def attach_contract_dispatcher[E, T](
     registration with no owner is not an attached contract and is returned
     unchanged.
     """
-    if not owner_contract_name:
+    if not owner_contract_label:
         return dispatcher
-    _PROCESS_COUNTER.register(owner_contract_name)
-    return measure_contract_dispatch(owner_contract_name, dispatcher)
+    _PROCESS_COUNTER.register(owner_contract_label)
+    return measure_contract_dispatch(owner_contract_label, dispatcher)
 
 
 def measure_contract_dispatch[E, T](
-    contract_name: str,
+    contract_label: str,
     dispatcher: Callable[[E], Awaitable[T]],
     counter: ContractDispatchCostCounter | None = None,
 ) -> Callable[[E], Awaitable[T]]:
-    """Wrap a dispatcher so every dispatch is charged to ``contract_name``.
+    """Wrap a dispatcher so every dispatch is charged to ``contract_label``.
 
     A dispatch that raises is charged too: the time it held the member is real.
     """
     target = counter if counter is not None else _PROCESS_COUNTER
 
     async def _measured(envelope: E) -> T:
-        timer = _DispatchTimer()
+        timer = DispatchTimer()
         token = _current_timer.set(timer)
         started = time.perf_counter()
         try:
@@ -173,7 +173,7 @@ def measure_contract_dispatch[E, T](
             wall = time.perf_counter() - started
             _current_timer.reset(token)
             target.record(
-                contract_name,
+                contract_label,
                 wall_seconds=wall,
                 off_loop_seconds=timer.off_loop_seconds,
                 payload_bytes=_ingress_bytes.get(),

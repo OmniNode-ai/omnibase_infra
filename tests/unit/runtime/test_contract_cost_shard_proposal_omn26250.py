@@ -40,7 +40,7 @@ _T0 = datetime(2026, 11, 21, 0, 0, 0, tzinfo=UTC)
 def _reading(name: str, loop_ms: float, window: int) -> ModelContractCostReading:
     start = _T0 + timedelta(minutes=window)
     return ModelContractCostReading(
-        contract_name=name,
+        contract_label=name,
         window_start=start,
         window_end=start + timedelta(minutes=1),
         dispatch_count=2,
@@ -66,7 +66,11 @@ def test_contracts_are_ranked_by_summed_loop_time_with_shares() -> None:
             readings=readings, served_contracts=("heavy", "light", "middle")
         )
     )
-    assert [c.contract_name for c in proposal.contracts] == ["heavy", "middle", "light"]
+    assert [c.contract_label for c in proposal.contracts] == [
+        "heavy",
+        "middle",
+        "light",
+    ]
     assert proposal.contracts[0].on_loop_wall_ms == pytest.approx(400.0)
     assert proposal.contracts[0].dispatch_count == 4
     assert proposal.contracts[0].share_of_loop_time == pytest.approx(0.8)
@@ -82,7 +86,8 @@ def test_top_10_share_is_the_share_of_the_ten_heaviest() -> None:
     readings = tuple(_reading(f"c{n:02d}", float(n), 0) for n in range(1, 13))
     proposal = _handler().handle(
         ModelContractCostShardRequest(
-            readings=readings, served_contracts=tuple(r.contract_name for r in readings)
+            readings=readings,
+            served_contracts=tuple(r.contract_label for r in readings),
         )
     )
     assert proposal.top_10_share_of_loop_time == pytest.approx(75.0 / 78.0)
@@ -106,7 +111,10 @@ def test_rerunning_over_the_same_readings_gives_the_same_proposal() -> None:
     )
     assert _handler().handle(request) == _handler().handle(request)
     # Equal loop time ties break on name, so the order is stable.
-    assert [c.contract_name for c in _handler().handle(request).contracts] == ["a", "b"]
+    assert [c.contract_label for c in _handler().handle(request).contracts] == [
+        "a",
+        "b",
+    ]
 
 
 def test_all_zero_loop_time_reads_as_zero_shares() -> None:

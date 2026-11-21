@@ -16,10 +16,12 @@ from typing import TYPE_CHECKING
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.health.model_contract_cost_shard_proposal import (
     ModelContractCostShardProposal,
-    ModelContractCostShare,
 )
 from omnibase_infra.models.health.model_contract_cost_shard_request import (
     ModelContractCostShardRequest,
+)
+from omnibase_infra.models.health.model_contract_cost_share import (
+    ModelContractCostShare,
 )
 
 if TYPE_CHECKING:
@@ -50,7 +52,7 @@ class HandlerContractCostShardProposal:
         """Return the contracts of ``request.readings`` heaviest loop time first."""
         sums: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0])
         for reading in request.readings:
-            row = sums[reading.contract_name]
+            row = sums[reading.contract_label]
             row[0] += reading.on_loop_wall_ms
             row[1] += reading.off_loop_wall_ms
             row[2] += reading.dispatch_count
@@ -63,7 +65,7 @@ class HandlerContractCostShardProposal:
         ranked = sorted(sums.items(), key=lambda item: (-item[1][0], item[0]))
         contracts = tuple(
             ModelContractCostShare(
-                contract_name=name,
+                contract_label=name,
                 on_loop_wall_ms=row[0],
                 off_loop_wall_ms=row[1],
                 dispatch_count=int(row[2]),

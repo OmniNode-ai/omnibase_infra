@@ -58,6 +58,16 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_contract_cost_shard_proposal_omn26250.py -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
+  - id: dod-omn26250-integration-proof-cost-to-proposal
+    description: >-
+      A real wrapped dispatcher is dispatched on a running event loop, the counter closes a window, and the shard proposal handler ranks the readings with the measured slow contract first.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_contract_dispatch_cost_to_shard_proposal_omn26250.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
   - id: dod-omn26250-deploy-cost-in-dev-runtime
     description: >-
       Post-deploy probe: the rebuilt dev runtime container imports the counter this change adds. It reads the live container, which carries the module only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
