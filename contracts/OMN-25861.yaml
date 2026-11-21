@@ -1,0 +1,32 @@
+schema_version: 1.0.0
+ticket_id: OMN-25861
+title: usage-by-model-day rows serve no backend, so the Usage page cannot show a model reached through an alias
+summary: >-
+  Infra half only: vendors usage migration 0004 of node_projection_usage_by_model_day byte for byte from the omnimarket source, which adds the nullable usage_by_model_day_calls.backend and usage_by_model_day.backends columns the usage writer fills once both are in force. The writer, the local store, the producer and the served exposure are omnimarket's half of this ticket and carry its own contract.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn25861-infra-vendor
+    statement: >-
+      Migration 0004 is deployed byte-identical to the omnimarket source it was copied from, with one checksum-bound ledger row and the class the migration class checker reads from its statements.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: each usage-by-model-day row serves the backends its calls were reached through -- falsifier: uv run pytest with two calls to one model, one through byok-reflection, fails unless the row serves ["byok-reflection"]'
+evidence_requirements:
+  - kind: tests
+    description: Infra deployment half only; the vendored 0004 bytes, its two nullable columns, ledger checksum and forward-only class match the pinned omnimarket source.
+    command: uv run pytest tests/unit/migrations/test_omn25861_usage_backends_vendor.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn25861-infra-vendor-0004
+    description: Infra half only. Pins 0004's source bytes, its two nullable columns with no default, its exact ledger checksum and forward-only class. It does not prove the writer's backends or the Usage page.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn25861_usage_backends_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
