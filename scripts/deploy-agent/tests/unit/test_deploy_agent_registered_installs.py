@@ -30,7 +30,12 @@ from uuid import UUID, uuid4
 
 import pytest
 from deploy_agent import agent as agent_mod
-from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested, Scope
+from deploy_agent.events import (
+    EnumRuntimeLane,
+    ModelHealthCheck,
+    ModelRebuildRequested,
+    Scope,
+)
 from deploy_agent.executor import VerificationFailedError
 from deploy_agent.idle_converge import EnumRuntimePresence
 
@@ -63,6 +68,20 @@ def lock(monkeypatch: pytest.MonkeyPatch) -> type[_Lock]:
 def _held(agent: agent_mod.DeployAgent) -> list[dict[str, str]]:
     listing: dict[str, Any] = agent._latest_branch_installs()
     return list(listing["held"])
+
+
+def _refusal() -> VerificationFailedError:
+    """What the health gate raises for a runtime that answers HTTP 503."""
+    return VerificationFailedError(
+        [
+            ModelHealthCheck(
+                service=SERVICE,
+                endpoint="http://localhost:8085/health",
+                status="fail",
+                detail="HTTP 503",
+            )
+        ]
+    )
 
 
 def _register(
@@ -388,7 +407,7 @@ def test_gate_not_weakened_a_build_whose_health_check_fails_is_still_refused(
 
     def refuse(**kwargs: object) -> list[object]:
         timeline.append("verify")
-        raise VerificationFailedError("runtime health check: HTTP 503")
+        raise _refusal()
 
     monkeypatch.setattr(agent.executor, "verify", refuse)
 
@@ -523,7 +542,7 @@ def test_recorded_devwindow_the_failed_pinned_fix_job_a9ecbe18_is_still_refused_
 
     def refuse(**kwargs: object) -> list[object]:
         timeline.append("verify")
-        raise VerificationFailedError("runtime health check: HTTP 503")
+        raise _refusal()
 
     monkeypatch.setattr(agent.executor, "verify", refuse)
 
@@ -531,6 +550,7 @@ def test_recorded_devwindow_the_failed_pinned_fix_job_a9ecbe18_is_still_refused_
 
     job = jobs.load(cmd.correlation_id)
     assert job is not None and job.status == "failed"
+    assert "HTTP 503" in str(job.errors)
     assert timeline == ["recreate", "handler apply", "verify"]
 
 
