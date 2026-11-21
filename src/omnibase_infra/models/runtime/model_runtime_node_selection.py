@@ -30,14 +30,12 @@ from collections.abc import Mapping
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.models.model_node_identity import ModelNodeIdentity
+from omnibase_infra.models.runtime.model_node_exclusion_lane_env import (
+    ENV_RUNTIME_NODE_EXCLUSION,
+    parse_contract_name_list,
+)
 
 ENV_RUNTIME_NODE_SELECTION = "ONEX_RUNTIME_NODE_SELECTION"
-ENV_RUNTIME_NODE_EXCLUSION = "ONEX_RUNTIME_NODE_EXCLUSION"
-
-
-def _parse_names(raw: str) -> tuple[str, ...]:
-    """Split a comma-separated name list, dropping blanks and duplicates."""
-    return tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
 
 
 class ModelRuntimeNodeSelection(BaseModel):
@@ -68,8 +66,8 @@ class ModelRuntimeNodeSelection(BaseModel):
         """Read the selection and exclusion from the environment."""
         source: Mapping[str, str] = os.environ if environ is None else environ
         return cls(
-            contracts=_parse_names(source.get(ENV_RUNTIME_NODE_SELECTION) or ""),
-            excluded=_parse_names(source.get(ENV_RUNTIME_NODE_EXCLUSION) or ""),
+            contracts=parse_contract_name_list(source.get(ENV_RUNTIME_NODE_SELECTION)),
+            excluded=parse_contract_name_list(source.get(ENV_RUNTIME_NODE_EXCLUSION)),
         )
 
     @property

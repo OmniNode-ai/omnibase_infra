@@ -1,0 +1,95 @@
+schema_version: 1.0.0
+ticket_id: OMN-26232
+title: The dev lane can turn a node off through ONEX_RUNTIME_NODE_EXCLUSION, carried through the compose passthrough and the deploy agent lane env allowlist and validated against known node names
+summary: >-
+  The runtime's one switch for leaving a node out, ONEX_RUNTIME_NODE_EXCLUSION, was neither in the compose passthrough env nor in the deploy agent's runtime_lane_env.v1 allowlist, so no overlay could set it. This change adds the key to the passthrough anchor (value-less, no default in any compose, lane, prod, stability or catalog file), adds it to the allowlist, and adds a typed model (src/omnibase_infra/models/runtime/model_node_exclusion_lane_env.py) that parses the comma list and checks each name against the contract names the next image build declares, read from each package's onex.nodes entry points the way the runtime discovers them. The deploy agent runs that check where it reads the lane env, so a mistyped name is refused with LaneEnvFragmentError before any container is recreated. One name is safe on every kernel service because the ownership filter is handed the whole discovered manifest whatever the profile. No node, contract or handler is added, and no value of the key is set anywhere.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26232-node-exclusion-lane-env
+    statement: A lane can name a node to leave off from its overlay, a typo is refused before any container is recreated, and nothing is off by default.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a typed model parses ONEX_RUNTIME_NODE_EXCLUSION as a comma list and refuses a name that is not a known node contract name, naming the unknown name in the error, and accepts known names and the empty value -- falsifier: uv run pytest tests/unit/models/runtime/test_node_exclusion_lane_env_omn26218.py -q fails at origin/dev, which has no such file"
+      - id: AC2
+        statement: "AC2: the deploy agent's runtime_lane_env.v1 allowlist carries ONEX_RUNTIME_NODE_EXCLUSION, a fragment for the dev lane that sets a known name reaches the runtime env, and a fragment that sets a mistyped name fails with LaneEnvFragmentError before any container is recreated -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_lane_env_fragment_node_exclusion_omn26218.py -q fails at origin/dev"
+      - id: AC3
+        statement: "AC3: the omninode-runtime service in the compose passthrough env carries ONEX_RUNTIME_NODE_EXCLUSION from the lane env, and with no value set the rendered stack holds no non-empty exclusion on any service -- falsifier: uv run pytest tests/ci/test_runtime_env_anchor.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/integration/infra/test_dev_runtime_compose_render.py -q fails with the passthrough added and a default value set"
+      - id: AC4
+        statement: "AC4: no overlay or default sets a value on prod or stability lanes in this change -- falsifier: uv run pytest tests/unit/docker -q fails if any prod or stability compose file or lane entry renders a non-empty ONEX_RUNTIME_NODE_EXCLUSION"
+      - id: AC5
+        statement: "AC5: integrated: the deploy agent's own lane env reader, run on a lab host from the installed branch against a scratch fragment for the dev lane, accepts a fragment naming a known node and refuses a fragment naming a mistyped one with the typo in the message, and touches no running container -- falsifier: the read-back on a lab host from the installed branch shows the mistyped name accepted, the known name refused, or a running container on that host restarting during the read"
+evidence_requirements:
+  - kind: tests
+    description: The model, deploy agent fragment, compose passthrough and per-profile exclusion tests.
+    command: uv run --frozen pytest tests/unit/models/runtime/test_node_exclusion_lane_env_omn26218.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_node_exclusion_omn26218.py tests/unit/docker/test_node_exclusion_passthrough_omn26218.py tests/unit/runtime/auto_wiring/test_node_exclusion_every_profile_omn26218.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26232-ac1-typed-model
+    description: >-
+      The model parses a comma list in order without blanks or duplicates, accepts unset, blank and known names, refuses an unknown name with that name and a close match in the message, names every unknown name, and is strict, frozen and extra-forbid. The static known-names read equals the runtime's own inventory pass over this repository's package, so the deploy agent and the runtime agree on what a known node is.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/models/runtime/test_node_exclusion_lane_env_omn26218.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26232-ac2-agent-allowlist-refusal
+    description: >-
+      The runtime_lane_env.v1 allowlist carries the key and its literal is pinned to the model's constant. A fragment naming a known name, from the deploy source or the omnimarket sibling, is returned with the key. A mistyped name raises LaneEnvFragmentError naming the typo and a close match. Empty and unset are accepted, an empty value is still refused for every other key, and a name with no checkout to check it against is refused. The clone reader applies the check, and executor._compose_env, which every compose command reads, carries a known name and raises on a typo before any compose command runs.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_env_fragment_node_exclusion_omn26218.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26232-ac3-compose-passthrough
+    description: >-
+      The passthrough anchor holds the key value-less and every service that merges it carries it. A real docker compose render with nothing set holds no non-empty exclusion on any service in the base, dev-lane and dev-lane plus tenant-fold stacks, and a value in the compose env reaches omninode-runtime. The tests that used to assert the key is absent now assert no non-empty value. One name is accepted under every runtime profile the catalog declares and an undiscovered name is refused under every one.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runtime_env_anchor.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/unit/docker/test_omn19513_hook_events_writer.py tests/integration/infra/test_dev_runtime_compose_render.py tests/unit/runtime/auto_wiring/test_node_exclusion_every_profile_omn26218.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26232-ac4-no-value-on-prod-or-stability
+    description: >-
+      Every compose file under docker/, every catalog entry and every other file under docker/ is scanned for a value given to the key. None gives one, the prod and stability files do not mention the key at all, and a planted value in every shape the key can take is found, so the zero is not a blind scan.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_node_exclusion_passthrough_omn26218.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26232-ac5-lane-env-reader-readback
+    description: >-
+      The deploy agent's own reader, read_lane_env_fragment, runs against a scratch git clone holding a fragment for a synthetic lane: a known name is returned and a mistyped name raises LaneEnvFragmentError naming it. The reader is git and file reads only, and the test never calls docker. The lab run of the same reader from the pushed branch is recorded in the pull request's Lab line.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_env_fragment_node_exclusion_omn26218.py -q --no-cov -n 0 -p no:cacheprovider -k "clone_reader or compose_env"
+        cwd: .
+  - id: dod-omn26232-deploy-source-readback
+    description: |-
+      Hosted-runner source-artifact readback: fetch the compose file and the deploy agent's allowlist at the evaluated published commit and confirm the compose anchor names ONEX_RUNTIME_NODE_EXCLUSION value-less and the agent's allowlist names it. A missing name fails the command, so it fails at the merge base. No lab service or credentials are required. This checks the published source and does not assert a live runtime rollout.
+    source: manual
+    binds_ac: [AC2, AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/docker/docker-compose.infra.yml" | grep -c '^  ONEX_RUNTIME_NODE_EXCLUSION:$' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/scripts/deploy-agent/deploy_agent/instance_lanes.py" | grep -c '^            "ONEX_RUNTIME_NODE_EXCLUSION",$' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra

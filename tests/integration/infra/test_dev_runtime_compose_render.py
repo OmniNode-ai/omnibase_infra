@@ -383,7 +383,10 @@ def test_dev_hook_events_fold_keeps_the_consumer_group_id_in_real_compose() -> N
     main = services["omninode-runtime"]  # positive control: the render really parsed
     assert writer not in services
     for name, service in services.items():
-        assert "ONEX_RUNTIME_NODE_EXCLUSION" not in service.get("environment", {}), name
+        # OMN-26232: a value-less passthrough renders absent; assert no value.
+        assert not service.get("environment", {}).get("ONEX_RUNTIME_NODE_EXCLUSION"), (
+            name
+        )
     assert main["environment"]["KAFKA_INSTANCE_ID"] == "runtime-main"
 
     # The retired declaration, rendered only under the profile no bring-up asks for.
@@ -398,6 +401,64 @@ def test_dev_hook_events_fold_keeps_the_consumer_group_id_in_real_compose() -> N
         declared["environment"]["KAFKA_INSTANCE_ID"]
         == main["environment"]["KAFKA_INSTANCE_ID"]
     ), "the fold must not change the consumer group id the projection resumes from"
+
+
+_NODE_EXCLUSION = "ONEX_RUNTIME_NODE_EXCLUSION"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "layers",
+    [
+        {},
+        {"with_dev_lane_overlay": True},
+        {"with_dev_lane_overlay": True, "with_tenant_fold": True},
+    ],
+    ids=["base", "dev-lane", "dev-lane-tenant-fold"],
+)
+def test_node_exclusion_renders_no_value_on_any_service_when_nothing_sets_it(
+    layers: dict[str, bool],
+) -> None:
+    """OMN-26232: the passthrough has no default, so an unset key renders no value."""
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    result = _run_compose_config(env, profile="runtime", **layers)
+    assert result.returncode == 0, result.stderr
+    services = yaml.safe_load(result.stdout)["services"]
+    assert "omninode-runtime" in services  # positive control: the render really parsed
+    for name, service in services.items():
+        assert not service.get("environment", {}).get(_NODE_EXCLUSION), name
+
+
+@pytest.mark.integration
+def test_node_exclusion_set_by_the_lane_env_reaches_the_runtime_services() -> None:
+    """OMN-26232: a value the deploy agent puts in the compose env reaches the kernel services."""
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **{_NODE_EXCLUSION: "node_alpha,node_beta"},
+    )
+    result = _run_compose_config(
+        env, profile="runtime", with_dev_lane_overlay=True, with_tenant_fold=True
+    )
+    assert result.returncode == 0, result.stderr
+    services = yaml.safe_load(result.stdout)["services"]
+    carried = {
+        name
+        for name, service in services.items()
+        if service.get("environment", {}).get(_NODE_EXCLUSION) == "node_alpha,node_beta"
+    }
+    assert "omninode-runtime" in carried
+    assert carried <= set(services)
+    unset = _run_compose_config(
+        _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST),
+        profile="runtime",
+        with_dev_lane_overlay=True,
+        with_tenant_fold=True,
+    )
+    assert unset.returncode == 0, unset.stderr
+    for name in carried:
+        environment = yaml.safe_load(unset.stdout)["services"][name]["environment"]
+        # Compose renders a value-less passthrough as null: nothing set in the container.
+        assert environment[_NODE_EXCLUSION] is None, name
 
 
 @pytest.mark.integration

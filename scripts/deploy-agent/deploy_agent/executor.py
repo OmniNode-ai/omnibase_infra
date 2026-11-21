@@ -201,6 +201,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "protocols/protocol_cost_estimator_build_io.py",
         "handlers/handler_cost_estimator_build.py",
         "nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py",
+        "models/runtime/model_node_exclusion_lane_env.py",
         "nodes/node_setup_local_provision_effect/runtime_lane_env_overlay.py",
         "models/contracts/enum_llm_endpoint_status.py",
         "models/contracts/model_llm_endpoint_lane_overlay_binding.py",
@@ -1841,10 +1842,9 @@ def _lane_env_overlay() -> dict[str, str]:
     """This agent's lane env fragment, or nothing (OMN-20867).
 
     Only a process fenced to the dev lane alone reads one: ``_compose_env``
-    serves every lane, and a deploy of any other lane must never take a dev
-    lane's settings. The fragment is the active dev instance's, read from
-    the overlay clone at its ``origin/dev`` on every call, so a merged overlay
-    change reaches the next compose command without an agent restart.
+    serves every lane, and no other lane's deploy may take a dev lane's
+    settings. The active dev instance's fragment is read from the overlay clone
+    at ``origin/dev`` on every call, so a merged change needs no agent restart.
     """
     clone = _LaneOverlayClone.path
     raw = os.environ.get(ENV_ALLOWED_LANES, "").strip()
