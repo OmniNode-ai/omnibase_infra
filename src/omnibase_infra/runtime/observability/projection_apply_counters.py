@@ -50,6 +50,7 @@ from collections import deque
 from omnibase_infra.models.observability.model_projection_apply_delta import (
     ModelProjectionApplyDelta,
 )
+from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_RUNTIME_TICK
 
 logger = logging.getLogger(__name__)
 
@@ -170,17 +171,22 @@ class ProjectionApplyCounters:
     ) -> None:
         """Record one projection dispatch outcome.
 
-        ``consumed`` counts the dispatch, ``upserted`` the rows the handler
-        reported persisting, and ``refused_by_guard`` the zero-row writes the
-        handler attributed to its ordering guard (OMN-18992) — correct
-        behaviour, kept apart from both a write and a silent nothing.
+        ``consumed`` counts the dispatch, ``upserted`` the rows persisted, and
+        ``refused_by_guard`` the zero-row writes the handler attributed to its
+        ordering guard (OMN-18992), kept apart from both a write and a nothing.
         """
+        # OMN-26419. A runtime tick registers the projection but is never counted
+        # as consumed: it is a timer, not a source event, and a projection
+        # subscribed to it (the eval-results writer sweeps expired deadlines on
+        # it) writes zero rows whenever nothing has expired. Counted, it read as
+        # "consumed and wrote nothing" on dev job a7474c42 and rolled the build
+        # back. Every source topic counts exactly as before.
         key = (projection, topic)
         if not projection or not topic:
             return
         with self._lock:
             self._registered.add(key)
-            if consumed > 0:
+            if consumed > 0 and topic != SUFFIX_RUNTIME_TICK:
                 self._consumed[key] = self._consumed.get(key, 0) + consumed
             if upserted > 0:
                 self._upserted[key] = self._upserted.get(key, 0) + upserted

@@ -1,0 +1,37 @@
+{
+  "correlation_id": "a7474c42-8b77-4c2d-b04a-51875afa884b",
+  "command": {
+    "correlation_id": "a7474c42-8b77-4c2d-b04a-51875afa884b",
+    "requested_by": "agent/idle-restore",
+    "scope": "runtime",
+    "runtime_lane": "dev",
+    "build_source": "workspace",
+    "services": [],
+    "git_ref": "origin/dev",
+    "image_ref": null,
+    "image_digest": null,
+    "rollback": null,
+    "open_pr": "",
+    "sibling_tags": {},
+    "requested_at": null,
+    "overlay_ref": ""
+  },
+  "accepted_at": "2026-11-21T20:12:17.970298Z",
+  "current_phase": "publish",
+  "phase_results": {
+    "preflight": "success",
+    "git": "success",
+    "compose_gen": "success",
+    "seed": "success",
+    "runtime": "failed",
+    "core": "skipped",
+    "verification": "skipped",
+    "publish": "success"
+  },
+  "status": "failed",
+  "errors": [
+    "commit=8b76765e2fbb1a3f761bbf1788d972ab71e24bd4: RuntimeError: Runtime roll stopped at omninode-runtime: RuntimeError: Container omninode-runtime Running Container omninode-runtime Waiting container omninode-runtime is unhealthy; omninode-runtime health=unhealthy streak=5 started=2026-11-21T20:24:04.120169256Z restarts=0 oom=False last_probe=2026-11-21T15:56:16.752180134-05:00 exit=1 FAIL [runtime_degraded] runtime health DEGRADED — projection_apply_divergence: 1/95 projection(s) consumed at least 20 event(s) and upserted ZERO rows over 5 apply window(s) — offsets commit on a refusal and on an early return, so lag reads 0 over a total loss: EvalResultsProjectionWriter",
+    "commit=8b76765e2fbb1a3f761bbf1788d972ab71e24bd4: RuntimeError: Runtime roll stopped at omninode-runtime: RuntimeError: Container omninode-runtime Running Container omninode-runtime Waiting container omninode-runtime is unhealthy; omninode-runtime health=unhealthy streak=5 started=2026-11-21T20:24:04.120169256Z restarts=0 oom=False last_probe=2026-11-21T15:56:16.752180134-05:00 exit=1 FAIL [runtime_degraded] runtime health DEGRADED — projection_apply_divergence: 1/95 projection(s) consumed at least 20 event(s) and upserted ZERO rows over 5 apply window(s) — offsets commit on a refusal and on an early return, so lag reads 0 over a total loss: EvalResultsProjectionWriter; forward redeploy revision=57d2fb03a699ed73a77916bf3b8cdebe37f710ca verified=True"
+  ],
+  "completed_at": "2026-11-21T21:09:55.289485Z"
+}
