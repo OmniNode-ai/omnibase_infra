@@ -449,12 +449,24 @@ jobs:
             exit 1
           fi
           # One path per line. The receipt must say success and carry at least one
-          # path; jq -e fails on anything else, so a malformed receipt fails here.
-          if ! staged_lines=$(jq -er '(.result.handler_result // .result) | select(.success == true) | .staged[]' "${RUNNER_TEMP}/release-notes-receipt.json"); then
+          # path, except for the release-pr-body target; jq -e fails on anything
+          # else, so a malformed receipt fails here.
+          # A repo that keeps no changelog file on its default branch (target
+          # release-pr-body, OMN-25958) stages nothing: its block rides in the
+          # receipt's notes and goes into the release pull request body below.
+          if ! staged_lines=$(jq -er '(.result.handler_result // .result) | select(.success == true and ((.staged | length) > 0 or .target == "release-pr-body")) | (.staged | join("\n"))' "${RUNNER_TEMP}/release-notes-receipt.json"); then
             echo "::error::the release-notes receipt does not report success with staged paths"
             exit 1
           fi
           mapfile -t staged <<<"${staged_lines}"
+          if [ -z "${staged_lines}" ]; then
+            staged=()
+          fi
+          notes_section=""
+          if [ "$(jq -r '(.result.handler_result // .result).target' "${RUNNER_TEMP}/release-notes-receipt.json")" = "release-pr-body" ]; then
+            notes_block=$(jq -r '(.result.handler_result // .result).notes' "${RUNNER_TEMP}/release-notes-receipt.json")
+            notes_section=$(printf 'Release notes (this repository keeps no changelog file on its default branch, so they are carried here and written nowhere in the tree):\n\n%s\n' "${notes_block}")
+          fi
           if [ "${NEEDS_BUMP}" = "true" ]; then
             # The manifest and the lockfile move together: uv.lock records the
             # root package's own version, so a bump of pyproject.toml alone
@@ -482,8 +494,10 @@ jobs:
 
           git config user.name "onexbot-occ-writer[bot]"
           git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
-          git add -- "${staged[@]}"
-          git commit -m "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})" \
+          if [ "${#staged[@]}" -gt 0 ]; then
+            git add -- "${staged[@]}"
+          fi
+          git commit --allow-empty -m "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})" \
             --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
             --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           # publish the rebuilt branch
@@ -507,6 +521,8 @@ jobs:
           The refresh moved uv.lock only, ran once for this run, and is covered by
           the same lab evidence as the release (the release PR's own required CI
           for repositories declaring lab_evidence none).
+
+          ${notes_section:-}
 
           The train opened this because the repository's declared premises held for
           that exact commit: it carries unreleased release-relevant work since the

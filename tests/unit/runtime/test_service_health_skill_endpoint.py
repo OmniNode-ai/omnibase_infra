@@ -83,7 +83,7 @@ class TestServiceHealthSkillEndpoint:
                 "omnibase_infra.services.health_checker.web.AppRunner"
             ) as mock_runner_cls:
                 with patch(
-                    "omnibase_infra.services.health_checker.web.TCPSite"
+                    "omnibase_infra.services.health_checker.HealthProbeAcceptor"
                 ) as mock_site_cls:
                     app_instance = MagicMock()
                     routes: list[tuple[str, str, object]] = []

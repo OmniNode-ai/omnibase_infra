@@ -83,11 +83,7 @@ class TestServiceHealthSkillEndpointIntegration:
         await health_server.start()
         site = health_server._site
         assert site is not None
-        internal_server = site._server
-        assert internal_server is not None
-        sockets = getattr(internal_server, "sockets", None)
-        assert sockets and len(sockets) > 0
-        port: int = sockets[0].getsockname()[1]
+        port: int = site.port
         return health_server, port
 
     @pytest.mark.asyncio

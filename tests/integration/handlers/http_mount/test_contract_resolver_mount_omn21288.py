@@ -52,7 +52,7 @@ async def test_declared_resolver_serves_health_and_a_resolution_in_process() -> 
         assert server._mount_task is not None
         await server._mount_task
         assert server._runner is not None
-        base = f"http://127.0.0.1:{int(server._runner.addresses[0][1])}"
+        base = f"http://127.0.0.1:{int(server._site.port)}"
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{base}/api/nodes/health") as response:
                 assert response.status == 200
