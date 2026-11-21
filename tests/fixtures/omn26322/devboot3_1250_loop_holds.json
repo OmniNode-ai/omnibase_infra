@@ -37,6 +37,8 @@
   "fold": {
     "announcements": 1400,
     "seconds": 13.0,
-    "seconds_per_announcement": 0.0093
+    "seconds_per_announcement": 0.0093,
+    "max_single_apply_s": 1.051,
+    "max_single_apply_note": "after yielding between announcements, one admission (ModelNodeAnnouncePolicy.admit -> load_yaml_mapping_no_duplicates) held the loop 1.051 s on one CPU, read 2026-11-21T13:17:48Z"
   }
 }

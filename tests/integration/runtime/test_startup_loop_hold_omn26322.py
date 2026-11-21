@@ -133,7 +133,7 @@ async def test_startup_loop_hold_under_one_second_announcer_inventory() -> None:
 
 @pytest.mark.asyncio
 async def test_startup_loop_hold_under_one_second_announcer_fold() -> None:
-    """The fold gives the loop a turn between announcements."""
+    """The fold keeps the loop free between and during admissions."""
     fold = _fixture()["fold"]
     assert isinstance(fold, dict)
     per_item = float(str(fold["seconds_per_announcement"]))
@@ -143,8 +143,13 @@ async def test_startup_loop_hold_under_one_second_announcer_fold() -> None:
     per_call = max(per_item, _REPLAY_CAP_S / count)
     original = handler_package_announcer.apply_announcement
 
+    # One admission was recorded at over one second on its own (a large contract).
+    single = min(float(str(fold["max_single_apply_s"])), _REPLAY_CAP_S)
+    calls: list[int] = []
+
     def slow_apply(*args: Any, **kwargs: Any) -> Any:
-        time.sleep(per_call)
+        time.sleep(single if not calls else per_call)
+        calls.append(1)
         return original(*args, **kwargs)
 
     bus = EventBusInmemory(environment="test", group="node-announce")
@@ -164,6 +169,7 @@ async def test_startup_loop_hold_under_one_second_announcer_fold() -> None:
             )
         )
     assert per_call * count > _HOLD_LIMIT_S
+    assert single > _HOLD_LIMIT_S
     assert gap < _HOLD_LIMIT_S, (
         f"the announcement fold held the loop {gap:.2f}s over {count} items"
     )

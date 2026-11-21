@@ -490,8 +490,11 @@ class HandlerPackageAnnouncer:
             value = getattr(message, "value", None)
             try:
                 announcement = ModelNodeAnnouncement.model_validate_json(value or b"")
-                catalog, outcome = apply_announcement(
-                    catalog, announcement, read_installed
+                # Admission re-reads and parses the installed contract (over 1 s
+                # for one contract on one CPU); the catalog is immutable and the
+                # fold is sequential, so it runs on a worker thread (OMN-26322).
+                catalog, outcome = await asyncio.to_thread(
+                    apply_announcement, catalog, announcement, read_installed
                 )
                 outcomes.append(outcome)
             except _RECORD_FAILURES:
