@@ -1,0 +1,44 @@
+{
+  "source": "lab reproduction of the ONEX kernel main(), host h053, 1 CPU (systemd-run scope CPUQuota=100%), main-thread stack sampled every 1 s from sys._current_frames, loop lag from a 1 s heartbeat task",
+  "refs": {
+    "omnibase_infra": "5dec53db15d8f6d18bb2f7fcb337da450670d0ae (omnibase_infra#6133 head over dev 1d59fb659)",
+    "omnimarket": "9f421237f6f4324925676f0a8cc19e4e094152b4"
+  },
+  "read_utc": "2026-11-21T12:57:22Z",
+  "contracts_announced": 1400,
+  "holds_before": [
+    {
+      "name": "topic_provisioner_init",
+      "call": "service_kernel.py:2203 TopicProvisioner(...) -> service_topic_manager.py:279 _build_topic_specs -> contract_topic_extractor.extract_from_installed_packages",
+      "contiguous_s": 11.98,
+      "heartbeat_gap_end_utc": "2026-11-21T12:56:25.488631Z",
+      "scratch_run_contiguous_s": 12.3
+    },
+    {
+      "name": "boot_step0",
+      "call": "service_kernel.py:2810 run_boot_step0 -> handler_package_announcer.py:469 read_package_inventory and :504 publish -> on_message -> apply_announcement -> :389 read",
+      "contiguous_s": 42.06,
+      "heartbeat_gap_end_utc": "2026-11-21T12:57:08.548367Z",
+      "scratch_run_contiguous_s": 36.35
+    },
+    {
+      "name": "topic_startup_validator",
+      "call": "service_kernel.py:2270 TopicStartupValidator.validate -> service_topic_startup_validator.py:134 _required_topics -> contract_topic_extractor.extract_from_installed_packages",
+      "contiguous_s": 14.89,
+      "heartbeat_gap_end_utc": "2026-11-21T13:09:48.4Z",
+      "run": "scratch broker and scratch postgres, read 2026-11-21T13:10:30Z"
+    }
+  ],
+  "boot_step0_sample_split": {
+    "inventory_import_and_hash_samples": 28,
+    "fold_samples": 13,
+    "sample_interval_s": 1.0
+  },
+  "fold": {
+    "announcements": 1400,
+    "seconds": 13.0,
+    "seconds_per_announcement": 0.0093,
+    "max_single_apply_s": 1.051,
+    "max_single_apply_note": "after yielding between announcements, one admission (ModelNodeAnnouncePolicy.admit -> load_yaml_mapping_no_duplicates) held the loop 1.051 s on one CPU, read 2026-11-21T13:17:48Z"
+  }
+}

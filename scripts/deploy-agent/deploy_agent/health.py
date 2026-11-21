@@ -150,6 +150,9 @@ async def _health_handler(request: web.Request) -> web.Response:
             "correlation_id": str(active.correlation_id),
             "current_phase": str(active.current_phase),
             "started_at": active.accepted_at.isoformat(),
+            # OMN-26122: the lane the job rolls, so a probe grading one lane can
+            # tell its deploy from another lane's on this single-flight agent.
+            "runtime_lane": str(active.command.get("runtime_lane") or ""),
         }
 
     # Find the most recent completed job for last_result.
@@ -171,13 +174,12 @@ async def _health_handler(request: web.Request) -> web.Response:
         except Exception:  # noqa: BLE001
             continue
     if completed_jobs:
-        latest = max(completed_jobs, key=lambda pair: pair[0])[1]
+        latest_at, latest = max(completed_jobs, key=lambda pair: pair[0])
         last_result = {
             "correlation_id": str(latest.correlation_id),
             "status": latest.status,
-            "completed_at": latest.completed_at.isoformat()
-            if latest.completed_at
-            else None,
+            "completed_at": latest_at.isoformat(),
+            "runtime_lane": str(latest.command.get("runtime_lane") or ""),
             "phase_results": {str(k): str(v) for k, v in latest.phase_results.items()},
             # OMN-18636 AC5. A reader that only looks at /health must be able to
             # tell a finished job from one whose post-terminal work is still
