@@ -1,0 +1,80 @@
+schema_version: 1.0.0
+ticket_id: OMN-26250
+title: Every contract the dev runtime attaches has a measured per-contract dispatch cost over 24 hours, and the shard proposal is sorted by that reading
+summary: >-
+  Each runtime member wraps the dispatcher of every contract it attaches with a counter that times each dispatch with the monotonic clock, splits the time into wall time on the event loop and wall time on a worker thread (the plain-function entry methods of OMN-24491), and counts dispatches and the wire bytes of the bus messages consumed. Every window the loop reading of OMN-26249 carries one reading per attached contract, including a contract that dispatched nothing, each naming the window it covers. A ranking operation on the same node sums stored readings per contract, sorts them by loop time, states the share of the ten heaviest and lists served contracts that have no reading. The 24-hour reading on the dev runtime is taken after this change is deployed and is recorded on the ticket.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26250-contract-cost
+    statement: Every contract a runtime member attaches reads a measured dispatch cost every window, and the contracts are ranked by that reading.
+    acceptance:
+      - id: AC1
+        statement: "AC1: every contract the runtime attaches has a reading after 24 hours, none read as unknown -- falsifier: join the readings to the served manifest, any contract with no row fails"
+      - id: AC2
+        statement: "AC2: the readings carry measured values only and name the window they cover -- falsifier: a model test refuses a reading with no window; a grep of the output for the words \"estimate\" or \"assumed\" returns nothing"
+      - id: AC3
+        statement: "AC3: the shard proposal in the PR is the output of the reading, sorted by loop time, and states the share of loop time of the top 10 contracts -- falsifier: the PR's table matches a re-run of the query over the stored readings"
+evidence_requirements:
+  - kind: tests
+    description: The per-contract cost counter, the cost reading model and the shard proposal tests.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_contract_cost_counter.py tests/unit/runtime/test_contract_cost_shard_proposal_omn26250.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26250-ac1-attached-contract-reads
+    description: >-
+      A contract is registered with the counter when the wiring commits it, so it reads every window with a count of zero before it dispatches anything; a dispatch through the prepared dispatcher is charged to it; closing a window returns one reading for each attached contract, sorted, and zeroes the counters but keeps the contracts. The ranking lists a served contract that has no reading as unread. The 24-hour join to the served manifest on the dev runtime is recorded in the pull request and the ticket after the deploy.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_contract_cost_counter.py tests/unit/runtime/test_contract_cost_shard_proposal_omn26250.py -k "attached or every_attached or unread" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26250-ac2-measured-and-windowed
+    description: >-
+      Two fake handlers with known sleeps (0.2 s on a worker thread, 0.1 s on the loop) each read their own wall time within 20 percent, split into on-loop and off-loop time. The reading model refuses a missing window, a window that ends before it starts, a missing field and a negative measurement.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_contract_cost_counter.py -k "wall_time or window or missing or negative or failing" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+      - check_type: command
+        check_value: bash -c '! grep -rniE "estimate|assumed" src/omnibase_infra/models/health/model_contract_cost_reading.py src/omnibase_infra/models/health/model_contract_cost_shard_proposal.py src/omnibase_infra/models/health/model_contract_cost_shard_request.py src/omnibase_infra/handlers/contract_dispatch_cost.py src/omnibase_infra/handlers/handler_contract_cost_shard_proposal.py'
+        cwd: .
+  - id: dod-omn26250-ac3-proposal-is-the-ranking
+    description: >-
+      The ranking sums stored readings per contract, sorts them by loop time with ties broken on name, states the share of loop time of the ten heaviest, names the window the readings cover and gives the same table when re-run over the same readings. The PR's table is read from the stored readings of the dev runtime after the 24-hour window.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_contract_cost_shard_proposal_omn26250.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26250-deploy-cost-in-dev-runtime
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime container imports the counter this change adds. It reads the live container, which carries the module only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime python -c 'import omnibase_infra.handlers.contract_dispatch_cost'
+        cwd: .
+  - id: dod-omn26250-deploy-readings-carry-costs
+    description: >-
+      Post-deploy probe: the loop reading topic holds readings that carry the per-contract costs, read from the broker the dev runtime publishes to. The 24-hour join to the served manifest is read from the same topic over 24 hours and recorded as evidence in the pull request and the ticket.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: bash -c 'docker exec omnibase-infra-redpanda rpk topic consume onex.evt.omnibase-infra.runtime-loop-reading-recorded.v1 --offset -3 --num 3 --format json | grep -c contract_costs | grep -qx 3'
+        cwd: .

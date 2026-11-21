@@ -18,6 +18,8 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import cast
 
+from omnibase_infra.handlers.contract_dispatch_cost import run_in_worker_timed
+
 
 async def invoke_entry_method(
     handle_method: Callable[[object], object],
@@ -31,7 +33,7 @@ async def invoke_entry_method(
     saw before.
     """
     if not inspect.iscoroutinefunction(handle_method):
-        result = await asyncio.to_thread(handle_method, dispatch_arg)
+        result = await run_in_worker_timed(handle_method, dispatch_arg)
     else:
         result = handle_method(dispatch_arg)
     if asyncio.iscoroutine(result):

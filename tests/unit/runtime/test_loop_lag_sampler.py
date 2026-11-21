@@ -59,6 +59,7 @@ def _valid_reading_fields() -> dict[str, Any]:
         "tick_lag_ms": 40.0,
         "tick_lag_not_applicable_reason": None,
         "abandoned_dispatches": 0,
+        "contract_costs": (),
     }
 
 

@@ -30,6 +30,10 @@ from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
     EnumOmnibaseInfraTopic,
 )
 from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.handlers.contract_dispatch_cost import (
+    get_process_contract_cost_counter,
+    record_ingress_bytes,
+)
 from omnibase_infra.models.health.model_runtime_loop_reading import (
     ModelRuntimeLoopReading,
 )
@@ -118,13 +122,18 @@ class RuntimeLoopLagSampler:
         if topic.endswith(SUFFIX_RUNTIME_TICK):
             self._tick_subscriber = True
 
-    def observe_message(self, topic: str, payload: object) -> None:
-        """Record a message the member consumed; only a runtime tick counts.
+    def observe_message(self, topic: str, payload: object, wire_size: int) -> None:
+        """Record a message the member consumed.
+
+        The wire size is carried to the dispatches this message starts, where
+        the per-contract cost counts it (OMN-26250). Only a runtime tick
+        reaches the tick lag.
 
         A tick payload without a readable timezone-aware ``scheduled_at`` is
         skipped, so the reading says no tick was consumed rather than carrying
         a lag that was guessed.
         """
+        record_ingress_bytes(wire_size)
         if not topic.endswith(SUFFIX_RUNTIME_TICK):
             return
         raw = (
@@ -165,6 +174,9 @@ class RuntimeLoopLagSampler:
             tick_lag_ms=tick_lag_ms,
             tick_lag_not_applicable_reason=reason,
             abandoned_dispatches=request.abandoned_dispatches,
+            contract_costs=get_process_contract_cost_counter().close_window(
+                self._window_start, request.window_end
+            ),
         )
         self._window_start = request.window_end
         self._max_gap_seconds = 0.0
