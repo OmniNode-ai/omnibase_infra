@@ -54,7 +54,7 @@ def test_the_four_cases_and_the_control_are_declared_up_front() -> None:
     assert coded == [
         "auth.credential.invalid",
         "auth.credential.absent",
-        "auth.tenant.forbidden",
+        "resource.not_found",
     ]
     assert len(set(coded)) == len(coded)
     malformed = next(case for case in probe.CASES if case.name == "malformed")
@@ -83,7 +83,7 @@ def test_a_healthy_lane_grades_pass() -> None:
     assert observed[:3] == [
         "auth.credential.invalid",
         "auth.credential.absent",
-        "auth.tenant.forbidden",
+        "resource.not_found",
     ]
     assert observed[3] is None
 
@@ -241,12 +241,54 @@ def test_the_probe_keeps_every_arm_status_and_code_the_criterion_names() -> None
     assert expected == {
         "wrong_key": (401, "auth.credential.invalid"),
         "absent_key": (401, "auth.credential.absent"),
-        "wrong_tenant": (403, "auth.tenant.forbidden"),
+        "wrong_tenant": (404, "resource.not_found"),
         "malformed": (422, None),
     }
     assert probe.CONTROL.path == "/health"
     assert probe.CONTROL.expected_status == 200
     assert probe.HEADER_NAME == "x-api-key"
+
+
+@pytest.mark.unit
+def test_a_cross_tenant_read_that_answers_403_is_refused_as_an_existence_leak() -> None:
+    """OMN-26117: the runtime gateway answers 404 for another tenant's workflow, never 403.
+
+    ``node_workflow_gateway_effect``'s contract says "A workflow of another tenant
+    answers 404, the same as an unknown id", and the workflow receipt
+    endpoint reference and beta requirement N-2 say an existence signal across tenants is itself a leak,
+    so cross-tenant reads 404, never 403. The 403 ``auth.tenant.forbidden`` this
+    arm once expected came from the retired ``/v1/tenants/<slug>/api-keys`` route
+    of onex-api (RULING 2026-11-10T13:26:22Z). A 403 here would tell a caller the
+    foreign workflow exists, so it must grade FAIL, not PASS.
+    """
+    wrong_tenant = next(case for case in probe.CASES if case.name == "wrong_tenant")
+    assert (wrong_tenant.expected_status, wrong_tenant.expected_code) == (
+        404,
+        "resource.not_found",
+    )
+    leaked = probe.grade_case(
+        wrong_tenant,
+        probe.Observation(
+            status=403,
+            body={"code": "auth.tenant.forbidden", "detail": "Forbidden"},
+        ),
+    )
+    assert leaked.ok is False
+    refused = probe.grade_case(
+        wrong_tenant,
+        probe.Observation(
+            status=404,
+            body={"detail": "workflow not found", "code": "resource.not_found"},
+        ),
+    )
+    assert refused.ok is True, refused.reason
+    unavailable = probe.grade_case(
+        wrong_tenant,
+        probe.Observation(
+            status=503, body={"detail": "workflow status is unavailable"}
+        ),
+    )
+    assert unavailable.ok is False
 
 
 @pytest.mark.live_contact(
