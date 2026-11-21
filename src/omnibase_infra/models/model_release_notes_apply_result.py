@@ -16,11 +16,21 @@ class ModelReleaseNotesApplyResult(BaseModel):
     success: bool = Field(..., description="False when the node refused to write.")
     target: str = Field(
         default="",
-        description="Where the policy sends the notes: CHANGELOG.md or README.md.",
+        description=(
+            "Where the policy sends the notes: CHANGELOG.md, README.md, or "
+            "release-pr-body when the repo keeps no changelog file."
+        ),
     )
     staged: tuple[str, ...] = Field(
         default_factory=tuple,
         description="Repo-relative paths to `git add`, in staging order.",
+    )
+    notes: str = Field(
+        default="",
+        description=(
+            "The release block (public-hygiene filtered) for the release pull "
+            "request body; set only when target is release-pr-body."
+        ),
     )
     error_message: str | None = Field(
         default=None,

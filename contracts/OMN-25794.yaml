@@ -40,6 +40,7 @@ dod_evidence:
           bash -e -c '
           probe=$(mktemp -d);
           trap "rm -rf -- \"$probe\"" EXIT;
+          : > "$probe/CHANGELOG.md";
           printf "%s\n" "## v1.0.0 (2026-11-18)" "" "### Included Since v0.9.0" "- fix: example-hidden-repo remains (#4610)" > "$probe/entry.md";
           printf "%s\n" "private_repo_names: [example-hidden-repo]" > "$probe/vocabulary.yaml";
           printf "{\"clone_path\":\"%s\",\"entry_file\":\"%s/entry.md\",\"repository_visibility\":\"public\",\"hygiene_vocabulary_file\":\"%s/vocabulary.yaml\"}\n" "$probe" "$probe" "$probe" > "$probe/request.json";

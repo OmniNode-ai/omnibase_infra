@@ -10,8 +10,13 @@ policy, so every core release PR was born red on ``kb-doc-gate``, the
 
 The owner of "does this repo take a changelog" is the repo's own
 ``.readme-only-docs.yaml``, the file the ``readme-only-docs`` validator reads. A
-repo without it, or one that lists ``CHANGELOG.md`` under ``exceptions``, keeps the
-historical ``CHANGELOG.md`` prepend. A README-only repo gets the block in root
+repo that lists ``CHANGELOG.md`` under ``exceptions``, or that has no policy file
+and still carries a root ``CHANGELOG.md``, keeps the historical ``CHANGELOG.md``
+prepend. A repo with no policy file and no root ``CHANGELOG.md`` deleted its
+changelog under a prose-removal rule that has no policy file to read (omnimarket
+and omniclaude, OMN-25958: the 0.4.324 cut re-created ``CHANGELOG.md`` on dev and
+the prose-removal test refused it), so nothing is written to the tree: the block
+travels in the result, for the release pull request's body. A README-only repo gets the block in root
 ``README.md`` above its newest release section, a root ``CHANGELOG.md`` removed,
 and, where it carries its release-cut contract and identity test (omnibase_core),
 the pinned test and ``dod_evidence`` item every accepted README-shaped cut has
@@ -45,6 +50,7 @@ from omnibase_infra.models.model_release_notes_apply_result import (
 
 README_ONLY_DOCS_FILE: Final = ".readme-only-docs.yaml"
 _CHANGELOG_PATH: Final = "CHANGELOG.md"
+RELEASE_PR_BODY_TARGET: Final = "release-pr-body"
 _README_PATH: Final = "README.md"
 _RELEASE_CONTRACT_PATH: Final = "contracts/OMN-18595.yaml"
 _RELEASE_IDENTITY_TEST_PATH: Final = "tests/ci/test_release_cut_identity_omn18595.py"
@@ -94,17 +100,22 @@ def _filter_private_repository_names(entry: str, vocabulary_file: str | None) ->
 
 
 def release_notes_target(clone: Path) -> str:
-    """Where this repo's release notes live: ``CHANGELOG.md`` or ``README.md``.
+    """Where this repo's release notes live: ``CHANGELOG.md``, ``README.md`` or the PR.
 
     A repo that carries ``.readme-only-docs.yaml`` and does not list
     ``CHANGELOG.md`` among its ``exceptions`` refuses a root changelog, so its
-    notes go in the root README. Every other repo keeps the changelog. No
+    notes go in the root README. A repo with no policy file keeps the changelog
+    only while it still has one: no root ``CHANGELOG.md`` means the repo removed
+    it, and a cut must not bring it back onto the default branch, so the notes
+    go in the release pull request's body (``RELEASE_PR_BODY_TARGET``). No
     train-side key: a second copy of the answer would drift from the gate that
     actually decides.
     """
     config = clone / README_ONLY_DOCS_FILE
     if not config.is_file():
-        return _CHANGELOG_PATH
+        if (clone / _CHANGELOG_PATH).is_file():
+            return _CHANGELOG_PATH
+        return RELEASE_PR_BODY_TARGET
     try:
         loaded = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
@@ -312,9 +323,14 @@ def _contract_item_source(parsed: ModelParsedReleaseEntry, repo_name: str) -> st
 def apply_release_notes(
     clone: Path, entry: str, *, repo_name: str | None = None
 ) -> tuple[str, list[str]]:
-    """Write the release block into ``clone``; return the target and paths to stage."""
+    """Write the release block into ``clone``; return the target and paths to stage.
+
+    The ``release-pr-body`` target writes nothing and stages nothing.
+    """
     parsed = parse_release_entry(entry)
     target = release_notes_target(clone)
+    if target == RELEASE_PR_BODY_TARGET:
+        return target, []
     if target == _CHANGELOG_PATH:
         changelog = clone / _CHANGELOG_PATH
         existing = changelog.read_text(encoding="utf-8") if changelog.exists() else ""
@@ -382,5 +398,8 @@ class HandlerReleaseNotesApply:
         except (OSError, ValueError) as exc:
             return ModelReleaseNotesApplyResult(success=False, error_message=str(exc))
         return ModelReleaseNotesApplyResult(
-            success=True, target=target, staged=tuple(staged)
+            success=True,
+            target=target,
+            staged=tuple(staged),
+            notes=entry.rstrip("\n") if target == RELEASE_PR_BODY_TARGET else "",
         )
