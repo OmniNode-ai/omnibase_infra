@@ -1,3 +1,20 @@
+## v0.38.80 (2026-11-21)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.80 by the scheduled release train.
+- 8 release-relevant commit(s) merged since v0.38.79.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.79
+- : ledger readers git-maintenance and reconcile-verify-movement ask the reader node (#6122)
+- fix: dev deploy agent reads one branch-install store and applies registered installs before the health gate (#6123)
+- feat: publish each runtime member's event-loop lag, tick lag and abandoned dispatches every window (#6121)
+- : carry ONEX_RUNTIME_NODE_EXCLUSION through the compose passthrough and the deploy agent's lane env, validated against known node names (#6118)
+- chore(deps, ): move omnibase-core to dev-20261120075721-2a9efbda3548 (core 0.47.76) (#6116)
+- feat: provision the gateway_runtime login role and map gateway.database.dsn (#6113)
+- : the stability host broker layer is decided in one place for the refresh and the deploy agent (#6002)
+- : the runner installer prepares every bind-mounted cache directory as the runner user (#6103)
+
 ## v0.38.79 (2026-11-20)
 
 ### Release
