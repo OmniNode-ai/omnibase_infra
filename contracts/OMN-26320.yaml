@@ -23,7 +23,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The startup_wiring_off_loop and startup_wiring_error_fails_startup regressions built from the recorded dev-sized wiring profile.
-    command: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_off_loop_omn26320.py -q --no-cov -n 0 -p no:randomly
+    command: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_loop_turns_omn26320.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -38,15 +38,15 @@ dod_evidence:
         check_value: python3 -c "import json; d = json.load(open('tests/fixtures/omn26320/devboot_1000_wiring_block_profile.json')); r = d['reproduction']; assert r['host'] == 'h053' and r['wire_from_manifest_contiguous_loop_block_seconds'] > 10 and len(d['prepare_contract_wiring_ms']) == 807 and len(d['import_handler_class_ms']) == 1834"
         cwd: .
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_off_loop_omn26320.py -k startup_wiring_off_loop -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_loop_turns_omn26320.py -k startup_wiring_off_loop -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26320-ac2-startup-wiring-off-loop
-    description: "A /health probe on the wiring loop's own event loop is answered inside 0.8 s while the recorded dev-sized wiring pass runs; the test fails with a 3 s wait when wiring does not hand the loop back."
+    description: "A /health probe on the wiring loop's own event loop is answered between wiring items while the recorded dev-sized wiring pass runs: at most 500 of the 2641 recorded wiring calls run while one probe is in flight and the loop is never held longer than the slowest single recorded item. Neither assertion reads a clock, so a loaded runner cannot fail it (the first version bounded a wall-clock wait and failed once on a hosted runner with no code change). A positive control replays the pass with the loops run back to back and requires the same measurement to flag it."
     source: manual
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_off_loop_omn26320.py -k startup_wiring_off_loop -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_loop_turns_omn26320.py -k startup_wiring_off_loop -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26320-ac3-wiring-error-fails-startup
     description: "A StateIoUnconfiguredError raised while preparing a contract, and a collected failure under ONEX_WIRING_STRICT_MODE, reach the awaiting caller as the same typed errors after the loop has been handed back."
@@ -54,7 +54,7 @@ dod_evidence:
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_off_loop_omn26320.py -k startup_wiring_error_fails_startup -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_loop_turns_omn26320.py -k startup_wiring_error_fails_startup -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26320-ac4-gates-unchanged
     description: "The change edits no compose file, boot guard, healthcheck setting, start period or wait setting: it adds yield_each to handlers/entry_method_offload.py, changes two loop headers and one import line in handler_wiring.py, a test, a fixture and this contract."
@@ -62,7 +62,7 @@ dod_evidence:
     binds_ac: [AC4]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_off_loop_omn26320.py -k startup_wiring_off_loop -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_loop_turns_omn26320.py -k startup_wiring_off_loop -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26320-ac5-recorded-fixture-regression
     description: "The regression replays the recorded per-call durations from the fixture through the real wire_from_manifest and fails at origin/dev."
@@ -70,7 +70,7 @@ dod_evidence:
     binds_ac: [AC5]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_off_loop_omn26320.py -k startup_wiring_off_loop -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_loop_turns_omn26320.py -k startup_wiring_off_loop -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26320-deploy-wiring-yields-live
     description: >-
