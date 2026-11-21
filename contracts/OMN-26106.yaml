@@ -81,3 +81,33 @@ dod_evidence:
       - check_type: command
         check_value: ssh h201 'sha256sum ~/.config/systemd/user/deploy-agent.service'
         cwd: .
+  - id: dod-omn26106-ac1-accepted-20261121t1745z
+    description: 'AC1: every caller of the dev recreate window gate passes a non-empty requested_by; the gate takes it with no default. The same test file copied onto cb23b5f25 gives 3 failed, 1 passed.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_idle_gate_requester_omn26106.py -q -p no:randomly
+        cwd: .
+  - id: dod-omn26106-ac2-accepted-20261121t1745z
+    description: 'AC2: the stability follow runs against a window that refuses exactly the input recorded in fixtures/dev_agent_requested_by_crash_omn26106.txt; on cb23b5f25 it raises _RecordedRefusalError (ModelDevRecreateRequest.requested_by, input_value='''').'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_idle_gate_requester_omn26106.py -q -p no:randomly -k stability_follow_names_its_requester
+        cwd: .
+context:
+  ac_binding_provenance:
+    dod-omn26106-ac1-accepted-20261121t1745z:
+      - label: AC1
+        criterion_hash: 79a99d55a4bd42c79b35b7e8f3cfa0297ac740cf1dfbf82628c49ffc2824d949
+        proposed_by: lane=dod-closeout-bind-2026-11-21T1745Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-21T1745Z-c1
+    dod-omn26106-ac2-accepted-20261121t1745z:
+      - label: AC2
+        criterion_hash: f55b4d3a72e4f29d5b511f115ef69739b41f2ab061fe8739acae8b944325d807
+        proposed_by: lane=dod-closeout-bind-2026-11-21T1745Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-21T1745Z-c1
