@@ -3,14 +3,7 @@
 
 """OMN-19894 -- pick the lab lane a probe grades from the overlay's ordered list.
 
-WHY THIS EXISTS
-    Operator rulings 2026-09-28T01:58:06Z ("it's a problem if checks are reliant
-    on a specific machine") and 01:58:17Z ("chain of responders right?"). Before
-    this, every lab probe in this repository ran only on the .201 verify runner
-    and reached the lane through that host's ``host.docker.internal`` alias, so
-    the probe queued forever when .201 was down and could only ever grade .201.
-
-    Now the deployment overlay -- the repository variable ``LAB_LANES_JSON``,
+    The deployment overlay -- the repository variable ``LAB_LANES_JSON``,
     supplied by whoever runs the lab, never a literal in this repository --
     declares the lanes a probe may grade, in order, cheapest first. The probe
     grades the FIRST lane whose required surfaces all answer. The probe job
@@ -38,31 +31,29 @@ THE OVERLAY SHAPE
     and is then placed beside that lane, wherever the overlay says it runs.
 
 WHAT IT WRITES
-    ``GITHUB_ENV``: ``LANE_NAME`` and ``LANE_<FIELD>`` for every declared field
-    of the chosen lane (lists as JSON). ``GITHUB_OUTPUT``: ``name``, ``lane``
-    (the whole entry as JSON) and every field under its own name.
+    ``GITHUB_ENV``: ``LANE_NAME`` and ``LANE_<FIELD>`` for every declared field of
+    the chosen lane (lists as JSON). ``GITHUB_OUTPUT``: ``name``, ``lane`` (the
+    whole entry as JSON) and every field under its own name.
 
 DEPLOY WAIT (OMN-19811, OMN-20509)
     ``LANE_DEPLOY_WAIT_SECONDS`` opts into a bounded wait when no lane answers.
-    Eligible lanes' declared deploy agents must report readable, busy state;
-    idle or unreadable agents alone never justify waiting. Poll every
-    ``LANE_DEPLOY_POLL_SECONDS`` (default 15), then try the ordered lanes again.
-    A successful wait exports ``LANE_WAITED_SECONDS``, rounded up, so the probe
-    can share the same budget. The default budget of 0 keeps a single shot.
+    Only a readable, busy deploy agent justifies waiting (never idle or unreadable);
+    poll every ``LANE_DEPLOY_POLL_SECONDS`` (default 15), then try the ordered
+    lanes again. A successful wait exports ``LANE_WAITED_SECONDS``, rounded up.
+    The default budget of 0 keeps a single shot.
 
-    The agents are read once BEFORE the first lane check as well as after it:
-    the check spends its probe timeouts first, and a settle that ends inside
-    them (the agent re-execs, then reports idle) would otherwise leave nothing
-    to see. A busy pre-read counts as busy evidence for the wait. When an agent
-    then reads idle or unreadable, the lane gets ``SETTLE_GRACE_SECONDS`` more
-    to come back before the wait ends RED; the budget still bounds all of it.
+    The agents are read once BEFORE the first lane check as well as after it: the
+    check spends its probe timeouts first, and a settle that ends inside them would
+    leave nothing to see. A busy pre-read counts as busy evidence. When an agent
+    then reads idle or unreadable the lane gets ``SETTLE_GRACE_SECONDS`` more to
+    come back before the wait ends RED; the budget still bounds all of it.
 
-    ``LANE_DEPLOY_WAIT_WHILE_BUSY`` (true/1/yes, case-insensitive) also waits
-    when the chosen lane answers but its agent reads busy (OMN-20410). The
-    lane must answer again after the deploy, sharing the same wait budget; an
-    agent that stops answering after it read busy keeps the wait going, and
-    an agent that was never readable, or is undeclared, warns that deploy
-    state is unknown.
+    ``LANE_DEPLOY_WAIT_WHILE_BUSY`` (true/1/yes) also waits when the chosen lane
+    answers but its agent reads busy (OMN-20410); the lane must answer again after,
+    within the same budget. An agent that stops answering after it read busy keeps
+    the wait going; one never readable, or undeclared, warns the state is unknown.
+    A job the agent names as rolling another lane than the lane's ``bus_lane`` is
+    not that lane's deploy (OMN-26122); a job that names no lane is still waited.
 
 NO RESPONDER IS RED, NEVER A SKIP
     An empty or unset list, a malformed entry, or no eligible lane answering
@@ -222,17 +213,25 @@ def read_deploy_agent(url: str, timeout: float) -> dict[str, Any] | None:
     return {"health": health, "queue": read_object("queue")}
 
 
-def deploy_agent_busy_reason(snapshot: Mapping[str, Any]) -> str | None:
+def deploy_agent_busy_reason(snapshot: Mapping[str, Any], lane: str = "") -> str | None:
     """Pure busy test, matching the canary snapshot and its queue freshness bound."""
     health = snapshot.get("health")
     if not isinstance(health, dict):
+        return None
+    last = health.get("last_result")
+    job = health.get("active_job") or (
+        last if isinstance(last, dict) and last.get("settling") else {}
+    )
+    # OMN-26122: the one agent rolls every lane single-flight. A job it names as
+    # rolling a lane other than the one graded is not that lane's deploy; a job
+    # that names no lane (an older agent) stays a reason to wait.
+    if lane and job.get("runtime_lane") not in (None, "", lane):
         return None
     state = health.get("state")
     if state and state != "idle":
         return f"state={state}"
     if health.get("active_job"):
         return "active_job"
-    last = health.get("last_result")
     if isinstance(last, dict) and last.get("settling"):
         return "settling"
     queue = snapshot.get("queue")
@@ -260,9 +259,11 @@ def _busy_agents(
     busy: dict[str, str] = {}
     for candidate in candidates:
         snapshot = read_deploy_agent(candidate["deploy_agent_url"], timeout)
-        if snapshot is None and unreadable is not None:
-            unreadable.append(candidate["name"])
-        reason = deploy_agent_busy_reason(snapshot) if snapshot is not None else None
+        if snapshot is None:
+            if unreadable is not None:
+                unreadable.append(candidate["name"])
+            continue
+        reason = deploy_agent_busy_reason(snapshot, candidate.get("bus_lane", ""))
         if reason is not None:
             busy[candidate["name"]] = (
                 f"{candidate['name']} agent {candidate['deploy_agent_url']}: "

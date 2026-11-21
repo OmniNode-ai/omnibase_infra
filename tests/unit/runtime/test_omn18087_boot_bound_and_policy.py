@@ -70,6 +70,9 @@ LAB_COMMAND_NODES = (
     "node_delegation_routing_order_compute",
 )
 ROLL_WINDOW_GATE_NODE = "node_dev_roll_window_gate_effect"
+# Every `onex scm` read and pull request creation is a bus request to this node's
+# consumer, so a dev lane asks it within seconds of a dev replacement (OMN-26356).
+GITHUB_REPO_GATEWAY_NODE = "node_github_repo_gateway_effect"
 
 
 def test_dev_main_declares_the_boot_policy_and_memory_limit() -> None:
@@ -103,6 +106,25 @@ def test_dev_main_boot_priority_names_the_roll_window_gate() -> None:
     assert ROLL_WINDOW_GATE_NODE in rendered[
         "DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS"
     ].split(",")
+
+
+def test_dev_main_boot_priority_names_the_github_repo_gateway() -> None:
+    # Declared in the policy contract and rendered into the env the runtime reads;
+    # removing the name from the contract fails both assertions (OMN-26356).
+    boot = _contract().profiles["dev"].processes["main"].boot
+
+    assert boot is not None
+    assert GITHUB_REPO_GATEWAY_NODE in boot.priority_contracts
+    rendered = renderer.render_env(_contract())
+    assert GITHUB_REPO_GATEWAY_NODE in rendered[
+        "DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS"
+    ].split(",")
+    # A request-answering node is listed with the other request-answering nodes,
+    # ahead of the roll window gate that closes the list.
+    names = list(boot.priority_contracts)
+    assert names.index("node_delegation_routing_order_compute") < names.index(
+        GITHUB_REPO_GATEWAY_NODE
+    )
 
 
 def test_dev_main_memory_limit_fits_the_four_kernel_figure() -> None:

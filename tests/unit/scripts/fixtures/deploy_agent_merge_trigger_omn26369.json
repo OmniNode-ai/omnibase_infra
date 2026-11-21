@@ -1,0 +1,14 @@
+{
+  "source": "dev deploy agent on h201: state/jobs-dev job records and deploy-agent-dev journal, read 2026-11-21T16:20Z to 16:25Z; merge times from the git history of omnibase_infra origin/dev",
+  "merges": [
+    {"pr": 6131, "commit": "0ddeddccb", "merged_at": "2026-11-21T13:45:48Z", "touches_runtime_image": true},
+    {"pr": 6133, "commit": "0dabf0c2c", "merged_at": "2026-11-21T14:06:14Z", "touches_runtime_image": true}
+  ],
+  "jobs": [
+    {"id": "831062d1-c93d-464c-82ae-79c85855021b", "requested_by": "agent/idle-restore", "accepted_at": "2026-11-21T13:00:38.409985Z", "completed_at": "2026-11-21T14:15:56.659733Z", "status": "failed"},
+    {"id": "c8fd5fda-5f5b-4af1-8a84-77e1fc8c2a64", "requested_by": "agent/idle-restore", "accepted_at": "2026-11-21T15:00:27.461535Z", "completed_at": "2026-11-21T16:18:35.968067Z", "status": "failed"}
+  ],
+  "merge_triggered_jobs_between_merges_and_15_00": [],
+  "lane_down_read_at": "2026-11-21T14:26:34Z",
+  "recreate_window_announcements": ["2026-11-21T14:24:22Z", "2026-11-21T14:26:35Z", "2026-11-21T14:31:48Z", "2026-11-21T15:00:27Z"]
+}
