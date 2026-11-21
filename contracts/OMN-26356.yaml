@@ -1,0 +1,90 @@
+schema_version: 1.0.0
+ticket_id: OMN-26356
+title: The dev runtime attaches the GitHub repo gateway consumer in the boot-priority wave
+summary: >-
+  After each dev runtime replacement the GitHub repo gateway consumer (node_github_repo_gateway_effect) joined its group late: 234 s and 247 s after two container starts on 2026-11-19 (lane gwroot-0335, ticket OMN-25857) and 256.4 s after the container start of 2026-11-21T15:11:57Z (read from the dev runtime log of the dev host at 2026-11-21T15:18:00Z), so onex scm reads and pull request creation failed in that window. The dev main boot priority list in contracts/services/runtime_policy.contract.yaml now names the gateway node, after node_delegation_routing_order_compute and before node_dev_roll_window_gate_effect, and docker/runtime-policy.env is rendered from it by scripts/render_runtime_policy_env.py. A wiring-order run over the real contract roster (1443 discovered contracts, 1001 joins) puts the gateway at join 358 on origin/dev's list and join 9 on the branch.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26356-gateway-boot-priority
+    statement: The dev main runtime joins the GitHub repo gateway consumer in the first waves of the boot, ahead of every non-priority contract.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the time from container start to the gateway consumer group join on the dev runtime is measured on a lab host before and after the change and written in the pull request body under a heading Measured attach time, with the host and the UTC read time -- falsifier: onex scm pr-view of the pull request shows no section headed Measured attach time holding two timings, a host and a UTC read time"
+      - id: AC2
+        statement: "AC2: node_github_repo_gateway_effect is declared in the dev main boot priority set through the declared mechanism (the policy contract or env the runtime policy renders, never a hard-coded list in code) and the rendered ONEX_BOOT_PRIORITY_CONTRACTS carries it -- falsifier: uv run pytest tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q fails when the node is removed from the declared list"
+      - id: AC3
+        statement: "AC3: a test fails when a declared priority node subscribes after any non-priority node in the wiring order -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q fails on a roster that wires a declared priority node after a non-priority node"
+      - id: AC4
+        statement: "AC4: a regression test built from the recorded 2026-11-19 gateway attach timings (fixture path named in the pull request) fails on the unchanged priority list and passes with the gateway node declared -- falsifier: uv run pytest tests/unit/runtime -q -k gateway_attach passes at origin/dev or fails on the pull request branch"
+      - id: AC5
+        statement: "AC5: after the deploy agent installs the branch on dev through the declared path, the gateway consumer's Started-consumer line is within 60 s of the container start in the runtime log and one onex scm pr-view returns a terminal -- falsifier: on a dev roll without the change the same line reads 180 s or more after container start"
+evidence_requirements:
+  - kind: tests
+    description: The boot policy, roster priority and gateway attach tests.
+    command: uv run --frozen pytest tests/unit/runtime/test_omn18087_boot_bound_and_policy.py tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py tests/unit/runtime/test_omn26356_gateway_attach.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26356-ac1-measured-attach-time
+    description: >-
+      The pull request body carries a section headed Measured attach time. Before: container start 2026-11-21T15:11:57.6Z, Started-consumer line and group join 15:16:14Z, 256.4 s, read from the dev runtime log of the dev host at 2026-11-21T15:18:00Z by lane gwattach-1510. After, in seconds: not taken before the push, because the seconds need the deploy agent's install of the branch on dev, which this lane never restarts (AC5 reads it). What was measured after the change is the wiring order over the real contract roster: gateway join 358 of 1001 at origin/dev's list, 9 of 1001 on the branch. The check below is the fixture that holds the recorded timings the section cites.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: python3 -c "import json;d=json.load(open('tests/fixtures/omn26356/gwroot_0335_gateway_attach.json'));assert [r['attach_seconds'] for r in d['rolls']]==[234,247]"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -qE '^DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS=.*,node_github_repo_gateway_effect,' docker/runtime-policy.env
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26356-ac2-policy-names-the-gateway
+    description: >-
+      The dev main boot priority list in contracts/services/runtime_policy.contract.yaml names node_github_repo_gateway_effect and docker/runtime-policy.env is rendered from it; precedent OMN-23535 and OMN-24426 made the same change for other nodes. The new test fails at the merge base, where the list holds 13 names without the gateway.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen python scripts/render_runtime_policy_env.py --check-env-file docker/runtime-policy.env
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26356-ac3-wiring-order
+    description: >-
+      With the real dev main policy, a backlog discovered first and the priority nodes after it, no priority node subscribes after a non-priority node; a planted bad order is named by the helper. The wiring-order test fails at the merge base, where the gateway subscribes after the backlog.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_roster_and_priority.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26356-ac4-gateway-attach-regression
+    description: >-
+      The fixture tests/fixtures/omn26356/gwroot_0335_gateway_attach.json holds the two recorded 2026-11-19 timings (234 s and 247 s); the gateway_attach tests fail at the merge base and pass with the gateway declared.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_omn26356_gateway_attach.py -q -p no:cacheprovider -k gateway_attach
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26356-ac5-integrated
+    description: >-
+      Deploy check the hosted runner can run: the policy env the deploy reads names node_github_repo_gateway_effect in the dev main boot priority list and equals the render of the policy contract; it fails at the merge base. The runtime read after the deploy agent installs the branch (the gateway Started-consumer line within 60 s of the container start, one onex scm pr-view returning a terminal) is taken by the deploy path and posted as a pull request comment naming the head; this lane never restarts dev and does not claim it.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: command
+        check_value: grep -qE '^DEV_RUNTIME_MAIN_BOOT_PRIORITY_CONTRACTS=.*,node_github_repo_gateway_effect,' docker/runtime-policy.env
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen python scripts/render_runtime_policy_env.py --check-env-file docker/runtime-policy.env
+        cwd: ${OMNI_HOME}/omnibase_infra

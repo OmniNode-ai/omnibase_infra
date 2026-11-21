@@ -390,6 +390,10 @@ profiles:
           # The dev roll window gate holds every dev deploy command on one hold
           # topic; a consumer group that joins after a command was sent skips
           # it, so the gate joins in the first wave too (OMN-24447).
+          # The GitHub repo gateway answers every `onex scm` read and pull
+          # request creation by bus request; on 2026-11-19 its consumer group
+          # joined 234 s and 247 s after two container starts, and a request
+          # sent 5 s after one start got no reply (OMN-26356).
           priority_contracts:
             - node_delegate_skill_orchestrator
             - node_delegation_orchestrator
@@ -403,6 +407,7 @@ profiles:
             - node_host_drift_plugin_revision_orchestrator
             - node_delegated_code_edit_orchestrator
             - node_delegation_routing_order_compute
+            - node_github_repo_gateway_effect
             - node_dev_roll_window_gate_effect
           memory_limit: 3072M
         # OMN-22930 (T8): the BYOK credential READ that only the separate
