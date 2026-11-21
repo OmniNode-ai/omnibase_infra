@@ -49,10 +49,8 @@ class HandlerLazyStartIngress:
     """Consume first requests for dormant contracts and start them."""
 
     def __init__(self, container: ModelONEXContainer) -> None:
-        # The registry uses the interface as a key, never as a constructor.
-        key: type[object] = ProtocolEventBusSubscriber
-        self._bus: object = container.get_service(key)
         self._container = container
+        self._bus: object | None = None
         self._front_door: LazyStartFrontDoor | None = None
 
     @property
@@ -66,6 +64,11 @@ class HandlerLazyStartIngress:
     def _front_door_of_this_boot(self) -> LazyStartFrontDoor | None:
         policy = StoreLazyStartDormant.policy()
         if self._front_door is None and policy is not None:
+            if self._bus is None:
+                # The registry uses the interface as a key, never as a constructor.
+                # Resolved on first use: a boot with no policy needs no bus.
+                key: type[object] = ProtocolEventBusSubscriber
+                self._bus = self._container.get_service(key)
             contracts = StoreLazyStartDormant.contracts()
             provisioner = StoreLazyStartDormant.provisioner()
             self._front_door = LazyStartFrontDoor(
