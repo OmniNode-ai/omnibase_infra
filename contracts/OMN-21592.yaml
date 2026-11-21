@@ -1,0 +1,82 @@
+schema_version: 1.0.0
+ticket_id: OMN-21592
+title: Contract hot loading A4, a dormant contract is built, provisioned and attached on its first request through an always-available ingress
+summary: >-
+  On a lane whose hot-load overlay row is on_demand with a lazy_start block, the kernel wires only the front-door contract and the boot-priority set the row declares. Every other owned contract is dormant: its handler class is not imported, no dispatcher is registered, no topic is provisioned (the universe topic warm is off) and no consumer is attached. The first request for it, through the ingress node, builds its handler, provisions and confirms its topics, attaches its subscriptions and then delivers the held request to the node's own dispatcher. Concurrent first requests share one build; a failed start is rolled back with no subscription and no dispatcher left; a request over the budget is START_TIMEOUT and stays held. A lane with no lazy_start block boots as before.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - topics
+requirements:
+  - id: req-omn21592-lazy-start
+    statement: A contract outside the lane's boot set starts on its first request through the front door, once, in the plan's order.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a runtime booted with twenty admitted contracts creates no topic for them and imports no handler class (an import sentinel in each fixture handler) -- falsifier: a topic listed or a sentinel hit."
+      - id: AC2
+        statement: "AC2: The first request to one of them provisions, confirms and attaches in that order (the call log), answers within 30 seconds, and a second request builds nothing (build counter stays at one) -- falsifier: another order, an answer over 30 seconds, or a second build."
+      - id: AC3
+        statement: "AC3: Ten concurrent first requests build the node once and all ten are answered -- falsifier: more than one build or an unanswered request."
+      - id: AC4
+        statement: "AC4: A failure on the second of two attaches leaves no subscription and no dispatcher, and a retry starts the node -- falsifier: a leftover, or a retry that fails."
+      - id: AC11
+        statement: "AC11: A restart starts nothing until a request arrives, and the first request after it starts the node with no resend -- falsifier: a node serving before its request."
+      - id: AC12
+        statement: "AC12: A request that outlasts the budget is START_TIMEOUT and is not lost -- falsifier: a lost request."
+evidence_requirements:
+  - kind: tests
+    description: The lazy-start first-request tests over twenty sentinel fixture contracts and the runtime start transaction.
+    command: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21592-ac1-boot-set-only
+    description: "A boot with twenty-one fixture contracts and the lazy_start row wires two (the ingress and the boot-priority contract), imports only their handler modules and provisions no topic of the nineteen dormant ones; a control without the block wires all twenty-one."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly -k TestBootWiresOnlyTheBootSet
+        cwd: .
+  - id: dod-omn21592-ac2-first-request-order
+    description: "The first request's call log is provision, then confirm, then attach, then deliver, inside the 30 second budget; a second request leaves the build counter at one."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly -k TestFirstRequestStartsTheNode
+        cwd: .
+  - id: dod-omn21592-ac3-concurrent-build-once
+    description: "Ten concurrent first requests produce one build and ten DELIVERED answers."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly -k TestConcurrentFirstRequests
+        cwd: .
+  - id: dod-omn21592-ac4-attach-failure-rollback
+    description: "A refused second attach leaves no live subscription and no node dispatch engine; the next request starts the node."
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly -k TestFailedAttachLeavesNothing
+        cwd: .
+  - id: dod-omn21592-ac11-restart
+    description: "A restarted front door imports nothing and logs nothing until a request, and that request is delivered with one build."
+    source: manual
+    binds_ac: [AC11]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly -k TestRestart
+        cwd: .
+  - id: dod-omn21592-ac12-start-timeout-held
+    description: "A start slower than the budget answers START_TIMEOUT with held true, and the held request is delivered when the start completes."
+    source: manual
+    binds_ac: [AC12]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly -k TestStartTimeout
+        cwd: .

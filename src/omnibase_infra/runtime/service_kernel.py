@@ -144,6 +144,7 @@ from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.handlers import boot_readiness_checks
+from omnibase_infra.handlers import lazy_start_boot_split as lazy
 from omnibase_infra.handlers.event_bus_recovering import EventBusRecovering
 from omnibase_infra.handlers.handler_package_announcer import (
     build_registered_events,
@@ -2161,9 +2162,7 @@ async def bootstrap() -> int:
         # per-contract confirm carries all owned consumers (W2 evidence). The
         # provisioner instance is reused by the Phase B interleave.
         topic_provisioner: object | None = None
-        _universe_warm_enabled = (
-            os.environ.get("ONEX_BOOT_UNIVERSE_PROVISION", "1") != "0"
-        )
+        _universe_warm_enabled = lazy.boot_universe_warm_enabled()
         if use_kafka:
             _contracts_root = _get_contracts_dir()
             _skill_manifests_root: Path | None = None
@@ -3686,7 +3685,7 @@ async def bootstrap() -> int:
                 manifest=manifest,
                 runtime_profile=runtime_profile,
             )
-            manifest = ownership_result.manifest
+            manifest = lazy.boot_manifest(ownership_result.manifest, topic_provisioner)
             if auto_wiring_manifest_discovered.total_discovered > 0:
                 if ownership_result.folded_profiles:
                     # OMN-17427: this runtime carries other roles' nodes too.
