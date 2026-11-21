@@ -62,7 +62,7 @@ dod_evidence:
     binds_ac: [AC4]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_canonical_file_shape_ratchet_omn21523.py -k file_shape -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26338.py -k startup_loop_hold_under_one_second -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26338-ac5-recorded-fixture-regression
     description: "The regression replays the recorded holds from tests/fixtures/omn26338/holds2_1410_loop_holds.json and fails at omnibase_infra#6134 head f2e451a3."
