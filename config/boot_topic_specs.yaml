@@ -44,5 +44,6 @@ lanes:
     # topics (2 more specs).
     # OMN-26105 adds the runner-pool-retire command and -completed terminal
     # topics (2 more specs).
-    repo_specs: 229
-    repo_specs_measured_at: "bf76c6681c90088fb9ca6dbca626d226c327c529"
+    # OMN-26249 adds the runtime-loop-reading-recorded event topic (1 more spec).
+    repo_specs: 230
+    repo_specs_measured_at: "ab8f59fcffdb362788112a4c7ea4cbc5e376e20e"

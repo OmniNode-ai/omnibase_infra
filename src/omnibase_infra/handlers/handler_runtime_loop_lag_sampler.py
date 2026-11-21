@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
     EnumOmnibaseInfraTopic,
 )
@@ -197,6 +198,16 @@ class HandlerRuntimeLoopLagSampler:
 
     def __init__(self, container: ModelONEXContainer) -> None:
         self._container = container
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role: compute handler."""
+        return EnumHandlerType.COMPUTE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral category: reads the clock and in-process state, no I/O."""
+        return EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE
 
     def handle(self, request: ModelRuntimeLoopWindowRequest) -> ModelRuntimeLoopReading:
         """Close the open window of this process's sampler and return its reading."""
