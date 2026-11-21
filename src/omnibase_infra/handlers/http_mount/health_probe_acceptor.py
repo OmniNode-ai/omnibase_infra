@@ -39,8 +39,10 @@ from collections.abc import Callable
 from omnibase_infra.models.health.enum_health_degraded_reason import (
     EnumHealthDegradedReason,
 )
-from omnibase_infra.models.health.model_event_loop_stall_health import (
+from omnibase_infra.models.health.model_event_loop_stall_details import (
     ModelEventLoopStallDetails,
+)
+from omnibase_infra.models.health.model_event_loop_stall_health import (
     ModelEventLoopStallHealth,
 )
 
