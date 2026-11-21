@@ -1,0 +1,71 @@
+schema_version: 1.0.0
+ticket_id: OMN-26320
+title: The omnibase_infra runtime kernel wires its contracts off the event loop, so the dev runtime answers /health and serves its bus consumers during startup
+summary: >-
+  wire_from_manifest prepared every discovered contract and imported every handler class in loops that never suspended, so the runtime event loop that serves /health was held for the whole pass. The two loops now hand the loop back after every contract through yield_each, in the same order on the same thread, so a /health probe is answered between contracts and a wiring error still reaches the bootstrap awaiter as the same typed error. The health gate, the boot guard, the compose wait and the compose start period are not changed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26320-wiring-off-loop
+    statement: Startup wiring does not hold the event loop for the whole pass, a wiring error still fails startup, and no gate is weakened.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the synchronous wiring calls that hold the event loop during kernel bootstrap, and each one's blocked time at the dev contract count, are measured on a lab host and written in the PR body under a section headed Measured loop blocks -- falsifier: onex scm pr-view of the PR shows no section headed Measured loop blocks holding per-call durations and a UTC read time"
+      - id: AC2
+        statement: "AC2: the synchronous wiring work runs off the event loop thread (a worker thread or process, or incremental with yields) in the same wiring order, so a startup with the dev contract set answers /health inside the compose start period -- falsifier: uv run pytest tests -q -k startup_wiring_off_loop fails at origin/dev and passes on the PR branch"
+      - id: AC3
+        statement: "AC3: a wiring error raised in the off-loop work still fails startup with the same typed error -- falsifier: uv run pytest tests -q -k startup_wiring_error_fails_startup fails if the error is swallowed"
+      - id: AC4
+        statement: "AC4: the health gate, the boot guard, the compose wait and the compose start period are unchanged by the PR -- falsifier: git diff origin/dev --stat on the PR branch lists no health gate setting, no boot guard file, no compose file and no wait setting, run with uv run pytest tests -q -k startup_wiring_off_loop"
+      - id: AC5
+        statement: "AC5: a regression test built from the recorded devboot-1000 reproduction data (fixture path named in the PR) fails on the broken code and passes on the fix -- falsifier: uv run pytest tests -q -k startup_wiring_off_loop"
+evidence_requirements:
+  - kind: tests
+    description: The startup_wiring_off_loop and startup_wiring_error_fails_startup regressions built from the recorded dev-sized wiring profile.
+    command: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_off_loop_omn26320.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26320-ac1-measured-loop-blocks
+    description: "The recorded fixture holds the lab host, the reproduction refs, the contiguous wire_from_manifest loop block and the per-call durations of the 807 contract preparations and 1834 handler imports; the PR body quotes them under Measured loop blocks."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: python3 -c "import json; d = json.load(open('tests/fixtures/omn26320/devboot_1000_wiring_block_profile.json')); r = d['reproduction']; assert r['host'] == 'h053' and r['wire_from_manifest_contiguous_loop_block_seconds'] > 10 and len(d['prepare_contract_wiring_ms']) == 807 and len(d['import_handler_class_ms']) == 1834"
+        cwd: .
+  - id: dod-omn26320-ac2-startup-wiring-off-loop
+    description: "A /health probe on the wiring loop's own event loop is answered inside 0.8 s while the recorded dev-sized wiring pass runs; the test fails with a 3 s wait when wiring does not hand the loop back."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_off_loop_omn26320.py -k startup_wiring_off_loop -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26320-ac3-wiring-error-fails-startup
+    description: "A StateIoUnconfiguredError raised while preparing a contract, and a collected failure under ONEX_WIRING_STRICT_MODE, reach the awaiting caller as the same typed errors after the loop has been handed back."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_off_loop_omn26320.py -k startup_wiring_error_fails_startup -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26320-ac4-gates-unchanged
+    description: "The change edits no compose file, boot guard, healthcheck setting, start period or wait setting: it adds yield_each to handlers/entry_method_offload.py, changes two loop headers and one import line in handler_wiring.py, a test, a fixture and this contract."
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_off_loop_omn26320.py -k startup_wiring_off_loop -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26320-ac5-recorded-fixture-regression
+    description: "The regression replays the recorded per-call durations from the fixture through the real wire_from_manifest and fails at origin/dev."
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_wiring_off_loop_omn26320.py -k startup_wiring_off_loop -q --no-cov -n 0 -p no:randomly
+        cwd: .
