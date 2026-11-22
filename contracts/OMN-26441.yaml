@@ -1,0 +1,90 @@
+schema_version: 1.0.0
+ticket_id: OMN-26441
+title: The per-contract dispatch cost wrapper passes the keyword-only delivery through, so a projection writer dispatched under cost measurement still receives _partition and _offset
+summary: >-
+  The wrapper that omnibase_infra#6125 put around every attached contract's dispatcher took only the envelope and carried no functools.wraps, so the dispatch engine's signature probes found neither the keyword-only delivery parameter nor a context parameter and called the wrapped dispatcher without them. Projection writers then raised ProjectionDeliveryContextMissingError on the dev runtime. The wrapper now forwards every argument and exposes the wrapped dispatcher's signature. No health gate, boot guard, compose file or wait setting changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26441-wrapper-passthrough
+    statement: A dispatcher attached under per-contract cost measurement receives every argument the engine passes to an unwrapped dispatcher.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a test registers a dispatcher that takes a keyword-only delivery through attach_contract_dispatcher with cost measurement on, dispatches one envelope, and the dispatcher receives delivery carrying _partition and _offset; the test fails at origin/dev and passes on the PR branch -- falsifier: uv run pytest tests/unit/runtime/auto_wiring -q -k contract_dispatch_cost_delivery"
+      - id: AC2
+        statement: "AC2: the wrapper passes every argument through to the wrapped dispatcher and the engine reads the wrapped dispatcher's signature, so accepts_delivery is True for a dispatcher that declares delivery and False for one that does not -- falsifier: uv run pytest tests/unit/runtime/auto_wiring -q -k contract_dispatch_cost_signature"
+      - id: AC3
+        statement: "AC3: the failure is reproduced first on a lab host at origin/dev, with the command and output in the PR body under a section headed Reproduction -- falsifier: onex scm pr-view of the PR shows no section headed Reproduction holding a command and its output"
+      - id: AC4
+        statement: "AC4: the PR changes no health gate setting, no boot guard file, no compose file and no wait setting -- falsifier: git diff origin/dev --name-only on the PR branch piped through grep -E 'health|boot_guard|compose' prints a line, run after uv run pytest tests/unit/runtime/auto_wiring -q -k contract_dispatch_cost"
+      - id: AC5
+        statement: "AC5: integrated: after the deploy agent applies the merged change on the dev lane, the running omninode-runtime holds no dispatched-with-no-delivery-context line in its first ten minutes and its health endpoint reads 200 -- falsifier: ssh omni-201 docker logs omninode-runtime piped through grep -c 'dispatched with no delivery context' prints a number above 0 for that window on the dev lane, read back"
+evidence_requirements:
+  - kind: tests
+    description: The cost wrapper keeps the dispatcher's delivery and context parameters, and the existing cost counter tests stay green.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_contract_dispatch_cost_delivery.py tests/unit/runtime/auto_wiring/test_contract_cost_counter.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26441-ac1-delivery-reaches-dispatcher
+    description: >-
+      A dispatcher with a keyword-only delivery parameter is attached under an owner contract label, registered on a real MessageDispatchEngine and dispatched one envelope with delivery coordinates; it receives the same delivery with partition and offset. Fails at the merge base, where the wrapper hides the parameter.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring -q --no-cov -n 0 -p no:cacheprovider -k contract_dispatch_cost_delivery
+        cwd: .
+  - id: dod-omn26441-ac2-signature-passthrough
+    description: >-
+      The registered entry reads accepts_delivery True for a dispatcher that declares delivery and False for one that does not, and accepts_context True for a context-aware dispatcher; the context-aware dispatcher is called with its context. Fails at the merge base, where the wrapper hides the context parameter.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring -q --no-cov -n 0 -p no:cacheprovider -k contract_dispatch_cost_signature
+        cwd: .
+  - id: dod-omn26441-ac3-reproduction-in-pr-body
+    description: >-
+      Read after the pull request is open: the PR body holds a section headed Reproduction with the command run at origin/dev and its failing output. The PR body is read from the watcher state, which only a local Done gate reaches.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: bash -c 'onex scm pr-view OmniNode-ai/omnibase_infra --head "$(git rev-parse --abbrev-ref HEAD)" | grep -c "Reproduction" | grep -vx 0'
+        cwd: .
+  - id: dod-omn26441-ac4-no-gate-files
+    description: >-
+      The branch diff against origin/dev names no health gate, boot guard or compose file. Read from the branch, so it passes at the merge base too and only a local Done gate runs it.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: bash -c '! git diff origin/dev --name-only | grep -E "health|boot_guard|compose"'
+        cwd: .
+  - id: dod-omn26441-ac5-dev-lane-no-missing-delivery
+    description: >-
+      Post-deploy probe: the dev runtime container started by the deploy agent from this change logs no dispatched-with-no-delivery-context line. It reads the live container, which carries the change only after the deploy agent has rebuilt it, so a pull request runner cannot pass it.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC5]
+    checks:
+      - check_type: command
+        check_value: bash -c 'ssh omni-201 docker logs omninode-runtime 2>&1 | grep -c "dispatched with no delivery context" | grep -qx 0'
+        cwd: .
+  - id: dod-omn26441-deploy-wrapper-in-dev-runtime
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime container imports the wrapper with its argument passthrough. It reads the live container, which carries the change only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: |-
+          docker exec omninode-runtime python -c 'import inspect; from omnibase_infra.handlers.contract_dispatch_cost import measure_contract_dispatch as m; ns = {}; exec("async def f(e, *, delivery=None): pass", ns); assert "delivery" in inspect.signature(m("probe", ns["f"])).parameters'
+        cwd: .
