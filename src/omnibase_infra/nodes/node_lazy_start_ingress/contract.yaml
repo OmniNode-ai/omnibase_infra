@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_lazy_start_ingress
+contract_name: node_lazy_start_ingress
+node_name: node_lazy_start_ingress
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: The always-available front door that starts a dormant contract on its first request.
+input_model:
+  name: ModelLazyStartRequest
+  module: omnibase_infra.models.lazy_start.model_lazy_start_request
+output_model:
+  name: ModelLazyStartResult
+  module: omnibase_infra.models.lazy_start.model_lazy_start_result
+event_bus:
+  subscribe_topics: ["onex.cmd.platform.node-start-requested.v1"]
+  publish_topics: ["onex.evt.platform.node-start-answered.v1"]
+terminal_event: "onex.evt.platform.node-start-answered.v1"
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: node.start.requested
+      handler:
+        name: HandlerLazyStartIngress
+        module: omnibase_infra.handlers.handler_lazy_start_ingress
+      event_model:
+        name: ModelLazyStartRequest
+        module: omnibase_infra.models.lazy_start.model_lazy_start_request
+      output_events: [ModelLazyStartResult]
+capabilities:
+  - name: node.start.requested
+    description: Start a dormant contract on its first request, once, and deliver the held request to it.
+metadata:
+  ticket: OMN-21592
+  description: Lazy-start front door of contract hot-loading plan task A4 (section 3.11.5).
