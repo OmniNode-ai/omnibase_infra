@@ -124,6 +124,16 @@ class ModelJobLineage(BaseModel):
     build_ref: str = ""
 
 
+class EnumJobStatus(StrEnum):
+    """The statuses an agent job record (``JobState``) can carry."""
+
+    ACCEPTED = "accepted"
+    IN_PROGRESS = "in_progress"
+    SUCCESS = "success"
+    FAILED = "failed"
+    SUPERSEDED = "superseded"
+
+
 class ModelJobRecord(BaseModel):
     """The fields of an agent job record (``JobState``) this rule reads."""
 
@@ -131,7 +141,7 @@ class ModelJobRecord(BaseModel):
 
     correlation_id: UUID
     command: ModelJobCommand
-    status: str
+    status: EnumJobStatus
     completed_at: datetime | None = None
     errors: tuple[str, ...] = ()
     lineage: ModelJobLineage | None = None
@@ -205,7 +215,11 @@ def failed_job_sources(job: ModelJobRecord) -> dict[str, str]:
 
 def failed_dev_job(job: ModelJobRecord | None) -> ModelFailedDevJob | None:
     """``job`` as a failed dev job, or ``None`` when it passed or ran another lane."""
-    if job is None or job.status != "failed" or job.command.runtime_lane != DEV_LANE:
+    if (
+        job is None
+        or job.status != EnumJobStatus.FAILED
+        or job.command.runtime_lane != DEV_LANE
+    ):
         return None
     return ModelFailedDevJob(
         correlation_id=job.correlation_id,
@@ -230,7 +244,7 @@ def latest_terminal_dev_job(state_dir: Path) -> ModelJobRecord | None:
         if (
             job is not None
             and job.completed_at is not None
-            and job.status in ("success", "failed")
+            and job.status in (EnumJobStatus.SUCCESS, EnumJobStatus.FAILED)
             and job.command.runtime_lane == DEV_LANE
         ):
             ended.append((job.completed_at, job))
@@ -431,11 +445,11 @@ class PostFailureConverge:
         )
 
 
-class _NoFlags:
+class NoFlags:
     """The lane flags of an agent that carries none: nothing is frozen."""
 
     def frozen_reason(self, now: datetime) -> str | None:
         return None
 
 
-_NO_FLAGS: Final = _NoFlags()
+_NO_FLAGS: Final = NoFlags()

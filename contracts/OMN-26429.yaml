@@ -66,3 +66,13 @@ dod_evidence:
         check_value: |-
           curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/scripts/deploy-agent/deploy_agent/agent.py" | grep -c '_post_failure.check' >/dev/null
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26429-integration-proof-job-record
+    description: >-
+      The post-failure converge rule parses the recorded failed dev job record (tests/fixtures/dev_job_a7474c42/job_record.json) through its status enum and recovers the built infra commit. Fails if the rule's job status model stops reading a real agent job record.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_post_failure_converge_job_record_omn26429.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
