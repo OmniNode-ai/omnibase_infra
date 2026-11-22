@@ -85,6 +85,9 @@ dod_evidence:
         check_value: >-
           python3 -c 'import yaml; d = yaml.safe_load(open("config/deploy_lane_routing.yaml")); i = d["instances"]["canary-h051"]; assert i["consumer_group"] == "onex-deploy-agent-canary-h051" and i["lane"]["runtime_container"] == "omninode-canary-runtime"'
         cwd: .
+      - check_type: command
+        check_value: onex validate src/omnibase_infra/nodes/node_runtime_canary_effect
+        cwd: .
   - id: dod-omn26463-integration-proof
     description: A canary run writes its receipt to disk and the roll's gate reads that file back, admitting PASS and refusing FAIL.
     source: manual
@@ -92,4 +95,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/test_runtime_canary_receipt_roundtrip_omn26463.py -q
+        cwd: .
+      - check_type: command
+        check_value: onex validate src/omnibase_infra/nodes/node_runtime_canary_effect
         cwd: .
