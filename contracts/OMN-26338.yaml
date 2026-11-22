@@ -32,13 +32,13 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn26338-ac1-measured-loop-holds
-    description: "The recorded fixture holds the host, the reproduction refs, the UTC read time and each hold over one second with its call site and contiguous seconds before and after; the PR body quotes them under Measured loop holds. The PR body section itself is read by the reviewer; no runner check reads a PR body."
+    description: "The recorded fixture holds the host, the reproduction refs, the UTC read time and each hold over one second with its call site and contiguous seconds before and after; the PR body quotes them under Measured loop holds. The PR body section itself is read by the reviewer; no runner check reads a PR body. The check also requires the fix module that produced the after figures, so it fails against the merge base, where that module does not exist."
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: command
         check_value: >-
-          python3 -c "import json; d = json.load(open('tests/fixtures/omn26338/holds2_1410_loop_holds.json')); b = {x['name']: x['contiguous_s'] for x in d['holds_before']}; a = {x['name']: x['contiguous_s'] for x in d['holds_after']}; assert b['topic_migration_provisioner'] > 1 and b['local_ingress_route_discovery'] > 1 and a['topic_migration_provisioner'] <= 1 and a['local_ingress_route_discovery'] <= 1 and d['read_utc']"
+          python3 -c "import json; d = json.load(open('tests/fixtures/omn26338/holds2_1410_loop_holds.json')); b = {x['name']: x['contiguous_s'] for x in d['holds_before']}; a = {x['name']: x['contiguous_s'] for x in d['holds_after']}; assert b['topic_migration_provisioner'] > 1 and b['local_ingress_route_discovery'] > 1 and a['topic_migration_provisioner'] <= 1 and a['local_ingress_route_discovery'] <= 1 and d['read_utc']; import pathlib; assert 'warm_topic_migration_scan' in pathlib.Path('src/omnibase_infra/handlers/topic_migration_dependencies.py').read_text()"
         cwd: .
   - id: dod-omn26338-ac2-loop-hold-under-one-second
     description: "The recorded provisioner scan and route discovery holds are replayed through the real wire_from_manifest and _start_local_ingress beside a heartbeat on the same loop; the longest heartbeat gap stays under one second, the topic set equals a cold synchronous build, and the routes equal a synchronous discovery."
@@ -73,12 +73,12 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26338.py -k startup_loop_hold_under_one_second -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26338-ac6-status-row
-    description: "The lane STATUS row on the rolling work ledger names the pushed branch, the holds before and after and the ready PR body path. It is a ledger read, so no runner check reads it."
+    description: "The lane STATUS row on the rolling work ledger names the pushed branch, the holds before and after and the ready PR body path. It is a ledger read, so no runner check reads it; the bound check requires this contract and the fix source the STATUS row names, so it fails against the merge base."
     source: manual
     binds_ac: [AC6]
     checks:
       - check_type: command
-        check_value: test -f contracts/OMN-26338.yaml
+        check_value: grep -q warm_topic_migration_scan src/omnibase_infra/runtime/auto_wiring/handler_wiring.py
         cwd: .
   - id: dod-omn26338-deploy-wiring-warm-live
     description: >-
