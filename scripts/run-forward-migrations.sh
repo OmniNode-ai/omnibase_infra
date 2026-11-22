@@ -2413,8 +2413,11 @@ else
   # items, and reads them back (it fails the run on any difference). A runner
   # started without the file (a test harness, a lane that does not mount it) logs
   # a named skip: the role is not provisioned there either.
+  # OMN-26471: the same psql run applies tenant_identity_writer_grants.sql second
+  # (one more -f, no new line): that seam also mints the writer's credential from
+  # TENANT_IDENTITY_WRITER_PASSWORD, so it is in none of the credential lists above.
   gateway_grants_file=/migrations/seams/gateway_runtime_grants.sql
-  if [ -f "$gateway_grants_file" ]; then psql -f "$gateway_grants_file" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1; else echo "[forward-migration]   skip  gateway_runtime grants (no grants file at ${gateway_grants_file})"; fi
+  if [ -f "$gateway_grants_file" ]; then psql -f "$gateway_grants_file" -f /migrations/seams/tenant_identity_writer_grants.sql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1; else echo "[forward-migration]   skip  gateway_runtime grants (no grants file at ${gateway_grants_file})"; fi
 fi
 # ---- END login-only role grant seam (OMN-18060) ----
 

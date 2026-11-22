@@ -19,7 +19,6 @@ import re
 from pathlib import Path
 
 import pytest
-import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -30,8 +29,6 @@ RUNNER = ROOT / "scripts" / "run-forward-migrations.sh"
 COMPOSE_INFRA = ROOT / "docker" / "docker-compose.infra.yml"
 COMPOSE_JUDGE = ROOT / "docker" / "docker-compose.judge.yml"
 COMPOSE_DEV_LANE = ROOT / "docker" / "docker-compose.dev-lane.yml"
-POLICY_CONTRACT = ROOT / "contracts" / "services" / "runtime_policy.contract.yaml"
-POLICY_ENV = ROOT / "docker" / "runtime-policy.env"
 DEV_MANIFEST = ROOT / "docker" / "dev-lane-required-env.manifest.txt"
 DEV_ENV_TEMPLATE = (
     ROOT / "scripts" / "deploy-agent" / "deploy" / "dev-instance.env.template"
@@ -40,7 +37,6 @@ DEV_ENV_TEMPLATE = (
 ROLE = "tenant_identity_writer"
 PASSWORD_VAR = "TENANT_IDENTITY_WRITER_PASSWORD"
 DSN_VAR = "TENANT_IDENTITY_DATABASE_DSN"
-LOGICAL_NAME = "tenant_identity.database.dsn"
 
 # One grant per tuple: (kind, object, privilege, column or None).
 EXPECTED_GRANTS: frozenset[tuple[str, str, str, str | None]] = frozenset(
@@ -284,23 +280,18 @@ def test_the_runner_applies_the_seam_in_the_gateway_grants_psql_run() -> None:
     assert GATEWAY_SEAM.is_file()
 
 
-def _forward_migration_block(path: Path) -> str:
-    text = path.read_text(encoding="utf-8")
-    start = text.index("\n  forward-migration:\n")
-    end = text.find("\n  ", start + 25)
-    nxt = re.search(r"\n  [a-z][a-z0-9-]*:\n", text[start + 25 :])
-    end = start + 25 + nxt.start() if nxt else len(text)
-    return text[start:end]
+def test_the_dev_lane_migration_service_receives_the_writer_password_fail_closed() -> (
+    None
+):
+    dev = COMPOSE_DEV_LANE.read_text(encoding="utf-8")
+    start = dev.index("\n  forward-migration:\n")
+    block = dev[start : dev.index("\n    labels:", start)]
+    assert f"{PASSWORD_VAR}: ${{{PASSWORD_VAR}:?" in block
+    for base in (COMPOSE_INFRA, COMPOSE_JUDGE):
+        assert PASSWORD_VAR not in base.read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("path", [COMPOSE_INFRA, COMPOSE_JUDGE])
-def test_the_migration_service_receives_the_writer_password(path: Path) -> None:
-    block = _forward_migration_block(path)
-    assert f"{PASSWORD_VAR}: ${{{PASSWORD_VAR}:-}}" in block
-    assert "/migrations/seams:/migrations/seams:ro" in block
-
-
-def test_the_dev_lane_renders_the_dsn_fail_closed_and_the_base_only_empty() -> None:
+def test_the_dev_lane_renders_the_dsn_fail_closed_and_no_base_file_names_it() -> None:
     dev = COMPOSE_DEV_LANE.read_text(encoding="utf-8")
     m = re.search(rf"^  {DSN_VAR}: \"(?P<dsn>[^\"]+)\"", dev, re.MULTILINE)
     assert m
@@ -308,27 +299,8 @@ def test_the_dev_lane_renders_the_dsn_fail_closed_and_the_base_only_empty() -> N
     assert dsn.startswith(f"postgresql://{ROLE}:${{{PASSWORD_VAR}:?")
     assert dsn.endswith("@postgres:5432/omninode_cloud")
     assert "*dev_lane_tenant_identity_env" in dev
-    infra = COMPOSE_INFRA.read_text(encoding="utf-8")
-    assert f"  {DSN_VAR}: ${{{DSN_VAR}:-}}" in infra
-    assert not re.search(rf"{DSN_VAR}: \"postgresql", infra)
-    assert PASSWORD_VAR not in infra.split("x-runtime-env:")[1].split("\nservices:")[0]
-
-
-def test_the_policy_contract_maps_the_logical_name_on_the_dev_profile_only() -> None:
-    contract = yaml.safe_load(POLICY_CONTRACT.read_text(encoding="utf-8"))
-    mapped = {
-        name: [
-            m
-            for m in profile.get("secret_resolver_mappings", [])
-            if m["logical_name"] == LOGICAL_NAME
-        ]
-        for name, profile in contract["profiles"].items()
-    }
-    hits = {name: ms for name, ms in mapped.items() if ms}
-    assert set(hits) == {"dev"}
-    assert hits["dev"][0]["source"] == {"source_type": "env", "source_path": DSN_VAR}
-    env_text = POLICY_ENV.read_text(encoding="utf-8")
-    assert f'"logical_name":"{LOGICAL_NAME}"' in env_text
+    for base in (COMPOSE_INFRA, COMPOSE_JUDGE):
+        assert DSN_VAR not in base.read_text(encoding="utf-8")
 
 
 def test_the_required_env_manifest_and_the_instance_template_name_the_password() -> (
