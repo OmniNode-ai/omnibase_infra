@@ -263,6 +263,13 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # [NODE] OMN-14819 narrow correlation_id envelope view; keeps the def-B replay
     # handler core free of ModelEventEnvelope (canonical handler-shape C-core).
     "ProtocolReplayEnvelope": "nodes/node_kafka_replay_compute/protocols/protocol_replay_envelope.py",
+    # [RUNTIME] OMN-26429 narrow views of the deploy agent's command, job store and
+    # lane flags that the post-failure converge rule reads; the rule imports nothing
+    # from deploy_agent, so the agent hands itself in through these.
+    "ProtocolCommand": "protocols/protocol_command.py",
+    "ProtocolJobStore": "protocols/protocol_job_store.py",
+    "ProtocolLaneFlags": "protocols/protocol_lane_flags.py",
+    "ProtocolPostFailureHost": "protocols/protocol_post_failure_host.py",
     # [RUNTIME] OMN-12632 narrows the AIOKafkaConsumer.end_offsets surface so
     # AdapterKafkaAdminLag can serve log-end offsets the pinned aiokafka 0.13.0
     # admin omits, without a hard aiokafka import at parse time.

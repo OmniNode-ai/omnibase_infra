@@ -534,6 +534,9 @@ class DeployAgent:
         self._idle_converge_started_at = datetime.now(UTC)
         self._idle_converge_last_check: float | None = None
         self._idle_converge_attempted: set[str] = set()
+        self._post_failure = load_dev_boot_guard(
+            "nodes.node_deploy_job_reading_effect.runtime_deploy_job_reading"
+        ).post_failure_converge(self, converge_command)
         self._idle_converge_last_verdict: EnumIdleConvergeVerdict | None = None
         self._idle_converge_last_verdicts: dict[str, EnumIdleConvergeVerdict] = {}
         self._migration_converge_last_check: float | None = None
@@ -956,6 +959,7 @@ class DeployAgent:
                         await self._offload(self._job_reading, "check_pin")
                     if getattr(consumer, "load_gate_paused", None) is None:
                         await self._offload(self._maybe_idle_converge)
+                        await self._offload(self._post_failure.check)
                         await self._offload(self._maybe_converge_forward_migration)
                     await asyncio.sleep(1)
         finally:
@@ -1363,16 +1367,12 @@ class DeployAgent:
             *((web.repository,) if web else ()),
         ):
             decision = self._decide_idle_converge(repository, now)
-            if decision.verdict is not self._idle_converge_last_verdicts.get(
-                repository
-            ):
-                if decision.verdict is not EnumIdleConvergeVerdict.CONVERGE:
-                    logger.info(
-                        "idle converge: %s (%s)",
-                        decision.verdict.value,
-                        decision.detail,
-                    )
-                self._idle_converge_last_verdicts[repository] = decision.verdict
+            last = self._idle_converge_last_verdicts.get(repository)
+            if decision.verdict not in (last, EnumIdleConvergeVerdict.CONVERGE):
+                logger.info(
+                    "idle converge: %s (%s)", decision.verdict.value, decision.detail
+                )
+            self._idle_converge_last_verdicts[repository] = decision.verdict
             if decision.verdict is EnumIdleConvergeVerdict.CONVERGE:
                 break
         assert decision is not None  # FOLLOWED_REPOSITORIES is never empty
