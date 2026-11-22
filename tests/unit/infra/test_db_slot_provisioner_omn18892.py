@@ -108,6 +108,7 @@ LOGIN_ONLY_ROLES = (
     "tenant_projection_writer",
     "chain_canary_reader",
     "gateway_runtime",
+    "tenant_identity_writer",
 )
 
 

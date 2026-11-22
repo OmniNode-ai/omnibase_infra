@@ -160,6 +160,11 @@ INFRA_DATABASES=("infisical_db" "omniweb")
 # (and nothing wider -- no CREATE, no TRUNCATE, no DELETE) come from the runner's
 # own gateway grant seam, which re-asserts and reads them back on every compose up.
 #
+# tenant_identity_writer (OMN-26471) is the fifth member: the login the runtime's
+# tenant and key nodes write the cloud identity tables' rows with on omninode_cloud.
+# Same split: this map mints the credential; its declared grants (no DELETE, no
+# TRUNCATE, no CREATE) come from the runner's tenant_identity_writer_grants.sql seam.
+#
 # TWO LANES, AND THE MANAGED ONE HAS NEITHER SEAM. chain_canary_reader is a
 # compose-lane instrument: this script mints it on a fresh volume and
 # run-forward-migrations.sh's credential seam re-asserts it on a warm one, both
@@ -174,6 +179,7 @@ LOGIN_ONLY_ROLE_MAP=(
     "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD"
     "chain_canary_reader:CHAIN_CANARY_READER_PASSWORD"
     "gateway_runtime:GATEWAY_RUNTIME_PASSWORD"
+    "tenant_identity_writer:TENANT_IDENTITY_WRITER_PASSWORD"
 )
 
 # =============================================================================

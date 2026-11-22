@@ -128,7 +128,8 @@ omniweb"
 LOGIN_ONLY_ROLES="omninode_runtime
 tenant_projection_writer
 chain_canary_reader
-gateway_runtime"
+gateway_runtime
+tenant_identity_writer"
 
 # ---------------------------------------------------------------------------
 # Connection budget (OMN-19415)
@@ -183,6 +184,7 @@ role_omnidash:12
 omninode_runtime:16
 tenant_projection_writer:4
 gateway_runtime:2
+tenant_identity_writer:2
 chain_canary_reader:2"
 
 # The dev lane is not fenced by this tool and carries no per-role limit; this is

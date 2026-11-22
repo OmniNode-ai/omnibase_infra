@@ -241,6 +241,14 @@ profiles:
         source:
           source_type: env
           source_path: GATEWAY_DATABASE_DSN
+      # OMN-26471: the runtime's tenant and key nodes' database (omninode_cloud, role
+      # tenant_identity_writer). Mapped on the dev profile only: the container env carries
+      # the DSN in docker-compose.dev-lane.yml (TENANT_IDENTITY_DATABASE_DSN, merged into
+      # omninode-runtime), and no other lane renders one. The value never appears here.
+      - logical_name: tenant_identity.database.dsn
+        source:
+          source_type: env
+          source_path: TENANT_IDENTITY_DATABASE_DSN
     services:
       main:
         runtime_id: dev-main

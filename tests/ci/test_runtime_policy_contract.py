@@ -536,6 +536,14 @@ def test_trajectory_rendered_file_adds_only_dharma_mappings(tmp_path: Path) -> N
             "logical_name": "gateway.database.dsn",
             "source": {"source_type": "env", "source_path": "GATEWAY_DATABASE_DSN"},
         },
+        # OMN-26471: the runtime's tenant and key nodes' database.
+        "tenant_identity.database.dsn": {
+            "logical_name": "tenant_identity.database.dsn",
+            "source": {
+                "source_type": "env",
+                "source_path": "TENANT_IDENTITY_DATABASE_DSN",
+            },
+        },
     }
     before = {row["logical_name"]: row for row in baseline["mappings"]}
     after = {row["logical_name"]: row for row in observed["mappings"]}

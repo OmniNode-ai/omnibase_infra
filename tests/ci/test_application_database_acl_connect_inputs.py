@@ -170,8 +170,10 @@ _IN_REPO_PROVENANCE: dict[str, str] = {
     # port comment above it (995 -> 994). OMN-26151 moved it eight down with the
     # gateway_runtime password, the gateway DSN passthrough and the seams mount
     # ahead of it (1008 -> 1016). OMN-26232 moved it nine more with the node
-    # exclusion lane env entries (1016 -> 1025).
-    "omnibase_infra:docker/docker-compose.infra.yml:1025": "KC_DB_USERNAME: postgres",
+    # exclusion lane env entries (1016 -> 1025). OMN-26471 moved it eight more with
+    # the tenant_identity_writer password passthrough (one in the postgres service)
+    # and the TENANT_IDENTITY_DATABASE_DSN passthrough ahead of it (1025 -> 1033).
+    "omnibase_infra:docker/docker-compose.infra.yml:1033": "KC_DB_USERNAME: postgres",
     "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4": (
         "CREATE DATABASE keycloak"
     ),
@@ -203,7 +205,7 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
             "four-column checksum ledger"
         ),
         provenance=(
-            "omnibase_infra:docker/docker-compose.infra.yml:1025",
+            "omnibase_infra:docker/docker-compose.infra.yml:1033",
             "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4",
             "omninode_infra:k8s/auth/keycloak-values.yaml:32",
             "omninode_infra:scripts/init-databases.sh:603",

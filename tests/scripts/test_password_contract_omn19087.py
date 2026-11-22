@@ -123,7 +123,7 @@ def _run_checker(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
 # --------------------------------------------------------------------------
 
 
-def test_contract_covers_exactly_the_six_compose_passwords() -> None:
+def test_contract_covers_exactly_the_seven_compose_passwords() -> None:
     assert set(_ALL_VARS) == {
         "POSTGRES_PASSWORD",
         "VALKEY_PASSWORD",
@@ -131,6 +131,7 @@ def test_contract_covers_exactly_the_six_compose_passwords() -> None:
         "TENANT_PROJECTION_WRITER_PASSWORD",
         "CHAIN_CANARY_READER_PASSWORD",
         "GATEWAY_RUNTIME_PASSWORD",
+        "TENANT_IDENTITY_WRITER_PASSWORD",
     }
     for var in _CONTRACT.LOGIN_ROLE_VARS:
         assert _CONTRACT.CONTRACT[var] is _CONTRACT.HEX

@@ -70,6 +70,11 @@ ALLOWED_EMPTY_DEFAULTS = {
     # x-runtime-env, and the shared base cannot carry the fail-closed `:?` (every lane layers
     # it). The fail-closed value is set by the dev and stability overlays.
     "GATEWAY_DATABASE_DSN",
+    # OMN-26471: the fifth LOGIN_ONLY_ROLE_MAP member, tenant_identity_writer, and its DSN
+    # passthrough, for the same two reasons as the gateway pair above. The fail-closed `:?`
+    # is TENANT_IDENTITY_DATABASE_DSN in the dev-lane overlay.
+    "TENANT_IDENTITY_WRITER_PASSWORD",
+    "TENANT_IDENTITY_DATABASE_DSN",
     # OMN-4316: OMNIMEMORY_* vars are intentionally opt-in (empty = disabled)
     "OMNIMEMORY_ENABLED",
     "OMNIMEMORY_MEMGRAPH_HOST",

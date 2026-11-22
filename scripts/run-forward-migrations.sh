@@ -227,7 +227,7 @@ slot_skip_role_seam() {
 # SLOT_MANAGED_ROLES mirrors the roles scripts/provision_db_slot.sh derives,
 # SERVICE_DB_MAP's roles and LOGIN_ONLY_ROLES, and is pinned equal to them by
 # tests/unit/infra/test_forward_migration_slot_role_confinement.py.
-SLOT_MANAGED_ROLES="role_omnibase role_omniintelligence role_omniclaude role_omnimemory role_omninode role_omnidash omninode_runtime tenant_projection_writer chain_canary_reader gateway_runtime"
+SLOT_MANAGED_ROLES="role_omnibase role_omniintelligence role_omniclaude role_omnimemory role_omninode role_omnidash omninode_runtime tenant_projection_writer chain_canary_reader gateway_runtime tenant_identity_writer"
 
 # The caller runs this in a command substitution, so a refusal is signalled by
 # exit status and the caller must stop on it; the copy is the caller's to
@@ -1844,6 +1844,7 @@ else
     "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD" \
     "chain_canary_reader:CHAIN_CANARY_READER_PASSWORD" \
     "gateway_runtime:GATEWAY_RUNTIME_PASSWORD" \
+    "tenant_identity_writer:TENANT_IDENTITY_WRITER_PASSWORD" \
   ; do
     entry_role_name=${login_role_entry%%:*}
     entry_password_var=${login_role_entry#*:}
@@ -2415,6 +2416,10 @@ else
   # a named skip: the role is not provisioned there either.
   gateway_grants_file=/migrations/seams/gateway_runtime_grants.sql
   if [ -f "$gateway_grants_file" ]; then psql -f "$gateway_grants_file" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1; else echo "[forward-migration]   skip  gateway_runtime grants (no grants file at ${gateway_grants_file})"; fi
+  # OMN-26471: the tenant_identity_writer grants, the same shape as the gateway file above
+  # (omninode_cloud, a role gate, a table gate, a readback that fails the run). A runner
+  # started without the file logs a named skip: the role is not provisioned there either.
+  tenant_identity_grants_file=/migrations/seams/tenant_identity_writer_grants.sql; if [ -f "$tenant_identity_grants_file" ]; then psql -f "$tenant_identity_grants_file" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1; else echo "[forward-migration]   skip  tenant_identity_writer grants (no grants file at ${tenant_identity_grants_file})"; fi
 fi
 # ---- END login-only role grant seam (OMN-18060) ----
 
