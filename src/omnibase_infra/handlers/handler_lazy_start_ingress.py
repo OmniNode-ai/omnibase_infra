@@ -11,10 +11,17 @@ transaction, and delivers the envelope to the node's own dispatcher. The
 dormant contracts, the policy and the topic provisioner are the ones the
 kernel's boot recorded (``StoreLazyStartDormant``); the bus is the runtime's
 subscriber bus from the container.
+
+The handler is also where a bus message wakes a dormant consumer (OMN-26396): it
+puts the front door in front of the runtime bus's publish, so a message published
+to the topic of a dormant contract starts that contract (and its closure) before
+the message reaches the topic. A handler never touches the bus; the gate is the
+runtime's own publish path, installed once by this always-wired node.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import cast
 
 from omnibase_core.container import ModelONEXContainer
@@ -28,6 +35,7 @@ from omnibase_infra.event_bus.model_topic_readiness_config import (
 )
 from omnibase_infra.handlers.lazy_start_boot_split import StoreLazyStartDormant
 from omnibase_infra.handlers.lazy_start_front_door import LazyStartFrontDoor
+from omnibase_infra.handlers.lazy_start_publish_gate import install_publish_gate
 from omnibase_infra.handlers.lazy_start_runtime_transaction import (
     LazyStartRuntimeTransaction,
 )
@@ -44,6 +52,8 @@ from omnibase_infra.protocols.protocol_topic_provisioner import (
 
 __all__: list[str] = ["HandlerLazyStartIngress"]
 
+logger = logging.getLogger(__name__)
+
 
 class HandlerLazyStartIngress:
     """Consume first requests for dormant contracts and start them."""
@@ -52,6 +62,14 @@ class HandlerLazyStartIngress:
         self._container = container
         self._bus: object | None = None
         self._front_door: LazyStartFrontDoor | None = None
+        try:
+            self._front_door_of_this_boot()
+        except Exception:
+            # The bus may not be registered yet; the first request installs the gate.
+            logger.exception(
+                "Lazy start ingress: wake-on-publish gate not installed at wiring "
+                "(OMN-26396)"
+            )
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -84,7 +102,13 @@ class HandlerLazyStartIngress:
                 ),
                 contracts,
                 policy,
+                StoreLazyStartDormant.wired_contracts(),
             )
+            if not install_publish_gate(self._bus, self._front_door.wake_for_topic):
+                logger.warning(
+                    "Lazy start ingress: this bus has no publish, so a message to a "
+                    "dormant consumer's topic does not wake it (OMN-26396)"
+                )
         return self._front_door
 
     async def handle(self, request: ModelLazyStartRequest) -> ModelLazyStartResult:

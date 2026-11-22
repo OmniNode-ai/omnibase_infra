@@ -1,0 +1,109 @@
+schema_version: 1.0.0
+ticket_id: OMN-26396
+title: Lazy start wakes a workflow's whole contract closure on its first request, once per shared contract, and a bus message to a dormant consumer wakes it
+summary: >-
+  On a lane that boots a declared boot set and leaves the rest dormant, the first request for a workflow now wakes the workflow's whole contract closure: the contract it names plus every dormant contract it publishes to, transitively, read from the discovered contracts' topics and started in one stable order (by name). Each contract has one start in flight at a time, shared by every wake that needs it, so two workflows that share a contract wake it once and the second waits on the first. A wake that fails rolls back every contract it started that no live wake still holds, keeps what another workflow already serves, and never deletes a topic. The ingress node installs the wake on the runtime bus's publish path, so a message published to the topic of a dormant consumer starts that consumer before the message reaches the topic and is consumed once. A node woken lazily applies what it returns the way its own subscription does, so the next hop of a chain is answered on the first request.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - topics
+requirements:
+  - id: req-omn26396-closure-wake
+    statement: A first request wakes the workflow's whole closure once per contract, and a bus message to a dormant consumer wakes it.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a first request for a workflow whose orchestrator composes or publishes to three other dormant contracts wakes all four, and a contract already wired is not woken again -- falsifier: uv run pytest tests/unit/runtime/test_lazy_start_first_request.py -q -k closure_wake fails at head af302d75 and passes on the branch"
+      - id: AC2
+        statement: "AC2: with two workflows that share contracts, the second workflow's first request neither rewires nor resubscribes a shared contract the first woke (build and subscribe counters stay at one) -- falsifier: uv run pytest tests/unit/runtime/test_lazy_start_first_request.py -q -k shared_contract_skipped fails at head af302d75 and passes on the branch"
+      - id: AC3
+        statement: "AC3: two first requests that arrive together for workflows sharing a contract wake that contract exactly once, the second waits on the wake in flight, there is no doubled subscription and no message is consumed twice -- falsifier: uv run pytest tests/unit/runtime/test_lazy_start_first_request.py -q -k concurrent_single_flight fails at head af302d75 and passes on the branch"
+      - id: AC4
+        statement: "AC4: a wake that fails on one contract of a closure leaves no dispatcher and no subscription for any contract that wake started, a contract another workflow already serves keeps serving, and a retry wakes the closure -- falsifier: uv run pytest tests/unit/runtime/test_lazy_start_first_request.py -q -k failed_wake_rollback fails at head af302d75 and passes on the branch"
+      - id: AC5
+        statement: "AC5: a message published to a topic whose consumer is dormant wakes that consumer and is delivered to it, and a delegation inner hop to a dormant contract is answered -- falsifier: uv run pytest tests/unit/runtime/test_lazy_start_first_request.py -q -k inner_hop_wake fails at head af302d75 and passes on the branch"
+evidence_requirements:
+  - kind: tests
+    description: The lazy-start first-request tests, including the closure wake, shared-contract, single-flight, rollback and inner-hop tests over fixture contract files read through the runtime's discovery.
+    command: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26396-ac1-closure-wake
+    description: "A first request for an orchestrator that publishes to three dormant contracts builds and attaches all four exactly once (a contract served before the request is not built again), from fixture contract.yaml files read through discovery; the test fails at the merge base, where only the named contract wakes."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly -k closure_wake
+        cwd: .
+  - id: dod-omn26396-ac2-shared-contract-skipped
+    description: "After workflow A woke, workflow B's first request builds and attaches its own new contracts only: the two shared contracts keep one build and one subscription each, and nothing is detached."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly -k shared_contract_skipped
+        cwd: .
+  - id: dod-omn26396-ac3-concurrent-single-flight
+    description: "Two first requests for workflows that share contracts, started together, build and attach each shared contract once, deliver each request once, and finish inside a deadline (no deadlock between overlapping closures); the shared pair attaches in one stable order."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly -k concurrent_single_flight
+        cwd: .
+  - id: dod-omn26396-ac4-failed-wake-rollback
+    description: "A failed attach on one member rolls back every member the wake started and no peer holds, leaves no subscription, no dispatcher and no serving name, keeps every topic the wake provisioned (no delete), keeps a contract another workflow serves, spares a member a live peer wake joined, and a retry wakes the closure."
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly -k failed_wake_rollback
+        cwd: .
+  - id: dod-omn26396-ac5-inner-hop-wake
+    description: "A message published through the bus's own publish path to the topic of a dormant consumer starts that consumer (provision, confirm, attach) before the publish reaches the bus, is consumed once by the new subscription, and a publish sent while the wake is in flight waits for it; a failed wake fails the publish loudly."
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly -k inner_hop_wake
+        cwd: .
+  - id: dod-omn26396-ac5-inner-hop-chain
+    description: "An orchestrator woken by a first request applies what it returns, so the next node's topic receives it and that node answers, on the first request."
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly -k inner_hop_chain
+        cwd: .
+  - id: dod-omn26396-integration-proof-ingress-wake
+    description: "The ingress node's real contract.yaml and a real dormant contract of this repository wire through wire_from_manifest on a lazy-start lane; the ingress installs the wake on the bus's publish path and a publish to the dormant node's topic starts it."
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_lazy_start_ingress_contract_omn21592.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26396-ac6-lab-delegation-receipt
+    description: >-
+      The lab run of one delegation request with the dev boot set, answered at every hop on its first request, with the time to /health and the wired and dormant counts. The receipt is written by the lane that runs it on a lab host that holds the boot harness, omnimarket and the overlays clone. The lane that opened this change could not run it (its host had no overlays clone, no omnimarket in the environment, no container engine and no broker), so this item fails until that receipt exists. It is scoped to the local Done gate and binds no acceptance criterion, because a pull request runner cannot run it. The lab claim it proves: one delegation request on a lab boot with the dev boot set from overlays branch OMN-26385-dev-lazy-start-boot-set is answered at every hop on its first request, and the report names the time to /health and the wired and dormant counts.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: bash -c 'test -s "${OMNI_HOME}/.claude_scratch/reports/OMN-26396-lab-delegation-e2e-receipt.json"'
+  - id: dod-omn26396-deploy-closure-live
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime container imports the closure graph and the front door this change adds, and its /health answers within 5 s with a JSON status. It reads the live container, which carries the module only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime python -c 'from omnibase_infra.handlers.lazy_start_closure import LazyStartClosureGraph; from omnibase_infra.handlers.lazy_start_front_door import LazyStartFrontDoor'
+      - check_type: command
+        check_value: bash -c 'docker exec omninode-runtime curl -s -m 5 http://localhost:8085/health | grep -q "\"status\""'
