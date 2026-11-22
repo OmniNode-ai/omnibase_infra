@@ -1,0 +1,82 @@
+schema_version: 1.0.0
+ticket_id: OMN-26472
+title: "omnibase_infra: tenant_api_keys gains an expires_at column on the dev and stability lanes through a gated seam"
+summary: >-
+  tenant_api_keys has no expiry column. This change adds expires_at timestamptz NULL and a partial index on (expires_at) WHERE is_active through the new seam docker/migrations/seams/tenant_api_keys_expiry.sql. The seam is gated on database omninode_cloud and on to_regclass('public.tenant_api_keys') so an absent table is a named skip and never fails a run started with ON_ERROR_STOP=1. The forward-migration runner calls it only inside a case on the new indicator ONEX_MIGRATION_GATEWAY_LANE (dev or stability), which the dev lane overlay and the stability lane overlay set on the forward-migration service and no other compose file, catalog entry or lane carries. Unset logs a named skip and an unknown value warns and skips. Expiry is set at insert only, so no grant changes. Acceptance on the live dev database is read on omni-201 after the next dev migration run that follows the merge.
+is_seam_ticket: true
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26472-expires-at
+    statement: On the dev and stability lanes the forward-migration runner adds a nullable timestamptz expires_at column and a partial index to tenant_api_keys through a gated seam, leaves existing rows unchanged, and on every other lane, and whenever the table or database is absent, skips by name without failing the run.
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: on omni-201 the column exists with the right type and the runner logs the ok line after the next dev migration run -- falsifier: `psql -d omninode_cloud -At -c "select is_nullable, data_type from information_schema.columns where table_schema='public' and table_name='tenant_api_keys' and column_name='expires_at'"` prints anything but exactly `YES|timestamp with time zone`, the dev runner log lacks `ok tenant_api_keys.expires_at present`, or it shows a skip line on dev
+      - id: AC2
+        statement: |-
+          AC2: the existing key rows (8 at 2026-11-22T20:05Z) are unchanged -- falsifier: `select id, key_hash, is_active, revoked_at from tenant_api_keys order by id` before and after differ
+      - id: AC3
+        statement: |-
+          AC3: the render tests pass and the indicator sits only in the dev and stability renders -- falsifier: `uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py tests/integration/infra/test_stability_test_runtime_compose_render.py tests/integration/infra/test_lakshman_compose_render.py tests/integration/infra/test_prod_runtime_compose_render.py tests/integration/infra/test_judge_compose_render.py -q` fails, the dev or stability render lacks the indicator, or any other lane's render, the base file or the catalog carries it
+      - id: AC4
+        statement: |-
+          AC4: the seam skips by name and never fails the run when the table is absent or the indicator is unset -- falsifier: `uv run pytest tests/unit/test_tenant_api_keys_expiry_seam.py -q` exits non-zero, or the runner test on a scratch Postgres with omninode_cloud but no tenant_api_keys (indicator set to dev) does not exit 0 with the table-absent skip line, or with the indicator unset logs no unset skip line or issues an ALTER
+evidence_requirements:
+  - kind: tests
+    description: The seam parse test, the fence-parity suite and the runner test on a scratch Postgres.
+    command: uv run --frozen pytest tests/unit/test_tenant_api_keys_expiry_seam.py tests/scripts/test_node_migration_fence_parity.py tests/integration/migrations/test_tenant_api_keys_expiry_runner_omn26472.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26472-ac1-seam-form
+    description: "The parse test reads the committed seam: ADD COLUMN IF NOT EXISTS expires_at timestamptz NULL, the partial index, and a readback that raises and ends with the ok line the dev runner log must carry. The omni-201 column read and the runner-log read are post-merge readbacks after the next dev migration run, listed in the PR body."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/test_tenant_api_keys_expiry_seam.py -q --no-cov
+        cwd: .
+  - id: dod-omn26472-ac2-rows-unchanged
+    description: "The seam carries no data write and no default, and the runner test seeds two key rows, runs the runner twice on a scratch Postgres and reads the key list back unchanged. The omni-201 before and after key list is a post-merge readback, listed in the PR body."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/test_tenant_api_keys_expiry_seam.py -k "nullable or no_grant" -q --no-cov
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_tenant_api_keys_expiry_runner_omn26472.py -k leaves_the_rows_alone -q --no-cov
+        cwd: .
+  - id: dod-omn26472-ac3-render
+    description: "The five lane render tests and the fence-parity suite: the dev and stability renders carry the indicator with their own value, and the collaborator lane, prod and judge renders, the base compose file and the forward-migration catalog entry do not."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/infra/test_dev_runtime_compose_render.py tests/integration/infra/test_stability_test_runtime_compose_render.py tests/integration/infra/test_lakshman_compose_render.py tests/integration/infra/test_prod_runtime_compose_render.py tests/integration/infra/test_judge_compose_render.py -q --no-cov
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_node_migration_fence_parity.py -q --no-cov
+        cwd: .
+  - id: dod-omn26472-ac4-named-skips
+    description: "The parse test plus the runner test on a scratch Postgres: with omninode_cloud and no tenant_api_keys and the indicator set to dev the runner exits 0 with the table-absent skip line; with the indicator unset it logs the unset skip line and issues no ALTER."
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/test_tenant_api_keys_expiry_seam.py -q --no-cov
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_tenant_api_keys_expiry_runner_omn26472.py -q --no-cov
+        cwd: .
+  - id: dod-omn26472-deploy
+    description: "Hosted-runner deploy probe over docker: with a reachable docker daemon, the real forward-migration runner runs in the runner image against a scratch Postgres holding omninode_cloud, and the gateway-lane compose render and the dev and stability overlays are read. The seam adds the column and index only when the indicator is set to a gateway lane value, skips by name otherwise, and leaves seeded key rows unchanged. The omni-201 column and key-list reads are post-merge readbacks listed in the PR body."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: docker info --format '{{.ServerVersion}}' && uv run --frozen pytest tests/integration/migrations/test_tenant_api_keys_expiry_runner_omn26472.py tests/scripts/test_node_migration_fence_parity.py -k "expiry or gateway" -q --no-cov
+        cwd: .
