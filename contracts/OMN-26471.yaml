@@ -1,0 +1,123 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26471"
+title: "omnibase_infra: a least-grant tenant_identity_writer role and the omninode_cloud topology entry exist on the dev lane"
+summary: >-
+  The dev lane has no runtime writer role on omninode_cloud. This change adds the login-only role tenant_identity_writer (the declared grants on the five identity tables, the database, the schema and the outbox id sequence, none wider) through a seam beside gateway_runtime_grants.sql, the role's credential in the bootstrap, the runner, the slot provisioner and the password contract, and the fail-closed TENANT_IDENTITY_DATABASE_DSN in the dev lane's main runtime with its tenant_identity.database.dsn mapping. The typed omninode_cloud topology entry (AC6) is not part of this change: the pinned topology model requires a stream and a domain column that omninode_cloud's ledger does not have.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26471-tenant-identity-writer"
+    statement: "The dev lane holds a least-grant tenant_identity_writer role on omninode_cloud whose credential the runner asserts and whose DSN the main runtime renders fail-closed."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the role holds exactly the listed set -- falsifier: on omni-201 the effective-privilege readback the seam itself runs (has_table_privilege, has_column_privilege, has_sequence_privilege, has_database_privilege, has_schema_privilege, plus the WITH GRANT OPTION forms and a positive control that a grant with delegation rights makes it raise) differs from the list, or `select table_name, column_name, privilege_type from information_schema.role_column_grants where grantee='tenant_identity_writer' order by 1,2,3` prints a column not in the list (role_table_grants alone is not enough because it does not show column-scoped UPDATE)
+      - id: "AC2"
+        statement: >-
+          AC2: the runtime connects as tenant_identity_writer on a fresh slot and on omni-201's warm volume -- falsifier: a `select session_user, current_user, current_database()` through the T3 node's DSN does not print `tenant_identity_writer, tenant_identity_writer, omninode_cloud` on either
+      - id: "AC3"
+        statement: >-
+          AC3: the runner asserts the role's credential on omni-201 and does not skip it -- falsifier: the dev lane's forward-migration log for the run after deploy has a `skip` line for tenant_identity_writer or no credential line for it at all
+      - id: "AC4"
+        statement: >-
+          AC4: gateway_runtime's nine grants are unchanged -- falsifier: the existing gateway_runtime_grants.sql readback raises on the next run, or its output on omni-201 is a `skip` line instead of `ok ... nine gateway grants`
+      - id: "AC5"
+        statement: >-
+          AC5: the failing test is red before the seam and green after -- falsifier: `uv run pytest tests/unit/test_tenant_identity_writer_grants.py -q` exits non-zero after the change, or the PR's first commit shows it passing
+      - id: "AC6"
+        statement: >-
+          AC6: the pinned topology resolves omninode_cloud for omnimarket after the release and pin raise -- falsifier: on that pin `uv run pytest tests/unit/runtime/test_topology_strict_wiring_omn15655.py -q` fails on T3's or T7's branch, or the PR adds a residual row
+evidence_requirements:
+  - kind: "tests"
+    description: "The seam declares exactly the listed grants and nothing broader, its readback expected sets equal the sets the grants produce and fire on a dropped grant, a widened column list and a delegable grant, the role mints login only in the bootstrap, the runner and the provisioner, the runner applies the seam beside the gateway seam inside the slot guard, the dev lane renders the DSN fail-closed in omninode-runtime only while the shared base never requires the password, and the runtime policy maps the logical name on the dev profile only."
+    command: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn26471-ac1-seam-and-readback"
+    description: "AC1 (hosted part): the pinned seam holds the declared grants, the reset before them, and the readback with the delegation forms, each pinned with a positive control."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26471-ac1-hosted-deploy-probe"
+    description: "Deploy scope: the pushed head carries the seam with the column-scoped tenant_api_keys UPDATE and its readback, read from GitHub at the checked-out revision so the hosted runner can run it."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "command"
+        check_value: "bash -o pipefail -c 'gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/seams/tenant_identity_writer_grants.sql?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F \"GRANT UPDATE (is_active, revoked_at) ON public.tenant_api_keys\" >/dev/null'"
+        cwd: "."
+  - id: "dod-omn26471-ac1-lab-readback"
+    description: "AC1 (lab part): the lane's STATUS row names the installed revision and the `ok tenant_identity_writer holds exactly the declared grants` line of the dev lane's forward-migration run. Needs the work ledger, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: []
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep OMN-26471 | grep STATUS | grep -F installed= | grep -F \"holds exactly the declared grants\"'"
+        cwd: "."
+  - id: "dod-omn26471-ac2-dsn-fail-closed"
+    description: "AC2 (hosted part): the dev lane renders TENANT_IDENTITY_DATABASE_DSN fail-closed as tenant_identity_writer on omninode_cloud in omninode-runtime only, and the runtime policy maps tenant_identity.database.dsn to it."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -q -n 0 --no-cov -k 'dsn or policy'"
+        cwd: "."
+  - id: "dod-omn26471-ac2-session-readback"
+    description: "AC2 (lab part): the lane's STATUS row prints `tenant_identity_writer, tenant_identity_writer, omninode_cloud` for the session readback on a fresh slot and on the warm volume. Needs the work ledger and the T3 node's DSN, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: []
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep OMN-26471 | grep STATUS | grep -F \"tenant_identity_writer, tenant_identity_writer, omninode_cloud\"'"
+        cwd: "."
+  - id: "dod-omn26471-ac3-credential-passthrough"
+    description: "AC3 (hosted part): the role is in the bootstrap and runner credential maps, the password reaches the postgres and forward-migration services in the base and the judge compose, and the runner has no skip path for the role while the password is set."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -q -n 0 --no-cov -k 'credential or password or login_only or slot_managed'"
+        cwd: "."
+  - id: "dod-omn26471-ac3-no-skip-line"
+    description: "AC3 (lab part): the lane's STATUS row names the installed revision and a forward-migration log with a credential line for tenant_identity_writer and no skip line for it. Needs the work ledger, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: []
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep OMN-26471 | grep STATUS | grep -F installed= | grep -F tenant_identity_writer'"
+        cwd: "."
+  - id: "dod-omn26471-ac4-gateway-seam-untouched"
+    description: "AC4: the gateway_runtime grants seam still carries its nine-grant `ok` line and the new test pins it, and the exemplar's own pin of the nine items still passes."
+    source: "manual"
+    binds_ac: ["AC4"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py tests/unit/infra/test_gateway_runtime_login_role_omn26151.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26471-ac5-red-then-green"
+    description: "AC5: the new test file passes at the head; it fails at the merge base, where the seam and the wiring it pins do not exist (the first commit of the PR holds the test alone, red)."
+    source: "manual"
+    binds_ac: ["AC5"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26471-ac6-topology-resolves"
+    description: "AC6: after the omnibase_infra release and the omnimarket pin raise, the omnimarket strict-wiring topology test passes on T3's branch. Not part of this change (the topology entry is blocked, see the PR body); needs the omnimarket clone, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: []
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'cd \"$OMNI_HOME/omnimarket\" && uv run pytest tests/unit/runtime/test_topology_strict_wiring_omn15655.py -q'"
+        cwd: "."
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
