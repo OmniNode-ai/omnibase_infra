@@ -1,0 +1,12 @@
+{
+  "entry_point_name": "compliance_orchestrator",
+  "package_name": "unknown",
+  "reason": "discovery_error",
+  "error": "the runtime lane's declared node exclusion names 'compliance_orchestrator', which no discovered contract is; nothing to leave unattached for it (OMN-26324).",
+  "recorded_by": "OMN-26460 reproduction: discover_contracts() then filter_manifest_for_runtime_profile(manifest, 'main') at omnibase_infra 127c7fb249cb with omnibase-core 0.47.76 (the lock pin) and omnimarket 9d2b0129a7e5 installed",
+  "environment": {
+    "ONEX_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra,omnimarket",
+    "ONEX_CONTRACTS_DIR": "contracts"
+  },
+  "raised_at": "src/omnibase_infra/models/runtime/model_runtime_node_selection.py:129 (stale_declared_errors), called from src/omnibase_infra/runtime/auto_wiring/profile_ownership.py:423"
+}
