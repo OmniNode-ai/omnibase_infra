@@ -18,7 +18,10 @@ calls, the same two the boot uses, in the plan's order (section 3.11.5):
   and discards the node's engine, so no subscription and no dispatcher is left.
   It never deletes a topic.
 * ``deliver`` dispatches the held request to the node's engine in this process;
-  the request never rides the node's command topic.
+  the request never rides the node's command topic. What the node returns is
+  applied the way the node's own subscription applies it (the contract-derived
+  result applier), so the next hop of a chain receives its message on the first
+  request, not only on a later one (OMN-26396).
 
 The node's own engine is what makes a rollback complete: the shared engine has
 no dispatcher removal, so a dispatcher registered there could not be taken back
@@ -30,6 +33,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from typing import cast
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.event_bus.enum_contract_attach_status import (
@@ -41,6 +45,7 @@ from omnibase_infra.event_bus.model_contract_attach_result import (
 from omnibase_infra.event_bus.model_topic_readiness_config import (
     ModelTopicReadinessConfig,
 )
+from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.protocols.protocol_lazy_start_bus import (
     ProtocolLazyStartBus,
 )
@@ -56,7 +61,15 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelDiscoveredContract,
 )
 from omnibase_infra.runtime.auto_wiring.report import ModelAutoWiringReport
+from omnibase_infra.runtime.dispatch_envelope_context import bind_dispatch_envelope
+from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+    load_published_events_map,
+)
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.service_dispatch_result_applier import (
+    DispatchResultApplier,
+    build_contract_result_applier,
+)
 
 __all__: list[str] = ["LazyStartRuntimeTransaction"]
 
@@ -100,6 +113,7 @@ class NodeStart:
     manifest: ModelAutoWiringManifest
     report: ModelAutoWiringReport
     bus: RecordingBus
+    applier: DispatchResultApplier | None = None
     dispatcher_ids: tuple[str, ...] = ()
     attach_results: list[ModelContractAttachResult] = field(default_factory=list)
 
@@ -149,7 +163,23 @@ class LazyStartRuntimeTransaction:
             manifest=manifest,
             report=report,
             bus=RecordingBus(self._bus),
+            applier=self._applier_of(self._contracts[contract_name]),
             dispatcher_ids=tuple(report.results[0].dispatchers_registered),
+        )
+
+    def _applier_of(
+        self, contract: ModelDiscoveredContract
+    ) -> DispatchResultApplier | None:
+        """The contract-derived applier the node's own subscription would build."""
+        if contract.event_bus is None or not contract.event_bus.publish_topics:
+            return None
+        return build_contract_result_applier(
+            event_bus=cast("ProtocolEventBusLike", self._bus),
+            contract_path=contract.contract_path,
+            publish_topics=contract.event_bus.publish_topics,
+            terminal_event=contract.terminal_event,
+            output_topic_map=load_published_events_map(contract.contract_path),
+            allowed_output_topics=contract.event_bus.publish_topics,
         )
 
     async def attach(self, contract_name: str) -> None:
@@ -192,6 +222,10 @@ class LazyStartRuntimeTransaction:
             if isinstance(envelope, ModelEventEnvelope)
             else ModelEventEnvelope[object].model_validate(envelope)
         )
-        return await start.engine.dispatch(
+        result = await start.engine.dispatch(
             topic, typed, allowed_dispatcher_ids=start.dispatcher_ids
         )
+        if start.applier is not None and result is not None:
+            with bind_dispatch_envelope(typed):
+                await start.applier.apply(result, typed.correlation_id)
+        return result

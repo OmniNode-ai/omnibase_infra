@@ -1,0 +1,78 @@
+schema_version: 1.0.0
+ticket_id: OMN-26429
+title: After a failed or recovered dev roll, the deploy agent starts one rebuild of the newer origin/dev head, so dev does not stay on a stale image
+summary: >-
+  Job ca1533c4 (agent/idle-restore, dev lane) built omnibase_infra 0f7f2b730399c250db0222626463381ac99078c8, failed at the runtime phase and ended failed at 2026-11-22T02:08:00Z after the boot guard rolled the lane back. The fixes for that failure merged while it ran, and nothing started a rebuild: idle converge refuses omnibase_infra by design and omnimarket inside C15's window. The agent now derives the need from its own job records (the newest terminal dev job failed, its recorded infra commit differs from origin/dev) and runs one rebuild as agent/post-failure-converge through the ordinary accept and execute path, once per head, delayed and not dropped by the C15 and C16 windows. Code lives in the new module scripts/deploy-agent/deploy_agent/post_failure_converge.py; no compose file, health gate, boot guard or wait setting changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26429-post-failure-converge
+    statement: After a terminal failed or recovered dev job the deploy agent rebuilds the newer origin/dev head once.
+    acceptance:
+      - id: AC1
+        statement: "AC1: after a terminal failed or recovered dev job the agent reads origin/dev and starts one rebuild when its head differs from the failed job's source, once per head -- falsifier: a failed job followed by a newer dev head with no job in the jobs-dev record within 20 minutes"
+      - id: AC2
+        statement: "AC2: the rebuild respects the C15 and C16 probe windows exactly as idle converge does -- falsifier: uv run pytest on the window test finds a job accepted inside a reserved window"
+      - id: AC3
+        statement: "AC3: a regression test built from the recorded ca1533c4 job record plus a newer head (fixture path named in the PR) asserts one converge request -- falsifier: uv run pytest on that test passes with the new step removed"
+evidence_requirements:
+  - kind: tests
+    description: The post-failure converge rule, its probe-window sweep and the recorded ca1533c4 regression.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_post_failure_converge_omn26429.py -q --no-header -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26429-ac1-one-rebuild-per-head
+    description: >-
+      A failed dev job followed by a newer dev head yields one rebuild named agent/post-failure-converge; the same head on three consecutive checks and after a simulated restart of the agent yields one; a head equal to the failed job's source, a passed newest job, a failed prod or stability job, an active job, a frozen lane and a failure that records no source yield none; a closed load gate defers the rebuild and keeps the need; a head that moves while waiting yields one rebuild of the newest head.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_post_failure_converge_omn26429.py -q --no-header -p no:cacheprovider -k "TestDecision or TestRecordedJob or test_the_same_head_on_three_checks or test_a_restart_before or test_a_head_equal or test_no_failed_job or test_a_passed_newest or test_a_failed_prod or test_no_rebuild or test_a_closed_load_gate or test_a_head_that_moves_while"
+        cwd: .
+  - id: dod-omn26429-ac2-probe-windows
+    description: >-
+      The windows are read through idle converge's own probe_blocking over the one schedule parser (config/lab_probe_windows.yaml). A sweep of every minute across two days finds a converge verdict only outside C15's and C16's exclusions; a window delays the rebuild and keeps the need, and the first clear check after C15's run (02:47Z) starts it; an unreadable schedule starts nothing.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_post_failure_converge_omn26429.py -q --no-header -p no:cacheprovider -k "TestProbeWindows or test_a_probe_window_delays or test_an_unreadable_schedule"
+        cwd: .
+  - id: dod-omn26429-ac3-recorded-ca1533c4-regression
+    description: >-
+      The recorded ca1533c4 job record (fixture scripts/deploy-agent/tests/unit/fixtures/recorded_job_ca1533c4_omn26429.json) seeded into the jobs directory with dev head 3f614d4f477576a9575ff716016995eb630151e8 makes the agent accept and run exactly one rebuild. The control: the same test fails when PostFailureConverge.check is stubbed to do nothing, which is how the poll loop calls the step.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_post_failure_converge_omn26429.py -q --no-header -p no:cacheprovider -k "test_the_recorded_job_plus_a_newer_head_asks_for_exactly_one_rebuild or test_the_rule_runs_only_on_the_poll_loops_idle_branch"
+        cwd: .
+  - id: dod-omn26429-deploy-source-readback
+    description: >-
+      Hosted-runner source-artifact readback: fetch the rule's module and the agent's call of it at the evaluated published commit and confirm the module names the rule's requester and the agent calls it from the poll loop's idle branch. A missing line fails the command, so it fails at the merge base, where neither exists. No lab service or credentials are required. This checks the published source and does not assert a live runtime roll.
+    source: manual
+    binds_ac: [AC1, AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/nodes/node_deploy_job_reading_effect/runtime_post_failure_converge.py" | grep -c 'agent/post-failure-converge' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/scripts/deploy-agent/deploy_agent/agent.py" | grep -c '_post_failure.check' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26429-integration-proof-job-record
+    description: >-
+      The post-failure converge rule parses the recorded failed dev job record (tests/fixtures/dev_job_a7474c42/job_record.json) through its status enum and recovers the built infra commit. Fails if the rule's job status model stops reading a real agent job record.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_post_failure_converge_job_record_omn26429.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
