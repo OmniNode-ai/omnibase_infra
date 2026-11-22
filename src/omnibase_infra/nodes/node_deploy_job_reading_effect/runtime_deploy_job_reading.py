@@ -29,7 +29,9 @@ from pydantic import BaseModel, JsonValue, ValidationError
 if TYPE_CHECKING:
     from omnibase_infra.nodes.node_deploy_job_reading_effect.runtime_post_failure_converge import (
         PostFailureConverge,
-        ProtocolCommand,
+    )
+    from omnibase_infra.protocols.protocol_command import ProtocolCommand
+    from omnibase_infra.protocols.protocol_post_failure_host import (
         ProtocolPostFailureHost,
     )
 
