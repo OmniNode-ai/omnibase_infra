@@ -130,3 +130,24 @@ def test_a7474c42_source_events_that_write_nothing_still_degrade() -> None:
 
 def test_a7474c42_divergence_floor_is_unchanged() -> None:
     assert APPLY_DIVERGENCE_MIN_CONSUMED == 20
+
+
+def test_a7474c42_recorded_rule_clears_on_the_recorded_log() -> None:
+    """The rule the job record names no longer fires on the log it was recorded with."""
+    record = json.loads((FIXTURES / "job_record.json").read_text())
+    assert "projection_apply_divergence" in record["errors"][0]
+    assert _replay(_recorded_dispatches()) == "HEALTHY"
+
+
+def test_a7474c42_gate_still_grades_source_events_while_ticks_are_excluded() -> None:
+    """The floor, the source-topic grading and the tick exclusion hold together."""
+    assert APPLY_DIVERGENCE_MIN_CONSUMED == 20
+    source_topic = next(
+        topic for topic, _ in _recorded_dispatches() if topic != SUFFIX_RUNTIME_TICK
+    )
+    assert _replay([(source_topic, 0)] * APPLY_DIVERGENCE_MIN_CONSUMED) == "DEGRADED"
+    reset_projection_apply_counters_for_test()
+    assert (
+        _replay([(SUFFIX_RUNTIME_TICK, 0)] * (APPLY_DIVERGENCE_MIN_CONSUMED * 5))
+        == "HEALTHY"
+    )

@@ -21,19 +21,19 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The a7474c42 replay tests over the recorded job record and container log excerpt, and the apply-flow dimension suite they sit beside.
-    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_job_a7474c42_tick_apply_accounting_omn26419.py tests/unit/services/test_runtime_health_projection_apply_dimensions_omn18910.py -q --no-cov
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_job_a7474c42_tick_apply_accounting_omn26419.py tests/integration/test_a7474c42_tick_projection_apply_seam_omn26419.py tests/unit/services/test_runtime_health_projection_apply_dimensions_omn18910.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn26419-ac1-cause
-    description: "The recorded cause: job a7474c42 phase_results.runtime failed with FAIL [runtime_degraded] projection_apply_divergence EvalResultsProjectionWriter (fixture tests/fixtures/dev_job_a7474c42/job_record.json)."
+    description: "The recorded cause: job a7474c42 phase_results.runtime failed with FAIL [runtime_degraded] projection_apply_divergence EvalResultsProjectionWriter (fixture tests/fixtures/dev_job_a7474c42/job_record.json); the rule it names reads HEALTHY on the recorded log at the fix and DEGRADED at the merge base."
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_job_a7474c42_tick_apply_accounting_omn26419.py -k job_record_names_the_rule_and_step -q --no-cov
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_job_a7474c42_tick_apply_accounting_omn26419.py -k "job_record_names_the_rule_and_step or recorded_rule_clears_on_the_recorded_log" -q --no-cov
         cwd: .
   - id: dod-omn26419-ac2-red-green
     description: "The replay of the recorded container log excerpt through the apply recorder and the divergence evaluation: DEGRADED at the merge base, HEALTHY on the fix, with a positive control that real source events still grade DEGRADED."
@@ -44,12 +44,12 @@ dod_evidence:
         check_value: uv run --frozen pytest tests -q --no-cov -k a7474c42
         cwd: .
   - id: dod-omn26419-ac3-gate-unchanged
-    description: The divergence floor stays 20 and a source topic that writes nothing still reads DEGRADED.
+    description: The divergence floor stays 20 and a source topic that writes nothing still reads DEGRADED, while the recorded ticks no longer do (DEGRADED at the merge base, HEALTHY on the fix).
     source: manual
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_job_a7474c42_tick_apply_accounting_omn26419.py -k "source_events_that_write_nothing_still_degrade or divergence_floor_is_unchanged" -q --no-cov
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_job_a7474c42_tick_apply_accounting_omn26419.py -k "source_events_that_write_nothing_still_degrade or divergence_floor_is_unchanged or gate_still_grades_source_events_while_ticks_are_excluded" -q --no-cov
         cwd: .
   - id: dod-omn26419-deploy
     description: Hosted-runner probe that reads the committed apply counters from GitHub at the checked-out commit and requires the runtime tick exclusion in the apply recorder.
