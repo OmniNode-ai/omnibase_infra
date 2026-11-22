@@ -66,5 +66,5 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/seams/tenant_identity_schema_readback.sql?ref=omn-26121-tenant-identity-schema-seam' --jq .content | base64 -d | grep -q 'tenant_api_keys|column|expires_at'
+          gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/seams/tenant_identity_schema_readback.sql?ref=omn-26121-tenant-identity-schema-seam' --jq .content | base64 -d | grep 'tenant_api_keys|column|expires_at' > /dev/null
         cwd: .
