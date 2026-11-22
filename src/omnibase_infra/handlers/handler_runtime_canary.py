@@ -30,6 +30,7 @@ from typing import Final, cast
 from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_runtime_canary_verdict import EnumRuntimeCanaryVerdict
 from omnibase_infra.models.model_runtime_canary_candidate import (
     ModelRuntimeCanaryCandidate,
@@ -128,6 +129,16 @@ class HandlerRuntimeCanary:
 
     def __init__(self, container: ModelONEXContainer) -> None:
         self._container = container
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure handler over the lane's runtime container."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Side-effecting: probes the candidate and writes the receipt file."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def handle(self, request: ModelRuntimeCanaryRequest) -> ModelRuntimeCanaryReceipt:
         key: type[object] = ProtocolRuntimeCanaryProbe
@@ -230,6 +241,16 @@ def _judge(
 
 class HandlerRuntimeCanaryGate:
     """The dev roll's read of a candidate's canary receipt."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure handler over the lane's runtime container."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Reads the receipt file; no write."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def handle(
         self, request: ModelRuntimeCanaryRequest
