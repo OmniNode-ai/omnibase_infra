@@ -50,6 +50,15 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_merge_build_decision_trigger_row_omn26431.py -q --no-cov -n 0 -p no:cacheprovider -k trigger_row_passes_the_ledger_row_grammar
         cwd: .
+  - id: dod-omn26431-ac1-handler-integration
+    description: >-
+      The build decision handler, wired with the deploy job reading node contract's real settings, builds the STATUS row (src=build-decision, trigger_sha, class, result, job), gives a repeated decision the same append request id, reports a failed append without raising, and writes no result cell for a NON_RUNTIME sha. It fails at the merge base because the handler does not exist there.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_dev_merge_build_decision_row_omn26431.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
   - id: dod-omn26431-deploy-source-readback
     description: >-
       Hosted-runner source-artifact readback: fetch the agent's call site and the build decision handler at the evaluated published commit and confirm the agent hands each decision to the build decision entries and the handler writes the src=build-decision row. A missing line fails the command, so it fails at the merge base. No lab service or credentials are required. This checks the published source and does not assert a live runtime rollout: the deploy agent picks the change up on its next ordinary deploy.
