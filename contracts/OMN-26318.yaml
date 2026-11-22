@@ -22,11 +22,10 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn26318-ac1-omnibase-infra-row
-    description: The ratchet file holds this repository's measured ratchet row and a per-file table at the checked-out commit; the file has no per-file table at the merge base, so the check fails there.
+    description: The ratchet file holds this repository's measured ratchet row and a per-file table at the checked-out commit; the file has no per-file table at the merge base, so the test fails there.
     source: manual
     binds_ac: [AC1]
     checks:
-      - check_type: command
-        check_value: >-
-          test -f config/ledger_file_census_ratchet.yaml && grep -Fxq '  omnibase_infra: 23' config/ledger_file_census_ratchet.yaml && grep -Fxq 'files:' config/ledger_file_census_ratchet.yaml
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ledger_file_census_hook_omn24480.py -k per_file_table -q --no-cov
         cwd: .
