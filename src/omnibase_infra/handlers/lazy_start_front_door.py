@@ -13,15 +13,29 @@ subscription is left; a topic it created stays) and is retried within the
 policy's retry budget, and a later request starts it again. A request not
 answered inside the policy's budget is answered ``START_TIMEOUT`` and stays
 held: it is delivered once the start completes, never dropped.
+
+A first request wakes the whole closure of the contract it names (OMN-26396): that
+contract plus every dormant contract it publishes to, transitively, in one stable
+order (by name). Each contract has one start in flight at a time, shared by every
+wake that needs it, so two workflows that share a contract start it once and the
+second waits on the first. A contract is committed as serving only when the wake
+that needed it completes; a wake that fails rolls back every contract it started
+that no live wake still holds and that no completed wake committed, and keeps what
+another workflow already serves. A topic a failed wake created is never deleted.
+A bus message addressed to a dormant consumer wakes it through ``wake_for_topic``
+before the message is published.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Collection
+from collections.abc import Mapping
 
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.enums.enum_lazy_start_outcome import EnumLazyStartOutcome
+from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
+from omnibase_infra.handlers.lazy_start_closure import LazyStartClosureGraph
 from omnibase_infra.models.lazy_start import (
     ModelLazyStartPolicy,
     ModelLazyStartRequest,
@@ -30,6 +44,7 @@ from omnibase_infra.models.lazy_start import (
 from omnibase_infra.protocols.protocol_lazy_start_transaction import (
     ProtocolLazyStartTransaction,
 )
+from omnibase_infra.runtime.auto_wiring.models import ModelDiscoveredContract
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 __all__: list[str] = ["LazyStartFrontDoor"]
@@ -38,25 +53,32 @@ logger = logging.getLogger(__name__)
 
 
 class LazyStartFrontDoor:
-    """Start a dormant contract on its first request, once, then deliver."""
+    """Start a dormant contract's closure on its first request, once, then deliver."""
 
     def __init__(
         self,
         transaction: ProtocolLazyStartTransaction,
-        dormant_contracts: Collection[str],
+        dormant_contracts: Mapping[str, ModelDiscoveredContract],
         policy: ModelLazyStartPolicy,
+        wired_contracts: Mapping[str, ModelDiscoveredContract] | None = None,
     ) -> None:
         self._transaction = transaction
         self._dormant = frozenset(dormant_contracts)
+        self._graph = LazyStartClosureGraph(
+            {**(wired_contracts or {}), **dormant_contracts}
+        )
         self._policy = policy
         self._serving: set[str] = set()
         self._starts: dict[str, asyncio.Task[None]] = {}
+        self._wakes: dict[str, asyncio.Task[None]] = {}
+        self._holders: dict[str, set[str]] = {}
+        self._rollbacks: dict[str, asyncio.Task[None]] = {}
         self._held: set[asyncio.Task[ModelLazyStartResult]] = set()
         self.held_results: list[ModelLazyStartResult] = []
 
     @property
     def serving(self) -> frozenset[str]:
-        """The contracts this front door has started."""
+        """The contracts whose wake completed: started and committed."""
         return frozenset(self._serving)
 
     async def handle(self, request: ModelLazyStartRequest) -> ModelLazyStartResult:
@@ -67,13 +89,13 @@ class LazyStartFrontDoor:
             return _result(request, EnumLazyStartOutcome.CONTRACT_NOT_ANNOUNCED)
         if name in self._serving:
             return await self._deliver(request)
-        start = self._start_of(name)
+        wake = self._wake_of(name)
         try:
             await asyncio.wait_for(
-                asyncio.shield(start), timeout=self._policy.budget_seconds
+                asyncio.shield(wake), timeout=self._policy.budget_seconds
             )
         except TimeoutError:
-            held = asyncio.create_task(self._deliver_when_started(request, start))
+            held = asyncio.create_task(self._deliver_when_started(request, wake))
             self._held.add(held)
             held.add_done_callback(self._held.discard)
             return _result(
@@ -94,15 +116,108 @@ class LazyStartFrontDoor:
             )
         return await self._deliver(request)
 
+    async def wake_for_topic(self, topic: str) -> None:
+        """Wake every dormant consumer of ``topic``, before a message is published to it.
+
+        Returns at once when no dormant consumer is left. Waits on the wake in
+        flight when there is one (the message is held, never published into a
+        topic nobody is consuming); raises when the wake fails or does not finish
+        inside the policy's budget, so the producer's own failure path applies.
+        """
+        for name in self._graph.consumers_of(topic):
+            if name in self._dormant and name not in self._serving:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(self._wake_of(name)),
+                        timeout=self._policy.budget_seconds,
+                    )
+                except Exception as exc:
+                    context = ModelInfraErrorContext.with_correlation(
+                        transport_type=EnumInfraTransportType.RUNTIME,
+                        operation="lazy_start_wake_for_publish",
+                        target_name=name,
+                    )
+                    raise InfraUnavailableError(
+                        f"consumer '{name}' of '{topic}' did not wake: "
+                        f"{sanitize_error_message(exc)}",
+                        context=context,
+                    ) from exc
+
+    def _wake_of(self, name: str) -> asyncio.Task[None]:
+        """The one in-flight wake of ``name``'s closure; a failed wake is replaced."""
+        wake = self._wakes.get(name)
+        if wake is None or _failed(wake):
+            wake = asyncio.create_task(self._wake(name), name=f"lazy-wake-{name}")
+            self._wakes[name] = wake
+        return wake
+
+    async def _wake(self, target: str) -> None:
+        held: list[str] = []
+        try:
+            for member in self._graph.closure_of(target):
+                if member not in self._dormant or member in self._serving:
+                    continue
+                start = self._start_of(member)
+                self._holders.setdefault(member, set()).add(target)
+                held.append(member)
+                await asyncio.shield(start)
+        except BaseException:
+            await self._abandon(target, held)
+            raise
+        self._serving.update(held)
+        for member in held:
+            self._holders[member].discard(target)
+        logger.info(
+            "Lazy start: closure of '%s' woke %d contract(s) (OMN-26396)",
+            target,
+            len(held),
+        )
+
+    async def _abandon(self, target: str, held: list[str]) -> None:
+        """Roll back what this wake started and nothing else needs; keep the rest."""
+        doomed: list[str] = []
+        for member in reversed(held):
+            holders = self._holders[member]
+            holders.discard(target)
+            start = self._starts.get(member)
+            if (
+                not holders
+                and member not in self._serving
+                and start is not None
+                and start.done()
+                and not _failed(start)
+            ):
+                doomed.append(member)
+        for member in doomed:
+            del self._starts[member]
+            self._rollbacks[member] = asyncio.create_task(self._roll_back(member))
+        if doomed:
+            await asyncio.gather(*(self._rollbacks[m] for m in doomed))
+
+    async def _roll_back(self, name: str) -> None:
+        try:
+            await self._transaction.rollback(name)
+        except Exception:
+            logger.exception(
+                "Lazy start: rollback of '%s' after a failed closure wake raised "
+                "(OMN-26396)",
+                name,
+            )
+        finally:
+            del self._rollbacks[name]
+
     def _start_of(self, name: str) -> asyncio.Task[None]:
         """The one in-flight start for ``name``; a failed start is replaced."""
         start = self._starts.get(name)
-        if start is None or (start.done() and start.exception() is not None):
+        if start is None or _failed(start):
             start = asyncio.create_task(self._start(name), name=f"lazy-start-{name}")
             self._starts[name] = start
         return start
 
     async def _start(self, name: str) -> None:
+        rollback = self._rollbacks.get(name)
+        if rollback is not None:
+            await rollback
         attempts = 1 + self._policy.max_retries
         for attempt in range(1, attempts + 1):
             try:
@@ -120,7 +235,6 @@ class LazyStartFrontDoor:
                 if attempt == attempts:
                     raise
                 continue
-            self._serving.add(name)
             logger.info(
                 "Lazy start: contract '%s' started on its first request (attempt %d) "
                 "(OMN-21592)",
@@ -161,6 +275,10 @@ class LazyStartFrontDoor:
         if self._held:
             await asyncio.gather(*tuple(self._held), return_exceptions=True)
         return tuple(self.held_results)
+
+
+def _failed(task: asyncio.Task[None]) -> bool:
+    return task.done() and (task.cancelled() or task.exception() is not None)
 
 
 def _result(
