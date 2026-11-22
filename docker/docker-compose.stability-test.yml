@@ -385,6 +385,10 @@ services:
   forward-migration:
     container_name: omnibase-infra-stability-test-forward-migration
     restart: "no"
+    environment:
+      # OMN-26121: this lane mounts the gateway on omninode_cloud, so the runner creates
+      # and reads back the tenant identity schema here (scripts/run-forward-migrations.sh).
+      ONEX_MIGRATION_GATEWAY_LANE: stability_test
   migration-gate:
     container_name: omnibase-infra-stability-test-migration-gate
     restart: "no"
