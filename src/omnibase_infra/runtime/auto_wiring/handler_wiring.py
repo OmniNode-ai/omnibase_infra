@@ -89,6 +89,7 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.contracts.contract_completion_bound import read_completion_bound
 from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.errors import (
     ProjectionNotMaterializedError,
@@ -3111,41 +3112,6 @@ def _read_state_io(contract_path: Path) -> dict[str, object]:
         return {}
     state_io = raw.get("state_io") or {}
     return state_io if isinstance(state_io, dict) else {}
-
-
-def _read_completion_bound(contract_path: Path) -> ModelCompletionBound | None:
-    """Read and validate the top-level ``completion_bound`` block (OMN-18296).
-
-    Returns ``None`` when the block is absent — a ``state_io`` contract that
-    declares no bound keeps the pre-OMN-18296 behaviour (the environment-variable
-    give-up TTL, row-only), so this is additive for every contract that has not
-    opted in. A block that IS present but malformed raises: a bound the runtime
-    cannot read is worse than no bound at all, because a reader would believe one
-    was being enforced.
-
-    Shape and rationale live in
-    :mod:`omnibase_infra.runtime.state_io.model_completion_bound`.
-    """
-    try:
-        raw = read_contract_yaml(contract_path)
-    except FileNotFoundError:
-        return None
-    if not isinstance(raw, dict):
-        return None
-    block = raw.get("completion_bound")
-    if block is None:
-        return None
-    if not isinstance(block, dict):
-        raise ModelOnexError(
-            f"handler_wiring: completion_bound in {contract_path} must be a "
-            f"mapping — got {type(block).__name__}."
-        )
-    try:
-        return ModelCompletionBound.model_validate(block)
-    except ValidationError as exc:
-        raise ModelOnexError(
-            f"handler_wiring: completion_bound in {contract_path} is invalid: {exc}"
-        ) from exc
 
 
 def _contract_declares_state_io(contract: ModelDiscoveredContract) -> bool:
@@ -8907,12 +8873,16 @@ def _contracts_root_for_runtime_dependencies() -> Path:
     return Path(__file__).resolve().parents[2] / "nodes"
 
 
-def _build_topic_migration_executor_dependencies() -> dict[str, object]:
+def _build_topic_migration_executor_dependencies(
+    provisioner: object | None = None,
+) -> dict[str, object]:
     """Build concrete collaborators for HandlerTopicMigrationExecutor.
 
     The handler declares these as required constructor services. Materializing
     them here keeps generic resolver Step 2 deterministic while preserving the
-    handler's strict constructor contract.
+    handler's strict constructor contract. A ``provisioner`` the caller already
+    holds (the kernel's, built once per boot, OMN-26359) is reused instead of
+    building a second one, which scanned every installed contract again.
     """
     from aiokafka import AIOKafkaConsumer
     from aiokafka.admin import AIOKafkaAdminClient
@@ -8932,7 +8902,8 @@ def _build_topic_migration_executor_dependencies() -> dict[str, object]:
     lag_admin = AdapterKafkaAdminLag(admin, consumer)
     observer = ServiceConsumerLagObserver(lag_admin)
     return {
-        "provisioner": TopicProvisioner(
+        "provisioner": provisioner
+        or TopicProvisioner(
             bootstrap_servers=bootstrap_servers,
             contracts_root=_contracts_root_for_runtime_dependencies(),
         ),
@@ -8963,7 +8934,7 @@ def _materialize_known_handler_dependencies(
     event_bus: object | None,
     container: object | None,
     ownership_query: object | None,
-    terminal_topics: frozenset[str] = frozenset(),
+    terminal_topics_for: Callable[[], frozenset[str]] = frozenset,
 ) -> dict[str, dict[str, object]] | None:
     """Materialize infra-known constructor deps for core resolver Step 2.
 
@@ -9007,7 +8978,7 @@ def _materialize_known_handler_dependencies(
         available["event_publisher"] = _make_sync_event_publisher(
             event_bus=event_bus,
             handler_name=handler_name,
-            terminal_topics=terminal_topics,
+            terminal_topics=terminal_topics_for(),
         )
     if requires_event_consumer and event_bus is not None:
         available["event_consumer"] = _make_sync_event_consumer(
@@ -9017,7 +8988,13 @@ def _materialize_known_handler_dependencies(
     # An empty set is a subset too. Optional runtime ports must not construct
     # migration services: the provisioner scans the installed contract tree.
     if required_params and required_params <= TOPIC_MIGRATION_EXECUTOR_DEPS:
-        available.update(_build_topic_migration_executor_dependencies())
+        available.update(
+            _build_topic_migration_executor_dependencies(
+                (materialized_explicit_dependencies or {})
+                .get(handler_name, {})
+                .get("provisioner")
+            )
+        )
     if not (
         requires_event_publisher
         or requires_event_consumer
@@ -10007,7 +9984,9 @@ async def wire_from_manifest(
     async for contract in yield_each(manifest.contracts):
         try:
             await warm_topic_migration_scan(
-                contract, _contracts_root_for_runtime_dependencies()
+                contract,
+                _contracts_root_for_runtime_dependencies(),
+                materialized_explicit_dependencies,
             )
             prepared = _prepare_contract_wiring(
                 contract=contract,
@@ -11114,6 +11093,11 @@ def _prepare_contract_wiring(
     _check_fanout_publish_coverage(contract)
 
     prepared_wirings: list[PreparedWiring] = []
+    # OMN-26359: declared once per contract, and only read by an entry whose
+    # constructor takes an event_publisher.
+    terminal_topics_for = cache(
+        partial(load_terminal_event_topics, contract.contract_path)
+    )
     for entry in contract.handler_routing.handlers:
         try:
             prepared = _prepare_handler_wiring(
@@ -11129,6 +11113,7 @@ def _prepare_contract_wiring(
                 topology=topology,
                 catalog_binding_policy=catalog_binding_policy,
                 secret_resolver=secret_resolver,
+                terminal_topics_for=terminal_topics_for,
             )
             prepared_wirings.append(prepared)
         except TypeError:
@@ -11525,6 +11510,11 @@ async def _subscribe_contract_topics(
     declared_dlq_topics = contract.event_bus.dlq_topics or tuple(
         _read_dlq_topics(contract.contract_path)
     )
+    # OMN-26359: both are per-contract, so read them once, not once per topic.
+    propagate_publish_failures = _contract_declares_state_io(contract)
+    failure_terminal_topics = _declared_failure_terminal_topics(
+        contract, success_topic=output_topic or ""
+    )
     for topic in contract.event_bus.subscribe_topics:
         # OMN-14758 (S6) / OMN-14771 (S8 §D1=4b): the ONE core RuntimeDispatch owns this
         # topic's OWNER route. Skip the legacy push callback for the OWNER only, so
@@ -11583,7 +11573,7 @@ async def _subscribe_contract_topics(
                 # publish-from-row failure + conflict-retry exhaustion PROPAGATE
                 # (redeliver) instead of being log-and-discarded. Non-state_io
                 # contracts keep the historical swallow behavior unchanged.
-                propagate_publish_failures=_contract_declares_state_io(contract),
+                propagate_publish_failures=propagate_publish_failures,
                 allowed_dispatcher_ids=dispatcher_scope,
                 # OMN-16777: this is the only layer that holds BOTH the group id
                 # and the topic while a message is in flight, so it is where
@@ -11596,9 +11586,7 @@ async def _subscribe_contract_topics(
                 # so the applier guard can never fire for it -- the boundary is
                 # the only surface that can answer, and this is the address it
                 # answers at.
-                failure_terminal_topics=_declared_failure_terminal_topics(
-                    contract, success_topic=output_topic or ""
-                ),
+                failure_terminal_topics=failure_terminal_topics,
                 # OMN-17432: the address of last resort when the contract
                 # declares no separate failure terminal — its own declared
                 # terminal/output topic, which is where the caller is already
@@ -11917,6 +11905,7 @@ def _prepare_handler_wiring(
     topology: ModelDeploymentTopology | None = None,
     catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
     secret_resolver: SecretResolver | None = None,
+    terminal_topics_for: Callable[[], frozenset[str]] | None = None,
 ) -> PreparedWiring:
     """Prepare one handler entry — delegates construction to the resolver.
 
@@ -12007,7 +11996,8 @@ def _prepare_handler_wiring(
         # read through the same function route discovery uses, so the wiring's
         # notion of "this publish is a terminal" cannot drift from the set the
         # Pattern B broker subscribes to.
-        terminal_topics=load_terminal_event_topics(contract.contract_path),
+        terminal_topics_for=terminal_topics_for
+        or partial(load_terminal_event_topics, contract.contract_path),
     )
 
     def _quarantine_prepared(
@@ -12311,7 +12301,7 @@ def _prepare_handler_wiring(
             state_io,
             event_bus=event_bus,
             output_topic_map=_outbox_topic_map,
-            completion_bound=_read_completion_bound(contract.contract_path),
+            completion_bound=read_completion_bound(contract.contract_path),
             pre_dispatch_guard=_delegation_fault_pre_dispatch_guard(
                 contract=contract,
                 entry=entry,

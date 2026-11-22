@@ -10,18 +10,18 @@ import json
 import logging
 import os
 import stat
-import typing
 from collections.abc import Awaitable, Callable, Sequence
 from copy import deepcopy
 from pathlib import Path
 from types import UnionType
-from typing import cast, get_args, get_origin
+from typing import Annotated, Union, cast, get_args, get_origin
 from uuid import UUID
 
 import yaml
 from pydantic import AliasChoices, AliasPath, BaseModel, ConfigDict, ValidationError
 
 from omnibase_core.types import JsonType
+from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.runtime.contract_terminal_events import (
     extract_terminal_event_topics,
     terminal_event_topics_from_declaration,
@@ -109,7 +109,7 @@ def discover_runtime_local_ingress_routes(
 
         for contract_path in sorted(nodes_dir.glob("*/contract.yaml")):
             try:
-                raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+                raw = read_contract_yaml(contract_path)
             except yaml.YAMLError as exc:
                 logger.warning(
                     "Skipping malformed local ingress contract",
@@ -671,10 +671,10 @@ def _annotation_contains_uuid(annotation: object) -> bool:
     if annotation is UUID:
         return True
     origin = get_origin(annotation)
-    if origin is typing.Annotated:
+    if origin is Annotated:
         annotation_args = get_args(annotation)
         return bool(annotation_args) and _annotation_contains_uuid(annotation_args[0])
-    if origin in (typing.Union, UnionType):
+    if origin in (Union, UnionType):
         return any(_annotation_contains_uuid(arg) for arg in get_args(annotation))
     return False
 

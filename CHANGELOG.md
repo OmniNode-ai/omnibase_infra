@@ -1,3 +1,28 @@
+## v0.38.81 (2026-11-22)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.81 by the scheduled release train.
+- 16 release-relevant commit(s) merged since v0.38.80.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.80
+- : the first request for a workflow wakes its whole contract closure (#6155)
+- : the deploy agent writes one ledger row per dev merge sha stating its build decision (#6154)
+- : after a failed or recovered dev roll, the deploy agent rebuilds the newer origin/dev head (#6150)
+- fix: run the migration provisioner scan and local ingress route discovery off the event loop (#6138)
+- : dev wires only the contracts it runs (declared exclusion of 205) (#6136)
+- : contract hot loading A4: wire a contract on its first request, keep only a declared boot set eager (#6143)
+- : a runtime tick no longer counts as a consumed event in projection apply accounting (dev roll divergence) (#6147)
+- fix: remove the boot step 0, topic provisioner and validator scan holds on the startup event loop (#6134)
+- : the concurrent consume drain always yields, so a projection withhold never stalls the event loop (#6142)
+- fix: admit idle restore of a down dev lane for a runtime merge (#6140)
+- feat: runtime image carries a prebuilt node catalog and auto-wiring manifest, loaded at boot after a stamp check (#6141)
+- fix: hand the event loop back between startup wiring items so /health is served (#6133)
+- fix: a release cut never writes CHANGELOG.md to a repo that removed it (#6132)
+- feat: grant the runtime account the floor_integration_pass marker (#6129)
+- fix: answer /health off a stalled runtime event loop with a typed degraded reason (#6131)
+- fix: apply registered dev installs into the recreated runtime before the roll's compose wait (#6130)
+
 ## v0.38.80 (2026-11-21)
 
 ### Release
