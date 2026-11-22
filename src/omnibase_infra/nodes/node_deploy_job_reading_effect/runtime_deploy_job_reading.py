@@ -62,6 +62,22 @@ request_module, result_module, handler_module = (
     _load(relative) for relative in _CHECKOUT_MODULES
 )
 
+_POST_FAILURE_MODULES = (
+    "enums/enum_post_failure_verdict.py",
+    "enums/enum_job_status.py",
+    "models/model_job_command.py",
+    "models/model_job_lineage.py",
+    "models/model_job_record.py",
+    "models/model_failed_dev_job.py",
+    "models/model_post_failure_inputs.py",
+    "models/model_post_failure_decision.py",
+    "protocols/protocol_command.py",
+    "protocols/protocol_job_store.py",
+    "protocols/protocol_lane_flags.py",
+    "protocols/protocol_post_failure_host.py",
+    "nodes/node_deploy_job_reading_effect/runtime_post_failure_converge.py",
+)
+
 
 def post_failure_converge(
     host: ProtocolPostFailureHost, converge_command: Callable[[], ProtocolCommand]
@@ -70,9 +86,7 @@ def post_failure_converge(
 
     It reads the same job records this node turns into readings, and shares nothing else.
     """
-    rule = _load(
-        "nodes/node_deploy_job_reading_effect/runtime_post_failure_converge.py"
-    )
+    *_, rule = (_load(relative) for relative in _POST_FAILURE_MODULES)
     converge: PostFailureConverge = rule.PostFailureConverge(host, converge_command)
     return converge
 

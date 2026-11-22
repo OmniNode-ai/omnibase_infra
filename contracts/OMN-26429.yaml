@@ -71,7 +71,7 @@ dod_evidence:
       The post-failure converge rule parses the recorded failed dev job record (tests/fixtures/dev_job_a7474c42/job_record.json) through its status enum and recovers the built infra commit. Fails if the rule's job status model stops reading a real agent job record.
     source: manual
     execution_scope: local_done_gate
-    binds_ac: [AC3]
+    binds_ac: []
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/test_post_failure_converge_job_record_omn26429.py -q

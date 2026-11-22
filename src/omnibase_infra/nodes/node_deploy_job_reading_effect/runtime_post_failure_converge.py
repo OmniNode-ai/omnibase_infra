@@ -77,7 +77,20 @@ from pathlib import Path
 from typing import Final, Protocol
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import ValidationError
+
+from omnibase_infra.enums.enum_job_status import EnumJobStatus
+from omnibase_infra.enums.enum_post_failure_verdict import EnumPostFailureVerdict
+from omnibase_infra.models.model_failed_dev_job import ModelFailedDevJob
+from omnibase_infra.models.model_job_command import ModelJobCommand
+from omnibase_infra.models.model_job_lineage import ModelJobLineage
+from omnibase_infra.models.model_job_record import ModelJobRecord
+from omnibase_infra.models.model_post_failure_decision import ModelPostFailureDecision
+from omnibase_infra.models.model_post_failure_inputs import ModelPostFailureInputs
+from omnibase_infra.protocols.protocol_command import ProtocolCommand
+from omnibase_infra.protocols.protocol_job_store import ProtocolJobStore
+from omnibase_infra.protocols.protocol_lane_flags import ProtocolLaneFlags
+from omnibase_infra.protocols.protocol_post_failure_host import ProtocolPostFailureHost
 
 logger = logging.getLogger(__name__)
 
@@ -94,98 +107,6 @@ CHECK_INTERVAL_SECONDS: Final = 60
 #: The commit the boot guard writes into a failure (``commit=<40 hex>: <reason>``).
 _COMMIT_TOKEN: Final = re.compile(r"\bcommit=([0-9a-f]{40})\b")
 _SHORT_REF_MIN: Final = 12
-
-
-class EnumPostFailureVerdict(StrEnum):
-    CONVERGE = "converge"
-    FROZEN = "frozen"
-    JOB_ACTIVE = "job_active"
-    NO_FAILED_JOB = "no_failed_job"
-    SOURCE_UNKNOWN = "source_unknown"
-    HEAD_UNREADABLE = "head_unreadable"
-    UP_TO_DATE = "up_to_date"
-    ALREADY_ATTEMPTED = "already_attempted"
-    WINDOWS_UNREADABLE = "windows_unreadable"
-    PROBE_WINDOW = "probe_window"
-
-
-class ModelJobCommand(BaseModel):
-    """The two fields of a job's command this rule reads."""
-
-    model_config = ConfigDict(frozen=True, extra="ignore")
-
-    runtime_lane: str = ""
-    requested_by: str = ""
-
-
-class ModelJobLineage(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="ignore")
-
-    build_ref: str = ""
-
-
-class EnumJobStatus(StrEnum):
-    """The statuses an agent job record (``JobState``) can carry."""
-
-    ACCEPTED = "accepted"
-    IN_PROGRESS = "in_progress"
-    SUCCESS = "success"
-    FAILED = "failed"
-    SUPERSEDED = "superseded"
-
-
-class ModelJobRecord(BaseModel):
-    """The fields of an agent job record (``JobState``) this rule reads."""
-
-    model_config = ConfigDict(frozen=True, extra="ignore")
-
-    correlation_id: UUID
-    command: ModelJobCommand
-    status: EnumJobStatus
-    completed_at: datetime | None = None
-    errors: tuple[str, ...] = ()
-    lineage: ModelJobLineage | None = None
-
-
-class ModelFailedDevJob(BaseModel):
-    """The newest terminal dev job when it failed, and the source it built."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    correlation_id: UUID
-    requested_by: str
-    #: Repository -> the commit the failed job built, as its record names it.
-    sources: dict[str, str]
-
-
-class ModelPostFailureInputs(BaseModel):
-    """Everything one decision reads, gathered before it is made."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    now: datetime
-    job_active: bool
-    failed_job: ModelFailedDevJob | None
-    #: Repository -> its dev head now, ``None`` when it could not be read.
-    heads: dict[str, str | None]
-    #: The guarded probe run that excludes ``now``, or ``None``.
-    probe_blocker: str | None
-    #: Why the probe schedule could not be read, or ``None``.
-    windows_error: str | None
-    #: ``<repository>@<head>`` for every head a rebuild was already started for.
-    attempted: frozenset[str]
-    frozen_reason: str | None = None
-
-
-class ModelPostFailureDecision(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    verdict: EnumPostFailureVerdict
-    detail: str
-    #: The heads that differ from the failed job's source, on a CONVERGE.
-    heads: dict[str, str] = {}
-    #: What a CONVERGE marks attempted: ``<repository>@<head>`` per head in ``heads``.
-    attempt_keys: tuple[str, ...] = ()
 
 
 def same_revision(head: str, source: str) -> bool:
@@ -305,48 +226,6 @@ def decide(inputs: ModelPostFailureInputs) -> ModelPostFailureDecision:
         heads=behind,
         attempt_keys=keys,
     )
-
-
-class ProtocolCommand(Protocol):
-    """The rebuild command: what the rule reads and what the agent accepts."""
-
-    @property
-    def correlation_id(self) -> UUID: ...
-
-    @property
-    def requested_by(self) -> str: ...
-
-    def model_dump(self, *, mode: str) -> dict[str, object]: ...
-
-    def model_copy(self, *, update: dict[str, object]) -> ProtocolCommand: ...
-
-
-class ProtocolJobStore(Protocol):
-    state_dir: Path
-
-    def has_active_job(self) -> bool: ...
-
-    def accept(self, correlation_id: UUID, command: dict[str, object]) -> object: ...
-
-
-class ProtocolLaneFlags(Protocol):
-    def frozen_reason(self, now: datetime) -> str | None: ...
-
-
-class ProtocolPostFailureHost(Protocol):
-    """The deploy agent, as far as the rule reads it; looked up at call time."""
-
-    job_store: ProtocolJobStore
-    _router: object | None
-    _allowed_lanes: Collection[str]
-    _idle_converge_now: Callable[[], datetime]
-    _idle_read_head_ref: Callable[[str], str | None]
-    _idle_probe_blocker: Callable[[datetime], str | None]
-    _lane_flags: ProtocolLaneFlags
-
-    def _idle_converge_gate_open(self, who: str) -> bool: ...
-
-    def _execute_command(self, cmd: ProtocolCommand) -> None: ...
 
 
 class PostFailureConverge:
