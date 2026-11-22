@@ -1,0 +1,6 @@
+# RECONSTRUCTED fixture (OMN-26463): the same boot after the OMN-21753 fix. No failing line.
+2026-11-22 16:59:21,004 INFO omnibase_infra.runtime.service_kernel Boot manifest: 54 contract(s) wired at boot
+2026-11-22 16:59:29,118 INFO omnibase_infra.handlers.lazy_start_boot_split Lazy start: 54 contract(s) wired at boot, 412 dormant until their first request; boot set names not owned here=[]
+2026-11-22 16:59:29,402 INFO omnibase_infra.handlers.lazy_start_front_door Waking node_schedule_run_reducer on its first request
+2026-11-22 16:59:29,620 INFO omnibase_infra.handlers.lazy_start_runtime_transaction Started node_schedule_run_reducer
+2026-11-22 16:59:30,010 INFO omnibase_infra.runtime.heartbeat First heartbeat ok

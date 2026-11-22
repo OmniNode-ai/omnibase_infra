@@ -1,0 +1,98 @@
+# OMN-26463 runtime canary lane: one runtime container on the lab host that boots a dev
+# candidate alone, so a start failure is found before the dev roll builds it.
+#
+# WHAT THIS IS. A deploy-agent instance overlay in the shape of the second dev lane's overlay
+# (the instance-lane support of OMN-19543), layered on the dev lane's infra plus
+# dev-lane pair and named by the `canary-h051` row of config/deploy_lane_routing.yaml.
+# The canary run (nodes/node_runtime_canary_effect) waits for /ready, wakes every
+# dormant contract once, holds the heartbeat and writes a PASS or FAIL receipt the dev
+# roll reads (require_canary_receipt).
+#
+# ISOLATION. Its own compose project, container names, network, volumes, published
+# ports, Postgres, Redpanda (so its own topics and consumer groups: it never reads a
+# dev topic or joins a dev group) and Valkey. Every port binds loopback. It carries no dev, customer or prod credential: the env its agent
+# renders is the canary's own (see test_canary_isolation). Keycloak, Infisical, onex-api
+# and the cloud-migration one-shots are off, as on the second dev lane; no operator login is mounted.
+#
+# PORT BLOCK 62000-62999 (read free by `ss -ltn` 2026-11-22; above the ephemeral
+# range 32768-60999 that the host's kernel reports): runtime main 62085, effects 62086,
+# projection API 62002, Postgres 62436, Valkey 62379. Redpanda publishes no host port: the
+# canary's runtime and its probe reach it inside the compose network.
+name: omnibase-infra-canary
+# OMN-20932: a lane's Bifrost overlay is private deployment config; this
+# repository ships none (only lane-overlays/local.bifrost.example.yaml, the
+# neutral template). Every runtime service mounts the overlay named for its
+# compose project from ONEX_LANE_OVERLAY_DIR at one lane-neutral path, and
+# compose refuses when the directory is unset or the file is absent. The deploy
+# paths resolve the directory (scripts/runtime_build/compose_files.sh and the
+# deploy agent's _compose_env).
+x-lane-overlay-mount: &lane-overlay-mount
+  type: bind
+  source: "${ONEX_LANE_OVERLAY_DIR:?ONEX_LANE_OVERLAY_DIR must name the directory holding your COMPOSE_PROJECT_NAME.bifrost.yaml (config/lab/lane-overlays under ONEX_WORKSPACE_CONFIG_ROOT); this repository ships no lab lane overlay}/${COMPOSE_PROJECT_NAME}.bifrost.yaml"
+  target: /app/config/delegation/lane.bifrost.yaml
+  read_only: true
+  bind:
+    create_host_path: false
+services:
+  postgres:
+    container_name: omnibase-infra-canary-postgres
+    ports: !override
+      - "127.0.0.1:62436:5432"
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-canary-redpanda
+  valkey:
+    container_name: omnibase-infra-canary-valkey
+    ports: !override
+      - "127.0.0.1:62379:6379"
+  # Never started on this lane.
+  keycloak:
+    profiles: !override ["canary-disabled"]
+  infisical:
+    profiles: !override ["canary-disabled"]
+  # OMN-24714: the dev-lane overlay makes the architecture graph's store a
+  # dependency of the dev lane; this lane starts no graph, so it is scaled to 0.
+  omnibase-infra-memgraph:
+    scale: 0
+  forward-migration:
+    container_name: omnibase-infra-canary-forward-migration
+    labels:
+      com.omninode.lane: canary
+  migration-gate:
+    container_name: omnibase-infra-canary-migration-gate
+  intelligence-migration:
+    container_name: omnibase-infra-canary-intelligence-migration
+  phoenix:
+    container_name: omnibase-infra-canary-phoenix
+    # OMN-19417: the census declares this container running and the lane_sync
+    # check fails the lab-pass receipt while it is absent. The agent's deps leg
+    # (`--profile core up -d`, no service list) is the only leg that starts a
+    # service outside its runtime list, so Phoenix joins `core` on this lane.
+    profiles: !override ["core", "runtime", "full"]
+    ports: !override
+      - "127.0.0.1:62006:6006"
+  omninode-runtime:
+    container_name: omninode-canary-runtime
+    environment:
+      # OMN-21551: docker-compose.dev-lane.yml names the dev lane's own tenant
+      # (the house tenant) as this runtime's ONEX_TENANT_ID. This lane is not
+      # that lane, so it keeps none: blank is unset to omnimarket.
+      ONEX_TENANT_ID: ""
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
+      ONEX_RUNTIME_LANE: "compose-canary"
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/lane.bifrost.yaml
+      # OMN-20590: this lane's main runtime publishes the runtime tick
+      # (onex.intent.platform.runtime-tick.v1). Opt-in per lane: the first
+      # ticks activate every subscribing contract, including the dead-letter
+      # and consumer-flow prunes (dry_run false). Only the main role acts on
+      # it, so it is set here and nowhere else in this file.
+      ONEX_RUNTIME_SCHEDULER_ENABLED: "true"
+    ports: !override
+      - "127.0.0.1:62085:8085"
+    volumes: !override
+      - runtime_logs:/app/logs
+      - runtime_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - *lane-overlay-mount
+      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
+      - /dev/null:/run/secrets/vertex_access_token:ro
