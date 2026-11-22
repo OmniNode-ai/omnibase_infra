@@ -39,7 +39,7 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/topology/test_omn25103_floor_integration_vendor.py -k runtime_role_may_read -q"
-        cwd: "."
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
   - id: "dod-omn25103-infra-ac2"
     description: "AC2 hosted probe. The two vendored migrations are present; the new test file is absent at the merge base, so the command fails there."
@@ -47,7 +47,7 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/topology/test_omn25103_floor_integration_vendor.py -k 'vendored or match_omnimarket' -q"
-        cwd: "."
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC2"]
   - id: "dod-omn25103-infra-ac3"
     description: "AC3 hosted probe. Removing the floor_integration_rows grant empties the runtime's read; the case fails at the merge base, where no profile grants floor_integration_rows."
@@ -55,7 +55,7 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/topology/test_omn25103_floor_integration_vendor.py -k control -q"
-        cwd: "."
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC3"]
   - id: "dod-omn25103-infra-ac4"
     description: "AC4 hosted probe. Every profile grants the runtime role the floor_integration_pass marker, equal to the vendored 0003."
@@ -63,7 +63,7 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/topology/test_omn25103_floor_integration_pass_vendor.py -k 'upsert_the_floor_integration_pass or marker_migration_grants' -q"
-        cwd: "."
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC4"]
   - id: "dod-omn25103-infra-ac5"
     description: "AC5 hosted probe. The two marker migrations are vendored byte-identical, with ledger rows."
@@ -71,7 +71,7 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/topology/test_omn25103_floor_integration_pass_vendor.py -k 'match_omnimarket or bridge or expiry' -q"
-        cwd: "."
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC5"]
   - id: "dod-omn25103-infra-ac6"
     description: "AC6 hosted probe. The real ACL derivation reports a profile without the marker grant as missing."
@@ -79,5 +79,5 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/topology/test_omn25103_floor_integration_pass_vendor.py -k control -q"
-        cwd: "."
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC6"]
