@@ -98,9 +98,6 @@ if TYPE_CHECKING:
         ModelTopicReadinessConfig,
     )
     from omnibase_infra.protocols import ProtocolEventBusLike
-    from omnibase_infra.protocols.protocol_provisioned_topics_ensurer import (
-        ProtocolProvisionedTopicsEnsurer,
-    )
     from omnibase_infra.protocols.protocol_runtime_log_producer import (
         ProtocolRuntimeLogProducer,
     )
@@ -2285,9 +2282,7 @@ async def bootstrap() -> int:
                     # OMN-7810: auto-create missing topics before failing strict
                     # validation, through the kernel's one TopicProvisioner.
                     validation_result = await auto_create_missing_topics(
-                        cast(
-                            "ProtocolProvisionedTopicsEnsurer | None", topic_provisioner
-                        ),
+                        cast("TopicProvisioner | None", topic_provisioner),
                         validator,
                         validation_result,
                         correlation_id=correlation_id,

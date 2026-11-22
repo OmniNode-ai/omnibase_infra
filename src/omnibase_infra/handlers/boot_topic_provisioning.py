@@ -23,7 +23,7 @@ import logging
 import re
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import yaml
@@ -33,17 +33,17 @@ from omnibase_infra.errors import TopicReplicationPolicyError
 from omnibase_infra.models.event_bus.model_contract_topic_entry import (
     TENANT_SLUG_PATTERN,
 )
-from omnibase_infra.protocols.protocol_provisioned_topics_ensurer import (
-    ProtocolProvisionedTopicsEnsurer,
-)
 from omnibase_infra.protocols.protocol_topic_provisioner import (
     ProtocolTopicProvisioner,
 )
-from omnibase_infra.protocols.protocol_topic_validator import ProtocolTopicValidator
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.model_topic_validation_result import (
         ModelTopicValidationResult,
+    )
+    from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
+    from omnibase_infra.event_bus.service_topic_startup_validator import (
+        TopicStartupValidator,
     )
     from omnibase_infra.runtime.auto_wiring.models import (
         ModelAutoWiringManifest,
@@ -248,8 +248,8 @@ __all__: list[str] = [
 
 
 async def auto_create_missing_topics(
-    provisioner: ProtocolProvisionedTopicsEnsurer | None,
-    validator: ProtocolTopicValidator,
+    provisioner: TopicProvisioner | None,
+    validator: TopicStartupValidator,
     validation_result: ModelTopicValidationResult,
     *,
     correlation_id: UUID | None,
