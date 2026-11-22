@@ -91,6 +91,14 @@
 #     which only the dev/lab project loads — deliberately NOT set in
 #     docker-compose.infra.yml, which every lane overlay merges. See the
 #     LANE-SCOPED FENCE RELEASE block below.
+#   ONEX_MIGRATION_GATEWAY_LANE (default: unset = skip, OMN-26472).
+#     Lane indicator for the tenant_api_keys expiry seam
+#     (/migrations/seams/tenant_api_keys_expiry.sql). Recognised values are `dev`
+#     and `stability` (the stability lane), the two lanes that mount the gateway on
+#     omninode_cloud; unset or unknown skips the seam by name (fail closed). Set
+#     only by the dev and stability compose overlays, never by docker-compose.infra.yml (which
+#     every lane merges) and never by the collaborator lane, whose cloud one-shot
+#     runs after this runner finishes.
 
 set -e
 
@@ -2172,6 +2180,22 @@ else
 fi
 
 echo "[forward-migration] Complete: ${APPLIED} infra applied, ${SKIPPED} infra skipped; ${NODE_APPLIED} node applied, ${NODE_SKIPPED} node skipped."
+
+# OMN-26472: tenant_api_keys.expires_at on the lanes that serve the gateway. Runs
+# before the grant seams below; the seam itself skips by name when omninode_cloud
+# or the table is absent. Fail closed: unset or an unknown indicator never runs it.
+case "${ONEX_MIGRATION_GATEWAY_LANE:-}" in
+  dev|stability)
+    psql -f /migrations/seams/tenant_api_keys_expiry.sql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1
+    ;;
+  "")
+    echo "[forward-migration]   skip  tenant_api_keys expiry (ONEX_MIGRATION_GATEWAY_LANE unset: this lane does not serve the gateway)"
+    ;;
+  *)
+    echo "[forward-migration] WARNING: unknown ONEX_MIGRATION_GATEWAY_LANE='${ONEX_MIGRATION_GATEWAY_LANE}' — skipping the tenant_api_keys expiry seam (fail-closed)." >&2
+    echo "[forward-migration]   skip  tenant_api_keys expiry (ONEX_MIGRATION_GATEWAY_LANE is not a gateway lane value: this lane does not serve the gateway)"
+    ;;
+esac
 
 # ---------------------------------------------------------------------------
 # 3b. Re-assert deployment-owned least-privilege GRANTS (OMN-18060)
