@@ -31,4 +31,5 @@ repo_slice:
   # OMN-25796 adds the runner-image-roll command and completed terminal topics (2 more specs).
   # OMN-26105 adds the runner-pool-retire command and completed terminal topics (2 more specs).
   # OMN-26249 adds the runtime-loop-reading-recorded event topic (1 more spec).
-  max_specs: 226
+  # OMN-21592 adds the node-start-requested command and node-start-answered event topics (2 more specs).
+  max_specs: 228

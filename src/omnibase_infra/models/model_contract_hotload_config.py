@@ -42,6 +42,9 @@ from pydantic import (
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.models.lazy_start.model_lazy_start_policy import (
+    ModelLazyStartPolicy,
+)
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 __all__: list[str] = ["ModelContractHotloadConfig"]
@@ -64,6 +67,10 @@ class ModelContractHotloadConfig(BaseModel):
             permitted. Required (non-empty) when ``enabled`` is true. Names are
             matched case-insensitively after trimming. Anything not named here,
             including an unset environment, is refused.
+        lazy_start: The lane's boot set, start budget and retry budget
+            (OMN-21592). With ``mode: on_demand`` and this block, only the boot
+            set is wired at boot and every other owned contract starts on its
+            first request through the front door. Absent: boot as before.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -81,11 +88,20 @@ class ModelContractHotloadConfig(BaseModel):
         default=(),
         description="Environment names where hot loading is permitted (allowlist)",
     )
+    lazy_start: ModelLazyStartPolicy | None = Field(
+        default=None,
+        description="Boot set and start budget of a lazy-start lane (OMN-21592)",
+    )
 
     @property
     def defers_topics_to_first_request(self) -> bool:
         """True when start-up creates topics only for contracts that load."""
         return self.enabled and self.mode == "on_demand"
+
+    @property
+    def lazy_start_policy(self) -> ModelLazyStartPolicy | None:
+        """The lazy-start block when this row defers to first requests, else None."""
+        return self.lazy_start if self.defers_topics_to_first_request else None
 
     @field_validator("allowed_environments", mode="after")
     @classmethod
