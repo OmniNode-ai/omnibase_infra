@@ -130,9 +130,6 @@ from omnibase_infra.protocols.protocol_consumer_group_lister import (
 from omnibase_infra.protocols.protocol_consumer_group_offset_handover import (
     ProtocolConsumerGroupOffsetHandover,
 )
-from omnibase_infra.protocols.protocol_wrapped_event_bus import (
-    ProtocolWrappedEventBus,
-)
 from omnibase_infra.runtime.auto_wiring.models.model_consume_concurrency import (
     ModelConsumeConcurrency,
 )
@@ -303,14 +300,18 @@ def plan_offset_handover(
 
 
 def unwrap_event_bus(event_bus: object) -> object:
-    """The bus a forwarding wrapper (``ProtocolWrappedEventBus``) stands in front of.
+    """The bus a forwarding wrapper (one with a ``wrapped_event_bus`` property) fronts.
 
     A capability check on the wrapper would read its own type and members, not
     the bus's (OMN-21753). A bus that is not a wrapper is returned as it is.
     """
-    while isinstance(event_bus, ProtocolWrappedEventBus):
-        event_bus = event_bus.wrapped_event_bus
-    return event_bus
+    # Read the member from the type: a ``__getattr__`` pass-through on the
+    # instance must not be mistaken for a wrapper.
+    while True:
+        member = getattr(type(event_bus), "wrapped_event_bus", None)
+        if not isinstance(member, property) or member.fget is None:
+            return event_bus
+        event_bus = member.fget(event_bus)
 
 
 def supports_offset_handover(event_bus: object) -> bool:

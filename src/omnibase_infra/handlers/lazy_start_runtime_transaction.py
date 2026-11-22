@@ -79,7 +79,7 @@ logger = logging.getLogger(__name__)
 class RecordingBus:
     """The runtime bus, recording each subscription handle a subscribe returns.
 
-    It implements ``ProtocolWrappedEventBus`` (OMN-21753): the pre-subscribe
+    It exposes ``wrapped_event_bus`` (OMN-21753): the pre-subscribe
     preflight judges handover and consume-concurrency support on the bus named
     here, because a ``__getattr__`` pass-through is invisible to ``isinstance``.
     """
