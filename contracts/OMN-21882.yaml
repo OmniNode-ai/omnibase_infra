@@ -6,6 +6,13 @@ summary: >-
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn21882-ac1-accepted-20261122t0545z:
+      - label: AC1
+        criterion_hash: ddafb893990623fcc8ed7880d8b6435c49881960d7df2878c53a24df0a735cc4
+        proposed_by: lane=dod-closeout-bind-2026-11-22T0545Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-22T0545Z-c1
 requirements:
   - id: req-omn21882-transcribed-acceptance-criteria
     statement: The acceptance criteria this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy.
@@ -52,3 +59,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn21882-ac1-accepted-20261122t0545z
+    description: 'AC1: the committed TLC output bound to results/model.sha256 shows Model holding every invariant and each mut_* and wit_* configuration reporting its named invariant violated; a spec or cfg change without a fresh TLC result fails the digest test.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/formal/test_host_bringup_model.py -q --no-cov -p no:cacheprovider -k "digest or passing or mutant"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
