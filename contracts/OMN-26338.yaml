@@ -49,12 +49,12 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26338.py -k startup_loop_hold_under_one_second -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26338-ac3-error-fails-startup
-    description: "A scan error in the migration provisioner, a missing contracts root and a duplicate local ingress alias fail wiring and _start_local_ingress with the error they raised before the change."
+    description: "A scan error in the migration provisioner, a missing contracts root and a duplicate local ingress alias fail wiring and _start_local_ingress with the error they raised before the change. The bound command also runs the loop-hold regression, so it fails against the merge base, where the holds are still on the loop, and passes only when the error survives the move off the loop."
     source: manual
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26338.py -k startup_wiring_error_fails_startup -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/runtime/test_startup_loop_hold_omn26338.py -k 'startup_wiring_error_fails_startup or startup_loop_hold_under_one_second' -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26338-ac4-gates-unchanged
     description: "The change edits no compose file, boot guard, healthcheck setting, start period or wait setting. handler_wiring.py shrinks, service_kernel.py is untouched, runtime_local_ingress.py is untouched and runtime_host_process.py keeps its line count; the new logic is in handlers/topic_migration_dependencies.py and models/event_bus/model_contract_topic_scan.py."
