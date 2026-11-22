@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.38.81"
+version = "0.38.82"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -697,6 +697,7 @@ node_kafka_replay_compute = "omnibase_infra.nodes.node_kafka_replay_compute"
 node_lab_proof_plan_compute = "omnibase_infra.nodes.node_lab_proof_plan_compute"
 node_lab_proof_run_effect = "omnibase_infra.nodes.node_lab_proof_run_effect"
 node_lane_entry_point_census_effect = "omnibase_infra.nodes.node_lane_entry_point_census_effect"
+node_lazy_start_ingress = "omnibase_infra.nodes.node_lazy_start_ingress"
 node_ledger_open_claims_effect = "omnibase_infra.nodes.node_ledger_open_claims_effect"
 node_ledger_projection_compute = "omnibase_infra.nodes.node_ledger_projection_compute"
 node_ledger_write_effect = "omnibase_infra.nodes.node_ledger_write_effect"

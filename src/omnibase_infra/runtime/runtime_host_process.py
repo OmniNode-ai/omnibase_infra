@@ -2516,8 +2516,8 @@ class RuntimeHostProcess:
             self._local_ingress_config.package_names
         )
         self._local_ingress_active_packages = package_names
-        self._local_ingress_routes = discover_runtime_local_ingress_routes(
-            package_names
+        self._local_ingress_routes = await asyncio.to_thread(
+            discover_runtime_local_ingress_routes, package_names
         )
         self._local_ingress_dispatch_result_applier = (
             await self._resolve_dispatch_result_applier_from_container()

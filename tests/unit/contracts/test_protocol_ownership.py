@@ -72,6 +72,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolWhoamiTransport": "gateway/client/gateway_identity_verifier.py",  # [DI] OMN-17028 one-method seam (a single authenticated GET) for the credential-identity check `onex auth status` runs. Declared beside its only consumer for the same reason as ProtocolCloudLedgerTransport above -- ProtocolGatewayTransport is runtime_checkable and structurally satisfied by every existing in-memory fake, so widening it would silently un-satisfy all of them. Infra-local, not cross-repo: bound to this repo's ~/.onex credential store and httpx adapter
     "ProtocolHookVenvReconcileHost": "protocols/protocol_hook_venv_reconcile_host.py",  # [DI] OMN-19998 host effect boundary (installed/carries/uv) HandlerReconcileWorkspaceVenvs resolves from the container so the reconcile logic runs against an in-memory fake. Infra-local, not spi: bound to the hook venv reconcile handler and its request model
     "ProtocolConsumerGroupLister": "protocols/protocol_consumer_group_lister.py",  # [DI] OMN-19998 one-method seam (list_consumer_groups) the contract-subscribe preflight asks a stateful bus for predecessor group ids so a consumer-group version bump can seed the successor group. Infra-local, not spi: bound to the version handover in this repo and satisfied structurally by the Kafka bus
+    "ProtocolLazyStartBus": "protocols/protocol_lazy_start_bus.py",  # [DI] OMN-21592 the runtime bus surface (subscribe/publish/get_consumer_groups) a lazy start attaches through. Infra-local, not spi: it narrows this repo's event bus for the lazy-start front door
+    "ProtocolLazyStartTransaction": "protocols/protocol_lazy_start_transaction.py",  # [DI] OMN-21592 one runtime's start steps (build/attach/rollback/deliver) for a dormant contract, injected into the lazy-start front door. Infra-local, not spi: bound to this repo's kernel wiring
     "ProtocolIdempotencyStore": "protocols/protocol_idempotency_store.py",
     "ProtocolLedgerSink": "protocols/protocol_ledger_sink.py",
     "ProtocolMessageDispatcher": "protocols/protocol_message_dispatcher.py",
@@ -261,6 +263,13 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # [NODE] OMN-14819 narrow correlation_id envelope view; keeps the def-B replay
     # handler core free of ModelEventEnvelope (canonical handler-shape C-core).
     "ProtocolReplayEnvelope": "nodes/node_kafka_replay_compute/protocols/protocol_replay_envelope.py",
+    # [RUNTIME] OMN-26429 narrow views of the deploy agent's command, job store and
+    # lane flags that the post-failure converge rule reads; the rule imports nothing
+    # from deploy_agent, so the agent hands itself in through these.
+    "ProtocolCommand": "protocols/protocol_command.py",
+    "ProtocolJobStore": "protocols/protocol_job_store.py",
+    "ProtocolLaneFlags": "protocols/protocol_lane_flags.py",
+    "ProtocolPostFailureHost": "protocols/protocol_post_failure_host.py",
     # [RUNTIME] OMN-12632 narrows the AIOKafkaConsumer.end_offsets surface so
     # AdapterKafkaAdminLag can serve log-end offsets the pinned aiokafka 0.13.0
     # admin omits, without a hard aiokafka import at parse time.
