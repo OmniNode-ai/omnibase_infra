@@ -385,6 +385,11 @@ services:
   forward-migration:
     container_name: omnibase-infra-stability-test-forward-migration
     restart: "no"
+    environment:
+      # OMN-26472: scopes the tenant_api_keys expiry seam to the lanes that
+      # serve the gateway on omninode_cloud. Set here and in the dev overlay
+      # only; never in docker-compose.infra.yml, which every lane merges.
+      ONEX_MIGRATION_GATEWAY_LANE: stability
   migration-gate:
     container_name: omnibase-infra-stability-test-migration-gate
     restart: "no"

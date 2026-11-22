@@ -831,6 +831,10 @@ services:
       # committed in the runner, not supplied here — this names a policy, it
       # does not carry migration ids.
       ONEX_MIGRATION_LANE: dev
+      # OMN-26472: scopes the tenant_api_keys expiry seam to the lanes that
+      # serve the gateway on omninode_cloud. Set here and in the stability
+      # overlay only; never in docker-compose.infra.yml, which every lane merges.
+      ONEX_MIGRATION_GATEWAY_LANE: dev
     labels:
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-15379"
