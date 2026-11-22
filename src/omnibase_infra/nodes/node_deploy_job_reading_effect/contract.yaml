@@ -10,7 +10,7 @@ runtime_profiles: [main]
 contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 description: >-
-  Turns the terminal outcome of one deploy job (dev or stability lane, never prod) into one ledger reading row in the shape of the reading writer's rows, and appends it through the append command the reading writer's overlay already names. A successful job reads WORKING; a failed job reads NOT_WORKING with its failing step. The node declares no topic: the bus append command owns the ledger's topics.
+  Turns the terminal outcome of one deploy job (dev or stability lane, never prod) into one ledger reading row in the shape of the reading writer's rows, and appends it through the append command the reading writer's overlay already names. A successful job reads WORKING; a failed job reads NOT_WORKING with its failing step. It also writes one build-decision row per dev merge sha decision of the deploy agent (queued with the job id, deferred with its reason and earliest start, or refused with its reason), through the same append command, so a lane reads what became of a merge without a GitHub read. The node declares no topic: the bus append command owns the ledger's topics.
 input_model:
   name: ModelDeployJobReadingRequest
   module: omnibase_infra.models.model_deploy_job_reading_request
@@ -24,6 +24,8 @@ handler_routing:
   handlers:
     - operation: read_deploy_job
       handler: {name: HandlerDeployJobReading, module: omnibase_infra.handlers.handler_deploy_job_reading}
+    - operation: record_dev_merge_build_decision
+      handler: {name: HandlerDevMergeBuildDecision, module: omnibase_infra.handlers.handler_dev_merge_build_decision}
 # The reading writer's append route, by the names its overlay gives the two variables.
 settings:
   append_command_env: ONEX_LEDGER_BUS_APPEND_COMMAND
@@ -49,11 +51,20 @@ settings:
   alarm_owner: swarm-item-lane-OMN-24562
   alarm_job_owner_line: read the job's failing step on the deploy agent's host and open or hand the fix to the integrator lane that owns the pin
   alarm_pin_owner_line: the integrator lane that owns the pin lands or re-registers its unmerged fixes before expires_at; the orchestrator lands the open PRs
+  # OMN-26431: the build-decision rows. One STATUS row per dev merge sha decision; its key
+  # (repository, sha, result, reason) is held in the agent's state directory, so a decision
+  # that repeats on every idle tick writes one row.
+  build_decision_src: build-decision
+  build_decision_actor: deploy-agent:build-decision
+  # The bound on the one git diff that reads a sha's changed paths for its class.
+  build_decision_git_diff_timeout_seconds: 30
   # The deploy phases in pipeline order; the first one that failed is the failing step.
   phase_order: [preflight, git, compose_gen, seed, core, runtime, verification]
 capabilities:
   - name: deploy.job_reading
     description: Publish each deploy job's terminal outcome as a ledger reading row, so a failed job reads NOT_WORKING with its failing step where an owner reads it, and write an alarm row with an owner line for a failed job and for a code-ref pin within six hours of its expiry.
+  - name: deploy.dev_merge_build_decision
+    description: Publish the deploy agent's decision about building each dev merge sha as one ledger row (queued with the job id, deferred with its reason and earliest start, refused with its reason, or NON_RUNTIME with no build), once per decision.
 metadata:
   ticket: OMN-24617
   author: OmniNode Team
