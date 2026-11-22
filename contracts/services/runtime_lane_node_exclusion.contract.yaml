@@ -20,6 +20,12 @@
 # dev bus has no traffic to read, and a contract on the gateway, delegation, ledger,
 # deploy, health, tenant or onboarding paths is never listed: unproven idle stays wired.
 #
+# A contract of a package outside dev's ONEX_ACTIVE_RUNTIME_PACKAGES (docker/runtime-policy.env,
+# omnibase_infra and omnimarket) is never listed: discovery on dev never returns it, so an entry for
+# it reads as a declared exclusion that no discovered contract is, a discovery error that makes the
+# runtime DEGRADED and stops the dev roll (compliance_orchestrator, an omnibase_core node, did
+# exactly that in deploy job ae286985; OMN-26460). It is already unattached on dev.
+#
 # required_contracts is what dev needs (gateway, delegation, ledger, deploy, health).
 # tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py fails
 # when one of them is also excluded, so the trim breaks a test and not dev.
@@ -33,7 +39,6 @@ profiles:
       - capture_silence_watch_effect
       - close_out
       - compaction_loss_compute
-      - compliance_orchestrator
       - data_verification
       - handoff_effect
       - host_reconcile_compute
