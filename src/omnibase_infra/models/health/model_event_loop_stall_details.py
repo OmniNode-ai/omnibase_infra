@@ -27,6 +27,14 @@ class ModelEventLoopStallDetails(BaseModel):
     degraded_reason: EnumHealthDegradedReason
     event_loop_stalled_seconds: float = Field(ge=0.0)
     wait_budget_seconds: float = Field(gt=0.0)
+    loop_thread_stack: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Innermost-first frames of the event loop thread at the moment the "
+            "stalled-loop answer was sent (OMN-26430); the call holding the loop "
+            "is the first entry."
+        ),
+    )
     runtime_health: None = None
 
 

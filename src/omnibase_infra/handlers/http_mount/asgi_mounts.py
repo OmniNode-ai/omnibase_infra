@@ -28,6 +28,7 @@ from collections.abc import (
     Iterable,
     MutableMapping,
 )
+from pathlib import Path
 from typing import Any, cast
 
 from aiohttp import hdrs, web
@@ -136,6 +137,16 @@ class LifespanDriver:
         self._task = None
 
 
+def _names_http_mount(contract_path: Path) -> bool:
+    """Whether the contract text names ``http_mount`` (OMN-26430).
+
+    The kernel's manifest attach runs on the event loop thread, and parsing every
+    discovered contract there held the loop for 10.3 s on a 0.5 CPU boot. A
+    contract whose text never names the key cannot declare the block.
+    """
+    return "http_mount" in contract_path.read_text(encoding="utf-8")
+
+
 class AsgiMounts:
     """The set of ASGI applications a runtime serves for its contracts."""
 
@@ -186,6 +197,7 @@ class AsgiMounts:
                 )
             )
             for c in contracts
+            if _names_http_mount(c.contract_path)
         )
         return tuple(block for block in blocks if block is not None)
 
