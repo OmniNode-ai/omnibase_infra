@@ -11,6 +11,12 @@ requirements:
     acceptance:
       - id: AC3
         statement: "AC3 (this repository's launcher-move part): the CI, hook, compose and probe callers run python -m omnibase_core.cli.cli_commands -- falsifier: the bound tests fail at the merge base, where the workflows, compose files and probes still name onex"
+  - id: req-omn25070-infra-build-loop-script
+    statement: scripts/fire-build-loop.sh runs the core CLI as a module, not the onex launcher.
+    acceptance:
+      - id: AC3
+        statement: >-
+          AC3 (the launcher move), the part this script carries: omnibase-core stops declaring onex, so scripts/fire-build-loop.sh runs uv run python -m omnibase_core.cli.cli_commands run build_loop_workflow.yaml with the same arguments and runs no onex launcher -- falsifier: uv run pytest tests/ci/test_fire_build_loop_runs_core_module_omn25070.py, which fails on dev, where the script runs uv run onex run.
 evidence_requirements:
   - kind: tests
     description: The tests that pin each caller's command text, and the compose render probe.
@@ -34,4 +40,12 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: docker compose -f docker/docker-compose.dev-lane.yml config --no-interpolate | grep -q "omnibase_core.cli.cli_commands ledger query" && docker compose -f docker/docker-compose.dev-tenant-fold.yml config --no-interpolate | grep -q "omnibase_core.cli.cli_commands ledger query"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25070-infra-build-loop-script
+    description: scripts/fire-build-loop.sh runs the build loop through the core module and runs no onex launcher. Fails on dev, where it runs uv run onex run build_loop_workflow.yaml.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_fire_build_loop_runs_core_module_omn25070.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
