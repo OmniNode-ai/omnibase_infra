@@ -223,8 +223,9 @@ def dod_verify_argv(
 
     A venv without omnibase-core fails the import at exec time with a non-zero
     exit, which the caller already converts into a named per-ticket error; the
-    sweep job additionally asserts the module imports in the dispatch venv
-    before any ticket is scanned, so the loud failure comes first.
+    sweep job's "Compose the dispatch venv" step additionally imports the
+    module in the dispatch venv and fails before any ticket is scanned, so the
+    loud failure comes first.
 
     OMN-25667. ``onex skill`` writes its input payload under ``--state-root``,
     whose default is the cwd-relative ``.onex_state``. The runtime's cwd is
