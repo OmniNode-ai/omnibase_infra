@@ -1,0 +1,56 @@
+{
+  "source": "job record of the dev deploy agent on a lab host (jobs-dev/ca1533c4-...json), read read-only by lane requeue-0240 on 2026-11-22T02:45Z; the record is kept as written (job id, requester, phase results, timestamps, errors) with nothing else added. It holds no host name, token or path. Its errors carry the infra commit the boot guard recovered from; it records no omnimarket ref (the journal line OMNIMARKET_REF=5b683a9cbadf is the only place that names it), and its lineage is null.",
+  "journal_omnimarket_ref": "5b683a9cbadf",
+  "newer_dev_head": {
+    "omnibase_infra": "3f614d4f477576a9575ff716016995eb630151e8"
+  },
+  "job": {
+    "correlation_id": "ca1533c4-0f4f-4909-ba2c-5c1517a911fe",
+    "command": {
+      "correlation_id": "ca1533c4-0f4f-4909-ba2c-5c1517a911fe",
+      "requested_by": "agent/idle-restore",
+      "scope": "runtime",
+      "runtime_lane": "dev",
+      "build_source": "workspace",
+      "services": [],
+      "git_ref": "origin/dev",
+      "image_ref": null,
+      "image_digest": null,
+      "rollback": null,
+      "open_pr": "",
+      "sibling_tags": {},
+      "requested_at": null,
+      "overlay_ref": ""
+    },
+    "accepted_at": "2026-11-22T01:00:45.705552Z",
+    "current_phase": "publish",
+    "phase_results": {
+      "preflight": "success",
+      "git": "success",
+      "compose_gen": "success",
+      "seed": "success",
+      "runtime": "failed",
+      "core": "skipped",
+      "verification": "skipped",
+      "publish": "success"
+    },
+    "status": "failed",
+    "errors": [
+      "commit=0f7f2b730399c250db0222626463381ac99078c8: RuntimeError: Runtime roll stopped at omninode-runtime: RuntimeError: Container omninode-runtime Running Container omninode-runtime Waiting container omninode-runtime is unhealthy; omninode-runtime health=unhealthy streak=5 started=2026-11-22T01:10:32.271510707Z restarts=0 oom=False last_probe=2026-11-21T20:42:41.2224369-05:00 exit=1 FAIL [runtime_degraded] runtime health DEGRADED — projection_apply_divergence: 1/96 projection(s) consumed at least 20 event(s) and upserted ZERO rows over 6 apply window(s) — offsets commit on a refusal and on an early return, so lag reads 0 over a total loss: EvalResultsProjectionWriter",
+      "commit=0f7f2b730399c250db0222626463381ac99078c8: RuntimeError: Runtime roll stopped at omninode-runtime: RuntimeError: Container omninode-runtime Running Container omninode-runtime Waiting container omninode-runtime is unhealthy; omninode-runtime health=unhealthy streak=5 started=2026-11-22T01:10:32.271510707Z restarts=0 oom=False last_probe=2026-11-21T20:42:41.2224369-05:00 exit=1 FAIL [runtime_degraded] runtime health DEGRADED — projection_apply_divergence: 1/96 projection(s) consumed at least 20 event(s) and upserted ZERO rows over 6 apply window(s) — offsets commit on a refusal and on an early return, so lag reads 0 over a total loss: EvalResultsProjectionWriter; forward redeploy revision=57d2fb03a699ed73a77916bf3b8cdebe37f710ca verified=True"
+    ],
+    "not_started": null,
+    "result_publish_pending": false,
+    "completed_at": "2026-11-22T02:08:00.588397Z",
+    "settling_stage": null,
+    "superseded_by_sha": null,
+    "superseded_by_correlation_id": null,
+    "superseded_count": 0,
+    "superseded_correlation_ids": [],
+    "onex_api_delivery": null,
+    "superseded_by_running_build": false,
+    "lineage": null,
+    "verify_recreate": [],
+    "oneshot_reruns": []
+  }
+}
