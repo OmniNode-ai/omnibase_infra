@@ -76,6 +76,7 @@ def test_same_module_fails_without_the_archetype_declaration(tmp_path: Path) -> 
         "clock",
         "import_database",
         "file_read",
+        "direct_bus",
         "direct_adapter",
     }
     assert all(

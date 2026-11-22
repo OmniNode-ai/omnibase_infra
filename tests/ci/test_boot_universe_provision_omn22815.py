@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_infra.handlers.lazy_start_boot_split import boot_universe_warm_enabled
+
 ROOT = Path(__file__).resolve().parents[2]
 DOCKER_DIR = ROOT / "docker"
 DEV_COMPOSE = DOCKER_DIR / "docker-compose.infra.yml"
@@ -39,7 +41,8 @@ def _kernel_universe_warm_enabled(environ: Mapping[str, str]) -> bool:
     """Apply the kernel's own ``_universe_warm_enabled`` expression to ``environ``.
 
     The expression is read from the kernel source: ``os.environ.get(NAME,
-    DEFAULT) != OFF``. A change in its shape fails here, so the test cannot go
+    DEFAULT) != OFF``, or the lazy-start boot split's reader of the same switch
+    (OMN-21592), which is then called with ``environ``. A change in its shape fails here, so the test cannot go
     on judging a read the kernel no longer makes.
     """
     for node in ast.walk(ast.parse(KERNEL.read_text(encoding="utf-8"))):
@@ -51,6 +54,15 @@ def _kernel_universe_warm_enabled(environ: Mapping[str, str]) -> bool:
         ):
             continue
         expr = node.value
+        if (
+            isinstance(expr, ast.Call)
+            and isinstance(expr.func, ast.Attribute)
+            and expr.func.attr == boot_universe_warm_enabled.__name__
+        ):
+            # OMN-21592: the kernel reads the switch through the lazy-start boot
+            # split, which also keeps the warm off on a lane with a lazy_start row
+            # (an environ with no overlay root has none).
+            return boot_universe_warm_enabled(environ)
         assert isinstance(expr, ast.Compare)
         assert isinstance(expr.ops[0], ast.NotEq)
         read = expr.left
