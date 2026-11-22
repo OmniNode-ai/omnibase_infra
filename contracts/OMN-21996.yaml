@@ -6,6 +6,13 @@ summary: >-
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn21996-ac2-accepted-20261122t1745z:
+      - label: AC2
+        criterion_hash: 3875f610793198c9ab889ae34d62cfab27370098e41867b606fd2fc0b02e86bb
+        proposed_by: lane=dod-closeout-bind-2026-11-22T1745Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-22T1745Z-c3
 requirements:
   - id: req-omn21996-timed-bus-ungrouped
     statement: A delegation through the phase-timing bus reads its terminals with no consumer group whenever the underlying bus can, and a bus that cannot keeps the grouped read it always had.
@@ -67,4 +74,13 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/cli/test_delegate_timed_bus_capabilities_omn21996.py -q --no-cov
+    binds_ac: ["AC2"]
+  - id: dod-omn21996-ac2-accepted-20261122t1745z
+    description: >-
+      AC2: over 100 timed delegate runs the inner bus records no consumer group (inner.groups == []) and every read is group-less (ungrouped_topics == [TOPIC]*100). Fails when the timing bus hides subscribe_ungrouped and RuntimeLocal falls back to a grouped subscribe.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_timed_bus_groups_per_call_omn21996.py::test_groups_per_call_a_hundred_timed_runs_leave_no_group -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: ["AC2"]
