@@ -23,7 +23,11 @@ that needed it completes; a wake that fails rolls back every contract it started
 that no live wake still holds and that no completed wake committed, and keeps what
 another workflow already serves. A topic a failed wake created is never deleted.
 A bus message addressed to a dormant consumer wakes it through ``wake_for_topic``
-before the message is published.
+before the message is published. A wake that fails there fails that contract only
+(OMN-21753): the failure is logged with the contract's name and kept in
+``wake_failures``, the wake is rolled back as for any start, and the publish
+goes on, so a publisher that happens to write to a dormant consumer's topic (the
+runtime's own heartbeat among them) is never failed by that consumer's start.
 """
 
 from __future__ import annotations
@@ -32,9 +36,7 @@ import asyncio
 import logging
 from collections.abc import Mapping
 
-from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.enums.enum_lazy_start_outcome import EnumLazyStartOutcome
-from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
 from omnibase_infra.handlers.lazy_start_closure import LazyStartClosureGraph
 from omnibase_infra.models.lazy_start import (
     ModelLazyStartPolicy,
@@ -75,6 +77,8 @@ class LazyStartFrontDoor:
         self._rollbacks: dict[str, asyncio.Task[None]] = {}
         self._held: set[asyncio.Task[ModelLazyStartResult]] = set()
         self.held_results: list[ModelLazyStartResult] = []
+        self.wake_failures: dict[str, str] = {}
+        """Contract name to why its wake for a published message failed (OMN-21753)."""
 
     @property
     def serving(self) -> frozenset[str]:
@@ -121,8 +125,11 @@ class LazyStartFrontDoor:
 
         Returns at once when no dormant consumer is left. Waits on the wake in
         flight when there is one (the message is held, never published into a
-        topic nobody is consuming); raises when the wake fails or does not finish
-        inside the policy's budget, so the producer's own failure path applies.
+        topic whose consumer is still starting). A wake that fails, or does not
+        finish inside the policy's budget, fails that contract only (OMN-21753):
+        it is logged with the contract's name and kept in ``wake_failures``, and
+        this returns so the publish goes on. The start itself has already rolled
+        the contract back; a later message wakes it again.
         """
         for name in self._graph.consumers_of(topic):
             if name in self._dormant and name not in self._serving:
@@ -132,16 +139,15 @@ class LazyStartFrontDoor:
                         timeout=self._policy.budget_seconds,
                     )
                 except Exception as exc:
-                    context = ModelInfraErrorContext.with_correlation(
-                        transport_type=EnumInfraTransportType.RUNTIME,
-                        operation="lazy_start_wake_for_publish",
-                        target_name=name,
+                    detail = sanitize_error_message(exc)
+                    self.wake_failures[name] = detail
+                    logger.exception(
+                        "Lazy start: contract '%s' did not wake for a message to "
+                        "'%s'; the publish goes on and only this contract is "
+                        "affected (OMN-21753)",
+                        name,
+                        topic,
                     )
-                    raise InfraUnavailableError(
-                        f"consumer '{name}' of '{topic}' did not wake: "
-                        f"{sanitize_error_message(exc)}",
-                        context=context,
-                    ) from exc
 
     def _wake_of(self, name: str) -> asyncio.Task[None]:
         """The one in-flight wake of ``name``'s closure; a failed wake is replaced."""
@@ -167,6 +173,7 @@ class LazyStartFrontDoor:
         self._serving.update(held)
         for member in held:
             self._holders[member].discard(target)
+            self.wake_failures.pop(member, None)
         logger.info(
             "Lazy start: closure of '%s' woke %d contract(s) (OMN-26396)",
             target,

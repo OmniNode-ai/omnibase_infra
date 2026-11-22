@@ -77,12 +77,22 @@ logger = logging.getLogger(__name__)
 
 
 class RecordingBus:
-    """The runtime bus, recording each subscription handle a subscribe returns."""
+    """The runtime bus, recording each subscription handle a subscribe returns.
+
+    It implements ``ProtocolWrappedEventBus`` (OMN-21753): the pre-subscribe
+    preflight judges handover and consume-concurrency support on the bus named
+    here, because a ``__getattr__`` pass-through is invisible to ``isinstance``.
+    """
 
     def __init__(self, bus: ProtocolLazyStartBus) -> None:
         self._bus = bus
         self.handles: list[Callable[[], Awaitable[object]]] = []
         self.closed = False
+
+    @property
+    def wrapped_event_bus(self) -> object:
+        """The runtime bus this recorder forwards to."""
+        return self._bus
 
     async def subscribe(self, *args: object, **kwargs: object) -> object:
         handle = await self._bus.subscribe(*args, **kwargs)

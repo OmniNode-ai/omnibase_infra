@@ -130,6 +130,9 @@ from omnibase_infra.protocols.protocol_consumer_group_lister import (
 from omnibase_infra.protocols.protocol_consumer_group_offset_handover import (
     ProtocolConsumerGroupOffsetHandover,
 )
+from omnibase_infra.protocols.protocol_wrapped_event_bus import (
+    ProtocolWrappedEventBus,
+)
 from omnibase_infra.runtime.auto_wiring.models.model_consume_concurrency import (
     ModelConsumeConcurrency,
 )
@@ -297,6 +300,17 @@ def plan_offset_handover(
         else:
             plan[partition] = end_offsets[partition]
     return plan
+
+
+def unwrap_event_bus(event_bus: object) -> object:
+    """The bus a forwarding wrapper (``ProtocolWrappedEventBus``) stands in front of.
+
+    A capability check on the wrapper would read its own type and members, not
+    the bus's (OMN-21753). A bus that is not a wrapper is returned as it is.
+    """
+    while isinstance(event_bus, ProtocolWrappedEventBus):
+        event_bus = event_bus.wrapped_event_bus
+    return event_bus
 
 
 def supports_offset_handover(event_bus: object) -> bool:
@@ -696,6 +710,9 @@ class HandlerContractSubscribePreflight:
             TypeError: The bus cannot honour a declaration.
         """
         self._contract_name = contract_name
+        # OMN-21753: a recording wrapper of the lazy-start path forwards every
+        # call, but its capabilities are the wrapped bus's, so ask that bus.
+        event_bus = unwrap_event_bus(event_bus)
         self._event_bus = event_bus
         self._consumer_group = consumer_group
         self._concurrency = concurrency
