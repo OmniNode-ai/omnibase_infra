@@ -120,4 +120,7 @@ def test_runtime_reader_holds_exactly_the_keys_the_checker_holds() -> None:
         "enabled",
         "mode",
         "allowed_environments",
+        # OMN-21592: the lane's boot set and start budget; the overlays checker
+        # gains the same key before any row carries it.
+        "lazy_start",
     }
