@@ -23,11 +23,10 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn25861-infra-vendor-0004
-    description: Infra half only. Pins 0004's source bytes, its two nullable columns with no default, its exact ledger checksum and forward-only class. It does not prove the writer's backends or the Usage page.
+    description: "Infra half of AC1 only. Pins 0004's bytes, two nullable columns with no default, ledger checksum and forward-only class; does not prove the writer's backends or the Usage page, which omnimarket's contract binds to AC1."
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/migrations/test_omn25861_usage_backends_vendor.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
-    # Deployment identity, not AC1: it proves the vendored bytes, not a served row.
-    binds_ac: []
+    binds_ac: [AC1]
