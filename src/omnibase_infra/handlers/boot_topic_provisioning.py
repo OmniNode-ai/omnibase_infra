@@ -33,9 +33,13 @@ from omnibase_infra.errors import TopicReplicationPolicyError
 from omnibase_infra.models.event_bus.model_contract_topic_entry import (
     TENANT_SLUG_PATTERN,
 )
+from omnibase_infra.protocols.protocol_provisioned_topics_ensurer import (
+    ProtocolProvisionedTopicsEnsurer,
+)
 from omnibase_infra.protocols.protocol_topic_provisioner import (
     ProtocolTopicProvisioner,
 )
+from omnibase_infra.protocols.protocol_topic_validator import ProtocolTopicValidator
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.model_topic_validation_result import (
@@ -241,22 +245,6 @@ __all__: list[str] = [
     "ensure_topics_exist",
     "provision_unattached_publish_topics",
 ]
-
-
-class ProtocolProvisionedTopicsEnsurer(Protocol):
-    """The kernel's one ``TopicProvisioner``, as the auto-create pass uses it."""
-
-    async def ensure_provisioned_topics_exist(
-        self, correlation_id: UUID | None = None
-    ) -> Mapping[str, object]: ...
-
-
-class ProtocolTopicValidator(Protocol):
-    """The kernel's ``TopicStartupValidator``, as the auto-create pass uses it."""
-
-    async def validate(
-        self, correlation_id: UUID | None = None, *, log_missing: bool = True
-    ) -> ModelTopicValidationResult: ...
 
 
 async def auto_create_missing_topics(

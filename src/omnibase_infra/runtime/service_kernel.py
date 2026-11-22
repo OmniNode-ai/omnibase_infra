@@ -97,10 +97,10 @@ if TYPE_CHECKING:
     from omnibase_infra.event_bus.model_topic_readiness_config import (
         ModelTopicReadinessConfig,
     )
-    from omnibase_infra.handlers.boot_topic_provisioning import (
+    from omnibase_infra.protocols import ProtocolEventBusLike
+    from omnibase_infra.protocols.protocol_provisioned_topics_ensurer import (
         ProtocolProvisionedTopicsEnsurer,
     )
-    from omnibase_infra.protocols import ProtocolEventBusLike
     from omnibase_infra.protocols.protocol_runtime_log_producer import (
         ProtocolRuntimeLogProducer,
     )
