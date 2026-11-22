@@ -1,0 +1,36 @@
+{
+  "ticket": "OMN-26430",
+  "image": {
+    "infra_vcs_ref": "57d2fb03a699ed73a77916bf3b8cdebe37f710ca",
+    "build_time": "2026-11-20T11:00:51Z",
+    "lacks": ["OMN-26316 health acceptor", "OMN-26320 wiring yield", "OMN-26322 boot step 0, provisioner and validator off-loop", "OMN-26338 migration provisioner scan off-loop"]
+  },
+  "dev_lane_reading": {
+    "source": "operator-lane read devread4-0135, 2026-11-22T02:35Z",
+    "container_started": "2026-11-22T01:43:10.309Z",
+    "first_health_200": "2026-11-22T02:00:22Z",
+    "first_health_200_seconds_after_start": 1032
+  },
+  "sandbox_reading": {
+    "host": "h053",
+    "lane": "rbhealth-0245",
+    "read_utc": "2026-11-22T03:21Z",
+    "cpus": 2,
+    "probe_command": "python /usr/local/bin/onex-container-healthcheck --degraded-policy fail",
+    "probe_urlopen_timeout_seconds": 5.0,
+    "rollback_image_probe_unreachable_after_first_answer": {"elapsed_ms": 5658, "curl_get_no_answer_seconds": 12.0},
+    "rollback_image_held_frames": [
+      "<module> (omnimarket/nodes/node_process_health_effect/handlers/handler_process_health_run.py:33)",
+      "_import_handler_class (src/omnibase_infra/runtime/auto_wiring/handler_wiring.py:824)",
+      "wire_from_manifest (src/omnibase_infra/runtime/auto_wiring/handler_wiring.py:9990)",
+      "bootstrap (src/omnibase_infra/runtime/service_kernel.py:4101)"
+    ],
+    "rollback_image_second_held_frames": [
+      "ModelContractTopicScan.read (src/omnibase_infra/models/event_bus/model_contract_topic_scan.py:96)",
+      "TopicProvisioner._build_topic_specs (src/omnibase_infra/event_bus/service_topic_manager.py:635)",
+      "TopicProvisioner.__init__ (src/omnibase_infra/event_bus/service_topic_manager.py:279)",
+      "_build_topic_migration_executor_dependencies (src/omnibase_infra/runtime/auto_wiring/handler_wiring.py:8946)",
+      "_prepare_handler_wiring (src/omnibase_infra/runtime/auto_wiring/handler_wiring.py:12007)"
+    ]
+  }
+}
