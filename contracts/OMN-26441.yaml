@@ -22,8 +22,8 @@ requirements:
         statement: "AC5: integrated: after the deploy agent applies the merged change on the dev lane, the running omninode-runtime holds no dispatched-with-no-delivery-context line in its first ten minutes and its health endpoint reads 200 -- falsifier: ssh omni-201 docker logs omninode-runtime piped through grep -c 'dispatched with no delivery context' prints a number above 0 for that window on the dev lane, read back"
 evidence_requirements:
   - kind: tests
-    description: The cost wrapper keeps the dispatcher's delivery and context parameters, and the existing cost counter tests stay green.
-    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_contract_dispatch_cost_delivery.py tests/unit/runtime/auto_wiring/test_contract_cost_counter.py -q --no-cov -n 0 -p no:cacheprovider
+    description: The cost wrapper keeps the dispatcher's delivery and context parameters, the integration test drives it through a real engine, and the existing cost counter tests stay green.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_contract_dispatch_cost_delivery.py tests/unit/runtime/auto_wiring/test_contract_cost_counter.py tests/integration/runtime/test_contract_dispatch_cost_delivery_omn26441.py -q --no-cov -n 0 -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ""
@@ -49,37 +49,64 @@ dod_evidence:
         cwd: .
   - id: dod-omn26441-ac3-reproduction-in-pr-body
     description: >-
-      Read after the pull request is open: the PR body holds a section headed Reproduction with the command run at origin/dev and its failing output. The PR body is read from the watcher state, which only a local Done gate reaches.
+      The reproduction is the AC1 command failing at origin/dev: the wrapper there hides the keyword-only delivery parameter, so the dispatcher is called without it. The bound check is that command, which fails at the merge base and passes at the head. The PR body section headed Reproduction is read by the reviewer and the local Done gate; no hosted runner reads a PR body.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring -q --no-cov -n 0 -p no:cacheprovider -k contract_dispatch_cost_delivery
+        cwd: .
+  - id: dod-omn26441-ac4-no-gate-files
+    description: >-
+      The change is the wrapper in src/omnibase_infra/handlers/contract_dispatch_cost.py and tests; it edits no compose file, boot guard, healthcheck setting or wait setting. The bound check requires the wrapper's argument passthrough in that one source file, so it fails at the merge base. The branch diff itself is read by the local Done gate item below, which a hosted runner cannot run.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: grep -q "functools.wraps(dispatcher)" src/omnibase_infra/handlers/contract_dispatch_cost.py
+        cwd: .
+  - id: dod-omn26441-ac5-dev-lane-delivery-reaches-writer
+    description: >-
+      A projection-writer-shaped dispatcher is attached under an owner contract label, registered on a real MessageDispatchEngine and dispatched one envelope with delivery coordinates; it builds _partition and _offset from the delivery it receives and raises the dispatched-with-no-delivery-context error when it gets none. This is the mechanism behind the log line AC5 reads on the dev lane. It fails at the merge base. The live container log read follows the deploy agent's roll and is the local Done gate item below.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_contract_dispatch_cost_delivery_omn26441.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26441-local-pr-body-reproduction
+    description: >-
+      Read after the pull request is open: the PR body holds a section headed Reproduction. The PR body is read from the watcher state, which only a local Done gate reaches, so it binds no acceptance criterion.
     source: manual
     execution_scope: local_done_gate
-    binds_ac: [AC3]
+    binds_ac: []
     checks:
       - check_type: command
         check_value: bash -c 'onex scm pr-view OmniNode-ai/omnibase_infra --head "$(git rev-parse --abbrev-ref HEAD)" | grep -c "Reproduction" | grep -vx 0'
         cwd: .
-  - id: dod-omn26441-ac4-no-gate-files
+  - id: dod-omn26441-local-no-gate-files
     description: >-
-      The branch diff against origin/dev names no health gate, boot guard or compose file. Read from the branch, so it passes at the merge base too and only a local Done gate runs it.
+      The branch diff against origin/dev names no health gate, boot guard or compose file. Read from the branch, so it passes at the merge base too and only a local Done gate runs it; it binds no acceptance criterion.
     source: manual
     execution_scope: local_done_gate
-    binds_ac: [AC4]
+    binds_ac: []
     checks:
       - check_type: command
         check_value: bash -c '! git diff origin/dev --name-only | grep -E "health|boot_guard|compose"'
         cwd: .
-  - id: dod-omn26441-ac5-dev-lane-no-missing-delivery
+  - id: dod-omn26441-deploy-dev-lane-no-missing-delivery
     description: >-
-      Post-deploy probe: the dev runtime container started by the deploy agent from this change logs no dispatched-with-no-delivery-context line. It reads the live container, which carries the change only after the deploy agent has rebuilt it, so a pull request runner cannot pass it.
+      Post-deploy probe: the dev runtime container started by the deploy agent from this change logs no dispatched-with-no-delivery-context line. It reads the live container, which carries the change only after the deploy agent has rebuilt it, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
     source: manual
     execution_scope: local_done_gate
-    binds_ac: [AC5]
+    binds_ac: []
     checks:
       - check_type: command
         check_value: bash -c 'ssh omni-201 docker logs omninode-runtime 2>&1 | grep -c "dispatched with no delivery context" | grep -qx 0'
         cwd: .
   - id: dod-omn26441-deploy-wrapper-in-dev-runtime
     description: >-
-      Post-deploy probe: the rebuilt dev runtime container imports the wrapper with its argument passthrough. It reads the live container, which carries the change only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it and it binds no acceptance criterion.
+      Post-deploy probe: the rebuilt dev runtime container imports the wrapper with its argument passthrough. It reads the live container, which carries the change only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
     source: manual
     execution_scope: local_done_gate
     binds_ac: []
