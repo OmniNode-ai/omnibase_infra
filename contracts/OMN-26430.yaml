@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-26430
 title: The dev boot-good rollback image 57d2fb03a699 answers /health within the compose start period, not 17 minutes after start
 summary: >-
-  The boot-good rollback image was built from omnibase_infra 57d2fb03a699, which predates the health acceptor, the wiring yield and the boot step 0, topic provisioner and validator off-loop changes now on origin/dev. A boot of that image on lab host h053 held the event loop for 12 s inside wire_from_manifest and inside TopicProvisioner construction, and the container probe read probe_unreachable after 5.66 s. The stalled-loop /health answer served by the acceptor now carries the innermost frames of the loop thread, so the call that holds the loop is named in the probe's own reading and the container log. The health gate, the Docker probe, its timeout, the boot guard, the start period and the auto-wiring are not changed.
+  The boot-good rollback image was built from omnibase_infra 57d2fb03a699, which predates the health acceptor, the wiring yield and the boot step 0, topic provisioner and validator off-loop changes now on origin/dev. A boot of that image on lab host h053 held the event loop for 12 s inside wire_from_manifest and inside TopicProvisioner construction, and the container probe read probe_unreachable after 5.66 s. The stalled-loop /health answer served by the acceptor now carries the innermost frames of the loop thread, so the call that holds the loop is named in the probe's own reading and the container log. The first two holders that answer named on the branch source are the manifest attach's http_mount scan, which now parses only contracts whose text names http_mount, and contract discovery in auto_wiring, which this change leaves alone. The health gate, the Docker probe, its timeout, the boot guard, the start period and the auto-wiring are not changed.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -17,7 +17,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The stalled-loop answer names the holding frame, and the recorded rollback-image reading sits inside the start period.
-    command: uv run --frozen pytest tests/unit/handlers/http_mount/test_health_probe_acceptor_loop_frame_omn26430.py tests/unit/handlers/http_mount/test_rollback_image_first_health_inside_start_period_omn26430.py -q --no-cov -n 0 -p no:randomly
+    command: uv run --frozen pytest tests/unit/handlers/http_mount/test_health_probe_acceptor_loop_frame_omn26430.py tests/unit/handlers/http_mount/test_rollback_image_first_health_inside_start_period_omn26430.py tests/unit/handlers/http_mount/test_asgi_mounts_declared_scan_omn26430.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -30,6 +30,14 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_health_probe_acceptor_loop_frame_omn26430.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26430-ac1-attach-scan-parses-only-mount-contracts
+    description: "The loop holder the stalled-loop answer named on the branch source (ServiceHealth.attach_manifest -> AsgiMounts.declared -> read_contract_yaml, 10.3 s at 0.5 CPU) no longer parses a contract whose text never names http_mount; the test fails at origin/dev with 41 contracts parsed."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_declared_scan_omn26430.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26430-ac2-first-health-inside-start-period
     description: "The recorded dev reading of the rollback image's first /health 200 (1032 s after start) is below every semantic-healthcheck start_period of the dev lane compose (1200 s and 1800 s)."
