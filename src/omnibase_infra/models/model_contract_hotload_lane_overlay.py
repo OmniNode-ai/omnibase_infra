@@ -22,6 +22,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.model_contract_hotload_config import (
@@ -74,9 +75,7 @@ class ModelContractHotloadLaneOverlay(BaseModel):
             if not path.is_file():
                 continue
             try:
-                overlay = cls.model_validate(
-                    yaml.safe_load(path.read_text(encoding="utf-8"))
-                )
+                overlay = cls.model_validate(read_contract_yaml(path))
             except (yaml.YAMLError, ValidationError) as exc:
                 raise ProtocolConfigurationError(
                     f"invalid contract hot-load lane overlay: {sanitize_error_message(exc)}",
