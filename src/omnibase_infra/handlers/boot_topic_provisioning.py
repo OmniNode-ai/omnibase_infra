@@ -248,7 +248,7 @@ class ProtocolProvisionedTopicsEnsurer(Protocol):
 
     async def ensure_provisioned_topics_exist(
         self, correlation_id: UUID | None = None
-    ) -> Mapping[str, list[str] | str]: ...
+    ) -> Mapping[str, object]: ...
 
 
 class ProtocolTopicValidator(Protocol):
@@ -289,12 +289,13 @@ async def auto_create_missing_topics(
         auto_result = await provisioner.ensure_provisioned_topics_exist(
             correlation_id=correlation_id,
         )
-        if auto_result["created"]:
+        created = auto_result["created"]
+        if isinstance(created, list) and created:
             logger.info(
                 "Auto-created %d missing topics after validation: %s "
                 "(correlation_id=%s)",
-                len(auto_result["created"]),
-                auto_result["created"],
+                len(created),
+                created,
                 correlation_id,
             )
         validation_result = await validator.validate(
