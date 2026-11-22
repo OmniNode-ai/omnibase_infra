@@ -504,6 +504,10 @@
 # is derived from a ticked box, and the scheduled arming policy is unchanged.
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
+# Only node_archetype: the check-no-io-outside-effects hook keys its I/O rule on
+# it. The handler descriptor model defaults the rest.
+descriptor:
+  node_archetype: effect
 contract_version:
   major: 1
   minor: 11

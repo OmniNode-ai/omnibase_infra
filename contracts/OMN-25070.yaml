@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-25070
 title: omnibase_infra's CI, hooks, compose and probes run the core CLI as a module, not the onex launcher
-summary: omnibase-core stops declaring the onex console script once the customer package omninode-onex carries it. Every CI step, pre-commit hook, compose ledger-read command and CI probe here that ran onex now runs python -m omnibase_core.cli.cli_commands with the same arguments, and the tests that pinned the onex text pin the module form.
+summary: omnibase-core stops declaring the onex console script once the customer package omninode-onex carries it. Every CI step, pre-commit hook, compose ledger-read command and CI probe here that ran onex, and the evidence autoclose sweep's two runtime callers (its dod_verify dispatch and its onex scm reads), now run python -m omnibase_core.cli.cli_commands with the same arguments, and the tests that pinned the onex text pin the module form.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -17,6 +17,12 @@ requirements:
       - id: AC3
         statement: >-
           AC3 (the launcher move), the part this script carries: omnibase-core stops declaring onex, so scripts/fire-build-loop.sh runs uv run python -m omnibase_core.cli.cli_commands run build_loop_workflow.yaml with the same arguments and runs no onex launcher -- falsifier: uv run pytest tests/ci/test_fire_build_loop_runs_core_module_omn25070.py, which fails on dev, where the script runs uv run onex run.
+  - id: req-omn25070-infra-runtime-callers
+    statement: The evidence autoclose sweep runs omnibase-core's CLI module with its own interpreter, never an onex launcher file or an onex from PATH.
+    acceptance:
+      - id: AC3
+        statement: >-
+          AC3 (the launcher move), the part the runtime code carries: done_write_receipt_guard.dod_verify_argv and offer_companion_sources._gateway_args return sys.executable -m omnibase_core.cli.cli_commands followed by the same skill dod_verify and scm arguments, so a runtime or dispatch venv that carries omnibase-core without omninode-onex still verifies tickets and reads pull requests -- falsifier: uv run pytest tests/unit/test_runtime_callers_run_core_module_omn25070.py, which fails on dev, where the verifier runs the onex beside the interpreter and the gateway falls back to an onex on PATH.
 evidence_requirements:
   - kind: tests
     description: The tests that pin each caller's command text, and the compose render probe.
@@ -48,4 +54,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_fire_build_loop_runs_core_module_omn25070.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25070-infra-runtime-callers
+    description: The sweep's verifier argv and gateway argv run the core module with the sweep's interpreter, and the module prefix reaches core's skill command in this venv. Fails on dev, where the verifier argv starts with the onex beside the interpreter and the gateway takes an onex from PATH when none is beside it.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/test_runtime_callers_run_core_module_omn25070.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
