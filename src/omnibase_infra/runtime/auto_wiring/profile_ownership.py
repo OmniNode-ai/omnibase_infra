@@ -420,13 +420,13 @@ def filter_manifest_for_runtime_profile(
                 operation="filter_manifest_for_runtime_profile",
             ),
         )
+    lane_errors.extend(node_selection.stale_declared_errors(discovered_names))
     selection = resolve_runtime_lane_class_selection(runtime_lane, environ)
     if selection.refusal:
         lane_errors.append(_lane_class_error(ENV_RUNTIME_LANE_CLASS, selection.refusal))
     elif selection.lane_class is not None:
-        discovered = {contract.name for contract in manifest.contracts}
         for name in selection.contracts:
-            if name not in discovered:
+            if name not in discovered_names:
                 lane_errors.append(
                     _lane_class_error(
                         name,
@@ -486,7 +486,7 @@ def filter_manifest_for_runtime_profile(
             "Auto-wiring node selection: selection=%s exclusion=%s; left %d "
             "contract(s) unattached (OMN-17427, OMN-19513)",
             list(node_selection.contracts),
-            list(node_selection.excluded),
+            [*node_selection.excluded, *node_selection.declared_excluded],
             len(node_selection_excluded),
         )
     if lane_class_admitted:
