@@ -46,6 +46,7 @@ class StoreLazyStartDormant:
 
     _policy: ModelLazyStartPolicy | None = None
     _contracts: dict[str, ModelDiscoveredContract] = {}
+    _wired: dict[str, ModelDiscoveredContract] = {}
     _provisioner: object | None = None
 
     @classmethod
@@ -54,9 +55,11 @@ class StoreLazyStartDormant:
         policy: ModelLazyStartPolicy,
         dormant: tuple[ModelDiscoveredContract, ...],
         provisioner: object | None = None,
+        wired: tuple[ModelDiscoveredContract, ...] = (),
     ) -> None:
         cls._policy = policy
         cls._contracts = {contract.name: contract for contract in dormant}
+        cls._wired = {contract.name: contract for contract in wired}
         cls._provisioner = provisioner
 
     @classmethod
@@ -73,9 +76,15 @@ class StoreLazyStartDormant:
         return dict(cls._contracts)
 
     @classmethod
+    def wired_contracts(cls) -> Mapping[str, ModelDiscoveredContract]:
+        """The contracts wired at boot: closure edges run through them (OMN-26396)."""
+        return dict(cls._wired)
+
+    @classmethod
     def clear(cls) -> None:
         cls._policy = None
         cls._contracts = {}
+        cls._wired = {}
         cls._provisioner = None
 
 
@@ -108,7 +117,7 @@ def boot_manifest(
     if policy is None:
         return manifest
     boot, dormant = split_boot_manifest(manifest, policy)
-    StoreLazyStartDormant.record(policy, dormant, provisioner)
+    StoreLazyStartDormant.record(policy, dormant, provisioner, boot.contracts)
     missing = sorted(policy.boot_set - {c.name for c in boot.contracts})
     logger.info(
         "Lazy start: %d contract(s) wired at boot, %d dormant until their first "

@@ -1,0 +1,75 @@
+schema_version: 1.0.0
+ticket_id: OMN-26431
+title: The runtime rebuild trigger appends one ledger row per dev merge sha stating its class and publish result, so a lane reads it without a GitHub read
+summary: >-
+  A dev merge that changes the runtime left no record of what the deploy agent decided about building it, so every lane asking whether a build was requested for a sha spent GitHub reads it does not have. The deploy agent now writes one STATUS row per dev merge sha decision through the bus ledger append command of the deploy job reading node (never a file), at the places that already decide it: a published command it runs (result=queued with the job id), its idle converge (queued with the job id, deferred by the probe window with the earliest start computed from config/lab_probe_windows.yaml, by the idle gates or by the deploy gate, or refused with its verdict), and a sha whose changed paths are all declared not-runtime (class=NON_RUNTIME, no build result). A decision is written once, keyed on repository, sha, result and reason and held in the agent's state directory; a refused append is logged and counted and changes no decision. The trigger_for_sha.sh reader (AC2) lives in the plugin repository and is a follow-on lane.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26431-dev-merge-build-decision-row
+    statement: Each dev merge sha the deploy agent decides about has one ledger row stating the sha, its class and the agent's result, written through the bus append command and read without a GitHub read.
+    acceptance:
+      - id: AC1
+        statement: "AC1: for each omnibase_infra and omnimarket dev merge the workflow appends a STATUS row trigger_sha=<sha> class=<NON_RUNTIME|PUBLISHED|DETECTED_NOT_PUBLISHED> correlation=<id> -- falsifier: a runtime merge with no such row within 10 minutes in the ledger"
+      - id: AC2
+        statement: "AC2: trigger_for_sha.sh reads that row before any GitHub read -- falsifier: uv run pytest on the script test shows a GitHub read spent for a sha that has a row"
+evidence_requirements:
+  - kind: tests
+    description: The deploy agent's build-decision row tests (queued, deferred, refused, NON_RUNTIME, once per decision, append failure, row grammar).
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_merge_build_decision_trigger_row_omn26431.py -q --no-cov -n 0 -p no:cacheprovider -k trigger_row
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26431-ac1-row-per-decision
+    description: >-
+      The deploy agent writes one STATUS row (src=build-decision) with trigger_sha, class and, where one exists, correlation, plus result=queued with job, result=deferred with reason and earliest_start, or result=refused with reason, through the bus ledger append command. The tests drive the agent's own decision sites (a published command it runs, the idle converge tick) against a stand-in append command and read the row that reaches it. They fail at the merge base because no row is written there. The class is NON_RUNTIME, with no result cell, when every changed path is declared not-runtime. The workflow-side half named in the criterion's wording is the rebuild trigger's own PUBLISHED and DETECTED_NOT_PUBLISHED view; this row is the deploy agent's answer for the same sha.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_merge_build_decision_trigger_row_omn26431.py -q --no-cov -n 0 -p no:cacheprovider -k "trigger_row_queued or trigger_row_deferred or trigger_row_refused or trigger_row_for_a_merge"
+        cwd: .
+  - id: dod-omn26431-ac1-once-and-never-a-gate
+    description: >-
+      The same decision twice writes one row (the key is the repository, sha, result and reason, held in the agent's state directory, so an idle tick every 60 seconds and an agent restart write one row), and a bus append that fails, times out or has no route changes no decision, no job and no health: it is logged with friction_type=build_decision_row_unappended, counted, and never retried in a loop.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_merge_build_decision_trigger_row_omn26431.py -q --no-cov -n 0 -p no:cacheprovider -k "trigger_row_for_the_same_decision_twice or trigger_row_append_failure"
+        cwd: .
+  - id: dod-omn26431-ac2-row-grammar-for-the-reader
+    description: >-
+      Producer half only. The criterion's change (trigger_for_sha.sh reading the row first) is in the plugin repository and is a follow-on lane. This item holds the grammar that lane reads: every result's row is one STATUS line, one key=value cell per field, ending in the append request id, and a reader greps src=build-decision and trigger_sha=<sha>.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_merge_build_decision_trigger_row_omn26431.py -q --no-cov -n 0 -p no:cacheprovider -k trigger_row_passes_the_ledger_row_grammar
+        cwd: .
+  - id: dod-omn26431-ac1-handler-integration
+    description: >-
+      The build decision handler, wired with the deploy job reading node contract's real settings, builds the STATUS row (src=build-decision, trigger_sha, class, result, job), gives a repeated decision the same append request id, reports a failed append without raising, and writes no result cell for a NON_RUNTIME sha. It fails at the merge base because the handler does not exist there.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_dev_merge_build_decision_row_omn26431.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26431-deploy-source-readback
+    description: >-
+      Hosted-runner source-artifact readback: fetch the agent's call site and the build decision handler at the evaluated published commit and confirm the agent hands each decision to the build decision entries and the handler writes the src=build-decision row. A missing line fails the command, so it fails at the merge base. No lab service or credentials are required. This checks the published source and does not assert a live runtime rollout: the deploy agent picks the change up on its next ordinary deploy.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/scripts/deploy-agent/deploy_agent/agent.py" | grep -c 'record_idle' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/handlers/handler_dev_merge_build_decision.py" | grep -c 'trigger_sha=' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra

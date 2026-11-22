@@ -158,6 +158,55 @@ def _append_env(
     return env
 
 
+def append_ledger_row(
+    settings: Mapping[str, JsonValue],
+    environ: Mapping[str, str],
+    row: str,
+    request_id: str,
+) -> str:
+    """Append ``row`` through the node's bus append command; ``""`` when it took it, else why not.
+
+    Every row this node writes (job readings, alarms, build decisions) goes through here:
+    rows on stdin, ``--lane``, ``--host``, ``--request-id`` and ``--rows-file -`` on the
+    command line, bounded by the contract's ``append_timeout_seconds``.
+    """
+    command_env = _text(settings, "append_command_env")
+    host_env = _text(settings, "host_name_env")
+    command = environ.get(command_env, "").strip()
+    host = environ.get(host_env, "").strip()
+    if not command or not host:
+        return f"{command_env} and {host_env} must both be set"
+    argv: Sequence[str] = [
+        *shlex.split(command),
+        "--lane",
+        _text(settings, "row_lane"),
+        "--host",
+        host,
+        "--request-id",
+        request_id,
+        "--rows-file",
+        "-",
+    ]
+    timeout = settings["append_timeout_seconds"]
+    env = _append_env(settings, environ)
+    try:
+        done = subprocess.run(
+            argv,
+            input=f"{row} | req={request_id}\n",
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=float(timeout) if isinstance(timeout, int | float) else None,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"append-command-failed:{type(exc).__name__}"
+    if done.returncode != 0:
+        tail = done.stderr.strip()[-300:].replace("\n", " | ")
+        return f"append-command-exit-{done.returncode}: {tail}".rstrip(": ")
+    return ""
+
+
 class HandlerDeployJobReading:
     """Build a terminal deploy job's reading row and append it to the ledger."""
 
@@ -295,7 +344,7 @@ class HandlerDeployJobReading:
         if row is None:
             return ModelDeployJobReadingResult(outcome="skipped")
         request_id = _pin_request_id(branch, expires_at, now)
-        error = self._append(row, request_id)
+        error = append_ledger_row(self._settings, self._environ, row, request_id)
         if error:
             logger.warning("pin alarm for %s not appended: %s", branch, error)
             return ModelDeployJobReadingResult(
@@ -322,7 +371,7 @@ class HandlerDeployJobReading:
         if row is None:
             return ModelDeployJobReadingResult(outcome="skipped")
         request_id = _request_id(request)
-        error = self._append(row, request_id)
+        error = append_ledger_row(self._settings, self._environ, row, request_id)
         alarm_row = self.build_alarm_row(request) or ""
         alarm_outcome: Literal["none", "appended", "unappended"] = "none"
         if alarm_row:
@@ -332,7 +381,9 @@ class HandlerDeployJobReading:
                     f"onex:deploy-job-alarm:{request.correlation_id}",
                 )
             )
-            alarm_error = self._append(alarm_row, alarm_id)
+            alarm_error = append_ledger_row(
+                self._settings, self._environ, alarm_row, alarm_id
+            )
             alarm_outcome = "unappended" if alarm_error else "appended"
             if alarm_error:
                 logger.warning(
@@ -360,41 +411,3 @@ class HandlerDeployJobReading:
             alarm_row=alarm_row,
             alarm_outcome=alarm_outcome,
         )
-
-    def _append(self, row: str, request_id: str) -> str:
-        """Append ``row``; an empty string when the append command took it, else why not."""
-        command_env = _text(self._settings, "append_command_env")
-        host_env = _text(self._settings, "host_name_env")
-        command = self._environ.get(command_env, "").strip()
-        host = self._environ.get(host_env, "").strip()
-        if not command or not host:
-            return f"{command_env} and {host_env} must both be set"
-        argv: Sequence[str] = [
-            *shlex.split(command),
-            "--lane",
-            _text(self._settings, "row_lane"),
-            "--host",
-            host,
-            "--request-id",
-            request_id,
-            "--rows-file",
-            "-",
-        ]
-        timeout = self._settings["append_timeout_seconds"]
-        env = _append_env(self._settings, self._environ)
-        try:
-            done = subprocess.run(
-                argv,
-                input=f"{row} | req={request_id}\n",
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=float(timeout) if isinstance(timeout, int | float) else None,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return f"append-command-failed:{type(exc).__name__}"
-        if done.returncode != 0:
-            tail = done.stderr.strip()[-300:].replace("\n", " | ")
-            return f"append-command-exit-{done.returncode}: {tail}".rstrip(": ")
-        return ""
