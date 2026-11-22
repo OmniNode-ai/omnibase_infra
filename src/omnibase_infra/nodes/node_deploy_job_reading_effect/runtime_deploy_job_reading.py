@@ -17,12 +17,21 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
+from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import BaseModel, JsonValue, ValidationError
+
+if TYPE_CHECKING:
+    from omnibase_infra.nodes.node_deploy_job_reading_effect.runtime_post_failure_converge import (
+        PostFailureConverge,
+        ProtocolCommand,
+        ProtocolPostFailureHost,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +61,20 @@ def _load(relative: str) -> ModuleType:
 request_module, result_module, handler_module = (
     _load(relative) for relative in _CHECKOUT_MODULES
 )
+
+
+def post_failure_converge(
+    host: ProtocolPostFailureHost, converge_command: Callable[[], ProtocolCommand]
+) -> PostFailureConverge:
+    """The agent's post-failure converge rule (OMN-26429), loaded from this checkout once.
+
+    It reads the same job records this node turns into readings, and shares nothing else.
+    """
+    rule = _load(
+        "nodes/node_deploy_job_reading_effect/runtime_post_failure_converge.py"
+    )
+    converge: PostFailureConverge = rule.PostFailureConverge(host, converge_command)
+    return converge
 
 
 def contract_path(execution: ModuleType) -> Path:
