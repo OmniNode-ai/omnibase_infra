@@ -32,22 +32,36 @@ dod_evidence:
   - id: dod-omn26326-ac1-group-membership
     description: The dev broker group read after the standby boots lists a member from h053 in the write group and the gateway read group; the group ids and member counts are in the pull request and the STATUS row.
     source: manual
-    binds_ac:
-      - AC1
     execution_scope: local_done_gate
     checks:
       - check_type: command
         check_value: docker inspect -f '{{.State.Running}}' omninode-dev-member-runtime
         cwd: .
+  - id: dod-omn26326-ac1-declared-group-membership
+    description: The overlay declares the dev runtime's own KAFKA_INSTANCE_ID, so its consumers join the dev runtime's write and gateway read groups; the test fails before the overlay exists and passes after. The live group read is the local item above.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/test_dev_member_overlay_omn26326.py -k consumer_groups -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
   - id: dod-omn26326-ac2-answered-while-dev-unhealthy
     description: One pull request creation request and one job-log read are answered with the terminal naming the standby member, beside the dev /health reading and its UTC time; both are in the pull request and the STATUS row.
     source: manual
-    binds_ac:
-      - AC2
     execution_scope: local_done_gate
     checks:
       - check_type: command
         check_value: docker inspect -f '{{.State.Running}}' omninode-dev-member-runtime
+        cwd: .
+  - id: dod-omn26326-ac2-declared-standalone-standby
+    description: The overlay declares one runtime service with no depends_on edge to a dev-lane service, so the standby answers while dev is unhealthy; the test fails before the overlay exists and passes after. The live read while dev is unhealthy is the local item above.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/test_dev_member_overlay_omn26326.py -k exactly_one_runtime_service -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
   - id: dod-omn26326-ac3-declared-file
     description: The overlay is a declared file and its test fails before the file exists and passes after.
