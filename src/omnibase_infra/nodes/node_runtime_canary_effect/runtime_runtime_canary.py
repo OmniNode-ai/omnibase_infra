@@ -19,6 +19,10 @@ from dataclasses import dataclass
 from typing import Final
 from urllib.parse import urlsplit
 
+from omnibase_infra.protocols.protocol_runtime_canary_probe import (
+    ProtocolRuntimeCanaryProbe,
+)
+
 __all__: list[str] = ["DockerCanaryProbe"]
 
 #: Run inside the canary's runtime image: the contracts its boot left dormant.
@@ -60,7 +64,7 @@ def _get(url: str, timeout: float) -> tuple[int, str]:
 
 
 @dataclass(frozen=True)
-class DockerCanaryProbe:
+class DockerCanaryProbe(ProtocolRuntimeCanaryProbe):
     """The canary lane's runtime container, read and driven from the host."""
 
     runtime_container: str

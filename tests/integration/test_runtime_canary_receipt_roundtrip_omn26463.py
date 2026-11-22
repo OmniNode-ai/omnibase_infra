@@ -19,6 +19,9 @@ from omnibase_infra.models.model_runtime_canary_candidate import (
 from omnibase_infra.models.model_runtime_canary_request import (
     ModelRuntimeCanaryRequest,
 )
+from omnibase_infra.protocols.protocol_runtime_canary_probe import (
+    ProtocolRuntimeCanaryProbe,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -32,7 +35,7 @@ _TAGS = {
 }
 
 
-class _Probe:
+class _Probe(ProtocolRuntimeCanaryProbe):
     def __init__(self, *, heartbeat: bool) -> None:
         self.now = 0.0
         self._heartbeat = heartbeat
