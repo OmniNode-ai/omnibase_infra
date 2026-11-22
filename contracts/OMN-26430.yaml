@@ -56,10 +56,10 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_asgi_mounts_declared_scan_real_contracts_omn26430.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26430-deploy-branch-source-reads-loop-frame
-    description: "The pushed branch source of the health acceptor defines loop_thread_stack, the function that puts the loop-holding frame into the stalled-loop /health answer. Read from GitHub at the PR branch, it fails at any ref that lacks the function."
+    description: "The pushed branch source of the health acceptor defines loop_thread_stack, the function that puts the loop-holding frame into the stalled-loop /health answer. Read from GitHub at the PR branch and from the checked-out tree, it fails at any tree that lacks the function, including the merge base."
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: command
-        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/http_mount/health_probe_acceptor.py?ref=omn-26430-rollback-image-health-probe" --jq .content | base64 -d | grep 'def loop_thread_stack' >/dev/null
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/http_mount/health_probe_acceptor.py?ref=omn-26430-rollback-image-health-probe" --jq .content | base64 -d | grep 'def loop_thread_stack' >/dev/null && grep 'def loop_thread_stack' src/omnibase_infra/handlers/http_mount/health_probe_acceptor.py >/dev/null
         cwd: .
