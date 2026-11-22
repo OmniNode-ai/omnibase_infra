@@ -25,7 +25,7 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Final, cast
 
 from pydantic import ValidationError
 
@@ -144,21 +144,24 @@ def _judge(
 ) -> ModelRuntimeCanaryReceipt:
     started_at = _now()
     t0 = clock()
-    facts: dict[str, Any] = {
+    facts: dict[str, object] = {
         "candidate": request.candidate,
         "started_at": started_at,
         "log_path": log_path,
     }
 
-    def fail(check: str, fallback: str, **more: Any) -> ModelRuntimeCanaryReceipt:
+    def fail(check: str, fallback: str, **more: object) -> ModelRuntimeCanaryReceipt:
         # The container's own first failing line outranks the canary's words.
         line = first_failing_line(probe.log_text()) or fallback
-        return ModelRuntimeCanaryReceipt(
-            verdict=EnumRuntimeCanaryVerdict.FAIL,
-            finished_at=_now(),
-            first_failing_line=line,
-            failed_check=check,
-            **{**facts, **more},
+        return ModelRuntimeCanaryReceipt.model_validate(
+            {
+                "verdict": EnumRuntimeCanaryVerdict.FAIL,
+                "finished_at": _now(),
+                "first_failing_line": line,
+                "failed_check": check,
+                **facts,
+                **more,
+            }
         )
 
     # 1. /ready inside the budget.
