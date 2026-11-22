@@ -211,6 +211,8 @@ DISPATCH_VENV="${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}"
 # The interpreter alone is not enough: a venv rebuilt without omnibase-core
 # would fail at import, so before each exec below the CLI module's file is
 # checked the way the entrypoint's existence used to be.
+# A dispatch venv path with glob chars ([ ] * ?) fails the check; the
+# wrapper refuses it rather than guessing.
 ENTRYPOINT=("$DISPATCH_VENV/bin/python" -m omnibase_core.cli.cli_commands)
 RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh"
 HOST_RECONCILER="$DISPATCH_VENV/bin/onex-host-reconcile"

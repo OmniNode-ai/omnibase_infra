@@ -95,3 +95,18 @@ def test_the_fake_refuses_any_other_invocation(tmp_path: Path) -> None:
     )
     assert result.returncode == 98
     assert witness.read_text(encoding="utf-8").startswith("WRONG_ENTRY")
+
+
+def test_a_reconcile_that_leaves_the_core_cli_missing_still_refuses(
+    workspace: _Workspace,
+) -> None:
+    """The check also runs after the one reconcile: a reconcile that leaves the interpreter but not omnibase-core's CLI must end in a refusal, not an exec that fails at import."""
+    install_fake_core_cli(workspace.dispatch_venv, _RECORD)
+    remove_core_cli(workspace.dispatch_venv)
+    workspace.install_reconciler(creates_entrypoint=False)
+    result = workspace.run("node", "node_example")
+    assert result.returncode == _EXIT_REFUSED, result.stderr
+    lines = workspace.witness_lines()
+    assert any(ln.startswith("RECONCILE") for ln in lines), lines
+    assert not any(ln.startswith("ENTRYPOINT") for ln in lines), lines
+    assert CORE_CLI_MODULE in result.stderr
