@@ -26,6 +26,7 @@ import sys
 import textwrap
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -87,13 +88,20 @@ def _arg_defaults(instructions: list[str]) -> dict[str, str]:
     return out
 
 
-def _run_the_manifest_instruction(tmp_path: Path) -> tuple[str, list[str]]:
+def _run_manifest_run(
+    tmp_path: Path,
+    *,
+    policy: Path | None = None,
+    build_args: dict[str, str] | None = None,
+) -> tuple[subprocess.CompletedProcess[str], dict[str, Any] | None]:
     """Run the manifest RUN's shell text as written, with ``python`` replaced by a recorder.
 
-    The bind mount is mapped to the repository file it names and each ``ARG`` default is
-    the environment the shell sees. The shell expands whatever the RUN's environment prefix
-    says; the recorder writes down the ``ONEX_ACTIVE_RUNTIME_PACKAGES`` it was handed and the
-    arguments after ``build``, which is exactly what the image build would have given the module.
+    The bind mount is mapped to the repository file it names (or to ``policy``) and each
+    ``ARG`` default is the environment the shell sees, overridden by ``build_args`` as
+    ``--build-arg`` would. The shell expands whatever the RUN's text says; the recorder writes
+    down the ``ONEX_ACTIVE_RUNTIME_PACKAGES`` it was handed and the arguments after ``-m``,
+    which is exactly what the image build would have given the module. The recorded value is
+    ``None`` when the shell stopped before it called python.
     """
     instructions = _instructions()
     text = instructions[_manifest_build_index(instructions)]
@@ -102,15 +110,16 @@ def _run_the_manifest_instruction(tmp_path: Path) -> tuple[str, list[str]]:
     def take_mount(match: re.Match[str]) -> str:
         fields = dict(f.split("=", 1) for f in match.group(1).split(","))
         if fields.get("type") == "bind":
-            mounts[fields["target"]] = _REPO / fields["source"]
+            mounts[fields["target"]] = policy or _REPO / fields["source"]
         return ""
 
     shell = re.sub(r"--mount=(\S+)\s*", take_mount, text.removeprefix("RUN ")).strip()
     for target, source in mounts.items():
         shell = shell.replace(target, str(source))
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     recorded = tmp_path / "recorded.json"
+    recorded.unlink(missing_ok=True)
     python = bin_dir / "python"
     python.write_text(
         f"#!{sys.executable}\n"
@@ -120,9 +129,25 @@ def _run_the_manifest_instruction(tmp_path: Path) -> tuple[str, list[str]]:
         encoding="utf-8",
     )
     python.chmod(0o755)
-    env = {**_arg_defaults(instructions), "PATH": f"{bin_dir}:/usr/bin:/bin"}
-    subprocess.run(["/bin/sh", "-c", shell], env=env, check=True)
-    seen = json.loads(recorded.read_text(encoding="utf-8"))
+    env = {
+        **_arg_defaults(instructions),
+        **(build_args or {}),
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+    }
+    result = subprocess.run(
+        ["/bin/sh", "-c", shell], env=env, check=False, capture_output=True, text=True
+    )
+    seen = (
+        json.loads(recorded.read_text(encoding="utf-8")) if recorded.exists() else None
+    )
+    return result, seen
+
+
+def _run_the_manifest_instruction(tmp_path: Path) -> tuple[str, list[str]]:
+    """The manifest RUN as the sanctioned build runs it: no build argument, the repository policy file."""
+    result, seen = _run_manifest_run(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert seen is not None
     argv: list[str] = seen["argv"]
     assert argv[:3] == ["-m", _MANIFEST_MODULE, "build"], argv
     return str(seen["active"]), argv[2:]
@@ -324,3 +349,85 @@ async def test_prebuilt_manifest_boot_uses_manifest_negative_input_changed_after
     assert boot.manifest is None
     assert len(boot.announced.catalog.entries) == len(entry_points)
     assert any(expected in r.getMessage() for r in caplog.records)
+
+
+_COMPOSE_DECLARATION = re.compile(r"^\s*ONEX_ACTIVE_RUNTIME_PACKAGES:\s*(.+?)\s*$")
+
+
+@pytest.mark.unit
+def test_prebuilt_manifest_boot_uses_manifest_build_reads_the_set_every_compose_file_passes(
+    tmp_path: Path,
+) -> None:
+    """The set the build stamps is the one each runtime compose file takes from the policy file."""
+    built, _ = _run_the_manifest_instruction(tmp_path)
+    assert built == _policy_env()[_ACTIVE]
+    assert built, "the policy file names at least one active package"
+
+    declaring = 0
+    for compose in sorted((_REPO / "docker").glob("docker-compose*.yml")):
+        declared = [
+            match.group(1)
+            for line in compose.read_text(encoding="utf-8").splitlines()
+            if (match := _COMPOSE_DECLARATION.match(line))
+        ]
+        if not declared:
+            continue
+        declaring += 1
+        for value in declared:
+            # An interpolation of the policy variable, with no default and no literal list:
+            # a compose that names another source or another list must fail this test.
+            assert value.startswith(f"${{{_ACTIVE}:?"), (compose.name, value)
+    # The infra, dogfood, judge and one more runtime compose file declare it today.
+    assert declaring >= 4, declaring
+
+
+@pytest.mark.unit
+def test_prebuilt_manifest_boot_uses_manifest_build_argument_wins_over_the_policy_file(
+    tmp_path: Path,
+) -> None:
+    result, seen = _run_manifest_run(
+        tmp_path, build_args={"PREBUILT_ACTIVE_RUNTIME_PACKAGES": "omnibase_infra"}
+    )
+    assert result.returncode == 0, result.stderr
+    assert seen is not None
+    assert seen["active"] == "omnibase_infra"
+
+
+@pytest.mark.unit
+def test_prebuilt_manifest_boot_uses_manifest_build_takes_the_last_repeated_key(
+    tmp_path: Path,
+) -> None:
+    """Compose's --env-file takes the last of a repeated key; the build must read the same line."""
+    policy = tmp_path / "policy.env"
+    policy.write_text(
+        f"{_ACTIVE}=first\nOTHER=x\n{_ACTIVE}=omnibase_infra,omnimarket\n",
+        encoding="utf-8",
+    )
+    result, seen = _run_manifest_run(tmp_path, policy=policy)
+    assert result.returncode == 0, result.stderr
+    assert seen is not None
+    assert seen["active"] == "omnibase_infra,omnimarket"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("OTHER=x\n", id="key-absent"),
+        pytest.param(f"{_ACTIVE}=\n", id="value-empty"),
+        pytest.param(f'{_ACTIVE}="omnibase_infra,omnimarket"\n', id="value-quoted"),
+        pytest.param(f"{_ACTIVE}=omnibase_infra # note\n", id="inline-comment"),
+        pytest.param(f"export {_ACTIVE}=omnibase_infra\n", id="export-prefix"),
+        pytest.param("", id="file-empty"),
+    ],
+)
+def test_prebuilt_manifest_boot_uses_manifest_build_fails_closed_without_a_usable_set(
+    tmp_path: Path, content: str
+) -> None:
+    """With no build argument and no plain value in the policy file the build stops, never stamps an empty set."""
+    policy = tmp_path / "policy.env"
+    policy.write_text(content, encoding="utf-8")
+    result, seen = _run_manifest_run(tmp_path, policy=policy)
+    assert result.returncode != 0
+    assert seen is None, "python was reached with an unusable set"
+    assert "OMN-26405" in result.stderr

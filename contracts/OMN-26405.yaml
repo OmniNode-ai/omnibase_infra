@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-26405
 title: The runtime image's prebuilt manifest passes its boot stamp check on the image it was built in, so boot step 0 loads it and runs no contract discovery
 summary: >-
-  The dev image built at revision 8b76765e2fbb stamped its prebuilt node manifest with active_packages='' because the build RUN received no PREBUILT_ACTIVE_RUNTIME_PACKAGES argument, while the runtime compose gives the container ONEX_ACTIVE_RUNTIME_PACKAGES from docker/runtime-policy.env ('omnibase_infra,omnimarket'). Every boot of that image therefore read the file stale and fell back to announce and discover. The manifest build RUN now reads the same policy file when no build argument names the set (an argument still wins), so the stamp records the value the container boots with. A stamp input that changes after the build still reads stale. The health gate, the boot guard, the compose wait and the compose start period are not changed.
+  The dev image built at revision 8b76765e2fbb stamped its prebuilt node manifest with active_packages='' because the build RUN received no PREBUILT_ACTIVE_RUNTIME_PACKAGES argument, while the runtime compose gives the container ONEX_ACTIVE_RUNTIME_PACKAGES from docker/runtime-policy.env ('omnibase_infra,omnimarket'). Every boot of that image therefore read the file stale and fell back to announce and discover. The manifest build RUN now reads the same policy file when no build argument names the set (an argument still wins; a repeated key takes the last line as compose does), so the stamp records the value the container boots with. The read fails closed: a missing key, an empty value or a value that is not a plain comma list stops the build instead of stamping an empty set. A stamp input that changes after the build still reads stale. The health gate, the boot guard, the compose wait and the compose start period are not changed.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -56,8 +56,24 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_boot_omn26405.py -k negative_input_changed_after_the_build_reads_stale -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26405-ac2-build-set-equals-compose-set
+    description: The set the build reads from docker/runtime-policy.env is the set every runtime compose file that declares it passes, because each declares the policy variable as an interpolation with no default; the build argument wins over the file and a repeated key takes the last line.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_boot_omn26405.py -k "reads_the_set_every_compose_file_passes or build_argument_wins or last_repeated_key" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26405-ac2-build-fails-closed
+    description: With no build argument and a policy file whose key is absent, empty, quoted, commented, exported or whose file is empty, the manifest RUN exits non-zero before it calls python.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_boot_omn26405.py -k fails_closed_without_a_usable_set -q --no-cov -n 0 -p no:randomly
+        cwd: .
   - id: dod-omn26405-ac3-gates-unchanged
-    description: The diff touches docker/Dockerfile.runtime, the manifest build module, the new test and this contract; the HEALTHCHECK line and its start period are asserted unchanged, and no compose file, boot guard or wait setting is in the diff.
+    description: The diff touches docker/Dockerfile.runtime, the new test and this contract; the HEALTHCHECK line and its start period are asserted unchanged, and no compose file, boot guard or wait setting is in the diff.
     source: manual
     binds_ac: [AC3]
     checks:

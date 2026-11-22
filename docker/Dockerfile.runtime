@@ -1153,8 +1153,23 @@ RUN --mount=type=bind,from=node_inventory,target=/node_inventory \
 # This RUN stays the last instruction that changes any stamp input.
 ARG PREBUILT_ACTIVE_RUNTIME_PACKAGES=""
 ARG PREBUILT_WORKLOAD=main
+#
+# The read fails closed: a missing file fails the bind mount, and a missing key, an
+# empty value or a value that is not a plain comma list (quoted, commented, spaced)
+# stops the build with a message rather than stamping an empty or mangled set. A repeated
+# key takes the last line, as compose's --env-file does.
 RUN --mount=type=bind,source=docker/runtime-policy.env,target=/tmp/runtime-policy.env \
-    ONEX_ACTIVE_RUNTIME_PACKAGES="${PREBUILT_ACTIVE_RUNTIME_PACKAGES:-$(sed -n 's/^ONEX_ACTIVE_RUNTIME_PACKAGES=//p' /tmp/runtime-policy.env | tail -n 1)}" \
+    set -eu; \
+    active="${PREBUILT_ACTIVE_RUNTIME_PACKAGES}"; \
+    if [ -z "${active}" ]; then \
+      active="$(sed -n 's/^ONEX_ACTIVE_RUNTIME_PACKAGES=//p' /tmp/runtime-policy.env | tail -n 1)"; \
+    fi; \
+    case "${active}" in \
+      ""|*[!A-Za-z0-9_.,-]*) \
+        echo "OMN-26405: no usable ONEX_ACTIVE_RUNTIME_PACKAGES for the prebuilt manifest (got '${active}'); set PREBUILT_ACTIVE_RUNTIME_PACKAGES or a plain comma list in docker/runtime-policy.env" >&2; \
+        exit 1;; \
+    esac; \
+    ONEX_ACTIVE_RUNTIME_PACKAGES="${active}" \
     python -m omnibase_infra.nodes.node_boot_catalog_effect.runtime_prebuilt_manifest build \
       --workload "${PREBUILT_WORKLOAD}"
 
