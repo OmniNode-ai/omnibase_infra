@@ -1,0 +1,80 @@
+schema_version: 1.0.0
+ticket_id: OMN-26357
+title: Dev's declared exclusion of 205 contracts leaves out every contract the delegation checks, gateway, ledger, deploy, health and onboarding paths use
+summary: >-
+  Child of OMN-26324. The dev exclusion declared in contracts/services/runtime_lane_node_exclusion.contract.yaml is checked against the paths the launch goal needs. The data contract now also declares delegation_check_paths (the contracts and topics the delegation checks C11 to C17, C28 to C30, the gateway, the scm write nodes, the work ledger, deploy, health and onboarding drive, read from the probe and command code) and reached_contracts (the fixed point of those seeds over the topic edges of the shipped contract files). Every excluded contract those paths use is removed from the exclusion. A test computes the topic closure from the contract files it can see and fails when a used contract is also excluded. No compose file, health gate, boot guard or wait setting changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26357-excluded-contract-reachability
+    statement: No contract a delegation check, the gateway, the scm write nodes, the work ledger, deploy, health or onboarding uses is excluded from the dev runtime, and each excluded contract has a stated reachability verdict.
+    acceptance:
+      - id: AC1
+        statement: "AC1: every one of the 205 excluded contracts has a reachability verdict (kept excluded, or removed with the delegation check, path or topic chain that uses it) in a PR comment on omnibase_infra#6136 headed Excluded contract reachability"
+      - id: AC2
+        statement: "AC2: a test reads the topics and nodes of the declared delegation-check paths from contracts and fails if a contract used by one of those paths is in the profile's excluded_contracts, with no hard-coded list of check paths in the test"
+      - id: AC3
+        statement: "AC3: every contract reachable from the checks, the gateway and scm write nodes, the work-ledger readers and append effect, the deploy and health paths, or onboarding is removed from profiles.dev.excluded_contracts, and the final excluded count and the removed contracts are in a STATUS row on the rolling ledger"
+      - id: AC4
+        statement: "AC4: the push goes to the same branch, no dev restart is made, and the diff adds no compose file, health gate, boot guard or wait setting change"
+      - id: AC5
+        statement: "AC5: integrated: after the next dev roll (made by the orchestrator, never by this lane) the running dev runtime wires every contract this lane removed from the exclusion and reports no discovery error for the declared set"
+evidence_requirements:
+  - kind: tests
+    description: The dev profile's declaration, filter, required-contract and delegation-path tests.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26357-ac1-reachability-verdicts
+    description: >-
+      The reachability verdicts are in the PR comment headed Excluded contract reachability, one row per contract of the 205 the branch head excluded. The declaration the verdicts rest on is checked in the repository: the paths and the reached set are declared, and the excluded list no longer holds a contract either names.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: grep -c "delegation_check_paths:" contracts/services/runtime_lane_node_exclusion.contract.yaml
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q --no-cov -n 0 -p no:cacheprovider -k delegation_path_not_excluded
+        cwd: .
+  - id: dod-omn26357-ac2-delegation-path-test
+    description: >-
+      The test reads the seeds from the declaration, computes the topic closure from the contract files, and fails when a used contract is excluded. Two controls add one used contract to a copy of the exclusion (a seed, and a contract only a topic chain reaches) and the check reports exactly that contract.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q --no-cov -n 0 -p no:cacheprovider -k delegation_path_not_excluded
+        cwd: .
+  - id: dod-omn26357-ac3-removals
+    description: >-
+      Every excluded contract a declared path uses is removed from the exclusion, and the predecessor's tests stay green: no required contract is excluded and the declared set is still left unattached.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q --no-cov -n 0 -p no:cacheprovider -k "dev_profile_contract_set or dev_required_contracts_wired"
+        cwd: .
+  - id: dod-omn26357-ac4-no-compose-or-gate-change
+    description: >-
+      The change is the declaration, one model file and tests: the diff against the PR's previous head holds no compose file, health gate, boot guard or wait setting.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q --no-cov -n 0 -p no:cacheprovider -k dev_profile_contract_set
+        cwd: .
+  - id: dod-omn26357-ac5-deploy-source-readback
+    description: >-
+      Hosted-runner source-artifact readback: fetch the declaration at the evaluated published commit and confirm it declares the delegation-check paths. This checks the published source and does not assert a live runtime rollout; the dev roll and the runtime health read-back after it are the orchestrator's.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/contracts/services/runtime_lane_node_exclusion.contract.yaml" | grep -c 'delegation_check_paths:' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
