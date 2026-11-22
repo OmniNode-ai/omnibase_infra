@@ -47,14 +47,17 @@
 # never consults PATH for `onex`. There is no uv in the invocation path at all, so
 # there is no implicit sync, no environment selection, and no fallback:
 #
-#   * the interpreter is the DISPATCH venv's own `bin/onex` -- by default
-#     `$OMNI_HOME/.onex-dispatch-venv/bin/onex`, always (OMN-17819; it was
-#     the canonical clone's `.venv/bin/onex` before the gate/dispatch split);
-#   * if that entrypoint is missing, the workspace reconciler runs ONCE and the
-#     wrapper re-checks -- the same self-heal-then-proceed policy the drift
-#     guard uses, and the same single owner of repair policy;
+#   * the interpreter is the DISPATCH venv's own `bin/python` running
+#     omnibase-core's CLI module (`-m omnibase_core.cli.cli_commands`, OMN-25070),
+#     by default `$OMNI_HOME/.onex-dispatch-venv/bin/python`, always; OMN-17819
+#     moved it out of the canonical clone's `.venv`; until OMN-25070 it was the
+#     dispatch venv's `bin/onex`;
+#   * if that interpreter, or omnibase-core's CLI module in it, is missing, the
+#     workspace reconciler runs ONCE and the wrapper re-checks -- the same
+#     self-heal-then-proceed policy the drift guard uses, and the same single
+#     owner of repair policy;
 #   * if it is still missing, this REFUSES with a typed message naming the
-#     missing path, the reconcile command, and the PATH `onex` it deliberately
+#     missing command, the reconcile command, and the PATH `onex` it deliberately
 #     did not run. It never silently runs something else.
 #
 # Robustness over configuration, deliberately: the correctness of the ONEX CLI
@@ -201,7 +204,14 @@ export OMNIBASE_PATH="$OMNI_HOME"
 # The default is spelled identically in both files and read from the same
 # variable, so a relocation cannot move one without the other.
 DISPATCH_VENV="${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}"
-ENTRYPOINT="$DISPATCH_VENV/bin/onex"
+# OMN-25070: omnibase-core stops declaring the onex console script, so the
+# dispatch venv will have no bin/onex. The wrapper runs omnibase-core's CLI
+# module with the dispatch venv's own interpreter; a bin/onex still there
+# belongs to an older core and is never run.
+# The interpreter alone is not enough: a venv rebuilt without omnibase-core
+# would fail at import, so before each exec below the CLI module's file is
+# checked the way the entrypoint's existence used to be.
+ENTRYPOINT=("$DISPATCH_VENV/bin/python" -m omnibase_core.cli.cli_commands)
 RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh"
 HOST_RECONCILER="$DISPATCH_VENV/bin/onex-host-reconcile"
 FLOOR_FILE="$OMNI_HOME/.onex-workspace-floor.json"
@@ -227,21 +237,21 @@ _warn_on_shadowed_path_onex() {
   local path_onex resolved_path_onex resolved_entrypoint resolved_wrapper
   path_onex="$(command -v onex 2>/dev/null || true)"
   [[ -n "$path_onex" ]] || return 0
-  [[ "$path_onex" != "$ENTRYPOINT" ]] || return 0
+  [[ "$path_onex" != "$DISPATCH_VENV/bin/onex" ]] || return 0
   [[ "$path_onex" != "$SCRIPT_DIR/onex" ]] || return 0
   # `command -v` returns the literal PATH entry, never a symlink's resolved
   # target (OMN-19810). A symlink placed at that entry on purpose so `onex` is
-  # on PATH -- resolving to this wrapper or to $ENTRYPOINT -- string-compares
+  # on PATH -- resolving to this wrapper or to the dispatch venv's bin/onex -- string-compares
   # unequal to both above and printed a false WARNING on every dispatch. Only
   # a comparison of RESOLVED paths tells a real shadow from that setup.
   resolved_path_onex="$(readlink -f "$path_onex" 2>/dev/null || echo "$path_onex")"
-  resolved_entrypoint="$(readlink -f "$ENTRYPOINT" 2>/dev/null || echo "$ENTRYPOINT")"
+  resolved_entrypoint="$(readlink -f "$DISPATCH_VENV/bin/onex" 2>/dev/null || echo "$DISPATCH_VENV/bin/onex")"
   resolved_wrapper="$(readlink -f "$SCRIPT_DIR/onex" 2>/dev/null || echo "$SCRIPT_DIR/onex")"
   [[ "$resolved_path_onex" != "$resolved_entrypoint" ]] || return 0
   [[ "$resolved_path_onex" != "$resolved_wrapper" ]] || return 0
   _say "WARNING: a different 'onex' shadows the CLI venv on PATH:"
   _say "  PATH resolves : $path_onex"
-  _say "  this wrapper  : $ENTRYPOINT"
+  _say "  this wrapper  : ${ENTRYPOINT[*]}"
   _say "  Anything that invokes a bare 'onex' without this wrapper (scripts,"
   _say "  hooks, Makefiles, a non-interactive shell that never read the alias)"
   _say "  runs that other build instead, against a different interpreter and a"
@@ -524,26 +534,26 @@ _enforce_floor() {
 # --------------------------------------------------------------------------- #
 # Exec the CLI venv's entrypoint -- never PATH
 # --------------------------------------------------------------------------- #
-if [[ -x "$ENTRYPOINT" ]]; then
+if [[ -x "${ENTRYPOINT[0]}" ]] && compgen -G "$DISPATCH_VENV/lib/python3*/site-packages/omnibase_core/cli/cli_commands.py" >/dev/null; then
   _enforce_floor "$@"
-  exec "$ENTRYPOINT" "$@"
+  exec "${ENTRYPOINT[@]}" "$@"
 fi
 
 if [[ "${ONEX_WRAPPER_NO_RECONCILE:-0}" != "1" && -f "$RECONCILER" ]]; then
-  _say "CLI entrypoint missing at $ENTRYPOINT -- reconciling once before refusing."
+  _say "CLI entrypoint missing: ${ENTRYPOINT[*]} -- reconciling once before refusing."
   # Same policy owner as the in-CLI self-heal: this wrapper holds no repair
   # logic of its own, it only decides WHEN the reconciler runs.
   bash "$RECONCILER" --omni-home "$OMNI_HOME" >&2
-  if [[ -x "$ENTRYPOINT" ]]; then
+  if [[ -x "${ENTRYPOINT[0]}" ]] && compgen -G "$DISPATCH_VENV/lib/python3*/site-packages/omnibase_core/cli/cli_commands.py" >/dev/null; then
     # The floor still applies on the self-healed path: a reconcile that rebuilt
     # a missing entrypoint has not thereby proven the workspace is at target.
     _enforce_floor "$@"
-    exec "$ENTRYPOINT" "$@"
+    exec "${ENTRYPOINT[@]}" "$@"
   fi
 fi
 
 _say "REFUSED: the ONEX CLI entrypoint does not exist."
-_say "  expected : $ENTRYPOINT"
+_say "  expected : ${ENTRYPOINT[*]} (omnibase-core's CLI module in the dispatch venv)"
 _say "  reconcile: bash $RECONCILER --omni-home $OMNI_HOME"
 _path_onex="$(command -v onex 2>/dev/null || true)"
 if [[ -n "$_path_onex" && "$_path_onex" != "$SCRIPT_DIR/onex" ]]; then

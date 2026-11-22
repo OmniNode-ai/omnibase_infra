@@ -33,6 +33,7 @@ from pathlib import Path
 import pytest
 
 from scripts.reconcile_verify_movement import FLOOR_SCHEMA
+from tests.scripts.onex_dispatch_fake import install_fake_core_cli
 
 pytestmark = pytest.mark.unit
 
@@ -65,12 +66,10 @@ class _Workspace:
         self.floor = root / ".onex-workspace-floor.json"
         self.argv_log = root / "argv.log"
 
-        entrypoint = self.venv_bin / "onex"
-        entrypoint.write_text(
-            f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> {self.argv_log}\nexit {_SENTINEL_OK}\n',
-            encoding="utf-8",
+        install_fake_core_cli(
+            self.venv_bin.parent,
+            f'printf "%s\\n" "$*" >> {self.argv_log}\nexit {_SENTINEL_OK}\n',
         )
-        entrypoint.chmod(0o755)
 
     def install_dist(self, name: str, version: str, commit: str | None = None) -> None:
         d = self.site_packages / f"{name}-{version}.dist-info"

@@ -23,6 +23,12 @@ requirements:
       - id: AC3
         statement: >-
           AC3 (the launcher move), the part the runtime code carries: done_write_receipt_guard.dod_verify_argv and offer_companion_sources._gateway_args return sys.executable -m omnibase_core.cli.cli_commands followed by the same skill dod_verify and scm arguments, so a runtime or dispatch venv that carries omnibase-core without omninode-onex still verifies tickets and reads pull requests -- falsifier: uv run pytest tests/unit/test_runtime_callers_run_core_module_omn25070.py, which fails on dev, where the verifier runs the onex beside the interpreter and the gateway falls back to an onex on PATH.
+  - id: req-omn25070-infra-developer-wrapper
+    statement: The developer wrapper scripts/onex runs omnibase-core's CLI module with the dispatch venv's own interpreter, never a bin/onex launcher.
+    acceptance:
+      - id: AC3
+        statement: >-
+          AC3 (the launcher move), the part the developer path carries: once omnibase-core stops declaring onex, the dispatch venv has no bin/onex, so scripts/onex execs the dispatch venv's python -m omnibase_core.cli.cli_commands with the same arguments after checking that omnibase-core's CLI is installed there; a dispatch venv without it is reconciled once and then refused with a message naming the module; a bin/onex left in the dispatch venv is never run; the PATH-shadow warning and the one reconcile retry are unchanged -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_core_module_omn25070.py, which fails on dev, where the wrapper execs the dispatch venv's bin/onex.
 evidence_requirements:
   - kind: tests
     description: The tests that pin each caller's command text, and the compose render probe.
@@ -62,4 +68,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/test_runtime_callers_run_core_module_omn25070.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25070-infra-developer-wrapper
+    description: The wrapper execs the dispatch venv's python -m omnibase_core.cli.cli_commands, never a leftover bin/onex, and refuses naming the module when omnibase-core's CLI is missing; every other wrapper test passes through a fake interpreter that refuses any other invocation. Fails on dev, where the wrapper execs bin/onex.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_onex_wrapper_core_module_omn25070.py tests/scripts/test_onex_wrapper.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
