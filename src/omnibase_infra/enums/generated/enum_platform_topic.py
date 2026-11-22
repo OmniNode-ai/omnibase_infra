@@ -29,6 +29,7 @@ class EnumPlatformTopic(str, Enum):
     CMD_LEDGER_APPEND_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'CMD_LEDGER_APPEND_V1')  # onex.cmd.platform.ledger-append.v1
     CMD_LEDGER_QUERY_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'CMD_LEDGER_QUERY_V1')  # onex.cmd.platform.ledger-query.v1
     CMD_NODE_REGISTRATION_ACKED_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'CMD_NODE_REGISTRATION_ACKED_V1')  # onex.cmd.platform.node-registration-acked.v1
+    CMD_NODE_START_REQUESTED_V1 = contract_topic_value('nodes/node_lazy_start_ingress/contract.yaml', 'platform', 'CMD_NODE_START_REQUESTED_V1')  # onex.cmd.platform.node-start-requested.v1
     CMD_REQUEST_INTROSPECTION_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'platform', 'CMD_REQUEST_INTROSPECTION_V1')  # onex.cmd.platform.request-introspection.v1
     CMD_RUNNER_IMAGE_ROLL_V1 = contract_topic_value('nodes/node_runner_image_roll/contract.yaml', 'platform', 'CMD_RUNNER_IMAGE_ROLL_V1')  # onex.cmd.platform.runner-image-roll.v1
     CMD_RUNNER_POOL_RETIRE_V1 = contract_topic_value('nodes/node_runner_pool_retire/contract.yaml', 'platform', 'CMD_RUNNER_POOL_RETIRE_V1')  # onex.cmd.platform.runner-pool-retire.v1
@@ -60,6 +61,7 @@ class EnumPlatformTopic(str, Enum):
     EVT_NODE_REGISTRATION_INITIATED_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_NODE_REGISTRATION_INITIATED_V1')  # onex.evt.platform.node-registration-initiated.v1
     EVT_NODE_REGISTRATION_REJECTED_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_NODE_REGISTRATION_REJECTED_V1')  # onex.evt.platform.node-registration-rejected.v1
     EVT_NODE_REGISTRATION_RESULT_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_NODE_REGISTRATION_RESULT_V1')  # onex.evt.platform.node-registration-result.v1
+    EVT_NODE_START_ANSWERED_V1 = contract_topic_value('nodes/node_lazy_start_ingress/contract.yaml', 'platform', 'EVT_NODE_START_ANSWERED_V1')  # onex.evt.platform.node-start-answered.v1
     EVT_REGISTRATION_SNAPSHOTS_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'platform', 'EVT_REGISTRATION_SNAPSHOTS_V1')  # onex.evt.platform.registration-snapshots.v1
     EVT_REGISTRY_REQUEST_INTROSPECTION_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_REGISTRY_REQUEST_INTROSPECTION_V1')  # onex.evt.platform.registry-request-introspection.v1
     EVT_RESOLUTION_DECIDED_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_RESOLUTION_DECIDED_V1')  # onex.evt.platform.resolution-decided.v1

@@ -1,0 +1,62 @@
+schema_version: 1.0.0
+ticket_id: OMN-26419
+title: Dev build job a7474c42 failure cause is fixed and one dev deploy passes through the declared path
+summary: >-
+  Dev deploy job a7474c42 (origin/dev 8b76765e2fbb, accepted 2026-11-21T20:12:17Z) failed at the runtime phase at 21:09:55Z because the container health read DEGRADED on projection_apply_divergence for EvalResultsProjectionWriter, which consumed at least 20 events and upserted zero rows. Nearly every dispatch the writer consumed is a runtime tick, the timer it sweeps deadlines on, and a tick with nothing to sweep writes zero rows by design; the apply counters counted each tick as a consumed source event. The apply counters no longer count a runtime tick as a consumed source event; the projection stays registered and every real source topic counts as before. The health gate, the boot guard, the compose wait and the divergence floor are unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26419-tick-not-consumed
+    statement: A projection subscribed to the runtime tick is graded on its source events only, so a tick that sweeps nothing does not read as a consumed event that wrote nothing.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the failure reason and step of job a7474c42, the rule that rolled dev back and an excerpt of the failed container log are named in the PR body under a section headed Measured failure cause, with the UTC read time -- falsifier: onex scm pr-view of the fix PR shows no section headed Measured failure cause holding a job record excerpt and a UTC read time"
+      - id: AC2
+        statement: "AC2: a regression test built from the recorded job a7474c42 record and container log excerpt (fixture path named in the PR) fails on the code at the merge base and passes on the fix -- falsifier: uv run pytest tests -q -k a7474c42 passes at origin/main or fails on the PR branch"
+      - id: AC3
+        statement: "AC3: the health gate, the boot guard and the compose wait are unchanged by the PR -- falsifier: git diff origin/main --stat on the PR branch lists a health gate setting, a boot guard file or a wait setting, checked with uv run pytest tests -q -k a7474c42"
+      - id: AC4
+        statement: "AC4: one dev deploy job runs through the declared deploy agent path to a succeeded terminal and docker health of the runtime then reads healthy -- falsifier: the job record under jobs-dev shows a failed or rolled-back terminal for the fix sha, or docker inspect health of the runtime on omni-201 does not read healthy"
+evidence_requirements:
+  - kind: tests
+    description: The a7474c42 replay tests over the recorded job record and container log excerpt, and the apply-flow dimension suite they sit beside.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_job_a7474c42_tick_apply_accounting_omn26419.py tests/integration/test_a7474c42_tick_projection_apply_seam_omn26419.py tests/unit/services/test_runtime_health_projection_apply_dimensions_omn18910.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26419-ac1-cause
+    description: "The recorded cause: job a7474c42 phase_results.runtime failed with FAIL [runtime_degraded] projection_apply_divergence EvalResultsProjectionWriter (fixture tests/fixtures/dev_job_a7474c42/job_record.json); the rule it names reads HEALTHY on the recorded log at the fix and DEGRADED at the merge base."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_job_a7474c42_tick_apply_accounting_omn26419.py -k "job_record_names_the_rule_and_step or recorded_rule_clears_on_the_recorded_log" -q --no-cov
+        cwd: .
+  - id: dod-omn26419-ac2-red-green
+    description: "The replay of the recorded container log excerpt through the apply recorder and the divergence evaluation: DEGRADED at the merge base, HEALTHY on the fix, with a positive control that real source events still grade DEGRADED."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests -q --no-cov -k a7474c42
+        cwd: .
+  - id: dod-omn26419-ac3-gate-unchanged
+    description: The divergence floor stays 20 and a source topic that writes nothing still reads DEGRADED, while the recorded ticks no longer do (DEGRADED at the merge base, HEALTHY on the fix).
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_job_a7474c42_tick_apply_accounting_omn26419.py -k "source_events_that_write_nothing_still_degrade or divergence_floor_is_unchanged or gate_still_grades_source_events_while_ticks_are_excluded" -q --no-cov
+        cwd: .
+  - id: dod-omn26419-deploy
+    description: Hosted-runner probe that reads the committed apply counters from GitHub at the checked-out commit and requires the runtime tick exclusion in the apply recorder.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/observability/projection_apply_counters.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "consumed > 0 and topic != SUFFIX_RUNTIME_TICK" in src'
+        cwd: ${OMNI_HOME}/omnibase_infra
