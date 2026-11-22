@@ -52,3 +52,17 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_post_failure_converge_omn26429.py -q --no-header -p no:cacheprovider -k "test_the_recorded_job_plus_a_newer_head_asks_for_exactly_one_rebuild or test_the_rule_runs_only_on_the_poll_loops_idle_branch"
         cwd: .
+  - id: dod-omn26429-deploy-source-readback
+    description: >-
+      Hosted-runner source-artifact readback: fetch the rule's module and the agent's call of it at the evaluated published commit and confirm the module names the rule's requester and the agent calls it from the poll loop's idle branch. A missing line fails the command, so it fails at the merge base, where neither exists. No lab service or credentials are required. This checks the published source and does not assert a live runtime roll.
+    source: manual
+    binds_ac: [AC1, AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/nodes/node_deploy_job_reading_effect/runtime_post_failure_converge.py" | grep -c 'agent/post-failure-converge' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/scripts/deploy-agent/deploy_agent/agent.py" | grep -c '_post_failure.check' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
