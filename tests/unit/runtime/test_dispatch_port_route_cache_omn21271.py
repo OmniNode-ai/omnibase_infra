@@ -12,6 +12,7 @@ resolution runs in a worker thread.
 from __future__ import annotations
 
 import asyncio
+import builtins
 import itertools
 import os
 import pathlib
@@ -22,6 +23,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -115,7 +117,11 @@ class _FakeRuntimeBus:
 
 
 class _ContractReadCounter:
-    """Counts ``Path.read_text`` calls on files named ``contract.yaml``."""
+    """Counts disk reads of files named ``contract.yaml``.
+
+    A read is a ``Path.read_text`` or the ``open`` that ``read_contract_yaml`` makes on a
+    cache miss (OMN-26359); a cache hit opens nothing.
+    """
 
     def __init__(self) -> None:
         self.paths: list[str] = []
@@ -164,7 +170,15 @@ def read_counter(monkeypatch: pytest.MonkeyPatch) -> _ContractReadCounter:
             counter.record(self)
         return original(self, encoding=encoding, errors=errors)
 
+    real_open = builtins.open
+
+    def counting_open(file: Any, *args: Any, **kwargs: Any) -> Any:
+        if isinstance(file, os.PathLike) and Path(file).name == "contract.yaml":
+            counter.record(Path(file))
+        return real_open(file, *args, **kwargs)
+
     monkeypatch.setattr(pathlib.Path, "read_text", counting_read_text)
+    monkeypatch.setattr(builtins, "open", counting_open)
     return counter
 
 
@@ -402,7 +416,10 @@ async def test_changed_contract_set_is_resolved_on_the_next_call(
     kind = change(package_root)
     after = await port._resolved_routes()
 
-    assert read_counter.count > reads_before
+    if kind == "removed":
+        assert read_counter.count == reads_before, "an unchanged contract was re-read"
+    else:
+        assert read_counter.count > reads_before
     if kind == "edited":
         assert after["demo"].command_topic == "onex.cmd.demo.start-renamed.v1"
     elif kind == "added":

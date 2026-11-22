@@ -35,6 +35,15 @@ if TYPE_CHECKING:
 TOPIC_MIGRATION_EXECUTOR_DEPS = frozenset({"provisioner", "drain_proof_gate"})
 
 
+def provisioner_dependencies(
+    provisioner: object | None,
+) -> dict[str, dict[str, object]]:
+    """Explicit constructor dependencies that hand ``provisioner`` to the executor."""
+    if provisioner is None:
+        return {}
+    return {"HandlerTopicMigrationExecutor": {"provisioner": provisioner}}
+
+
 def required_handler_init_params(handler_cls: type) -> frozenset[str]:
     """Return required constructor parameter names for a handler class."""
     sig = inspect.signature(handler_cls)
@@ -61,7 +70,9 @@ def _requires_migration_collaborators(entry: ModelHandlerRoutingEntry) -> bool:
 
 
 async def warm_topic_migration_scan(
-    contract: ModelDiscoveredContract, root: Path
+    contract: ModelDiscoveredContract,
+    root: Path,
+    explicit_dependencies: dict[str, dict[str, object]] | None = None,
 ) -> None:
     """Read the provisioner's contract-topic scan of ``root`` off the loop.
 
@@ -73,6 +84,12 @@ async def warm_topic_migration_scan(
     """
     if contract.handler_routing is None or not root.is_dir():
         return
-    if any(map(_requires_migration_collaborators, contract.handler_routing.handlers)):
+    held = explicit_dependencies or {}
+    entries = [
+        entry
+        for entry in contract.handler_routing.handlers
+        if "provisioner" not in held.get(entry.handler.name, {})
+    ]
+    if any(map(_requires_migration_collaborators, entries)):
         with contextlib.suppress(Exception):  # the synchronous construction re-raises
             await ModelContractTopicScan.read_off_loop(contracts_root=root)

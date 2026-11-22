@@ -1,0 +1,74 @@
+schema_version: 1.0.0
+ticket_id: OMN-26460
+title: The dev runtime reports one contract that cannot load (compliance_orchestrator) as DEGRADED, and the deploy health gate stops every dev roll
+summary: >-
+  Dev deploy job ae286985 (omnibase_infra 127c7fb249cb, omnimarket 9d2b0129a7e5) failed at 13:42:29Z on 2026-11-22 with runtime health DEGRADED - discovery_errors: 1 contract(s) failed to load: compliance_orchestrator. The contract loads. The row is stale_declared_errors reporting that the dev profile's declared node exclusion names compliance_orchestrator, an omnibase_core node, while dev's ONEX_ACTIVE_RUNTIME_PACKAGES is omnibase_infra,omnimarket, so discovery on dev never returns any omnibase_core contract and the exclusion can never match. The entry is removed from the dev exclusion (the node is already unattached on dev) and a test fails when the dev exclusion names a contract of a package outside the dev allowlist. The boot guard, the health gate, the healthcheck, its degraded policy and its start period are unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26460-dev-exclusion-discoverable
+    statement: The dev profile's declared node exclusion names only contracts that dev discovery can return, so no declared exclusion is reported as a discovery error.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the exact load error for compliance_orchestrator is reproduced by running the runtime's contract discovery the way the auto_wiring discovery tests do, at omnibase_infra 127c7fb249cb and omnimarket 9d2b0129a7e5, and is recorded in a ticket comment with five whys -- falsifier: `uv run pytest <the discovery reproduction test> -q` at the commit before the fix exits non-zero naming compliance_orchestrator"
+      - id: AC2
+        statement: "AC2: a regression test built from the incident's recorded data (the runtime log lines and the discovery error row, at a fixture path in the repository that owns the fix) fails on the broken code and passes on the fix -- falsifier: `uv run pytest <fixture-backed regression test> -q` fails at the commit before the fix and exits 0 after it"
+      - id: AC3
+        statement: "AC3: after the fix, runtime contract discovery over the dev image composition reports no discovery error for compliance_orchestrator -- falsifier: `uv run pytest <the discovery test> -q` exits 0 and its assertion lists zero failed contracts"
+evidence_requirements:
+  - kind: tests
+    description: The discovery reproduction and the fixture-backed regression over the recorded incident row, and the neighbouring declared-exclusion and discovery suites.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_declared_exclusion_discoverable_omn26460.py tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py tests/unit/runtime/auto_wiring/test_discovery.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26460-ac1-reproduction
+    description: "The reproduction test runs the runtime's discovery and ownership filter under the dev environment; at the merge base it exits non-zero naming compliance_orchestrator, on the fix it exits 0."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_declared_exclusion_discoverable_omn26460.py -k test_compliance_orchestrator_has_no_discovery_error_under_dev -q --no-cov
+        cwd: .
+  - id: dod-omn26460-ac2-red-green
+    description: "The regression built from the recorded incident record and discovery error row (tests/fixtures/dev_job_ae286985): red at the merge base, green on the fix, with a control that an exclusion of an undiscovered name still yields the recorded row."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_declared_exclusion_discoverable_omn26460.py -k "incident or recorded or undiscovered" -q --no-cov
+        cwd: .
+  - id: dod-omn26460-ac3-no-discovery-error
+    description: "Discovery plus the dev ownership filter report no row for compliance_orchestrator, and no dev exclusion names a contract of a package outside the dev allowlist."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_declared_exclusion_discoverable_omn26460.py -q --no-cov
+        cwd: .
+  - id: dod-omn26460-ac4-policy-answer
+    description: The policy answer with file and line is in the lane report and the ticket comment; this PR changes no health file.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: git diff --quiet origin/dev -- src/omnibase_infra/services/service_runtime_health_monitor.py src/omnibase_infra/runtime/health/container_healthcheck.py
+        cwd: .
+  - id: dod-omn26460-ac5-gate-unchanged
+    description: The PR touches neither the health monitor, the container healthcheck, the roll gate's health payload reader, nor the dev compose healthcheck.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: git diff --quiet origin/dev -- src/omnibase_infra/services/service_runtime_health_monitor.py src/omnibase_infra/runtime/health/container_healthcheck.py scripts/runtime_build/health_payload.py docker/docker-compose.dev-lane.yml
+        cwd: .
+  - id: dod-omn26460-deploy
+    description: Hosted-runner probe that reads the committed dev exclusion at the checked-out commit and requires that it does not name compliance_orchestrator.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import yaml; d = yaml.safe_load(open("contracts/services/runtime_lane_node_exclusion.contract.yaml")); assert "compliance_orchestrator" not in d["profiles"]["dev"]["excluded_contracts"]'
+        cwd: .

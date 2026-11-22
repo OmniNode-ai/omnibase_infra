@@ -2411,7 +2411,7 @@ dependencies = [
 
 [[package]]
 name = "omnibase-infra"
-version = "0.38.81"
+version = "0.38.82"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },

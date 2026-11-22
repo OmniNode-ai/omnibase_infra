@@ -54,12 +54,15 @@ class TestKernelBootTopicProvisioning:
         """Kernel suppresses per-topic MISSING_TOPIC logs before auto-create retry."""
         import inspect
 
+        from omnibase_infra.handlers import boot_topic_provisioning
         from omnibase_infra.runtime import service_kernel
 
         source = inspect.getsource(service_kernel)
         assert "log_missing=False" in source
         assert "strict_topic_validation" in source
-        assert "Topic validation recovered after auto-create" in source
+        # The auto-create retry moved out of the kernel (OMN-26359).
+        retry = inspect.getsource(boot_topic_provisioning.auto_create_missing_topics)
+        assert "Topic validation recovered after auto-create" in retry
 
     def test_provisioner_import_path_is_correct(self) -> None:
         """TopicProvisioner can be imported from the path used by service_kernel.py."""
