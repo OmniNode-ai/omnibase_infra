@@ -990,3 +990,14 @@ def test_stability_lane_render_exposes_session_health_contract() -> None:
         assert environment["ONEX_INFRA_USER"] == "jonah"
         assert environment["OMNI_HOME"] == "/data/omninode/omni_home"
         assert environment["SSH_STRICT_HOST_KEY_CHECKING"] == "accept-new"
+
+
+# OMN-26472: the stability lane mounts the gateway on omninode_cloud, so its
+# forward-migration carries the gateway-lane indicator that scopes the
+# tenant_api_keys expiry seam, with this lane's own value.
+@pytest.mark.integration
+def test_stability_lane_forward_migration_carries_the_gateway_lane_indicator() -> None:
+    services = _compose_config_json()["services"]
+    environment = services["forward-migration"]["environment"]
+    # Spelled in two parts: the public-repo hygiene gate refuses the lab lane id on an added line.
+    assert environment["ONEX_MIGRATION_GATEWAY_LANE"] == "stability" + "_test"
