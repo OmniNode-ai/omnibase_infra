@@ -73,6 +73,16 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_agent_adoption_omn26494.py -q -p no:randomly -k agent_reverts_after_restart_storm_not_for_four_restarts_or_a_slow_loop
         cwd: .
+  - id: dod-omn26494-integration-proof
+    description: The adoption gate runs against the node contract's real settings and a real state directory - a passing self-check records the adopted and previous refs, a failing one keeps the reason.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/test_dev_agent_adoption_omn26494.py -q -p no:randomly
+        cwd: .
   - id: dod-omn26494-ac5-post-merge
     description: 'Post-merge observation, not proved by this pull request. Reader - the deploy-agent role, reading on h201 the dev agent unit''s NRestarts at two reads ten minutes apart and the :8098 health log for the week to 2026-11-30, last read on 2026-11-30. Pass - NRestarts differs by under 5 between any two reads ten minutes apart and no gap over 60 minutes between health answers; fail - 5 or more restarts in ten minutes.'
     source: manual

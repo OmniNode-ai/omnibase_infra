@@ -37,7 +37,6 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TypeVar
 
 import yaml
 
@@ -52,7 +51,6 @@ SELF_CHECK_ENTRY = Path(
 #: The refusal reason recorded for a ref that restarted the agent in a storm.
 STORM_REASON = "restart-storm"
 
-_B = TypeVar("_B")
 Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 #: Restores the clone to a ref; raises when it cannot.
 Reverter = Callable[[str], None]
@@ -211,13 +209,12 @@ def adopts(
     loaded_ref: str,
     candidate_ref: str,
     run: Runner,
-    resync: Callable[[str, _B], None],
-    boundary: _B,
+    resync: Callable[[str], None],
 ) -> bool:
     """Whether the agent may re-exec onto ``candidate_ref``, the clone's HEAD after the pull.
 
-    A ref refused earlier is put back without a second check. Otherwise ``resync(agent_dir,
-    boundary)`` installs the clone's dependencies so the candidate's imports resolve, and the
+    A ref refused earlier is put back without a second check. Otherwise ``resync(agent_dir)``
+    installs the clone's dependencies so the candidate's imports resolve, and the
     candidate's self-check runs. A non-zero exit, a timeout or a self-check that could not start
     refuses the ref: the clone goes back to ``loaded_ref``, ``resync`` restores that ref's
     dependencies, the reason is kept and the agent stays where it is. On success the adoption is
@@ -234,7 +231,7 @@ def adopts(
         )
         git_revert(agent_dir, loaded_ref, run, settings)
         return False
-    resync(agent_dir, boundary)
+    resync(agent_dir)
     try:
         done = candidate_self_check(agent_dir, run, settings)
         code, tail = done.returncode, (done.stdout + done.stderr).strip()[-400:]
@@ -259,7 +256,7 @@ def adopts(
     )
     _refuse(state_dir, settings, candidate_ref, f"self-check-exit-{code}", loaded_ref)
     git_revert(agent_dir, loaded_ref, run, settings)
-    resync(agent_dir, boundary)
+    resync(agent_dir)
     return False
 
 

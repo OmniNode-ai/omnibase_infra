@@ -3929,8 +3929,7 @@ class DeployExecutor:
             loaded_sha,
             disk_sha,
             _run,
-            _uv_sync_after_pull,
-            boundary,
+            lambda clone: _uv_sync_after_pull(clone, boundary),
         ):
             return
 

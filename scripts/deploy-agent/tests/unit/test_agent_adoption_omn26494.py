@@ -188,7 +188,7 @@ def test_agent_keeps_previous_ref_on_failed_self_check(tmp_path: Path) -> None:
     synced: list[str] = []
 
     adopted = adoption.adopts(
-        AGENT_DIR, tmp_path, OLD, NEW, run, lambda d, b: synced.append(d), BOUNDARY
+        AGENT_DIR, tmp_path, OLD, NEW, run, lambda d: synced.append(d)
     )
 
     assert adopted is False
@@ -284,7 +284,7 @@ def _storm(
 ) -> tuple[list[bool], list[str], list[tuple[str, str]]]:
     """Adopt NEW over OLD, then start NEW at each offset (seconds); what each start did."""
     adoption = _adoption()
-    adoption.adopts(AGENT_DIR, tmp_path, OLD, NEW, _Git(0), lambda d, b: None, BOUNDARY)
+    adoption.adopts(AGENT_DIR, tmp_path, OLD, NEW, _Git(0), lambda d: None)
     reverted: list[str] = []
     alarms: list[tuple[str, str]] = []
 
@@ -399,10 +399,8 @@ def test_agent_reverts_after_restart_storm_alarm_row_names_both_refs() -> None:
     )
     from datetime import UTC, datetime
 
-    handler = handler_module.HandlerDeployJobReading(
-        settings=contract["settings"], environ={}
-    )
-    row = handler.build_adoption_revert_alarm_row(
+    row = handler_module.adoption_revert_alarm_row(
+        contract["settings"],
         adopted_ref=NEW,
         previous_ref=OLD,
         now=datetime(2026, 11, 23, 1, 0, tzinfo=UTC),
