@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from omnibase_infra.models.lazy_start import (
     ModelLazyStartPolicy,
@@ -28,13 +29,13 @@ from omnibase_infra.models.lazy_start import (
 from omnibase_infra.models.model_contract_hotload_lane_overlay import (
     ModelContractHotloadLaneOverlay,
 )
-from omnibase_infra.protocols.protocol_lazy_start_serving_source import (
-    ProtocolLazyStartServingSource,
-)
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelDiscoveredContract,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.handlers.lazy_start_front_door import LazyStartFrontDoor
 
 __all__: list[str] = [
     "StoreLazyStartDormant",
@@ -52,7 +53,7 @@ class StoreLazyStartDormant:
 
     _policy: ModelLazyStartPolicy | None = None
     _contracts: dict[str, ModelDiscoveredContract] = {}
-    _front_door: ProtocolLazyStartServingSource | None = None
+    _front_door: LazyStartFrontDoor | None = None
     _wired: dict[str, ModelDiscoveredContract] = {}
     _provisioner: object | None = None
 
@@ -88,7 +89,7 @@ class StoreLazyStartDormant:
         return dict(cls._wired)
 
     @classmethod
-    def record_front_door(cls, front_door: ProtocolLazyStartServingSource) -> None:
+    def record_front_door(cls, front_door: LazyStartFrontDoor) -> None:
         """Keep the boot's front door so ``/ready`` can read its serving set (OMN-26316)."""
         cls._front_door = front_door
 
