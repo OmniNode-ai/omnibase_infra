@@ -39,8 +39,10 @@ from scripts.ci.lab_pass_receipt import (
     ReceiptLookupError,
 )
 from scripts.lab_alarm import (
+    CONSENT_ROW_KINDS,
     EFFECTS_HELD_AFTER,
     STALE_INDETERMINATE_AFTER,
+    WORK_LEDGER_CANONICAL_ROW_TYPES,
     EffectsGroupReadError,
     EffectsHeldReader,
     EnumAlarmCondition,
@@ -51,11 +53,13 @@ from scripts.lab_alarm import (
     LaneCredentialError,
     LedgerAppender,
     LedgerAppendError,
+    LedgerReadError,
     ModelAlarm,
     ModelAlarmConfig,
     ModelAlarmRun,
     ModelAlarmState,
     ModelConditionReport,
+    ModelPostingConsent,
     ModelRecoveryNotice,
     evaluate_consumer_group_lag,
     evaluate_container_restarts,
@@ -67,6 +71,7 @@ from scripts.lab_alarm import (
     exit_code,
     expand_env,
     make_ledger_appender,
+    make_ledger_rows_reader,
     make_runner,
     read_chain_canary_verdict,
     read_ledger_newest_canonical_row,
@@ -862,13 +867,65 @@ def _effects_reader(
     return read
 
 
+class _FakeLedger:
+    """The work-ledger reader node's ``rows`` answer, served from text (OMN-26593).
+
+    It is the seam ``run_once`` and the consent and newest-row reads take in
+    place of a ledger file: no file is written or read. It records each ask so
+    a test can assert which reader name and filters the alarm used, and it
+    answers like the real reader node does when it does not: a ``LedgerReadError``.
+    """
+
+    def __init__(self, text: str = "", *, unanswered: str = "") -> None:
+        self.rows: list[str] = text.splitlines()
+        self.unanswered = unanswered
+        self.asked: list[dict[str, Any]] = []
+
+    def write_text(self, text: str, encoding: str = "utf-8") -> None:
+        self.rows = text.splitlines()
+
+    def ensure_row(self, row: str) -> None:
+        if row not in self.rows:
+            self.rows.append(row)
+
+    def __call__(
+        self,
+        *,
+        reader: str,
+        kinds: Sequence[str],
+        window_hours: int,
+        term: str | None = None,
+    ) -> tuple[str, ...]:
+        self.asked.append(
+            {
+                "reader": reader,
+                "kinds": tuple(kinds),
+                "window_hours": window_hours,
+                "term": term,
+            }
+        )
+        if self.unanswered:
+            raise LedgerReadError(self.unanswered)
+        return tuple(row for row in self.rows if row.strip())
+
+
+def _consent_of(ledger: _FakeLedger, *, channel: str) -> ModelPostingConsent | None:
+    rows = ledger(
+        reader="lab-alarm-consent",
+        kinds=CONSENT_ROW_KINDS,
+        window_hours=720,
+        term="lab alarm",
+    )
+    return resolve_posting_consent(rows, channel=channel)
+
+
 def _run(
     tmp_path: Path,
     *,
     result: EnumLabPassResult,
     restarts: str,
     lag: int,
-    ledger: Path,
+    ledger: _FakeLedger,
     canary: tuple[int, str] = (0, CANARY_GREEN),
     appender: LedgerAppender | None = None,
     clock: Callable[[], str] | None = None,
@@ -891,13 +948,10 @@ def _run(
         ledger_row_ticket="OMN-20769",
         ledger_dedupe_window=timedelta(hours=6),
     )
-    # The work-ledger condition reads --ledger too: give it one canonical row,
-    # appended below any consent row so cited line numbers do not move, and a
-    # projection already caught up to it.
+    # The work-ledger condition reads the ledger's newest row too: give it one
+    # canonical row and a projection already caught up to it.
     fresh_row = "2026-10-01T03:00:00Z | STATUS | lane=fixture | projection fresh"
-    if ledger.exists() and fresh_row not in ledger.read_text(encoding="utf-8"):
-        with ledger.open("a", encoding="utf-8") as handle:
-            handle.write(fresh_row + "\n")
+    ledger.ensure_row(fresh_row)
 
     def runner(
         argv: Sequence[str], *, timeout: float
@@ -911,7 +965,7 @@ def _run(
     return run_once(
         config,
         state_dir=tmp_path,
-        ledger_path=ledger,
+        ledger_reader=ledger,
         sha=SHA,
         receipt_reader=lambda repo, lane, sha: _receipt(
             result, ok=result is EnumLabPassResult.PASS
@@ -984,7 +1038,7 @@ def test_lane_drift_posts_once_and_again_when_the_finding_set_changes(
     monkeypatch.setattr(
         lab_alarm, "post_alarm", lambda alarm, **kw: posts.append(alarm) or "ts"
     )
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(_CONSENT + "\n", encoding="utf-8")
     for kinds in (
         ("revision_mismatch",),
@@ -1028,7 +1082,7 @@ def test_lane_drift_recovery_posts_once_and_allows_a_new_episode(
         "post_recovery",
         lambda notice, **kw: recoveries.append(notice) or "recovery-ts",
     )
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(_CONSENT + "\n", encoding="utf-8")
     for kinds in ((kind,), (kind,), (), (), (kind,)):
         _lane_drift_fixture(tmp_path, *kinds)
@@ -1059,7 +1113,7 @@ def test_lane_drift_unreadable_census_preserves_the_episode(
         "post_recovery",
         lambda notice, **kw: recoveries.append(notice) or "ts",
     )
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(_CONSENT + "\n", encoding="utf-8")
     _lane_drift_fixture(tmp_path, "revision_mismatch")
     _run(
@@ -1211,7 +1265,7 @@ def test_lane_drift_shuffled_findings_do_not_raise_again(
     monkeypatch.setattr(
         lab_alarm, "post_alarm", lambda alarm, **kw: posts.append(alarm) or "ts"
     )
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(_CONSENT + "\n", encoding="utf-8")
     _lane_drift_fixture(tmp_path, "revision_mismatch", "config_hash_mismatch")
     _run(
@@ -1251,7 +1305,7 @@ def test_lane_drift_can_continue_while_container_health_recovers(
         "post_recovery",
         lambda notice, **kw: recoveries.append(notice) or "ts",
     )
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(_CONSENT + "\n", encoding="utf-8")
     for kinds in (("revision_mismatch", "container_unhealthy"), ("revision_mismatch",)):
         _lane_drift_fixture(tmp_path, *kinds)
@@ -1312,7 +1366,7 @@ def test_lane_drift_failed_delivery_is_retried(
         return "ts"
 
     monkeypatch.setattr(lab_alarm, "post_alarm", lambda *a, **kw: "ts")
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(_CONSENT + "\n", encoding="utf-8")
     _lane_drift_fixture(tmp_path, "revision_mismatch")
     if recovery:
@@ -1362,7 +1416,7 @@ def test_the_same_failure_raises_exactly_one_alarm_across_two_runs(
     Level-triggering would re-raise this every tick, and an alarm that
     re-fires hourly is one nobody reads by the second day.
     """
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| no consent here |\n", encoding="utf-8")
 
     first = _run(
@@ -1393,7 +1447,7 @@ def test_the_same_failure_raises_exactly_one_alarm_across_two_runs(
 @pytest.mark.unit
 def test_a_recovered_subject_can_alarm_again(tmp_path: Path) -> None:
     """Edge-triggering must not become permanent suppression."""
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| none |\n", encoding="utf-8")
 
     _run(
@@ -1455,7 +1509,7 @@ def test_a_healthy_run_raises_nothing_and_records_all_four_conditions(
     tmp_path: Path,
 ) -> None:
     """AC5. Falsifier: a silent run is indistinguishable from one that never ran."""
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| none |\n", encoding="utf-8")
 
     # First run establishes the lag baseline; the second is the healthy one.
@@ -1703,10 +1757,8 @@ _WL_CONTAINER = "omnibase-infra-postgres"
 _WL_DATABASE = "omnidash_analytics"
 
 
-def _work_ledger_file(tmp_path: Path, *rows: str) -> Path:
-    path = tmp_path / "ROLLING_WORK_LEDGER.md"
-    path.write_text("# rolling work ledger\n\n" + "\n".join(rows) + "\n", "utf-8")
-    return path
+def _work_ledger_file(tmp_path: Path, *rows: str) -> _FakeLedger:
+    return _FakeLedger("\n".join(rows))
 
 
 def _psql_runner(
@@ -1724,10 +1776,11 @@ def _psql_runner(
 
 
 def _evaluate_work_ledger(
-    ledger: Path, answer: subprocess.CompletedProcess[str]
+    ledger: _FakeLedger, answer: subprocess.CompletedProcess[str]
 ) -> ModelConditionReport:
     return evaluate_work_ledger_projection_stale(
-        ledger_path=ledger,
+        rows_reader=ledger,
+        window_hours=1,
         container=_WL_CONTAINER,
         database=_WL_DATABASE,
         max_lag=timedelta(minutes=30),
@@ -1745,7 +1798,8 @@ def test_work_ledger_fresh_projection_reads_ok(tmp_path: Path) -> None:
     )
     seen: list[list[str]] = []
     report = evaluate_work_ledger_projection_stale(
-        ledger_path=ledger,
+        rows_reader=ledger,
+        window_hours=1,
         container=_WL_CONTAINER,
         database=_WL_DATABASE,
         max_lag=timedelta(minutes=30),
@@ -1833,7 +1887,8 @@ def test_work_ledger_psql_timeout_or_unparseable_reads_indeterminate(
         raise subprocess.TimeoutExpired(cmd=list(argv), timeout=timeout)
 
     timed_out = evaluate_work_ledger_projection_stale(
-        ledger_path=ledger,
+        rows_reader=ledger,
+        window_hours=1,
         container=_WL_CONTAINER,
         database=_WL_DATABASE,
         max_lag=timedelta(minutes=30),
@@ -1856,10 +1911,34 @@ def test_work_ledger_with_no_canonical_row_reads_indeterminate(tmp_path: Path) -
     assert report.outcome is EnumConditionOutcome.INDETERMINATE
     assert "no canonical row" in report.evidence
 
-    missing = _evaluate_work_ledger(
-        tmp_path / "absent.md", _completed("2026-10-01 03:00:00+00\n")
-    )
-    assert missing.outcome is EnumConditionOutcome.INDETERMINATE
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        "reader lab-alarm-projection exited 3: status=not-moved reason=reader-not-in-moved-readers",
+        "reader lab-alarm-projection exited 69: status=unreadable reason=node-unanswered",
+        "reader lab-alarm-projection exited 1: status=stale",
+        "reader lab-alarm-projection: TimeoutExpired: timed out or could not start uv",
+    ],
+)
+def test_work_ledger_unanswered_reader_reads_indeterminate_not_ok(
+    refusal: str,
+) -> None:
+    """AC2 (OMN-26593): a reader that does not answer raises the unreadable-ledger reading.
+
+    The same INDETERMINATE and the same ``LEDGER UNREADABLE ... Undated is not
+    current`` text an unreadable ledger file gave before; never OK, never an
+    empty-ledger reading, and never a read of the file in its place.
+    """
+    ledger = _FakeLedger(unanswered=refusal)
+    report = _evaluate_work_ledger(ledger, _completed("2026-10-01 03:00:00+00\n"))
+
+    assert report.outcome is EnumConditionOutcome.INDETERMINATE
+    assert "LEDGER UNREADABLE" in report.evidence
+    assert refusal in report.evidence
+    assert "Undated is not current" in report.evidence
+    assert not report.alarms
 
 
 @pytest.mark.unit
@@ -1881,18 +1960,95 @@ def test_work_ledger_non_canonical_row_type_at_the_tail_is_ignored(
 
 
 @pytest.mark.unit
-def test_work_ledger_reads_only_the_tail_of_a_large_ledger(tmp_path: Path) -> None:
-    """The newest row is found without reading the whole rolling file."""
-    filler = "x" * 200
-    ledger = _work_ledger_file(
-        tmp_path,
-        "2026-10-01T03:00:00Z | OPERATOR-CONSENT | far above the tail",
-        *(f"| filler {filler} |" for _ in range(2000)),
-        "2026-10-01T02:00:00Z | FRICTION | lane=a",
+def test_work_ledger_newest_row_is_asked_of_the_reader_node_by_its_listed_name() -> (
+    None
+):
+    """AC1 (OMN-26593): the newest-row read goes through the reader node, never a file.
+
+    The reader name is the one the overlays repository lists in
+    ``moved_readers``; the ask carries the canonical row kinds and a one hour
+    window, and the newest stamp of the answered rows wins whatever their order.
+    """
+    ledger = _FakeLedger(
+        "2026-10-01T03:00:00Z | STATUS | lane=a\n"
+        "2026-10-01T02:00:00Z | FRICTION | lane=a\n"
+        "free prose with no stamp\n"
     )
-    newest, row_type = read_ledger_newest_canonical_row(ledger, tail_bytes=4096)
-    assert newest == datetime(2026, 10, 1, 2, 0, tzinfo=UTC)
-    assert row_type == "FRICTION"
+    newest, row_type = read_ledger_newest_canonical_row(ledger, window_hours=1)
+
+    assert newest == datetime(2026, 10, 1, 3, 0, tzinfo=UTC)
+    assert row_type == "STATUS"
+    assert ledger.asked == [
+        {
+            "reader": "lab-alarm-projection",
+            "kinds": WORK_LEDGER_CANONICAL_ROW_TYPES,
+            "window_hours": 1,
+            "term": None,
+        }
+    ]
+
+
+@pytest.mark.unit
+def test_work_ledger_reader_command_carries_the_reader_flags_and_refuses_a_non_zero_exit() -> (
+    None
+):
+    seen: list[list[str]] = []
+
+    def answering(
+        argv: Sequence[str], *, timeout: float, stdin: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        seen.append(list(argv))
+        return _completed("2026-10-01T03:00:00Z | STATUS | lane=a\n\n")
+
+    read = make_ledger_rows_reader(
+        ("py", "-m", "node"), timeout_seconds=1, runner=answering
+    )
+    rows = read(
+        reader="lab-alarm-consent",
+        kinds=("RULING", "OPERATOR-CONSENT"),
+        window_hours=720,
+        term="lab alarm",
+    )
+    assert rows == ("2026-10-01T03:00:00Z | STATUS | lane=a",)
+    assert seen == [
+        [
+            "py",
+            "-m",
+            "node",
+            "--reader",
+            "lab-alarm-consent",
+            "--query",
+            "rows",
+            "--window-hours",
+            "720",
+            "--kind",
+            "RULING",
+            "--kind",
+            "OPERATOR-CONSENT",
+            "--term",
+            "lab alarm",
+        ]
+    ]
+
+    def not_moved(
+        argv: Sequence[str], *, timeout: float, stdin: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        return _completed("", 3, "READER status=not-moved")
+
+    with pytest.raises(LedgerReadError, match=r"exited 3.*not-moved"):
+        make_ledger_rows_reader(("py",), timeout_seconds=1, runner=not_moved)(
+            reader="lab-alarm-projection", kinds=(), window_hours=1
+        )
+
+    def hung(
+        argv: Sequence[str], *, timeout: float, stdin: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(argv, timeout)
+
+    with pytest.raises(LedgerReadError, match="TimeoutExpired"):
+        make_ledger_rows_reader(("py",), timeout_seconds=1, runner=hung)(
+            reader="lab-alarm-projection", kinds=(), window_hours=1
+        )
 
 
 @pytest.mark.unit
@@ -2075,10 +2231,25 @@ _CONSENT = (
 @pytest.mark.unit
 def test_no_consent_row_means_posting_is_disabled(tmp_path: Path) -> None:
     """AC6 falsifier: a posting path reachable with no resolvable row."""
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| 2026-09-21 | OMN-1 | CLAIM | unrelated |\n", encoding="utf-8")
-    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+    assert _consent_of(ledger, channel=CHANNEL) is None
 
+    run = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+    )
+    assert run.posting.startswith("disabled")
+    assert "no OPERATOR-CONSENT row in the last 720 hours" in run.posting
+
+
+@pytest.mark.unit
+def test_a_quiet_run_does_not_make_the_consent_read(tmp_path: Path) -> None:
+    """The consent read is a bus read of seconds; nothing to deliver means no read (OMN-26593)."""
+    ledger = _FakeLedger(_CONSENT)
     run = _run(
         tmp_path,
         result=EnumLabPassResult.PASS,
@@ -2086,21 +2257,30 @@ def test_no_consent_row_means_posting_is_disabled(tmp_path: Path) -> None:
         lag=1,
         ledger=ledger,
     )
-    assert run.posting.startswith("disabled")
+    assert run.posting == "nothing new to deliver this run; consent not read"
+    assert [ask["reader"] for ask in ledger.asked] == ["lab-alarm-projection"]
 
 
 @pytest.mark.unit
-def test_a_consent_row_naming_the_channel_resolves_by_file_and_line(
+def test_a_consent_row_naming_the_channel_resolves_and_cites_its_own_stamp(
     tmp_path: Path,
 ) -> None:
     """The positive control, without which the refusal proves nothing."""
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(f"| header |\n{_CONSENT}\n", encoding="utf-8")
 
-    consent = resolve_posting_consent(ledger, channel=CHANNEL)
+    consent = _consent_of(ledger, channel=CHANNEL)
     assert consent is not None
-    assert consent.line == 2
-    assert consent.citation.endswith(":2")
+    assert consent.row_stamp == _CONSENT.split(" | ", 1)[0]
+    assert consent.citation == f"work ledger row {consent.row_stamp}"
+    assert ledger.asked == [
+        {
+            "reader": "lab-alarm-consent",
+            "kinds": ("OPERATOR-CONSENT", "RULING"),
+            "window_hours": 720,
+            "term": "lab alarm",
+        }
+    ]
 
 
 @pytest.mark.unit
@@ -2112,20 +2292,20 @@ def test_a_consent_row_missing_its_out_of_scope_list_does_not_resolve(
     A row missing it looks identical to a valid one to the next reader, which
     is exactly why it cannot be allowed to resolve.
     """
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(
         '2026-09-21T00:00Z | OPERATOR-CONSENT | lane=x | "go" | '
         "APPROVED SCOPE: post to #omninode-notifications | OUT OF SCOPE: |\n",
         encoding="utf-8",
     )
-    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+    assert _consent_of(ledger, channel=CHANNEL) is None
 
 
 @pytest.mark.unit
 def test_a_consent_row_for_another_channel_does_not_resolve(tmp_path: Path) -> None:
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(_CONSENT + "\n", encoding="utf-8")
-    assert resolve_posting_consent(ledger, channel="#some-other-channel") is None
+    assert _consent_of(ledger, channel="#some-other-channel") is None
 
 
 @pytest.mark.unit
@@ -2133,11 +2313,11 @@ def test_a_consent_row_for_another_channel_does_not_resolve(tmp_path: Path) -> N
 def test_consent_for_a_channel_with_the_same_prefix_does_not_resolve(
     tmp_path: Path, suffix: str
 ) -> None:
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(
         _CONSENT.replace(CHANNEL, CHANNEL + suffix) + "\n", encoding="utf-8"
     )
-    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+    assert _consent_of(ledger, channel=CHANNEL) is None
 
 
 @pytest.mark.unit
@@ -2146,7 +2326,7 @@ def test_consent_for_landing_alerts_does_not_authorize_lab_alarms(
 ) -> None:
     from scripts import lab_alarm
 
-    ledger = tmp_path / "ROLLING_WORK_LEDGER.md"
+    ledger = _FakeLedger()
     ledger.write_text(
         '2026-09-27T12:38:41Z | OPERATOR-CONSENT | approved_by=operator | "yes" | '
         "APPROVED SCOPE: the landing controller posts failure alerts to "
@@ -2172,17 +2352,12 @@ def test_consent_for_landing_alerts_does_not_authorize_lab_alarms(
 
 
 @pytest.mark.unit
-def test_archived_alarm_consent_delivers_once_and_cites_the_archive(
+def test_alarm_consent_delivers_once_and_cites_the_row_stamp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from scripts import lab_alarm
 
-    ledger = tmp_path / "ROLLING_WORK_LEDGER.md"
-    ledger.write_text("# current ledger\n", encoding="utf-8")
-    archive = tmp_path / "archive"
-    archive.mkdir()
-    rolled = archive / "ROLLING_WORK_LEDGER_2026-09-24-split.md"
-    rolled.write_text("# archived ledger\n" + _CONSENT + "\n", encoding="utf-8")
+    ledger = _FakeLedger("# current ledger\n" + _CONSENT + "\n")
     posts: list[tuple[str, str]] = []
     monkeypatch.setattr(
         lab_alarm,
@@ -2204,37 +2379,54 @@ def test_archived_alarm_consent_delivers_once_and_cites_the_archive(
         lag=1,
         ledger=ledger,
     )
-    assert posts == [(SHA, f"{rolled}:2")]
+    stamp = _CONSENT.split(" | ", 1)[0]
+    assert posts == [(SHA, f"work ledger row {stamp}")]
     assert "delivered 1/1" in first.posting
     assert "nothing new to deliver" in repeat.posting
-    assert resolve_posting_consent(ledger, channel="#some-other-channel") is None
+    assert _consent_of(ledger, channel="#some-other-channel") is None
 
-    # Consent is re-read on every run, so removing the archived grant disables it.
-    rolled.write_text("# grant removed\n", encoding="utf-8")
-    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
-
-
-@pytest.mark.unit
-def test_archive_consent_requires_a_readable_live_ledger(tmp_path: Path) -> None:
-    archive = tmp_path / "archive"
-    archive.mkdir()
-    (archive / "ROLLING_WORK_LEDGER_2026-09-24-split.md").write_text(
-        _CONSENT + "\n", encoding="utf-8"
-    )
-    assert (
-        resolve_posting_consent(tmp_path / "ROLLING_WORK_LEDGER.md", channel=CHANNEL)
-        is None
-    )
+    # Consent is re-read on every delivering run, so removing the grant disables it.
+    ledger.write_text("# grant removed\n")
+    assert _consent_of(ledger, channel=CHANNEL) is None
 
 
 @pytest.mark.unit
-def test_consent_in_an_unrelated_archive_file_is_ignored(tmp_path: Path) -> None:
-    ledger = tmp_path / "ROLLING_WORK_LEDGER.md"
-    ledger.write_text("# current ledger\n", encoding="utf-8")
-    archive = tmp_path / "archive"
-    archive.mkdir()
-    (archive / "notes.md").write_text(_CONSENT + "\n", encoding="utf-8")
-    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+def test_unanswered_consent_read_disables_delivery_and_says_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC2 (OMN-26593): a reader that does not answer is no grant, never the file.
+
+    The ledger row of the raise is still appended (the appender is a separate
+    path), the channel gets nothing, and the posting line names the refusal.
+    """
+    from scripts import lab_alarm
+
+    class _ConsentUnanswered(_FakeLedger):
+        def __call__(self, **ask: Any) -> tuple[str, ...]:
+            if ask["reader"] == "lab-alarm-consent":
+                raise LedgerReadError(
+                    "reader lab-alarm-consent exited 3: status=not-moved"
+                )
+            return super().__call__(**ask)
+
+    sent: list[str] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda *a, **k: sent.append("sent") or "ts"
+    )
+    rows: list[str] = []
+    ledger = _ConsentUnanswered(_CONSENT)
+    run = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+        appender=_recording_appender(rows),
+    )
+    assert sent == []
+    assert len(rows) == 1
+    assert run.posting.startswith("disabled: the work-ledger reader did not answer")
+    assert "not-moved" in run.posting
 
 
 @pytest.mark.unit
@@ -2242,82 +2434,55 @@ def test_consent_in_an_unrelated_archive_file_is_ignored(tmp_path: Path) -> None
 def test_a_message_quoting_alarm_consent_is_not_authority(
     tmp_path: Path, row_type: str
 ) -> None:
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(
         f"2026-09-21T00:00Z | {row_type} | lane=x | quoted: " + _CONSENT + "\n",
         encoding="utf-8",
     )
-    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+    assert _consent_of(ledger, channel=CHANNEL) is None
 
 
 @pytest.mark.unit
 def test_ruling_consent_for_another_purpose_is_not_alarm_authority(
     tmp_path: Path,
 ) -> None:
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(
         "2026-09-21T00:00Z | RULING | OPERATOR-CONSENT Slack channel | "
         "landing controller may post to #omninode-notifications; "
         "no new Slack app | approved_by=operator\n",
         encoding="utf-8",
     )
-    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+    assert _consent_of(ledger, channel=CHANNEL) is None
 
 
 @pytest.mark.unit
 def test_lab_alarms_only_in_the_excluded_scope_do_not_resolve(tmp_path: Path) -> None:
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(
         "2026-09-21T00:00Z | OPERATOR-CONSENT | approved_by=operator | "
         "APPROVED SCOPE: landing alerts to #omninode-notifications | "
         "OUT OF SCOPE: lab alarms\n",
         encoding="utf-8",
     )
-    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+    assert _consent_of(ledger, channel=CHANNEL) is None
 
 
 @pytest.mark.unit
 def test_labelled_alarm_consent_without_an_approver_does_not_resolve(
     tmp_path: Path,
 ) -> None:
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(
         _CONSENT.replace("approved_by=operator | ", "") + "\n", encoding="utf-8"
     )
-    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+    assert _consent_of(ledger, channel=CHANNEL) is None
 
 
 @pytest.mark.unit
-def test_an_unreadable_ledger_does_not_resolve(tmp_path: Path) -> None:
-    """A grant that cannot be read is not a grant."""
-    assert resolve_posting_consent(tmp_path / "absent.md", channel=CHANNEL) is None
-
-
-@pytest.mark.unit
-def test_the_live_ledger_authorizes_the_consented_channel() -> None:
-    """The real grant, resolved from the real ledger rather than asserted.
-
-    An operator ruling on 2026-09-21 authorized this alarm to post to
-    #omninode-notifications using the existing lab bot token by reference.
-    This reads that row back through the same resolver the alarm uses, so the
-    authorization is proven by the mechanism and not by a dispatch message --
-    no agent message is consent.
-    """
-    omni_home = os.environ.get("OMNI_HOME")
-    if not omni_home:
-        pytest.skip("OMNI_HOME is unset, so the shared ledger cannot be located")
-    ledger = Path(omni_home) / "docs" / "tracking" / "ROLLING_WORK_LEDGER.md"
-    if not ledger.is_file():
-        pytest.skip("the shared registry ledger is not present on this host")
-
-    consent = resolve_posting_consent(ledger, channel=CHANNEL)
-    assert consent is not None, "the operator consent row no longer resolves"
-    assert consent.approved_by.startswith("operator")
-    assert consent.channel == CHANNEL
-
-    # And the control that makes the line above mean something: the same live
-    # ledger authorizes NO other channel.
-    assert resolve_posting_consent(ledger, channel="#not-approved-anywhere") is None
+def test_no_rows_do_not_resolve() -> None:
+    """A grant that is not among the rows read is not a grant."""
+    assert resolve_posting_consent((), channel=CHANNEL) is None
 
 
 @pytest.mark.unit
@@ -2329,7 +2494,7 @@ def test_a_ruling_shaped_consent_row_resolves(tmp_path: Path) -> None:
     resolver requires the substance, and the refusal controls below are what
     keep that from being a rubber stamp.
     """
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(
         "2026-09-21T14:46:45Z | RULING | lane=foreground | OPERATOR-CONSENT Slack "
         "channel | OMN-18867 durable lab alarm may post to #omninode-notifications "
@@ -2338,10 +2503,10 @@ def test_a_ruling_shaped_consent_row_resolves(tmp_path: Path) -> None:
         "('channel approved')\n",
         encoding="utf-8",
     )
-    consent = resolve_posting_consent(ledger, channel=CHANNEL)
+    consent = _consent_of(ledger, channel=CHANNEL)
     assert consent is not None
     assert consent.approved_by == "operator"
-    assert consent.line == 1
+    assert consent.row_stamp == "2026-09-21T14:46:45Z"
 
 
 @pytest.mark.unit
@@ -2374,9 +2539,9 @@ def test_a_row_missing_any_substantive_fact_refuses(
     tmp_path: Path, row: str, why: str
 ) -> None:
     """The controls that keep the widened resolver from being a rubber stamp."""
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(row + "\n", encoding="utf-8")
-    assert resolve_posting_consent(ledger, channel=CHANNEL) is None, why
+    assert _consent_of(ledger, channel=CHANNEL) is None, why
 
 
 @pytest.mark.unit
@@ -2390,7 +2555,7 @@ def test_nothing_is_sent_without_a_resolvable_consent_row(
     monkeypatch.setattr(
         lab_alarm, "post_alarm", lambda *a, **k: sent.append("sent") or "ts"
     )
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| nothing authorizing here |\n", encoding="utf-8")
 
     run = _run(
@@ -2424,7 +2589,7 @@ def test_the_token_never_reaches_the_run_record_or_the_rendering(
     assert lab_alarm.read_secret(env_file, lab_alarm.SLACK_TOKEN_VAR) == secret
 
     monkeypatch.setattr(lab_alarm, "post_alarm", lambda *a, **k: "1758470000.001")
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(_CONSENT + "\n", encoding="utf-8")
 
     run = _run(
@@ -2454,7 +2619,7 @@ def test_a_failed_delivery_is_recorded_rather_than_swallowed(
         )
 
     monkeypatch.setattr(lab_alarm, "post_alarm", boom)
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(_CONSENT + "\n", encoding="utf-8")
 
     run = _run(
@@ -2486,7 +2651,7 @@ def test_a_repeat_of_the_same_condition_delivers_nothing(
         "post_alarm",
         lambda alarm, **k: (posts.append(alarm.subject), "ts")[1],
     )
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text(_CONSENT + "\n", encoding="utf-8")
 
     _run(
@@ -2554,7 +2719,7 @@ def _assert_row_satisfies_the_friction_guard(row: str) -> None:
 @pytest.mark.unit
 def test_lab_alarm_appends_ledger_row_once_per_raise(tmp_path: Path) -> None:
     """AC1: one row for a raise, none for a re-raise inside the dedupe window."""
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| none |\n", encoding="utf-8")
     rows: list[str] = []
     appender = _recording_appender(rows)
@@ -2640,7 +2805,7 @@ def test_lab_alarm_appends_ledger_row_without_a_consented_channel(
     tmp_path: Path,
 ) -> None:
     """The ledger row does not wait on Slack consent, which is absent here."""
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| no consent row |\n", encoding="utf-8")
     rows: list[str] = []
     run = _run(
@@ -2659,7 +2824,7 @@ def test_lab_alarm_appends_ledger_row_without_a_consented_channel(
 def test_lab_alarm_appends_ledger_row_one_per_alarm_not_per_run(
     tmp_path: Path,
 ) -> None:
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| none |\n", encoding="utf-8")
     rows: list[str] = []
     run = _run(
@@ -2731,7 +2896,7 @@ def test_lab_alarm_failed_ledger_append_is_loud_and_retried(tmp_path: Path) -> N
     """An alarm that believes it recorded and did not is this ticket's defect."""
     from scripts.lab_alarm import EXIT_ALARM, exit_code
 
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| none |\n", encoding="utf-8")
     rows: list[str] = []
 
@@ -2778,46 +2943,66 @@ def test_lab_alarm_failed_ledger_append_is_loud_and_retried(tmp_path: Path) -> N
 
 
 @pytest.mark.unit
-def test_lab_alarm_ledger_appender_runs_the_ledger_tool_without_a_shell(
-    tmp_path: Path,
-) -> None:
-    calls: list[tuple[list[str], float]] = []
+def test_lab_alarm_ledger_appender_puts_the_row_on_stdin_and_names_no_ledger_file() -> (
+    None
+):
+    """AC1 (OMN-26593): ``append-rows -`` with the row on stdin, no ledger path in argv."""
+    calls: list[tuple[list[str], float, str]] = []
 
     def runner(
-        argv: Sequence[str], *, timeout: float
+        argv: Sequence[str], *, timeout: float, stdin: str
     ) -> subprocess.CompletedProcess[str]:
-        calls.append((list(argv), timeout))
+        calls.append((list(argv), timeout, stdin))
         return _completed("")
 
-    append = make_ledger_appender(
-        ("onex-ledger-bin", "--flag"), tmp_path / "ledger.md", runner=runner
-    )
-    append("2026-10-09T10:25:05Z | FRICTION | lane=lab-alarm")
+    append = make_ledger_appender(("onex-ledger-bin", "--flag"), runner=runner)
+    row = "2026-10-09T10:25:05Z | FRICTION | lane=lab-alarm | a ; $(b) 'c'"
+    append(row)
     assert calls[0][0] == [
         "onex-ledger-bin",
         "--flag",
-        str(tmp_path / "ledger.md"),
+        "append-rows",
+        "-",
         "--timeout",
         "60s",
-        "--append",
-        "2026-10-09T10:25:05Z | FRICTION | lane=lab-alarm",
     ]
+    assert calls[0][2] == row + "\n"
 
     def refusing(
-        argv: Sequence[str], *, timeout: float
+        argv: Sequence[str], *, timeout: float, stdin: str
     ) -> subprocess.CompletedProcess[str]:
         return _completed("", 2, "refused: FRICTION row carries no cost")
 
     with pytest.raises(LedgerAppendError, match=r"exited 2.*no cost"):
-        make_ledger_appender(("x",), tmp_path / "ledger.md", runner=refusing)("row")
+        make_ledger_appender(("x",), runner=refusing)("row")
 
     def hung(
-        argv: Sequence[str], *, timeout: float
+        argv: Sequence[str], *, timeout: float, stdin: str
     ) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(list(argv), timeout)
 
     with pytest.raises(LedgerAppendError, match="timed out"):
-        make_ledger_appender(("x",), tmp_path / "ledger.md", runner=hung)("row")
+        make_ledger_appender(("x",), runner=hung)("row")
+
+
+@pytest.mark.unit
+def test_lab_alarm_ledger_appender_default_runner_feeds_the_row_to_the_child(
+    tmp_path: Path,
+) -> None:
+    """The real subprocess path: the child reads the row from stdin, with no shell."""
+    sink = tmp_path / "received.txt"
+    script = tmp_path / "fake_onex_ledger.py"
+    script.write_text(
+        "import sys, pathlib\n"
+        f"pathlib.Path({str(sink)!r}).write_text("
+        "' '.join(sys.argv[1:]) + '|' + sys.stdin.read())\n",
+        encoding="utf-8",
+    )
+    make_ledger_appender((sys.executable, str(script)))("one | row ; $(x)")
+    assert (
+        sink.read_text(encoding="utf-8")
+        == "append-rows - --timeout 60s|one | row ; $(x)\n"
+    )
 
 
 @pytest.mark.unit
@@ -2827,6 +3012,26 @@ def test_lab_alarm_shipped_config_declares_the_ledger_append(tmp_path: Path) -> 
     assert isinstance(command, list) and command[-1] == "onex-ledger"
     assert re.fullmatch(r"OMN-\d+", payload["ledger_row_ticket"])
     assert int(payload["ledger_dedupe_window_minutes"]) > 0
+
+
+@pytest.mark.unit
+def test_lab_alarm_shipped_config_declares_the_ledger_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ONEX_INFRA_HOST", "lab.invalid")
+    monkeypatch.setenv("ONEX_RUNTIME_SSH_HOST", "user@lab.invalid")
+    monkeypatch.setenv("OMNI_HOME", "/nonexistent")
+    config = ModelAlarmConfig.load(CONFIG)
+    assert config.ledger_reader_command[-1] == (
+        "omnimarket.nodes.node_work_ledger_reader_effect"
+    )
+    assert config.ledger_projection_window_hours == 1
+    assert config.ledger_consent_window_hours == 720
+    payload = json.loads(CONFIG.read_text(encoding="utf-8"))
+    assert any(
+        k.startswith("_comment_") and "ledger_reader_command" in v
+        for k, v in payload.items()
+    )
 
 
 #: The crash window of 2026-10-09, replayed. The hourly timer fires at :25, so
@@ -2845,7 +3050,7 @@ _CRASH_WINDOW_TICKS: tuple[tuple[str, str], ...] = (
 @pytest.mark.unit
 def test_crash_loop_reaches_ledger_replay(tmp_path: Path) -> None:
     """AC2: replaying 10:16Z to 10:40Z puts the crash loop in the ledger before 10:30Z."""
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| none |\n", encoding="utf-8")
     rows: list[str] = []
     appender = _recording_appender(rows)
@@ -2929,16 +3134,13 @@ def _replay_tick(
             return _completed("2026-10-01 03:00:00+00\n")
         return docker(argv, timeout=timeout)
 
-    fresh_row = "2026-10-01T03:00:00Z | STATUS | lane=fixture | projection fresh"
-    if fresh_row not in ledger.read_text(encoding="utf-8"):
-        with ledger.open("a", encoding="utf-8") as handle:
-            handle.write(fresh_row + "\n")
+    ledger.ensure_row("2026-10-01T03:00:00Z | STATUS | lane=fixture | projection fresh")
     if not (tmp_path / "lane-census.json").exists():
         _lane_drift_fixture(tmp_path)
     return run_once(
         config,
         state_dir=tmp_path,
-        ledger_path=ledger,
+        ledger_reader=ledger,
         sha=SHA,
         receipt_reader=lambda repo, lane, sha: _receipt(
             EnumLabPassResult.PASS, ok=True
@@ -3147,6 +3349,31 @@ def test_the_launch_agent_is_declared_hourly_and_not_daily() -> None:
 
 
 @pytest.mark.unit
+def test_the_alarm_runs_without_a_ledger_argument_and_refuses_one() -> None:
+    """AC1 (OMN-26593): the alarm takes no ledger argument at all."""
+    from scripts.lab_alarm import build_parser
+
+    args = build_parser().parse_args(["--config", "c.json", "--state-dir", "s"])
+    assert not hasattr(args, "ledger")
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["--config", "c.json", "--state-dir", "s", "--ledger", "l.md"]
+        )
+
+
+@pytest.mark.unit
+def test_the_launch_agent_hands_no_ledger_file_argument() -> None:
+    """AC1 (OMN-26593): neither the launch agent nor its installer hands the alarm a ledger path."""
+    plist = PLIST_TEMPLATE.read_text(encoding="utf-8")
+    installer = INSTALLER.read_text(encoding="utf-8")
+    assert "--ledger" not in plist
+    assert "--ledger" not in installer
+    argv = plist.split("<key>ProgramArguments</key>", 1)[1].split("</array>", 1)[0]
+    assert "docs/tracking" not in argv
+    assert "docs/tracking" not in installer
+
+
+@pytest.mark.unit
 def test_the_installer_prints_both_halves_of_the_omn17173_readback() -> None:
     """A loaded-but-bootout'd job looks installed and does nothing.
 
@@ -3182,6 +3409,8 @@ def _render_lab_alarm_plist(
         "ONEX_INFRA_HOST": "lab.fixture.invalid",
         "ONEX_RUNTIME_SSH_HOST": "fixture-user@lab.fixture.invalid",
         "ONEX_WORKSPACE_CONFIG_ROOT": str(tmp_path / "config-root"),
+        "ONEX_SKILL_OVERLAY_ROOTS": str(tmp_path / "overlays-root"),
+        "LAB_ALARM_LEDGER_RECORD": str(tmp_path / "record.md"),
     }
     if drop_env is not None:
         del env[drop_env]
@@ -3219,12 +3448,24 @@ def test_a_render_carries_the_lab_host_and_ssh_target_from_the_installing_env(
     # OMN-20934: the config names the lane manifest under this root.
     assert str(tmp_path / "config-root") in rendered
     assert "@ONEX_WORKSPACE_CONFIG_ROOT@" not in rendered
+    # OMN-26593: the work-ledger reader finds its overlay under this root.
+    assert str(tmp_path / "overlays-root") in rendered
+    assert "@ONEX_SKILL_OVERLAY_ROOTS@" not in rendered
+    # The append's ledger of record rides in the unit's environment, never as an argument.
+    assert str(tmp_path / "record.md") in rendered
+    assert "@LAB_ALARM_LEDGER_RECORD@" not in rendered
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "missing",
-    ["ONEX_INFRA_HOST", "ONEX_RUNTIME_SSH_HOST", "ONEX_WORKSPACE_CONFIG_ROOT"],
+    [
+        "ONEX_INFRA_HOST",
+        "ONEX_RUNTIME_SSH_HOST",
+        "ONEX_WORKSPACE_CONFIG_ROOT",
+        "ONEX_SKILL_OVERLAY_ROOTS",
+        "LAB_ALARM_LEDGER_RECORD",
+    ],
 )
 def test_the_installer_refuses_rather_than_render_an_empty_lab_host(
     tmp_path: Path, missing: str
@@ -3319,7 +3560,7 @@ def test_the_exit_code_carries_the_verdict(tmp_path: Path) -> None:
     """
     from scripts.lab_alarm import EXIT_ALARM, EXIT_INDETERMINATE, EXIT_OK, exit_code
 
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| none |\n", encoding="utf-8")
 
     # Run 1 has no previous lag sample, so the lag condition is INDETERMINATE.
@@ -3527,7 +3768,7 @@ def test_the_chain_canary_reader_asks_for_fresh_scheduled_runs_only(
 def test_a_red_chain_canary_alarms_once_across_two_runs_and_clears(
     tmp_path: Path,
 ) -> None:
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| none |\n", encoding="utf-8")
 
     def canary_alarms(run: ModelAlarmRun) -> list[ModelAlarm]:
@@ -3562,7 +3803,7 @@ def test_a_stale_dev_tag_heartbeat_alarms_once_across_two_runs_and_clears(
     tmp_path: Path,
 ) -> None:
     """OMN-19998: the stale heartbeat is the negative control, the fresh one the positive."""
-    ledger = tmp_path / "ledger.md"
+    ledger = _FakeLedger()
     ledger.write_text("| none |\n", encoding="utf-8")
     stale_at = (datetime.now(UTC) - timedelta(hours=4)).isoformat(timespec="seconds")
 
