@@ -60,3 +60,21 @@ dod_evidence:
         check_value: docker exec omninode-runtime python -c 'from omnibase_infra.handlers.http_mount import HealthProbeAcceptor'
       - check_type: command
         check_value: bash -c 'docker exec omninode-runtime curl -s -m 5 http://localhost:8085/health | grep -q "\"status\""'
+  - id: dod-omn26316-lazy-start-serving-read
+    description: >-
+      The contract_attach readiness detail carries a lazy_start block: the front door's serving set, its count and every failed wake with its reason. A woken contract raises serving_count by one, a failed wake is listed by name, and ready is unchanged. The test fails at the merge base (StoreLazyStartDormant has no record_front_door) and passes on the branch.
+    source: manual
+    binds_ac: []
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_serving_read_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-deploy-lazy-start-serving-read
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime's /ready answer carries supplemental_readiness.contract_attach.lazy_start with a serving_count. It reads the live container, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: bash -c 'docker exec omninode-runtime curl -s -m 5 http://localhost:8085/ready | grep -q "\"serving_count\""'

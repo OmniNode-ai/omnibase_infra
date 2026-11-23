@@ -21,9 +21,15 @@ import logging
 import os
 from collections.abc import Mapping
 
-from omnibase_infra.models.lazy_start import ModelLazyStartPolicy
+from omnibase_infra.models.lazy_start import (
+    ModelLazyStartPolicy,
+    ModelLazyStartServingStatus,
+)
 from omnibase_infra.models.model_contract_hotload_lane_overlay import (
     ModelContractHotloadLaneOverlay,
+)
+from omnibase_infra.protocols.protocol_lazy_start_serving_source import (
+    ProtocolLazyStartServingSource,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -46,6 +52,7 @@ class StoreLazyStartDormant:
 
     _policy: ModelLazyStartPolicy | None = None
     _contracts: dict[str, ModelDiscoveredContract] = {}
+    _front_door: ProtocolLazyStartServingSource | None = None
     _wired: dict[str, ModelDiscoveredContract] = {}
     _provisioner: object | None = None
 
@@ -81,8 +88,29 @@ class StoreLazyStartDormant:
         return dict(cls._wired)
 
     @classmethod
+    def record_front_door(cls, front_door: ProtocolLazyStartServingSource) -> None:
+        """Keep the boot's front door so ``/ready`` can read its serving set (OMN-26316)."""
+        cls._front_door = front_door
+
+    @classmethod
+    def serving_status(cls) -> ModelLazyStartServingStatus | None:
+        """The front door's serving set and wake failures, or None before it exists."""
+        if cls._policy is None or cls._front_door is None:
+            return None
+        return cls._front_door.serving_status()
+
+    @classmethod
+    def serving_detail(cls) -> dict[str, object]:
+        """The ``lazy_start`` block of the ``/ready`` detail, or nothing (OMN-26316)."""
+        status = cls.serving_status()
+        if status is None:
+            return {}
+        return {"lazy_start": status.model_dump(mode="json")}
+
+    @classmethod
     def clear(cls) -> None:
         cls._policy = None
+        cls._front_door = None
         cls._contracts = {}
         cls._wired = {}
         cls._provisioner = None
