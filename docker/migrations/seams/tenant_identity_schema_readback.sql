@@ -104,8 +104,8 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'omninode_cl
       tenant_api_keys|column|name|text|NO|
       tenant_api_keys|column|revoked_at|timestamp with time zone|YES|
       tenant_api_keys|column|tenant_id|uuid|NO|
-      tenant_api_keys|constraint|chk_key_hash_valid|CHECK ((length(btrim(key_hash)) >= 32))
-      tenant_api_keys|constraint|chk_name_valid|CHECK (((length(btrim(name)) > 0) AND (length(name) <= 255)))
+      tenant_api_keys|constraint|chk_key_hash_valid|CHECK ((length(TRIM(BOTH FROM key_hash)) >= 32))
+      tenant_api_keys|constraint|chk_name_valid|CHECK (((length(TRIM(BOTH FROM name)) > 0) AND (length(name) <= 255)))
       tenant_api_keys|constraint|chk_revocation_consistency|CHECK ((((is_active = true) AND (revoked_at IS NULL)) OR ((is_active = false) AND (revoked_at IS NOT NULL))))
       tenant_api_keys|constraint|tenant_api_keys_key_hash_key|UNIQUE (key_hash)
       tenant_api_keys|constraint|tenant_api_keys_pkey|PRIMARY KEY (id)

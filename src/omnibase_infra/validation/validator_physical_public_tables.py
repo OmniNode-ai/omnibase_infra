@@ -10,6 +10,12 @@ OMN-26151: ``plan_tiers`` and ``plan_entitlements`` are declared at the logical
 ``platform_catalog`` schema, but the dev ``omninode_cloud`` database has no
 ``platform_catalog`` schema and holds them in ``public``. The gateway_runtime
 grants seam therefore names ``public.<name>``.
+
+OMN-26121: ``tenant_event_outbox`` is declared at the logical ``omninode_internal``
+schema, and the cloud database (the warm dev volume and the cloud migration alike)
+holds it in ``public``. The tenant identity seam therefore names
+``public.tenant_event_outbox``. The OMN-15359 set is not widened: that set also
+drives the physical grant mapping, and this table has no grant to remap.
 """
 
 from __future__ import annotations
@@ -22,15 +28,13 @@ PLATFORM_CATALOG_TABLES_PHYSICALLY_IN_PUBLIC: frozenset[str] = frozenset(
     {"plan_entitlements", "plan_tiers"}
 )
 
-# OMN-26121: tenant_event_outbox is declared at the logical ``omninode_internal``
-# schema but the tenant identity seam creates it in ``public`` on omninode_cloud.
-INTERNAL_SEAM_TABLES_PHYSICALLY_IN_PUBLIC: frozenset[str] = frozenset(
+INTERNAL_CLOUD_TABLES_PHYSICALLY_IN_PUBLIC: frozenset[str] = frozenset(
     {"tenant_event_outbox"}
 )
 
 PHYSICALLY_PUBLIC_TABLES: dict[str, frozenset[str]] = {
     "omninode_internal": INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359.union(
-        INTERNAL_SEAM_TABLES_PHYSICALLY_IN_PUBLIC
+        INTERNAL_CLOUD_TABLES_PHYSICALLY_IN_PUBLIC
     ),
     "platform_catalog": PLATFORM_CATALOG_TABLES_PHYSICALLY_IN_PUBLIC,
 }

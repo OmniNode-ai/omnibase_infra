@@ -2,7 +2,9 @@ schema_version: 1.0.0
 ticket_id: OMN-26121
 title: A stability roll flips its broker to SASL before it recreates a client, so the tenant-projection writer stops crash-looping on IllegalSaslStateError
 summary: >-
-  Agent jobs d1d52aac-9cf9-4307-b3dc-c0f8499dc0a0 and 53c37071-39e5-4b3c-a1b2-5dc3c5cc028b failed in the runtime phase with "stability lane writer tenant-projection-writer is not stable after the recreate: status=running health=starting restarts=1". The recreated writer carries KAFKA_SECURITY_PROTOCOL SASL_PLAINTEXT (the stability compose overlay) and logs aiokafka IllegalSaslStateError against redpanda:9092, because the stability broker holds enable_sasl=false, no SCRAM user and no superusers, and the overlay's redpanda-scram-user and redpanda-sasl-enable one-shots were never started: the roll recreates clients with up -d --no-deps, which bypasses their depends_on chain, and the agent's control-plane one-shot list names only redpanda-partition-cap. The roll step handed to the runtime up now runs the lane's declared SASL one-shots in the overlay's order, each to exit 0, before it recreates a writer; a one-shot that does not exit 0 fails the roll with no writer recreated, and a lane whose compose declares neither starts nothing. The step lives in runtime_cost_estimator_build.py, so the baselined executor gains no code line. The C15 chain-canary probe (run 45039982224) and the C16 receipt-identity probe (run 45039078949) submit to the stability gateway and read 503 "authentication is temporarily unavailable". The stability omninode_cloud database holds 0 tables, so the gateway has no identity tables to resolve a key against. T14 of the reviewed runtime tenant and key plan is built here as seam files under docker/migrations/seams/ (tenant_identity_schema.sql creates the eight tables only where absent and never alters one; tenant_identity_schema_readback.sql compares every column, constraint and index with the declared set and raises on any difference). A new entry seam, tenant_identity_gateway_lane.sql, included first by gateway_runtime_grants.sql (which the runner already applies, outside slots), runs them only where the rendered forward-migration carries ONEX_MIGRATION_GATEWAY_LANE; the runner is a baselined file and gains no code line. That indicator and tenant_api_keys_expiry.sql are T6's minimum, carried by this change because T6 is not on dev; no other T6 item is included. The stability and dev lane compose files set the indicator; the base compose file, the catalog and the collaborator lane never do.
+  Agent jobs d1d52aac-9cf9-4307-b3dc-c0f8499dc0a0 and 53c37071-39e5-4b3c-a1b2-5dc3c5cc028b failed in the runtime phase with "stability lane writer tenant-projection-writer is not stable after the recreate: status=running health=starting restarts=1". The recreated writer carries KAFKA_SECURITY_PROTOCOL SASL_PLAINTEXT (the stability compose overlay) and logs aiokafka IllegalSaslStateError against redpanda:9092, because the stability broker holds enable_sasl=false, no SCRAM user and no superusers, and the overlay's redpanda-scram-user and redpanda-sasl-enable one-shots were never started: the roll recreates clients with up -d --no-deps, which bypasses their depends_on chain, and the agent's control-plane one-shot list names only redpanda-partition-cap. The roll step handed to the runtime up now runs the lane's declared SASL one-shots in the overlay's order, each to exit 0, before it recreates a writer; a one-shot that does not exit 0 fails the roll with no writer recreated, and a lane whose compose declares neither starts nothing. The step lives in runtime_cost_estimator_build.py, so the baselined executor gains no code line.
+
+  The C15 chain-canary probe (run 45039982224) and the C16 receipt-identity probe (run 45039078949) submit to the stability gateway and read 503 "authentication is temporarily unavailable". The stability omninode_cloud database holds 0 tables, so the gateway has no identity tables to resolve a key against. T14 of the reviewed runtime tenant and key plan is built here as seam files under docker/migrations/seams/ (tenant_identity_schema.sql creates the eight tables only where absent and never alters one; tenant_identity_schema_readback.sql compares every column, constraint and index with the declared set and raises on any difference). A new entry seam, tenant_identity_gateway_lane.sql, included first by gateway_runtime_grants.sql (which the runner already applies, outside slots), runs them only where the rendered forward-migration carries ONEX_MIGRATION_GATEWAY_LANE; the runner is a baselined file and gains no code line. That indicator and tenant_api_keys_expiry.sql are T6's minimum, carried by this change because T6 is not on dev; no other T6 item is included. The stability and dev lane compose files set the indicator; the base compose file, the catalog and the collaborator lane never do.
 is_seam_ticket: true
 interface_change: false
 interfaces_touched: []
@@ -25,6 +27,17 @@ requirements:
         statement: "AC5: the roll runs the principal one-shot, then the flip one-shot, then recreates the writers, and starts no one-shot on a lane whose compose declares none -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_broker_sasl_flip_omn26121.py -k 'flipped or declares_no' -q --no-cov` exits non-zero"
       - id: AC6
         statement: "AC6: a one-shot that does not exit 0 fails the roll and no writer is recreated -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_broker_sasl_flip_omn26121.py -k 'does_not_exit or failed_principal' -q --no-cov` exits non-zero"
+  - id: req-omn26121-identity-schema-seam
+    statement: On a lane whose forward-migration carries ONEX_MIGRATION_GATEWAY_LANE (dev, stability_test) the grant seam's entry creates the missing tenant identity tables, adds tenant_api_keys.expires_at and reads the whole schema back; on every other lane it skips by name.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the create step creates each of the eight tables only when it is absent, never alters, drops or deletes, and leaves expires_at to the expiry seam -- falsifier: `uv run pytest tests/unit/test_tenant_identity_schema_seam.py -k 'create_step' -q --no-cov` exits non-zero"
+      - id: AC2
+        statement: "AC2: the readback declares every column, constraint and index of the eight tables (expires_at and its index included) and raises on a difference -- falsifier: `uv run pytest tests/unit/test_tenant_identity_schema_seam.py -k 'readback' -q --no-cov` exits non-zero"
+      - id: AC3
+        statement: "AC3: the entry seam runs create, then expiry, then readback for dev and stability_test only, before the gateway grants, skips by name when the indicator is unset or unknown, and the runner gains no code line -- falsifier: `uv run pytest tests/unit/test_tenant_identity_schema_seam.py -k 'runner or entry or grants_seam' -q --no-cov` exits non-zero"
+      - id: AC4
+        statement: "AC4: the dev and stability compose files carry the indicator with their lane's value and no other compose file and no catalog file carries it -- falsifier: `uv run pytest tests/unit/test_tenant_identity_schema_seam.py -k 'indicator or carries' -q --no-cov` exits non-zero"
 evidence_requirements:
   - kind: tests
     description: The seam, runner and compose assertions in the new test file.
@@ -32,6 +45,9 @@ evidence_requirements:
   - kind: tests
     description: The roll order and refusal assertions in the new test file, and the neighbouring roll tests.
     command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_broker_sasl_flip_omn26121.py scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q --no-cov
+  - kind: tests
+    description: The seam, runner and compose assertions in the new test file.
+    command: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -112,3 +128,44 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/docker/test_broker_sasl_converge_omn26121.py -q --no-cov -n 0
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26121-ac1-create-step
+    description: The create step is gated per table, alters nothing and omits expires_at.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -k create_step -q --no-cov
+        cwd: .
+  - id: dod-omn26121-ac2-readback
+    description: The readback declares the final catalog, expires_at included, and raises on any difference.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -k readback -q --no-cov
+        cwd: .
+  - id: dod-omn26121-ac3-runner-case
+    description: The entry seam order, placement before the grants and fail-closed skips, and the runner's unchanged code lines.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -k "runner or entry or grants_seam" -q --no-cov
+        cwd: .
+  - id: dod-omn26121-ac4-indicator-placement
+    description: The indicator is on the dev and stability compose files and nowhere else.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -k "indicator or carries" -q --no-cov
+        cwd: .
+  - id: dod-omn26121-deploy
+    description: Hermetic probe of the landing branch, run by the hosted runner. It reads the readback seam from the checked-out tree and the PR branch and requires the expires_at row of the declared catalog; the file does not exist on the merge base, so the command exits non-zero before this change.
+    source: manual
+    binds_ac: [AC2, AC3]
+    checks:
+      - check_type: command
+        check_value: >-
+          grep -F 'tenant_api_keys|column|expires_at' docker/migrations/seams/tenant_identity_schema_readback.sql > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/seams/tenant_identity_schema_readback.sql?ref=omn-26121-tenant-identity-schema-seam' --jq .content | base64 -d | grep 'tenant_api_keys|column|expires_at' > /dev/null
+        cwd: .
