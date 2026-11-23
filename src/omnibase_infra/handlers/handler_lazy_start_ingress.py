@@ -105,6 +105,7 @@ class HandlerLazyStartIngress:
                 policy,
                 StoreLazyStartDormant.wired_contracts(),
             )
+            StoreLazyStartDormant.record_front_door(self._front_door)
             if not install_publish_gate(self._bus, self._front_door.wake_for_topic):
                 logger.warning(
                     "Lazy start ingress: this bus has no publish, so a message to a "
