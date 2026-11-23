@@ -40,7 +40,7 @@ dod_evidence:
       - AC2
     checks:
       - check_type: command
-        check_value: test -z "$(git diff --name-only origin/dev HEAD -- '*handler_ticket_contract_prerequisite.py' '*test_repository_prose_removed_omn17427.py')"
+        check_value: test -z "$(git diff --name-only origin/dev HEAD -- '*handler_ticket_contract_prerequisite.py' '*test_repository_prose_removed_omn17427.py')" && grep -q release_cut_gate_needs_changelog src/omnibase_infra/handlers/handler_release_notes_apply.py
         cwd: .
       - check_type: test_passes
         check_value: uv run pytest tests/unit/nodes/node_release_notes_apply_effect/test_release_notes_no_changelog_omn25958.py tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py tests/unit/nodes/node_release_notes_apply_effect/test_release_cut_changelog_omn26500.py -q -p no:randomly -k "not recorded_cut and not node_reports and not second_cut"
