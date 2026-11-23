@@ -128,6 +128,31 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn19812-ac2-broker-login
+    description: "The stability broker requires SASL (OMN-26121), so the probe's rpk calls run as the probe's own SCRAM login stability-c28-probe: the workflow reads its password by name from the dev secret store into a mode-600 file, the node hands it to docker exec --env-file, and a login that cannot be read grades INDETERMINATE before any rpk call. The tests fail at the merge base (21 of 22 fail there) and pass at this head; the grading tests (-k red) stay green."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_broker_login_omn19812.py tests/ci/test_c28_broker_login_workflow_omn19812.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c28_consumer_flow_probe.py -q --no-cov -k red
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+      - AC4
+  - id: dod-omn19812-deploy-broker-login-shipped
+    description: The C28 producer runs node_board_probe_effect from the dev checkout on the lab runner, so the deployed surface is the source at the merged head; the probe's rpk wrapper carries the env-file login and the workflow carries the secret-store read at that head.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_board_probe_effect/handlers/_consumer_flow_lane.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF -- '"--env-file"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/chain-canary-c28-consumer-flow.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'STABILITY_TEST_KAFKA_SASL_PASSWORD_'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
   - id: dod-omn19812-ac5-ac7-retired
     description: AC5, AC6 and AC7 were deleted from OMN-19812. This item retires the claims of the six items that bound them and keeps their regression tests running. Its contract-shape test fails at the merge base, where the contract still declares AC5 to AC7, and passes here; it is bound to AC1 only so the item carries a bound, falsifiable check.
     source: manual
