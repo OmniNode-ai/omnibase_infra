@@ -34,6 +34,11 @@ requirements:
         statement: "AC7: the stability compose mounts ${ONEX_LANE_DECLARATION_DIR} read-only on omninode-runtime at /etc/onex/workspace-config/config/lab as a required variable, and refresh_stability_lane.sh exports the folder -- falsifier: `uv run pytest tests/ci/test_stability_lane_declaration_mount_omn26121.py -q --no-cov` exits non-zero"
       - id: AC8
         statement: "AC8: a stability job of the deploy agent and the stability warm refresh hold the real folder, refuse a folder with no ci_bus_lanes.yaml, and no other lane than dev and stability gains the variable -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py scripts/deploy-agent/tests/unit/test_stability_refresh_llm_endpoint_env_omn24119.py -q --no-cov` exits non-zero"
+  - id: req-omn26121-readback-rendering
+    statement: The tenant identity readback accepts a check written as TRIM(BOTH FROM x) and one written as btrim(x) as the same constraint, so a volume built by the create seam passes it and the gateway_runtime grants that follow it are applied; every other column, constraint and index difference still raises.
+    acceptance:
+      - id: AC9
+        statement: "AC9: the readback folds TRIM(BOTH FROM x) to btrim(x) on both the declared and the live side and nothing else, and the create seam's btrim rendering is the one it must accept -- falsifier: `uv run pytest tests/unit/test_tenant_identity_schema_seam.py -k 'trim_both or btrim_rendering' -q --no-cov` exits non-zero"
 evidence_requirements:
   - kind: tests
     description: The roll order and refusal assertions in the new test file, and the neighbouring roll tests.
@@ -156,4 +161,21 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -k declaration -q --no-cov -n 0
+        cwd: .
+  - id: dod-omn26121-ac9-readback-rendering
+    description: The readback folds the TRIM(BOTH FROM) rendering on both sides and only that rendering, and the create seam writes the btrim rendering.
+    source: manual
+    binds_ac: [AC9]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -k "trim_both or btrim_rendering" -q --no-cov
+        cwd: .
+  - id: dod-omn26121-readback-rendering-deploy
+    description: Hermetic probe of the landing branch, run by the hosted runner. It reads the readback seam from the checked-out tree and the PR branch and requires the fold of the TRIM(BOTH FROM) rendering on the live side; the merge base's copy compares the rendering literally, so the command exits non-zero before this change.
+    source: manual
+    binds_ac: [AC9]
+    checks:
+      - check_type: command
+        check_value: >-
+          grep -F "regexp_replace(line, 'TRIM" docker/migrations/seams/tenant_identity_schema_readback.sql > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/seams/tenant_identity_schema_readback.sql?ref=omn-26121-tenant-identity-readback-btrim' --jq .content | base64 -d | grep -F "regexp_replace(line, 'TRIM" > /dev/null
         cwd: .
