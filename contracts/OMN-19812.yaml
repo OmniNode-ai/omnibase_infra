@@ -202,3 +202,21 @@ dod_evidence:
         reason: AC7 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
         retired_by: m4-operator-1025
         retired_at: '2026-10-28T11:00:00Z'
+  - id: dod-omn19812-verify-runner-infisical-names
+    description: The three verify runners pass the four Infisical names the C28 probe reads the stability lane's secret through, in the default form, and stay identical in every field but their three identity fields. The new test fails against the merge base, where the compose file declares no Infisical name, and passes here.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_verify_runner_infisical_names_omn19812.py tests/ci/test_verify_runner_credential_read_only_omn18408.py tests/ci/test_deploy_runners_add_idle_omn22478.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn19812-deploy-runner-infisical-shipped
+    description: The runners are rolled from the deployed copy of docker-compose.runners.yml, so the merged head's compose file carries the name on all three verify runners.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: test "$(grep -cE '^ +INFISICAL_CLIENT_SECRET:[ ]+[$][{]INFISICAL_CLIENT_SECRET:-[}]$' docker/docker-compose.runners.yml)" -eq 3
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
