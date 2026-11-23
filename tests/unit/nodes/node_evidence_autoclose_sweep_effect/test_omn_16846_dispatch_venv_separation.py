@@ -117,16 +117,18 @@ def _dispatch_indices(steps: list[dict[str, Any]]) -> list[int]:
 # --------------------------------------------------------------------------
 
 
-def test_dod_verify_argv_uses_the_sweep_interpreters_own_onex() -> None:
+def test_dod_verify_argv_uses_the_sweep_interpreters_own_core_cli() -> None:
     argv = _dod_verify_argv("OMN-16759")
 
-    assert argv[0] == str(Path(sys.executable).parent / "onex"), (
+    assert argv[:3] == [sys.executable, "-m", "omnibase_core.cli.cli_commands"], (
         "the verifier must be dispatched from the interpreter the sweep is "
         "itself running in, so the sweep's dispatch venv (which carries the "
         "co-installed omnimarket) is decided by composition rather than by "
-        "whatever project the process cwd happens to resolve to"
+        "whatever project the process cwd happens to resolve to; it runs "
+        "omnibase-core's CLI module because the onex launcher file leaves "
+        "omnibase-core (OMN-25070)"
     )
-    assert argv[1:] == [
+    assert argv[3:] == [
         "skill",
         "dod_verify",
         "OMN-16759",

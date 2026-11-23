@@ -504,6 +504,10 @@
 # is derived from a ticked box, and the scheduled arming policy is unchanged.
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
+# Only node_archetype: the check-no-io-outside-effects hook keys its I/O rule on
+# it. The handler descriptor model defaults the rest.
+descriptor:
+  node_archetype: effect
 contract_version:
   major: 1
   minor: 11
@@ -792,8 +796,9 @@ io_operations:
 #     declared explicitly (OMN-15359). An omitted audience is refused by
 #     node_dod_verify before it loads the contract or executes evidence;
 #     the sweep must not infer a local_done_gate audience. The verifier is
-#     invoked from the sweep interpreter's OWN `onex` binary (OMN-16846:
-#     not `uv run`,
+#     invoked as the sweep interpreter's OWN omnibase-core CLI module,
+#     sys.executable -m omnibase_core.cli.cli_commands (OMN-16846 and
+#     OMN-25070: not `uv run`,
 #     which would re-resolve the project venv at the cwd and so tie the
 #     verifier's environment to the product clone the behaviour checks must
 #     run pytest in). The sweep must therefore be launched from an
