@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-18855
+title: bulk_pr_throttle has no create operation, so fleet-wide PR creation is unpaced while every other bulk operation is throttled
+summary: omnibase_infra#3967 (c6f348661) added a create operation to scripts/ci/bulk_pr_throttle.py that paces pull-request creation in bounded waves against the runner-fleet signal the other operations read. This contract records the acceptance-criterion bindings a second lane accepted. AC2 and AC4 are not bound here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn18855-ac1-accepted-20261123t0545z:
+      - label: AC1
+        criterion_hash: 3221232dd1c703364f8fd2cf62a841ef544895746d1f3f12ea892bc94220f11d
+        proposed_by: lane=dod-closeout-bind-2026-11-23T0545Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-23T0545Z-c0
+    dod-omn18855-ac3-accepted-20261123t0545z:
+      - label: AC3
+        criterion_hash: d3826f9bfe48bcef3902a9a59c94496fde78a54e4675e8ab0db831def81185d9
+        proposed_by: lane=dod-closeout-bind-2026-11-23T0545Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-23T0545Z-c0
+requirements:
+  - id: req-omn-18855-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+      - id: AC3
+        statement: 'AC3: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC1: a create run of 12 specs at wave size 5 runs 3 bounded waves and probes the fleet signal once before each. Fails with the product change of omnibase_infra#3967 reverted.'
+    command: uv run pytest "scripts/ci/tests/test_bulk_pr_throttle.py::TestCreatePacesAgainstTheLiveSignal::test_ac1_probes_the_fleet_once_per_wave" -q -n 0 --no-cov
+  - kind: tests
+    description: 'AC3: a create run that passes no wave size and no threshold is still split into default-size waves with a probe per wave, and the total cap applies to creates. Fails with the product change of omnibase_infra#3967 reverted.'
+    command: uv run pytest "scripts/ci/tests/test_bulk_pr_throttle.py::TestCreateIsPacedWithoutOptIn" -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn18855-ac1-accepted-20261123t0545z
+    description: 'AC1: a create run of 12 specs at wave size 5 runs 3 bounded waves and probes the fleet signal once before each. Fails with the product change of omnibase_infra#3967 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "scripts/ci/tests/test_bulk_pr_throttle.py::TestCreatePacesAgainstTheLiveSignal::test_ac1_probes_the_fleet_once_per_wave" -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn18855-ac3-accepted-20261123t0545z
+    description: 'AC3: a create run that passes no wave size and no threshold is still split into default-size waves with a probe per wave, and the total cap applies to creates. Fails with the product change of omnibase_infra#3967 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "scripts/ci/tests/test_bulk_pr_throttle.py::TestCreateIsPacedWithoutOptIn" -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
