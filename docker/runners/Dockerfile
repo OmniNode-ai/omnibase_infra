@@ -30,6 +30,10 @@ ARG OMNI_CI_ENV_ROOT=/home/runner/.cache/omni/ci-envs
 # equal to what the workflows ask for.
 ARG OMNI_TOOLCACHE_PYTHON_VERSIONS="3.12 3.13"
 ARG OMNI_TOOLCACHE_DIR=/opt/hostedtoolcache
+# OMN-24139: the published omnibase-infra release that carries `onex ledger query`,
+# the client the operator repository's freeze step reads the live work ledger with.
+# Exact version, never a range: a roll must give every runner the same reader.
+ARG ONEX_LEDGER_CLIENT_VERSION=0.38.82
 
 # Pinned digest for reproducible builds — update via: docker pull ubuntu:22.04
 FROM ubuntu:22.04@sha256:3ba65aa20f86a0fad9df2b2c259c613df006b2e6d0bfcc8a146afb8c525a9751 AS toolchain
@@ -463,7 +467,106 @@ FROM toolchain AS runner
 # EMPTY uv version to ensure_ci_env.sh, and without SHELL it would run under
 # `/bin/sh` with no pipefail.
 ARG UV_VERSION
+ARG ONEX_LEDGER_CLIENT_VERSION
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# --- The onex ledger query client (OMN-24139) -------------------------------
+# The operator repository's freeze step runs `onex ledger query --stdin --bus-lane
+# dev` to read the live work ledger and died with FileNotFoundError because this
+# image held no `onex`. The client is the published omnibase-infra package at an
+# exact version, in its own virtual environment so nothing a job installs can
+# change it. /usr/local/bin/onex is a shim (onex-ledger-reader.sh): for
+# `onex ledger query` it loads the read-only login mounted at
+# /home/runner/.lab-credentials/ci-ledger-read.env and refuses with exit 2 when
+# that file is absent; every other command passes through untouched. The build
+# fails here, not in a live job, if the installed client does not run.
+RUN uv venv --python /usr/local/bin/python3.12 /opt/onex-ledger-client \
+    && uv pip install --no-cache --python /opt/onex-ledger-client/bin/python \
+        "omnibase-infra==${ONEX_LEDGER_CLIENT_VERSION}" \
+    && /opt/onex-ledger-client/bin/onex --version
+# The shim is a heredoc, not a file beside this one: a new code file outside a canonical
+# location is refused by the canonical-file-shape ratchet (OMN-20304), and the test
+# tests/ci/test_runner_image_onex_ledger_reader_omn24139.py runs this exact text.
+COPY --chmod=0755 <<'ONEX_LEDGER_SHIM' /usr/local/bin/onex
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex -- the runner image's `onex` on the PATH (OMN-24139).
+#
+# WHY. The operator repository's freeze step reads the live work ledger with
+# `onex ledger query --stdin --bus-lane dev` and died with FileNotFoundError on
+# the build runners, which carried no `onex`. The client is the published
+# omnibase-infra package, installed at a pinned version into
+# /opt/onex-ledger-client (see the Dockerfile). This shim is installed as
+# /usr/local/bin/onex in front of it.
+#
+# WHAT IT DOES. For `onex ledger query ...` and nothing else it loads the
+# read-only ledger login mounted at /home/runner/.lab-credentials/ci-ledger-read.env
+# and exports KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD for that one exec, which
+# is where the client's own resolver (cli/delegate_lane_credentials.py) looks on a
+# CI runner. Every other invocation (`onex --version`, `onex ledger read ...`)
+# passes straight through with the caller's environment untouched.
+#
+# WHAT IT NEVER DOES.
+#   * run the credential file: it is parsed line by line as data, so a hostile or
+#     malformed file cannot execute anything;
+#   * print a value: no echo of a value, no xtrace, and the values travel in the
+#     exec's environment, never on its command line;
+#   * fall back: a missing, unreadable or half-filled file is a refusal with
+#     exit 2, before the client runs. A read that cannot authenticate must fail
+#     the step, never look like an empty ledger.
+#
+# The lane declaration (config/lab/ci_bus_lanes.yaml) is the repository's own. The
+# client reads it under OMNIBASE_PATH (the workspace root) and ONEX_WORKSPACE_CONFIG_ROOT (the
+# config root); both default to the job's checkout.
+set -euo pipefail
+set +o xtrace
+
+real="${ONEX_LEDGER_CLIENT_BIN:-/opt/onex-ledger-client/bin/onex}"
+credential_file="${ONEX_LEDGER_READ_CREDENTIAL_FILE:-/home/runner/.lab-credentials/ci-ledger-read.env}"
+
+refuse() {
+    echo "onex: refusing 'ledger query': $1" >&2
+    exit 2
+}
+
+if [[ "${1-}" == "ledger" && "${2-}" == "query" ]]; then
+    [[ -f "${credential_file}" && -r "${credential_file}" ]] \
+        || refuse "the read-only ledger credential file ${credential_file} is absent or unreadable"
+
+    username=""
+    password=""
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        line="${line%$'\r'}"
+        case "${line}" in
+            KAFKA_SASL_USERNAME=*) username="${line#*=}" ;;
+            KAFKA_SASL_PASSWORD=*) password="${line#*=}" ;;
+            *) ;;
+        esac
+    done < "${credential_file}"
+
+    # One pair of matching quotes around a value is the only decoration removed.
+    for name in username password; do
+        value="${!name}"
+        if [[ ${#value} -ge 2 && ( "${value:0:1}" == '"' || "${value:0:1}" == "'" ) \
+              && "${value: -1}" == "${value:0:1}" ]]; then
+            printf -v "${name}" '%s' "${value:1:${#value}-2}"
+        fi
+    done
+
+    [[ -n "${username}" && -n "${password}" ]] \
+        || refuse "${credential_file} does not hold both KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD"
+
+    export OMNIBASE_PATH="${OMNIBASE_PATH:-${GITHUB_WORKSPACE:-${PWD}}}"
+    export ONEX_WORKSPACE_CONFIG_ROOT="${ONEX_WORKSPACE_CONFIG_ROOT:-${GITHUB_WORKSPACE:-${PWD}}}"
+    export KAFKA_SASL_USERNAME="${username}"
+    export KAFKA_SASL_PASSWORD="${password}"
+fi
+
+exec "${real}" "$@"
+ONEX_LEDGER_SHIM
+RUN onex --version
 
 # --- Bound identity contract + prebuilt shared CI env (OMN-12567) ----------
 # The bound identity lock is the authority for "runner image vN". It is copied

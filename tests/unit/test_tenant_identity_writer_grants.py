@@ -307,8 +307,16 @@ def test_the_dev_lane_renders_the_dsn_fail_closed_and_no_base_file_names_it() ->
     assert dsn.startswith(f"postgresql://{ROLE}:${{{PASSWORD_VAR}:?")
     assert dsn.endswith("@postgres:5432/omninode_cloud")
     assert "*dev_lane_tenant_identity_env" in dev
+    # x-runtime-env passes the variable through empty so the resolver mapping can read it
+    # (tests/ci/test_runtime_env_anchor.py); the credentialed value lives in the overlay alone.
+    passthrough = f"{DSN_VAR}: ${{{DSN_VAR}:-}}"
     for base in (COMPOSE_INFRA, COMPOSE_JUDGE):
-        assert DSN_VAR not in base.read_text(encoding="utf-8")
+        named = [
+            line.strip()
+            for line in base.read_text(encoding="utf-8").splitlines()
+            if DSN_VAR in line and not line.lstrip().startswith("#")
+        ]
+        assert all(line == passthrough for line in named), named
 
 
 def test_the_required_env_manifest_and_the_instance_template_name_the_password() -> (

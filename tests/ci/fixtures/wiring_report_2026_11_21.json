@@ -1,0 +1,14 @@
+{
+  "_provenance": {
+    "source": "omnibase_infra#6133 body, section Results: wiring report read 2026-11-21T11:27Z on the lab kernel run, identical before and after the change",
+    "captured_utc": "2026-11-21T11:27:00Z"
+  },
+  "report": {
+    "wired": 436,
+    "skipped": 332,
+    "failed": 43,
+    "quarantined": 4,
+    "duplicates": 40
+  },
+  "not_recorded": "discovered=1382 and subscriptions with no producer are in no recorded report; the brief's discovered figure is unverified"
+}

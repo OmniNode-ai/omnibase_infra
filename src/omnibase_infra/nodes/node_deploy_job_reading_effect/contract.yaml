@@ -70,6 +70,26 @@ settings:
   routed_command_no_job_window_seconds: 600
   alarm_routed_command_owner: orchestrator-31d9-swarm
   alarm_routed_command_owner_line: read the routed instance's job record and agent log for the command, then re-route it or hand the instance's key fix to the owner of that host's agent; the instance is never restarted or edited by hand from this alarm
+  # OMN-26524: the callers of the two routing operations. Each names the function of the host
+  # composition root (runtime_deploy_job_reading.py) that runs the operation; the deploy
+  # agent's idle tick reaches both through its one existing entry, check_pin, which is gated
+  # to agents that run the dev lane. Each runs on its own interval and writes one run line
+  # per run to the agent's journal.
+  operation_callers:
+    check_routing_key_checks: check_routing
+    alarm_routed_commands_without_job_record: check_routed_commands
+  routing_check_interval_seconds: 300
+  routing_health_timeout_seconds: 3
+  # The health URL of each peer instance's agent, by instance name, read by the key check.
+  # Empty on purpose: the table's own verify URLs name host.docker.internal, which a host
+  # agent cannot reach, and no reachable address is declared anywhere yet. A peer with no URL
+  # (or no answer) is read as unread, which the check reports as key-check-unread.
+  instance_health_urls: {}
+  routed_command_alarm_interval_seconds: 60
+  # The routed commands this instance's alarm polls: one JSON object per line
+  # (correlation_id, instance, runtime_lane, requested_by, routed_at) in the agent's state
+  # directory. The file is read when present; no writer exists yet.
+  routed_commands_file: routed-commands.jsonl
   # The deploy phases in pipeline order; the first one that failed is the failing step.
   phase_order: [preflight, git, compose_gen, seed, core, runtime, verification]
 capabilities:
