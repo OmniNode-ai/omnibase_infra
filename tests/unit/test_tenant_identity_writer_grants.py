@@ -109,6 +109,14 @@ def parse_grants(text: str) -> set[tuple[str, str, str, str | None]]:
                 )
             else:
                 found.update(("table", name, p.strip(), None) for p in privs.split(","))
+    # The sequence grant is issued as a format()/\\gexec over the serial sequence of the
+    # owned table's id column (the readback pins the resulting name).
+    if re.search(
+        r"GRANT USAGE ON SEQUENCE %s TO \"tenant_identity_writer\"'[^;]*"
+        r"pg_get_serial_sequence\('public\.tenant_event_outbox', 'id'\)\)\s*\\gexec",
+        text,
+    ):
+        found.add(("sequence", "tenant_event_outbox_id_seq", "USAGE", None))
     return found
 
 

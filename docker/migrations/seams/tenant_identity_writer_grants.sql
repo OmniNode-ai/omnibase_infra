@@ -102,7 +102,10 @@ SELECT
         GRANT UPDATE (is_active, revoked_at) ON public.tenant_api_keys TO "tenant_identity_writer";
         GRANT SELECT, INSERT ON public.tenant_event_outbox TO "tenant_identity_writer";
         GRANT UPDATE (published_at, attempts, last_error) ON public.tenant_event_outbox TO "tenant_identity_writer";
-        GRANT USAGE ON SEQUENCE public.tenant_event_outbox_id_seq TO "tenant_identity_writer";
+        -- The sequence is resolved from the owned table's id column, not named: the ownership
+        -- manifests declare the table, and the readback below pins the resulting name.
+        SELECT format('GRANT USAGE ON SEQUENCE %s TO "tenant_identity_writer"', pg_catalog.pg_get_serial_sequence('public.tenant_event_outbox', 'id'))
+        \gexec
         COMMIT;
 
         -- Read the effective privileges back and compare them with the list. A GRANT by a role
