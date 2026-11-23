@@ -34,13 +34,13 @@ dod_evidence:
         check_value: uv run pytest tests/unit/runtime/test_lazy_start_db_io_topology_omn26594.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
   - id: dod-omn26594-ac2
-    description: 'AC2: the lazy-start first-request and handover-wake tests pass.'
+    description: 'AC2: the lazy-start first-request and handover-wake tests pass beside the OMN-26594 test, so the check fails at the merge base where that test file is absent (must-fail control).'
     source: manual
     binds_ac:
       - AC2
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/runtime/test_lazy_start_first_request.py tests/unit/runtime/test_lazy_start_handover_wake_omn21753.py -q -n 0 --no-cov -p no:cacheprovider
+        check_value: uv run pytest tests/unit/runtime/test_lazy_start_db_io_topology_omn26594.py tests/unit/runtime/test_lazy_start_first_request.py tests/unit/runtime/test_lazy_start_handover_wake_omn21753.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
   - id: dod-omn26594-ac3
     description: 'AC3: the test that fails at origin/dev pins the hand-over of the topology; the dev log read below is the deploy-time check.'
