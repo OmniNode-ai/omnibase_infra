@@ -13,7 +13,7 @@ requirements:
       - id: AC5
         statement: "AC5: every line of the docs tree that names onex-api says it is retired"
 evidence_requirements:
-  - kind: command
+  - kind: tests
     description: The documentation sweep for onex-api finds no line that does not say retired.
     command: "! git grep -n -i onex-api -- docs | grep -v -i retired"
 emergency_bypass:
@@ -29,3 +29,6 @@ dod_evidence:
       - check_type: command
         check_value: "! git grep -n -i onex-api -- docs | grep -v -i retired"
         cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_onex_api_retired_docs_omn26469.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
