@@ -22,7 +22,14 @@ PLATFORM_CATALOG_TABLES_PHYSICALLY_IN_PUBLIC: frozenset[str] = frozenset(
     {"plan_entitlements", "plan_tiers"}
 )
 
+# OMN-26121: tenant_event_outbox is declared at the logical ``omninode_internal``
+# schema but the tenant identity seam creates it in ``public`` on omninode_cloud.
+INTERNAL_SEAM_TABLES_PHYSICALLY_IN_PUBLIC: frozenset[str] = frozenset(
+    {"tenant_event_outbox"}
+)
+
 PHYSICALLY_PUBLIC_TABLES: dict[str, frozenset[str]] = {
-    "omninode_internal": INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
+    "omninode_internal": INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359
+    | INTERNAL_SEAM_TABLES_PHYSICALLY_IN_PUBLIC,
     "platform_catalog": PLATFORM_CATALOG_TABLES_PHYSICALLY_IN_PUBLIC,
 }
