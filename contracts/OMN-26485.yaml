@@ -1,0 +1,71 @@
+schema_version: 1.0.0
+ticket_id: OMN-26485
+title: The deploy lane routing table sends a runtime lane's builds only to an instance whose agent key check equals the runtime's, and a failed match raises an alarm instead of dropping the command
+summary: >-
+  A check over the routing table compares each available instance's agent key check with the lane runtime's and names both values on a mismatch. The router refuses a mismatched instance with a typed refusal and takes the default instance, and sends nothing when the default itself mismatches. A routed command with no job record on its instance inside the contract's declared window writes one alarm row naming the instance and the command, through the ledger append the deploy job reading node already uses. The logic is two handlers of node_deploy_job_reading_effect; the baselined resolver files are not edited.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26485-routing-key-check
+    statement: The router refuses an instance whose agent key check differs from the runtime's and an alarm fires when a routed command gets no job record inside the declared window.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a routing table that marks an instance available while its key check differs from the lane runtime's fails the check, naming both values -- falsifier: uv run pytest -k routing_key_check_mismatch exits non-zero"
+      - id: AC2
+        statement: "AC2: the sender refuses a mismatched instance, writes one typed refusal and sends to the next declared instance -- falsifier: uv run pytest -k routing_refuses_mismatched_instance exits non-zero"
+      - id: AC3
+        statement: "AC3: a routed command with no job record after 10 minutes writes one alarm row naming the instance and the command -- falsifier: uv run pytest -k routed_command_no_job_alarm exits non-zero"
+      - id: AC4
+        statement: "AC4: a regression test built from the recorded health answers e30a85fc883bc113 (the default instance) and 9b0c12edb01c7b61 (the second instance) of 2026-11-22T21:43Z (fixture path in the PR) fails on the broken table and passes on the fix -- falsifier: uv run pytest -k routing_incident_replay exits non-zero"
+      - id: AC5
+        statement: "AC5: over the week to 2026-11-29 every omnimarket dev command has a job record on its routed instance within 10 minutes or an alarm row -- falsifier: a routed command with neither a job record nor an alarm row after 10 minutes"
+evidence_requirements:
+  - kind: tests
+    description: The key check, refusal, alarm and incident replay regressions.
+    command: uv run --frozen pytest tests/unit/handlers/test_handler_routing_key_check_omn26485.py tests/unit/handlers/test_handler_routed_command_alarm_omn26485.py -k 'routing or routed_command' -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26485-ac1-routing-key-check-mismatch
+    description: The check over a table with the second instance available and key checks 9b0c12edb01c7b61 against the runtime's e30a85fc883bc113 returns outcome mismatch and a refusal naming both values; a matching key, a withdrawn instance and an unread key check each have a control.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_routing_key_check_omn26485.py tests/unit/handlers/test_handler_routed_command_alarm_omn26485.py -k routing_key_check_mismatch -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26485-ac2-routing-refuses-mismatched-instance
+    description: The router refuses the mismatched routed instance with one typed refusal and routes to the default instance; a mismatching default sends nothing; the availability flag and the OMN-21402 rule keep their behaviour.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_routing_key_check_omn26485.py tests/unit/handlers/test_handler_routed_command_alarm_omn26485.py -k routing_refuses_mismatched_instance -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26485-ac3-routed-command-no-job-alarm
+    description: A routed command with no job record on its instance after the contract's 600 seconds writes one alarm row naming instance and command, writes it once over repeated polls, waits inside the window, and is answered by a record on its own instance only.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_routing_key_check_omn26485.py tests/unit/handlers/test_handler_routed_command_alarm_omn26485.py -k routed_command_no_job_alarm -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26485-ac4-routing-incident-replay
+    description: The recorded answers under tests/fixtures/routing_key_check_incident_omn26485 replayed through the check fail the broken table naming the second instance and route the omnimarket build to the default instance, and pass the table with the second instance withdrawn.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_routing_key_check_omn26485.py tests/unit/handlers/test_handler_routed_command_alarm_omn26485.py -k routing_incident_replay -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26485-ac5-week-observation
+    description: The week to 2026-11-29 is not testable in the PR. Its falsifier as written on the ticket is a routed command with neither a job record nor an alarm row after 10 minutes. This check proves only that the joins exist, a job record on the routed instance answers a command by correlation id and an unanswered command writes its alarm row; it does not claim the week passed.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_routing_key_check_omn26485.py tests/unit/handlers/test_handler_routed_command_alarm_omn26485.py -k 'routed_command_no_job_alarm_is_answered_by_a_record_on_its_instance or routed_command_no_job_alarm_names_the_instance_and_the_command' -q --no-cov -n 0 -p no:randomly
+        cwd: .
