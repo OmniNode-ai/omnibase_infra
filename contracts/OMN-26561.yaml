@@ -1,0 +1,64 @@
+schema_version: 1.0.0
+ticket_id: OMN-26561
+title: One boot summary line at the first health 200 reads the contract parse count, the topic scan count and the longest event-loop gap per boot phase
+summary: >-
+  Three merged boot-performance changes (omnibase_infra 6145 parse each contract once, 6138 scan and route discovery off the event loop, 6134 boot step 0 and provisioner holds removed) could not be read on a running boot, because the boot log held no line that reports their effect. The runtime now logs one boot summary line, once, at the first health 200, carrying parse_runs, topic_scans, seconds_since_kernel_start and the longest event-loop gap in boot step 0, the provisioner, the wiring pass and the local ingress start, measured from the first phase entered (boot step 0 at the latest). The logic is HandlerBootSummary in handlers/handler_boot_summary.py, bound from node_boot_catalog_effect as operation boot_summary.record. The compose healthcheck and start period are not changed and no baselined file grows.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26561-boot-summary-line
+    statement: A dev boot logs exactly one boot summary line at the first health 200 that reads the three boot-performance changes back.
+    acceptance:
+      - id: AC4
+        statement: "AC4: a test fails at the merge base and passes on the branch for the boot summary line -- falsifier: the test passes at origin/dev, or grep -c 'boot summary: parse_runs=' on the dev runtime log is 0 after the build that carries this change"
+      - id: AC5
+        statement: "AC5: the line carries parse_runs, topic_scans and a longest gap per phase starting before step 0 -- falsifier: a 2 s hold injected in step 0 produces no logged gap over 1 s"
+      - id: AC6
+        statement: "AC6: no compose healthcheck or start-period change and zero growth in baselined files -- falsifier: git diff origin/dev --stat lists a compose file or growth in a baselined file"
+evidence_requirements:
+  - kind: tests
+    description: The boot summary line tests drive boot step 0 and the health handler, and the neighbouring step 0 and health tests stay green.
+    command: uv run --frozen pytest tests/unit/runtime/test_boot_summary_line_omn26561.py tests/unit/runtime/test_prebuilt_manifest_omn26361.py tests/unit/runtime/test_service_health.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26561-ac4-line-logged-at-first-200
+    description: >-
+      Boot step 0 runs through run_boot_catalog and the health handler answers 200: the log holds exactly one line starting boot summary: parse_runs= whose parse_runs and topic_scans equal ContractReadCache.parse_runs() and ModelContractTopicScan.runs(); a 503 answer and a second 200 write none. Fails at the merge base, where the boot log carries no such line.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_boot_summary_line_omn26561.py -q --no-cov -n 0 -p no:randomly -k "first_health_200 or written_once"
+        cwd: .
+  - id: dod-omn26561-ac5-step0-hold-reads-as-a-gap
+    description: >-
+      A 2 s blocking hold injected in boot step 0 reads as gap_boot_step0 of at least 1.9 s in the logged line, and each phase reads its own longest gap (wiring pass and local ingress start measured separately, phases that never ran read none). Fails at the merge base, where no line is logged.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_boot_summary_line_omn26561.py -q --no-cov -n 0 -p no:randomly -k "two_second_hold or own_longest_gap"
+        cwd: .
+  - id: dod-omn26561-ac6-no-growth-in-baselined-files
+    description: >-
+      The three baselined files this change touches (service_kernel.py, runtime_host_process.py, health_checker.py) are each at or under their line count at origin/dev (5988, 7778 and 1784); the compose files are not in the diff, which the local Done gate item below reads from git. Fails when any of the three grows.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: command
+        check_value: bash -c 'test "$(wc -l < src/omnibase_infra/runtime/service_kernel.py)" -le 5988 && test "$(wc -l < src/omnibase_infra/runtime/runtime_host_process.py)" -le 7778 && test "$(wc -l < src/omnibase_infra/services/health_checker.py)" -le 1784'
+        cwd: .
+  - id: dod-omn26561-local-no-compose-in-diff
+    description: >-
+      Read after the branch exists: git diff origin/dev --name-only lists no compose file. A hosted runner may not hold origin/dev, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: bash -c '! git diff origin/dev --name-only | grep -i compose'
+        cwd: .

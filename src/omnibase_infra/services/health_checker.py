@@ -84,6 +84,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.enum_runtime_readiness_state import (
     EnumRuntimeReadinessState,
 )
+from omnibase_infra.handlers.handler_boot_summary import emit_boot_summary_once
 from omnibase_infra.handlers.http_mount import (
     AsgiMounts,
     HealthProbeAcceptor,
@@ -904,7 +905,7 @@ class ServiceHealth(MixinSharedListener):
         """
         self._runtime_health_provider = provider
 
-    async def _handle_health(self, request: web.Request) -> web.Response:
+    async def _handle_health(self, _request: web.Request) -> web.Response:
         """Handle GET /health requests (liveness probe).
 
         This is the liveness endpoint handler for Docker/Kubernetes health
@@ -952,7 +953,7 @@ class ServiceHealth(MixinSharedListener):
                 the response body "status" field instead of relying solely on HTTP codes.
 
         Args:
-            request: The incoming aiohttp HTTP request. This parameter is required
+            _request: The incoming aiohttp HTTP request. This parameter is required
                 by the aiohttp handler signature but is intentionally unused in this
                 implementation as health checks do not require request data.
 
@@ -1006,9 +1007,6 @@ class ServiceHealth(MixinSharedListener):
             This ensures health probes always receive a response even during
             runtime failures, preventing indefinite probe hangs.
         """
-        # Suppress unused argument warning - aiohttp handler signature requires request
-        _ = request
-
         try:
             await self._try_attach_runtime_from_container()
             if self._runtime is None:
@@ -1091,11 +1089,6 @@ class ServiceHealth(MixinSharedListener):
                 #   2. Reduced functionality is often better than no functionality
                 #   3. Automatic restarts may mask recurring issues needing investigation
                 #   4. Operators can monitor "degraded" status via metrics/alerts
-                #
-                # Customization: To remove degraded containers from rotation, either:
-                #   - Subclass ServiceHealth and override _handle_health()
-                #   - Configure load balancer to inspect response body "status" field
-                #   - Change http_status below to 503 if restart-on-degrade is preferred
                 status = "degraded"
                 http_status = 200 if runtime_operational else 503
             else:
@@ -1178,6 +1171,7 @@ class ServiceHealth(MixinSharedListener):
                 details=cast("dict[str, JsonType]", enriched_details),
             )
 
+            emit_boot_summary_once(http_status)  # OMN-26561: first 200 only
             return web.Response(
                 text=response.model_dump_json(exclude_none=True),
                 status=http_status,
@@ -1473,7 +1467,7 @@ class ServiceHealth(MixinSharedListener):
             content_type="application/json",
         )
 
-    async def _handle_health_detailed(self, request: web.Request) -> web.Response:
+    async def _handle_health_detailed(self, _request: web.Request) -> web.Response:
         """Handle GET /health/detailed requests (verbose diagnostics).
 
         Returns per-component health breakdowns, last successful health check
@@ -1501,12 +1495,11 @@ class ServiceHealth(MixinSharedListener):
             }
 
         Args:
-            request: Incoming HTTP request (unused per aiohttp handler contract).
+            _request: Incoming HTTP request (unused per aiohttp handler contract).
 
         Returns:
             JSON response with detailed component health information.
         """
-        _ = request
 
         try:
             check_start = time.monotonic()

@@ -33,6 +33,7 @@ from omnibase_infra.errors import TopicReplicationPolicyError
 from omnibase_infra.models.event_bus.model_contract_topic_entry import (
     TENANT_SLUG_PATTERN,
 )
+from omnibase_infra.models.node_announce.model_boot_clock import ModelBootClock
 from omnibase_infra.protocols.protocol_topic_provisioner import (
     ProtocolTopicProvisioner,
 )
@@ -160,10 +161,11 @@ async def ensure_topics_exist(
     logged with the contract and topic and left out of the result; none is fatal
     to the boot.
     """
-    outcomes = await asyncio.gather(
-        *(provisioner.ensure_topic_exists(topic_name=t) for t in topics),
-        return_exceptions=True,
-    )
+    with ModelBootClock.phase("provisioner"):
+        outcomes = await asyncio.gather(
+            *(provisioner.ensure_topic_exists(topic_name=t) for t in topics),
+            return_exceptions=True,
+        )
     ensured: list[str] = []
     for topic, outcome in zip(topics, outcomes, strict=True):
         if isinstance(outcome, TopicReplicationPolicyError) or not isinstance(
