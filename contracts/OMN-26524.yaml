@@ -1,0 +1,70 @@
+schema_version: 1.0.0
+ticket_id: OMN-26524
+title: The routing key check and the routed-command alarm each run from a declared caller on the deploy agent's idle tick
+summary: >-
+  node_deploy_job_reading_effect declared check_routing_key_checks and alarm_routed_commands_without_job_record (OMN-26485) with no caller, so neither ran on dev. The node contract now names a caller for each (settings.operation_callers), both run from the one entry the deploy agent's idle tick already calls for this node, each on its own interval, each writing one run line to the agent journal. The router files and the agent module grow by zero lines.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26524-routing-callers
+    statement: Every handler operation of node_deploy_job_reading_effect has a caller in src that the deploy agent's idle tick reaches, and each caller writes a run line.
+    acceptance:
+      - id: AC41
+        statement: "AC41: a contract test fails at the merge base and passes on the branch because every handler of node_deploy_job_reading_effect is named by src outside its own module and the contract declares one caller per routing operation -- falsifier: uv run pytest tests/unit/handlers/test_deploy_job_reading_callers_omn26524.py passes at origin/dev"
+      - id: AC42
+        statement: "AC42: the idle tick's one job-reading entry runs the key check and the alarm, each with a run line, the alarm writing one row for a routed command with no job record -- falsifier: the deploy agent's routing_idle_callers tests exit non-zero"
+      - id: AC43
+        statement: "AC43: the router files and the deploy agent module grow by zero lines -- falsifier: git diff origin/dev --stat names scripts/ci/deploy_lane_verify_route.py, scripts/deploy-agent/deploy_agent/routing.py or scripts/deploy-agent/deploy_agent/agent.py"
+evidence_requirements:
+  - kind: tests
+    description: The caller contract test and the agent idle-tick caller tests.
+    command: uv run --frozen pytest tests/unit/handlers/test_deploy_job_reading_callers_omn26524.py -m unit -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26524-ac41-caller-contract
+    description: The contract test names every handler of the node outside its own module, and the declared callers of the two routing operations exist in the host composition root and are reached by check_pin; it fails at origin/dev for exactly the two routing handlers.
+    source: manual
+    binds_ac: [AC41]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_deploy_job_reading_callers_omn26524.py -m unit -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26524-ac42-idle-callers
+    description: check_routing reads an undeclared peer as unread, passes when every peer answers with the agent's key, names a peer whose key differs, is throttled and does not run without a key; check_routed_commands writes one alarm row for a command with no job record and none for an answered, waiting or other-instance command; check_pin runs both.
+    source: manual
+    binds_ac: [AC42]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_routing_idle_callers_omn26524.py -q -p no:randomly
+        cwd: .
+  - id: dod-omn26524-ac43-zero-growth
+    description: The change touches the node contract and the node's runtime module and adds tests; the baselined router files and the agent module are untouched.
+    source: manual
+    binds_ac: [AC43]
+    checks:
+      - check_type: command
+        check_value: grep -q '^  operation_callers:' src/omnibase_infra/nodes/node_deploy_job_reading_effect/contract.yaml && test -z "$(git diff origin/dev... --name-only -- scripts/ci/deploy_lane_verify_route.py scripts/deploy-agent/deploy_agent/routing.py scripts/deploy-agent/deploy_agent/agent.py)"
+        cwd: .
+  - id: dod-omn26524-integration-proof
+    description: The agent's idle tick runs the routing key check and the routed-command alarm through the agent's own loader against the checkout's real node contract and routing table.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/test_deploy_job_reading_idle_callers_omn26524.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26524-deploy-probe-run-lines
+    description: >-
+      Post-deploy read: after the deploy agent applies this branch on dev, its journal holds a routing key check run line and a routed command alarm run line from the idle tick. It reads the live agent, which carries this change only after the deploy agent has applied it, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion, because the unit-level halves above bind AC41 and AC42.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: ssh h201 "journalctl --user -u deploy-agent-dev --since '-3 hours' --no-pager | grep -q 'routed command alarm polled=' && journalctl --user -u deploy-agent-dev --since '-3 hours' --no-pager | grep -q 'routing key check outcome='"
+        cwd: .
