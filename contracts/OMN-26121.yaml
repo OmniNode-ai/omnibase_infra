@@ -27,6 +27,13 @@ requirements:
         statement: "AC3: the entry seam runs create, then expiry, then readback for dev and stability_test only, before the gateway grants, skips by name when the indicator is unset or unknown, and the runner gains no code line -- falsifier: `uv run pytest tests/unit/test_tenant_identity_schema_seam.py -k 'runner or entry or grants_seam' -q --no-cov` exits non-zero"
       - id: AC4
         statement: "AC4: the dev and stability compose files carry the indicator with their lane's value and no other compose file and no catalog file carries it -- falsifier: `uv run pytest tests/unit/test_tenant_identity_schema_seam.py -k 'indicator or carries' -q --no-cov` exits non-zero"
+  - id: req-omn26121-stability-lane-declaration
+    statement: The stability runtime mounts the lane declaration folder at /etc/onex/workspace-config/config/lab, so the gateway batch-ingest door's lifespan resolves its broker and /health no longer answers 503 with DelegateLaneSelectionError after the stability follow.
+    acceptance:
+      - id: AC7
+        statement: "AC7: the stability compose mounts ${ONEX_LANE_DECLARATION_DIR} read-only on omninode-runtime at /etc/onex/workspace-config/config/lab as a required variable, and refresh_stability_lane.sh exports the folder -- falsifier: `uv run pytest tests/ci/test_stability_lane_declaration_mount_omn26121.py -q --no-cov` exits non-zero"
+      - id: AC8
+        statement: "AC8: a stability job of the deploy agent and the stability warm refresh hold the real folder, refuse a folder with no ci_bus_lanes.yaml, and no other lane than dev and stability gains the variable -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py scripts/deploy-agent/tests/unit/test_stability_refresh_llm_endpoint_env_omn24119.py -q --no-cov` exits non-zero"
 evidence_requirements:
   - kind: tests
     description: The roll order and refusal assertions in the new test file, and the neighbouring roll tests.
@@ -34,6 +41,9 @@ evidence_requirements:
   - kind: tests
     description: The seam, runner and compose assertions in the new test file.
     command: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -q --no-cov
+  - kind: tests
+    description: The stability lane declaration mount, the agent render and the stability refresh assertions.
+    command: uv run --frozen pytest tests/ci/test_stability_lane_declaration_mount_omn26121.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py scripts/deploy-agent/tests/unit/test_stability_refresh_llm_endpoint_env_omn24119.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -113,4 +123,37 @@ dod_evidence:
       - check_type: command
         check_value: >-
           grep -F 'tenant_api_keys|column|expires_at' docker/migrations/seams/tenant_identity_schema_readback.sql > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/seams/tenant_identity_schema_readback.sql?ref=omn-26121-tenant-identity-schema-seam' --jq .content | base64 -d | grep 'tenant_api_keys|column|expires_at' > /dev/null
+        cwd: .
+  - id: dod-omn26121-ac7-stability-declaration-mount
+    description: The stability runtime mounts the lane declaration folder read-only as a required variable and the stability refresh exports it.
+    source: manual
+    binds_ac: [AC7]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_stability_lane_declaration_mount_omn26121.py -q --no-cov
+        cwd: .
+  - id: dod-omn26121-ac8-stability-declaration-env
+    description: The agent's stability job and the stability refresh hold the real folder and refuse a stale one; only dev and stability take it.
+    source: manual
+    binds_ac: [AC8]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py scripts/deploy-agent/tests/unit/test_stability_refresh_llm_endpoint_env_omn24119.py -q --no-cov
+        cwd: .
+  - id: dod-omn26121-stability-declaration-deploy
+    description: Hermetic probe of the landing branch, run by the hosted runner. It reads the stability refresh script from the checked-out tree and the PR branch and requires the with-declaration mode of the lane env render; the script is a product path the merge-base control does not overlay, and the merge base's copy calls the render without the declaration, so the command exits non-zero before this change.
+    source: manual
+    binds_ac: [AC7]
+    checks:
+      - check_type: command
+        check_value: >-
+          grep -F ' with-declaration)' scripts/runtime_build/refresh_stability_lane.sh > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/refresh_stability_lane.sh?ref=omn-26121-stability-lane-declaration-mount' --jq .content | base64 -d | grep -F ' with-declaration)' > /dev/null
+        cwd: .
+  - id: dod-omn26121-ac7-stability-declaration-render
+    description: The rendered stability runtime holds the real lane declaration folder read-only and the render refuses without the variable.
+    source: manual
+    binds_ac: [AC7]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -k declaration -q --no-cov -n 0
         cwd: .
