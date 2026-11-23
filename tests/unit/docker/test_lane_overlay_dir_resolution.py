@@ -60,6 +60,8 @@ def _lane_mount_services(lane: str, services: Collection[str]) -> set[str]:
         return _RUNTIME_SERVICES | _WORKER_SERVICES | {_HOOK_EVENTS_WRITER}
     if lane == "prepr" or lane.startswith(("dev-", "stability")):
         return _RUNTIME_SERVICES | _WORKER_SERVICES
+    if lane == "canary":
+        return {"omninode-runtime"}
     if lane == "prod":
         return _RUNTIME_SERVICES | {"runtime-worker"}
     if _DELEGATION_WRITER in services:
@@ -101,7 +103,7 @@ def test_the_shipped_overlay_directory_holds_only_the_neutral_template() -> None
 
 def test_all_lane_compose_recipes_are_covered() -> None:
     assert sorted(len(services) for services in _LANE_COMPOSE_MOUNTS.values()) == (
-        [2] * 3 + [3] * 2 + [4] * 4 + [5]
+        [1] + [2] * 3 + [3] * 2 + [4] * 4 + [5]
     )
     assert "docker-compose.prod.yml" in _LANE_COMPOSE_MOUNTS
 
