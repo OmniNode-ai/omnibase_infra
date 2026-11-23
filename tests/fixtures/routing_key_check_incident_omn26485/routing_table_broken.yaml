@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# The routing table the way it stood when the incident was recorded, reduced to the fields
+# the key check reads and with neutral instance names (the committed table names the hosts):
+# inst-a is the default instance; inst-b is available and takes the omnimarket dev route.
+default_instance: inst-a
+instances:
+  inst-a: {}
+  inst-b:
+    available: true
+routes:
+  - runtime_lane: dev
+    requester_repository: omnimarket
+    instance: inst-b
