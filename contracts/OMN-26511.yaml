@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-26511
+title: Six merged layer-0 changes each read one run line on the dev runtime, or get a declared trigger or a CI-only classification
+summary: >-
+  omnibase_infra#6144 made the stability lane resolve wait only for its own lane's deploy jobs, and the resolver printed a line only when it waited, so with the deploy agent idle no run log told the new rule from the old one. Every resolve pass of .github/actions/resolve-lab-lane/resolve_lab_lane.py now prints one `lab lane wait set` line, also when nothing waits, naming the lane being resolved and each deploy job the agent showed as counted toward the wait or ignored as another lane's (job id and lane id). The wait decision itself is unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26511-resolver-prints-its-wait-set
+    statement: Every pass of the lab lane resolver prints one line naming the lane being resolved and the deploy jobs it counted toward the wait and the ones it ignored as another lane's.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: an idle pass of the resolver prints one `lab lane wait set` line naming the lane and no counted or ignored job -- falsifier: the test for the idle pass passes at the merge base'
+      - id: AC5
+        statement: 'AC5: the line names the deploy jobs of other lanes as ignored, separately from the counted ones, with job id and lane id -- falsifier: a fixture with one other-lane job prints no ignored entry'
+      - id: AC6
+        statement: 'AC6: the existing resolver wait tests keep every assertion -- falsifier: a diff against the merge base deletes or loosens an assertion in the two existing resolver wait tests'
+evidence_requirements:
+  - kind: tests
+    description: The wait-set line tests and the three existing resolver tests, which pass unchanged.
+    command: uv run --frozen pytest tests/ci/test_resolve_lab_lane_wait_set_line_omn26511.py tests/ci/test_resolve_lab_lane_deploy_wait_omn19811.py tests/ci/test_resolve_lab_lane_wait_while_busy_omn20410.py tests/ci/test_resolve_lab_lane_other_lane_job_omn26122.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26511-ac4-idle-pass-line
+    description: >-
+      The resolver wrote a line only when it waited (`lab lane deploy wait started`), so an idle pass printed nothing about the wait set. The test runs the resolver with the agent idle and the lane answering, and asserts one `lab lane wait set` line that names the lane and its bus_lane and reads `no deploy job seen`. It fails at the merge base, where the resolver prints no such line.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_resolve_lab_lane_wait_set_line_omn26511.py -q --no-cov -n 0 -p no:randomly -k "idle_pass or single_shot or unreadable or red_pass"
+        cwd: .
+  - id: dod-omn26511-ac5-ignored-named-apart
+    description: >-
+      The agent's job names a lane (runtime_lane, OMN-26122). The tests run the resolver against a job of another lane, of the graded lane and of no named lane, and read the line: the other lane's job reads `job <id> lane <lane> ignored`, the graded lane's and the unnamed job read `counted`. A parametrised test also holds that a job is marked `counted` exactly when `deploy_agent_busy_reason` reads busy.
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_resolve_lab_lane_wait_set_line_omn26511.py -q --no-cov -n 0 -p no:randomly -k "ignored or counted or agrees_with_the_busy_test or queued"
+        cwd: .
+  - id: dod-omn26511-ac6-existing-tests-unchanged
+    description: >-
+      The three existing resolver tests (OMN-19811, OMN-20410, OMN-26122) are not edited by this change and pass against the resolver with the line added, so no wait assertion is deleted or loosened.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_resolve_lab_lane_deploy_wait_omn19811.py tests/ci/test_resolve_lab_lane_wait_while_busy_omn20410.py tests/ci/test_resolve_lab_lane_other_lane_job_omn26122.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
