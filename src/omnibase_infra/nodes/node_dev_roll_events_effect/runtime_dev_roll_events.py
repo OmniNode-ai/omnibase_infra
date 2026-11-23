@@ -169,10 +169,15 @@ def recreate_gate_at(
     repo_root: Path,
     last_recreate_at: datetime | None,
     announced_for: datetime | None = None,
+    *,
+    announce: Callable[[object], bool] | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> ProtocolRecreateGate:
     """The dev recreate window gate: the policy from the checkout's rendered env, announcing
     through the node's own publisher (OMN-25912). An unreadable policy is a refusing gate,
-    never an open window."""
+    never an open window. ``announce`` and ``clock`` stand in for the publisher and the wall
+    clock: the one-shot self-check of a candidate agent passes a recorder and a fake clock
+    (OMN-26494)."""
     try:
         for relative in (
             "enums/enum_dev_recreate_verdict.py",
@@ -196,8 +201,8 @@ def recreate_gate_at(
                 env[key.strip()] = value.strip()
         return handler.DevRecreateWindowGate(
             window.ModelDevRecreatePolicy.from_env(env),
-            build_events_at(repo_root).recreate_announced,
-            clock=lambda: datetime.now(UTC),
+            announce or build_events_at(repo_root).recreate_announced,
+            clock=clock or (lambda: datetime.now(UTC)),
             last_recreate_at=last_recreate_at,
             announced_for=announced_for,
         )
