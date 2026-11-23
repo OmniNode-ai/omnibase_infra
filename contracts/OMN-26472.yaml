@@ -32,7 +32,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn26472-ac1-seam-form
-    description: "The parse test reads the committed seam and the runner test on a scratch Postgres, which needs this change's identity readback normalisation, adds the column through it: ADD COLUMN IF NOT EXISTS expires_at timestamptz NULL, the partial index, and a readback that raises and ends with the ok line the dev runner log must carry. The omni-201 column read and the runner-log read are post-merge readbacks after the next dev migration run, listed in the PR body."
+    description: "The parse test reads the committed seam and the runner test on a scratch Postgres, whose readback already folds TRIM(BOTH FROM x) to btrim(x) on dev (OMN-26121), adds the column through it: ADD COLUMN IF NOT EXISTS expires_at timestamptz NULL, the partial index, and a readback that raises and ends with the ok line the dev runner log must carry. The omni-201 column read and the runner-log read are post-merge readbacks after the next dev migration run, listed in the PR body."
     source: manual
     binds_ac: [AC1]
     checks:
