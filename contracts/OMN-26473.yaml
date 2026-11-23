@@ -25,7 +25,7 @@ evidence_requirements:
     command: "uv run --frozen pytest tests/unit/infra/test_tenant_identity_effects_runtime_omn26473.py tests/ci/test_runtime_policy_contract.py -q -n 0 --no-cov"
 dod_evidence:
   - id: "dod-omn26473-ac1-effects-carries-dsn"
-    description: "runtime-effects resolves TENANT_IDENTITY_DATABASE_DSN through the merged anchor, fail-closed; the declaration is in the overlay once and in no base file."
+    description: "runtime-effects resolves TENANT_IDENTITY_DATABASE_DSN through the merged anchor, fail-closed; the credentialed declaration is in the overlay once, and the base file carries only the empty x-runtime-env passthrough."
     source: "manual"
     binds_ac: ["AC1"]
     checks:
