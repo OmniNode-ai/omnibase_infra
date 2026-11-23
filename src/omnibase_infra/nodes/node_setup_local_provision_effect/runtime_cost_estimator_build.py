@@ -377,6 +377,9 @@ class HandedOverRoll:
         self.ran = False
 
     def __call__(self, extra_env: dict[str, str] | None = None) -> tuple[str, ...]:
+        converge_broker_sasl(
+            self.execution, self.lane, self.execution._compose_env(extra_env)
+        )
         rolled = roll_writers(self.execution, self.lane, self.git_sha, extra_env)
         self.ran = True
         return rolled
@@ -400,6 +403,67 @@ def handed_over(
             raise RuntimeError(_NOT_ROLLED)
 
     return up
+
+
+#: The overlay's broker one-shots, in the order its ``depends_on`` chains them: the
+#: principals, then the flip. The roll starts the writers with ``up -d --no-deps``,
+#: which bypasses that chain, so nothing else starts them.
+BROKER_SASL_ONESHOTS = ("redpanda-scram-user", "redpanda-sasl-enable")
+BROKER_ONESHOT_WAIT_SECONDS = 120
+
+
+def converge_broker_sasl(
+    execution: ModuleType, lane: str, environment: dict[str, str]
+) -> tuple[str, ...]:
+    """Run the lane's SASL one-shots in order, each to exit 0, before a client starts.
+
+    The overlay renders every client with SASL credentials, so a broker still on
+    ``enable_sasl=false`` refuses the recreated writers (``IllegalSaslStateError``)
+    and the roll fails them as not stable. Both one-shots are idempotent: the
+    principal one-shot reads an existing user back and the flip sets a property
+    already set. A one-shot that does not exit 0 fails the roll before any writer
+    is recreated. A lane whose compose declares neither starts nothing.
+    """
+    declared = _read_docker(
+        execution,
+        [*_compose_prefix(execution, lane), "config", "--services"],
+        environment,
+    ).split()
+    services = tuple(s for s in BROKER_SASL_ONESHOTS if s in declared)
+    for service in services:
+        argv = [
+            *_compose_prefix(execution, lane),
+            "up",
+            "-d",
+            "--no-deps",
+            "--no-build",
+            "--pull",
+            "never",
+            "--force-recreate",
+            service,
+        ]
+        result = execution._run(
+            argv,
+            timeout=execution.PHASE_TIMEOUTS[execution.Phase.RUNTIME],
+            env=environment,
+        )
+        if result.returncode:
+            raise RuntimeError(
+                f"stability broker one-shot {service} start exited {result.returncode}"
+            )
+        container = _writer_container(execution, lane, service, environment)
+        exit_code = execution._run(
+            ["docker", "wait", container],
+            timeout=BROKER_ONESHOT_WAIT_SECONDS,
+            env=environment,
+        )
+        if exit_code.returncode or str(exit_code.stdout).strip() != "0":
+            raise RuntimeError(
+                f"stability broker one-shot {service} exited "
+                f"{str(exit_code.stdout).strip() or exit_code.returncode}; "
+                "no writer was recreated"
+            )
+    return services
 
 
 def roll_writers(
