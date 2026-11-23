@@ -2528,6 +2528,9 @@ async def bootstrap() -> int:
                 from omnibase_core.models.events.model_event_envelope import (
                     ModelEventEnvelope,
                 )
+                from omnibase_infra.handlers.boot_deferred_subscribe import (
+                    subscribe_topics_concurrently,
+                )
                 from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_correlation import (
                     HandlerSavingsCorrelation,
                     decode_event_message,
@@ -2643,7 +2646,7 @@ async def bootstrap() -> int:
                             _topic, _payload
                         )
 
-                    for _signal_topic, _on_message in (
+                    _savings_subscriptions = (
                         (
                             SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED,
                             _savings_on_injection_message,
@@ -2656,22 +2659,17 @@ async def bootstrap() -> int:
                             SUFFIX_OMNICLAUDE_PATTERN_ENFORCEMENT,
                             _savings_on_validator_catch_message,
                         ),
-                    ):
-                        try:
-                            await event_bus.subscribe(
-                                _signal_topic,
-                                node_identity=_savings_node_identity,
-                                on_message=_on_message,
-                            )
-                        except Exception:  # noqa: BLE001
-                            logger.warning(
-                                "Could not subscribe to %s for savings correlation",
-                                _signal_topic,
-                                exc_info=True,
-                            )
+                    )
 
                     async def _savings_correlation_loop() -> None:
-                        """Periodic savings-correlation batch loop."""
+                        """Join the signal topics, then run the periodic batch loop."""
+                        # OMN-26418: joined off the boot path; inline they held it 25 s to 35 s.
+                        await subscribe_topics_concurrently(
+                            event_bus.subscribe,
+                            _savings_subscriptions,
+                            node_identity=_savings_node_identity,
+                            purpose="savings correlation",
+                        )
                         while True:
                             try:
                                 await asyncio.sleep(_savings_interval)

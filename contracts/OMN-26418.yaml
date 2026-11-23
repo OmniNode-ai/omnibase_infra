@@ -1,0 +1,47 @@
+schema_version: 1.0.0
+ticket_id: OMN-26418
+title: The 20:24Z dev build's startup time is attributed phase by phase from its boot log, and each of its three largest phases is matched to an open owner or a new change
+summary: >-
+  The kernel's savings correlation step no longer awaits its three signal-topic joins on the boot path. The three event_bus.subscribe calls ran one after another inside the kernel before the boot went on (25.1 s on the 2026-11-23T10:55Z dev boot, 35 s on the 2026-11-21T23:10Z boot), and no later boot step reads those consumers. The joins now run together as the first statement of the savings correlation task, which the kernel already cancels at shutdown, through subscribe_topics_concurrently in handlers/boot_deferred_subscribe.py. The health gate, the boot guard, the compose wait and the compose start period are not changed, and service_kernel.py shrinks by two lines.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26418-savings-join-off-boot-path
+    statement: The kernel boot does not wait on the savings signal-topic joins; they join together inside the savings correlation task, and one failed join stops no other.
+    acceptance:
+      - id: AC3
+        statement: "AC3: every phase with no open change has a branch with a regression test that fails at the merge base and passes on the branch, and a pull request opened through onex scm pr-create -- falsifier: uv run pytest on the named test at the merge base passes, or onex scm pr-list shows no pull request for the branch"
+evidence_requirements:
+  - kind: tests
+    description: The kernel-source structure test, the join-concurrency test and the savings node wiring gate.
+    command: uv run --frozen pytest tests/unit/runtime/test_kernel_savings_join_off_boot_path_omn26418.py tests/unit/handlers/test_boot_deferred_subscribe_omn26418.py tests/integration/runtime/test_savings_node_auto_wiring_boot_omn26418.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26418-ac3-kernel-awaits-no-savings-subscribe
+    description: "Read from the kernel source: the savings step awaits no event_bus.subscribe outside the savings correlation task, and that task joins the signal topics through subscribe_topics_concurrently before its periodic loop. At the merge base the kernel awaits the three subscribes in a loop and the test fails."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_kernel_savings_join_off_boot_path_omn26418.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26418-ac3-joins-are-concurrent
+    description: "A counted fake bus shows every signal topic inside the join at once, a failed join is logged and stops no other, and cancelling the task reaches every join in flight."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_boot_deferred_subscribe_omn26418.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26418-ac3-savings-node-wires
+    description: "The real savings estimation contract is read from disk and wires through wire_from_manifest with the kernel's arguments and zero failures (the runtime-startup gate the repository requires for a service_kernel.py change)."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_savings_node_auto_wiring_boot_omn26418.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
