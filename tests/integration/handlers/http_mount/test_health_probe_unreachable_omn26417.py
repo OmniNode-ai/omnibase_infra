@@ -32,7 +32,7 @@ from omnibase_infra.runtime.health.container_healthcheck import (
 )
 from omnibase_infra.services.health_checker import ServiceHealth
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
 # container_healthcheck._DEFAULT_TIMEOUT_SECONDS: the probe's own HTTP timeout.
 _PROBE_TIMEOUT_SECONDS = 5.0

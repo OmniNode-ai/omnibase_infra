@@ -21,7 +21,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The probe_unreachable regression, three concurrent container-healthcheck reads against a blocked loop, and the in-flight cap.
-    command: uv run --frozen pytest tests/unit/services/test_health_probe_unreachable_omn26417.py -q --no-cov -n 0 -p no:randomly
+    command: uv run --frozen pytest tests/integration/handlers/http_mount/test_health_probe_unreachable_omn26417.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -36,7 +36,7 @@ dod_evidence:
         check_value: bash -c "grep -n 'probe_unreachable' src/omnibase_infra/runtime/health/container_healthcheck.py && grep -n 'DEFAULT_HEALTH_URL = ' src/omnibase_infra/runtime/health/container_healthcheck.py"
         cwd: .
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/services/test_health_probe_unreachable_omn26417.py -k not_read_by_concurrent_probes -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_health_probe_unreachable_omn26417.py -k not_read_by_concurrent_probes -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26417-ac2-probe-unreachable-regression
     description: "Three container-healthcheck reads in flight while the loop is blocked past the probe timeout each get the acceptor's typed 503 inside the 5 s timeout; at origin/dev two of the three read probe_unreachable at 5.05 s."
@@ -44,7 +44,7 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/services/test_health_probe_unreachable_omn26417.py -k probe_unreachable -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_health_probe_unreachable_omn26417.py -k probe_unreachable -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26417-ac3-gate-unchanged
     description: "The semantic container healthcheck still returns FAIL for the stalled-loop answer (the regression asserts the 503 verdict), and the change edits no compose file, boot guard, healthcheck setting or wait setting. The second check is the regression that asserts that same 503 verdict arrives inside the probe timeout with the gate unchanged; it fails at the merge base."
@@ -55,7 +55,7 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/services/test_startup_health_degraded_omn26316.py -k answers_while_loop_is_blocked -q --no-cov -n 0 -p no:randomly
         cwd: .
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/services/test_health_probe_unreachable_omn26417.py -k not_read_by_concurrent_probes -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_health_probe_unreachable_omn26417.py -k not_read_by_concurrent_probes -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26417-ac4-probes-read-verdict-unit
     description: "The unit-level half of AC4, run by the hosted check: with the loop blocked past the probe timeout, concurrent container-healthcheck reads against the acceptor each get its typed verdict and none reads probe_unreachable, and a connection past the in-flight cap is closed. At the merge base two of the three reads are probe_unreachable. The live read of the rebuilt dev container is the next item."
@@ -63,7 +63,7 @@ dod_evidence:
     binds_ac: [AC4]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/services/test_health_probe_unreachable_omn26417.py -k probe_unreachable -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_health_probe_unreachable_omn26417.py -k probe_unreachable -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26417-deploy-probe-reads-verdict
     description: >-
