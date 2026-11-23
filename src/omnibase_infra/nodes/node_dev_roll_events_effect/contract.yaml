@@ -30,6 +30,15 @@ topics:
 # under its size limit.
 settings:
   log_byte_cap: 262144
+  # OMN-26494: the deploy agent adopts a code ref only after its one-shot self-check exits 0, and
+  # returns to the previous ref after this many restarts inside this many seconds. The agent
+  # keeps its adoption record (current ref, previous ref, start times, refused refs) in its
+  # state directory under this name.
+  adoption_restart_limit: 5
+  adoption_storm_window_seconds: 600
+  adoption_state_file: agent-adoption.json
+  adoption_self_check_timeout_seconds: 300
+  adoption_git_timeout_seconds: 60
 handler_routing:
   routing_strategy: operation_match
   handlers:

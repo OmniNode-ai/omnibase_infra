@@ -53,7 +53,7 @@ def stability_llm_endpoint_env_exports(
         environ,
         search_root,
         state_dir,
-        mounts_lane_declaration=False,
+        mounts_lane_declaration=True,
     )
     return exports
 
@@ -87,7 +87,8 @@ def _overlay_home(root: Path, endpoint_urls: dict[str, str]) -> Path:
 def _lane_overlays(root: Path) -> Path:
     lane_dir = root / "lane-overlays"
     lane_dir.mkdir()
-    # The stability compose mounts no lane declaration folder, so none is built here (OMN-24854).
+    # The stability runtime mounts the lane declaration folder (OMN-26121): the folder above the lane overlays holds it.
+    (root / "ci_bus_lanes.yaml").write_text("lanes: {}\n", encoding="utf-8")
     (lane_dir / LANE_FILE).write_text(
         yaml.safe_dump(
             {

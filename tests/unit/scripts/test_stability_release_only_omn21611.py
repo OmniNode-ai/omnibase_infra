@@ -94,6 +94,8 @@ def clones(tmp_path: Path) -> Path:
 def _write_pin(config_root: Path, pin: dict[str, str]) -> Path:
     path = config_root / "config" / "lab" / "lane-overlays" / f"{LANE}.release-pin.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
+    # OMN-26121: the stability refresh exports the lane declaration folder (config/lab), which must hold the declaration.
+    (path.parent.parent / "ci_bus_lanes.yaml").write_text("lanes: {}\n")
     lines = [
         "schema_version: 1",
         "date: 2026-10-30",

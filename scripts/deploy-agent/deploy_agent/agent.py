@@ -55,6 +55,7 @@ from deploy_agent.events import (
     Scope,
 )
 from deploy_agent.executor import (
+    ADOPTION_MODULE,
     DEPLOY_AGENT_DIR,
     REPO_DIR,
     SCOPE_BUNDLES,
@@ -795,17 +796,17 @@ class DeployAgent:
             flags.frozen_reason(datetime.now(UTC)) or "not frozen",
         )
 
-        # Step 0: record which code this process actually loaded, before
-        # anything can move the clone underneath it, and NAME IT IN THE JOURNAL
-        # (OMN-18200). Until this line existed there was no artifact anywhere --
-        # not the journal, not the health payload, not a job record -- that said
-        # which commit a running agent was executing, which is why a process
-        # four days stale beside a fixed clone looked exactly like a healthy
-        # one. self_update compares against this value, not against the remote.
+        # Step 0: record the code this process loaded (OMN-18200), then count this start: five
+        # restarts of an adopted ref in ten minutes return the clone to the previous ref (OMN-26494).
         loaded_sha = record_loaded_code_sha(
             os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR)
         )
-        logger.info("Deploy agent loaded code sha: %s", loaded_sha)
+        load_dev_boot_guard(ADOPTION_MODULE).guard_boot(
+            sys.modules[__name__],
+            loaded_sha,
+            load_dev_boot_guard(JOB_READING).record_adoption_revert,
+            os.execv,
+        )
 
         # Step 1: Recover crashed jobs
         if recovered := self.job_store.recover_crashed_jobs():
@@ -1144,26 +1145,13 @@ class DeployAgent:
         The third boundary, and the only one that is not job-driven. Both
         OMN-16442 boundaries fire inside the handling of a command, so an agent
         with no traffic can never pick up a fix -- including, and especially, a
-        fix to itself. That is not hypothetical: on 2026-09-14 the change that
-        needed to reach this process was the change to this process, and the
-        only merge that would have published a rebuild command was that same
-        merge.
+        fix to itself (2026-09-14: the only merge that would have published a
+        rebuild command was the change to this process).
 
-        Two guards, both asserted rather than assumed, because "the poll
-        returned nothing" is not the same fact as "nothing is in flight":
-
-        * an accepted or in-progress job means a deploy is running and a
-          re-exec would abort it -- the OMN-16442 defect, arrived at from a
-          different direction;
-        * a job awaiting its terminal publish means a result is owed to the
-          bus. It IS durable (``result_publish_pending`` on disk, replayed by
-          ``_retry_pending_publishes`` at startup), so a re-exec here would not
-          lose it -- but it would delay it by a process restart for no reason,
-          and the next idle tick is one interval away.
-
-        The interval is stamped whether or not the guards let the check through,
-        so a guarded agent re-checks on the next interval rather than probing
-        the job store on every one-second poll.
+        Two guards, both asserted: an accepted or in-progress job means a deploy is running and
+        a re-exec would abort it (OMN-16442); a result awaiting its terminal publish is durable
+        but would be delayed by a restart for no reason. The interval is stamped whether or not
+        a guard lets the check through, so a guarded agent re-checks one interval later.
         """
         now = time.monotonic()
         if (

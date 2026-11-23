@@ -1027,19 +1027,19 @@ class TestInnerHopWake:
         assert log == [("publish", nobody)]
 
     @pytest.mark.asyncio
-    async def test_inner_hop_to_a_consumer_that_fails_to_wake_is_not_published(
+    async def test_inner_hop_to_a_consumer_that_fails_to_wake_fails_that_consumer_only(
         self, fixture_handlers: list[str], tmp_path: Path
     ) -> None:
-        """A failed wake fails the publish loudly; nothing is published into the void."""
+        """A failed wake does not fail the publish (OMN-21753); the next one wakes it."""
         log = CallLog()
         bus = RecordingBus(log, fail_attach={_cmd(B_ORCH)})
         await _boot_ingress(tmp_path, log, bus)
 
-        with pytest.raises(InfraUnavailableError, match=B_ORCH):
-            await bus.publish_envelope(_hop_envelope(), topic=_cmd(B_ORCH))
+        await bus.publish_envelope(_hop_envelope(), topic=_cmd(B_ORCH))
 
-        assert bus.published == []
+        assert bus.published == [_cmd(B_ORCH)]
         assert bus.live == set()
+        assert _sentinel().HANDLED == []
         await bus.publish_envelope(_hop_envelope(), topic=_cmd(B_ORCH))
         assert _sentinel().HANDLED == [B_ORCH]
 

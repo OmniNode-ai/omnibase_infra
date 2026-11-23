@@ -16,7 +16,11 @@ prepend. A repo with no policy file and no root ``CHANGELOG.md`` deleted its
 changelog under a prose-removal rule that has no policy file to read (omnimarket
 and omniclaude, OMN-25958: the 0.4.324 cut re-created ``CHANGELOG.md`` on dev and
 the prose-removal test refused it), so nothing is written to the tree: the block
-travels in the result, for the release pull request's body. A README-only repo gets the block in root
+travels in the result, for the release pull request's body. One exception: a repo
+whose own release-cut gate admits a cut only with ``CHANGELOG.md`` in its diff
+(omnimarket's ticket-contract prerequisite, OMN-26500) gets the entry staged in
+``CHANGELOG.md``, because a cut without it is an empty diff that the gate refuses;
+that repo's post-release bump removes the file again. A README-only repo gets the block in root
 ``README.md`` above its newest release section, a root ``CHANGELOG.md`` removed,
 and, where it carries its release-cut contract and identity test (omnibase_core),
 the pinned test and ``dod_evidence`` item every accepted README-shaped cut has
@@ -30,6 +34,7 @@ README, a block in another shape, or a contract that does not end in its
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -54,6 +59,13 @@ RELEASE_PR_BODY_TARGET: Final = "release-pr-body"
 _README_PATH: Final = "README.md"
 _RELEASE_CONTRACT_PATH: Final = "contracts/OMN-18595.yaml"
 _RELEASE_IDENTITY_TEST_PATH: Final = "tests/ci/test_release_cut_identity_omn18595.py"
+# The repo's own release-cut gate decides whether a cut must carry CHANGELOG.md, so the
+# train reads that gate from the checkout and keeps no key of its own (OMN-26500).
+_RELEASE_CUT_GATE_PATH: Final = (
+    "src/omnimarket/nodes/node_ticket_contract_prerequisite_effect/handlers/"
+    "handler_ticket_contract_prerequisite.py"
+)
+_RELEASE_CUT_PATHS_NAME: Final = "_RELEASE_CUT_PATHS"
 _ENTRY_HEADING: Final[re.Pattern[str]] = re.compile(
     r"^## v(\d+\.\d+\.\d+) \((\d{4}-\d{2}-\d{2})\)$"
 )
@@ -99,6 +111,33 @@ def _filter_private_repository_names(entry: str, vocabulary_file: str | None) ->
     return header + marker + since + newline + pattern.sub("…", subjects)
 
 
+def release_cut_gate_needs_changelog(clone: Path) -> bool:
+    """Whether the repo's release-cut gate lists ``CHANGELOG.md`` among its cut paths.
+
+    The gate admits a release cut only while ``CHANGELOG.md`` is in the cut's diff
+    and the diff stays inside the listed paths. A checkout with no gate file, a gate
+    that does not parse, or a gate that does not list ``CHANGELOG.md`` answers
+    ``False``: the repo has no such gate.
+    """
+    gate = clone / _RELEASE_CUT_GATE_PATH
+    try:
+        tree = ast.parse(gate.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeError):
+        return False
+    return any(
+        isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == _RELEASE_CUT_PATHS_NAME
+            for target in node.targets
+        )
+        and any(
+            isinstance(leaf, ast.Constant) and leaf.value == _CHANGELOG_PATH
+            for leaf in ast.walk(node.value)
+        )
+        for node in ast.walk(tree)
+    )
+
+
 def release_notes_target(clone: Path) -> str:
     """Where this repo's release notes live: ``CHANGELOG.md``, ``README.md`` or the PR.
 
@@ -107,13 +146,17 @@ def release_notes_target(clone: Path) -> str:
     notes go in the root README. A repo with no policy file keeps the changelog
     only while it still has one: no root ``CHANGELOG.md`` means the repo removed
     it, and a cut must not bring it back onto the default branch, so the notes
-    go in the release pull request's body (``RELEASE_PR_BODY_TARGET``). No
-    train-side key: a second copy of the answer would drift from the gate that
-    actually decides.
+    go in the release pull request's body (``RELEASE_PR_BODY_TARGET``), unless the
+    repo's own release-cut gate needs ``CHANGELOG.md`` in the cut
+    (``release_cut_gate_needs_changelog``): then the cut carries it and the repo's
+    post-release bump removes it. No train-side key: a second copy of the answer
+    would drift from the gate that actually decides.
     """
     config = clone / README_ONLY_DOCS_FILE
     if not config.is_file():
-        if (clone / _CHANGELOG_PATH).is_file():
+        if (clone / _CHANGELOG_PATH).is_file() or release_cut_gate_needs_changelog(
+            clone
+        ):
             return _CHANGELOG_PATH
         return RELEASE_PR_BODY_TARGET
     try:
