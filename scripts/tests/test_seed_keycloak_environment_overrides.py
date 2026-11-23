@@ -54,6 +54,15 @@ _ROSTER_PATH = (
     Path(__file__).resolve().parents[2] / "docker" / "keycloak" / "desired-clients.json"
 )
 
+# The browser login client's Keycloak id is also a private repository name, so
+# it is read from the roster rather than spelled here: it is the one client
+# whose staging override declares ``attributes``.
+LOGIN_CLIENT = next(
+    c["clientId"]
+    for c in json.loads(_ROSTER_PATH.read_text(encoding="utf-8"))["clients"]
+    if "attributes" in c.get("environmentOverrides", {}).get("staging", {})
+)
+
 
 def _mod() -> types.ModuleType:
     if "seed_keycloak_clients" in sys.modules:
@@ -125,7 +134,7 @@ class TestTheRosterDeclaresTheException:
         }
         assert declared == {
             "onex-api": ["prod"],
-            "omniweb": ["staging"],
+            LOGIN_CLIENT: ["staging"],
             "omnidash-spa": ["staging"],
             "onex-customer": ["staging"],
         }

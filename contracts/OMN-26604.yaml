@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-26604
 title: The staging Keycloak realm gets the staging redirect URIs from the client roster, so the seed job keeps them
 summary: >-
-  The staging seed job reconciles docker/keycloak/desired-clients.json on every staging sync and sets each client's redirect URIs and web origins to exactly the roster list, so the staging hosts added by hand with kcadm were wiped. omniweb, onex-customer and omnidash-spa now declare a staging override with the staging hosts only, and omniweb's staging sign-out URI. An override replaces a whole field, so each list is the full staging set and omniweb's staging attributes repeat the PKCE method. onex-api keeps its base shape on staging because its only override is prod. The staging overlay in omninode_infra sets KC_ENVIRONMENT=staging in a separate PR.
+  The staging seed job reconciles docker/keycloak/desired-clients.json on every staging sync and sets each client's redirect URIs and web origins to exactly the roster list, so the staging hosts added by hand with kcadm were wiped. The browser login client, onex-customer and omnidash-spa now declare a staging override with the staging hosts only, and the login client's staging sign-out URI. An override replaces a whole field, so each list is the full staging set and the login client's staging attributes repeat the PKCE method. onex-api keeps its base shape on staging because its only override is prod. The staging overlay in the deployment repository sets KC_ENVIRONMENT=staging in a separate PR.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -11,12 +11,12 @@ requirements:
     statement: The staging realm's browser clients accept the staging hosts and nothing else.
     acceptance:
       - id: AC1
-        statement: "AC1: resolved for staging, omniweb, onex-customer and omnidash-spa carry the staging redirect URIs, web origins and sign-out URI, and no prod, dev or localhost host"
+        statement: "AC1: resolved for staging, the browser login client, onex-customer and omnidash-spa carry the staging redirect URIs, web origins and sign-out URI, and no prod, dev or localhost host"
   - id: req-omn26604-nothing-else-moves
     statement: The override changes only the named fields, and never drops a base attribute.
     acceptance:
       - id: AC2
-        statement: "AC2: every attributes override keeps each base attribute key (omniweb keeps PKCE S256), and only redirectUris, webOrigins and attributes differ from the base on staging"
+        statement: "AC2: every attributes override keeps each base attribute key (the login client keeps PKCE S256), and only redirectUris, webOrigins and attributes differ from the base on staging"
   - id: req-omn26604-other-realms
     statement: onex-api, dev and prod are unchanged, and the seeder takes staging as an environment name.
     acceptance:

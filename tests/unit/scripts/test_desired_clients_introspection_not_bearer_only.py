@@ -120,8 +120,22 @@ class TestIntrospectionCallersAreNotBearerOnly:
 #: rather than a field someone adds to a roster entry and nobody notices.
 #: OMN-23298 adds the three browser clients, whose staging realm serves only
 #: the staging hosts.
+#: The browser login client's Keycloak id is also a private repository name,
+#: so it is read from the roster: it is the one client whose staging override
+#: declares ``attributes``. A second such client fails this read, not silently
+#: widens the allowlist.
+def _staging_attributes_client_id() -> str:
+    ids = [
+        c["clientId"]
+        for c in _clients()
+        if "attributes" in c.get("environmentOverrides", {}).get("staging", {})
+    ]
+    assert len(ids) == 1, f"expected exactly one staging attributes override: {ids}"
+    return ids[0]
+
+
 CLIENTS_ALLOWED_AN_ENVIRONMENT_OVERRIDE = frozenset(
-    {"onex-api", "omniweb", "omnidash-spa", "onex-customer"}
+    {"onex-api", "omnidash-spa", "onex-customer", _staging_attributes_client_id()}
 )
 
 #: Every field an override block may carry. Two document it and the rest

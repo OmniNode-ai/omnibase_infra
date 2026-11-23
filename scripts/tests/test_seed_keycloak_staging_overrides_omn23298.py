@@ -7,14 +7,14 @@ The staging seed Job reconciles this roster on every staging sync. The
 browser clients' redirect URIs and web origins are reconciled to exactly the
 roster list, so the staging hosts that were added by hand with kcadm were
 wiped on the next sync. They are declared here instead, as a ``staging``
-override on omniweb, onex-customer and omnidash-spa, and the staging Job
-names ``KC_ENVIRONMENT=staging``.
+override on the browser login client, onex-customer and omnidash-spa, and
+the staging Job names ``KC_ENVIRONMENT=staging``.
 
 An override replaces a whole field (``apply_environment_overrides``), and the
 seeder reconciles ``attributes`` to the roster map, removing undeclared keys
 that Keycloak does not manage. So each staging list is the full staging set,
-and omniweb's staging ``attributes`` repeats the PKCE method next to the
-staging sign-out URI.
+and the login client's staging ``attributes`` repeats the PKCE method next
+to the staging sign-out URI.
 """
 
 from __future__ import annotations
@@ -34,8 +34,17 @@ _ROSTER_PATH = (
     Path(__file__).resolve().parents[2] / "docker" / "keycloak" / "desired-clients.json"
 )
 
+# The browser login client's Keycloak id is also a private repository name, so
+# it is read from the roster rather than spelled here: it is the one client
+# whose staging override declares ``attributes``, which the tests below assert.
+LOGIN_CLIENT = next(
+    c["clientId"]
+    for c in json.loads(_ROSTER_PATH.read_text(encoding="utf-8"))["clients"]
+    if "attributes" in c.get("environmentOverrides", {}).get("staging", {})
+)
+
 STAGING_SHAPE = {
-    "omniweb": {
+    LOGIN_CLIENT: {
         "redirectUris": ["https://staging.app.omninode.ai/*"],
         "webOrigins": [
             "https://staging.app.omninode.ai",
@@ -103,8 +112,8 @@ class TestStagingGetsTheStagingHosts:
             spec = resolved[client_id]
             assert spec["redirectUris"] == shape["redirectUris"], client_id
             assert spec["webOrigins"] == shape["webOrigins"], client_id
-        logout = resolved["omniweb"]["attributes"]["post.logout.redirect.uris"]
-        assert logout == STAGING_SHAPE["omniweb"]["post.logout.redirect.uris"]
+        logout = resolved[LOGIN_CLIENT]["attributes"]["post.logout.redirect.uris"]
+        assert logout == STAGING_SHAPE[LOGIN_CLIENT]["post.logout.redirect.uris"]
 
     def test_staging_accepts_no_prod_dev_or_localhost_host(self) -> None:
         resolved = _resolved("staging")
@@ -131,9 +140,9 @@ class TestStagingGetsTheStagingHosts:
                     client["clientId"],
                     environment,
                 )
-        assert checked, "no attributes override found"
-        omniweb = _resolved("staging")["omniweb"]["attributes"]
-        assert omniweb["pkce.code.challenge.method"] == "S256"
+        assert checked == 1, f"expected exactly one attributes override: {checked}"
+        attributes = _resolved("staging")[LOGIN_CLIENT]["attributes"]
+        assert attributes["pkce.code.challenge.method"] == "S256"
 
     def test_only_the_named_fields_change_on_staging(self) -> None:
         resolved = _resolved("staging")
