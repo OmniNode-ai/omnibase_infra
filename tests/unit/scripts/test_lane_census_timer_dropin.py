@@ -350,3 +350,44 @@ def test_installer_refuses_a_copy_with_no_revision_record(tmp_path: Path) -> Non
     assert "revision" in result.stderr
     assert not (home / ".config/systemd/user/onex-lane-census.service").exists()
     assert not (tmp_path / "systemctl.log").exists()
+
+
+def test_standalone_unit_keeps_the_collector_beside_its_revision(
+    tmp_path: Path,
+) -> None:
+    """The unit a scheduled run starts is the collector, and it names its revision."""
+    env, home = _installer_env(tmp_path)
+    result = _install(
+        env,
+        "--standalone",
+        "--broker-container",
+        "census-test-broker",
+        "--repo-root",
+        str(_REPO),
+    )
+    assert result.returncode == 0, result.stderr
+    service = (home / ".config/systemd/user/onex-lane-census.service").read_text()
+    assert f"ExecStart=/bin/bash {_REPO}/scripts/lane-census-check.sh" in service
+    assert re.search(r"^Environment=LANE_CENSUS_REVISION=\S+$", service, re.M), (
+        "the unit carries no revision record"
+    )
+
+
+def test_standalone_unit_runs_one_source_whose_revision_is_recorded(
+    tmp_path: Path,
+) -> None:
+    """One script root in the unit, and exactly one revision record for it."""
+    env, home = _installer_env(tmp_path)
+    result = _install(
+        env,
+        "--standalone",
+        "--broker-container",
+        "census-test-broker",
+        "--repo-root",
+        str(_REPO),
+    )
+    assert result.returncode == 0, result.stderr
+    service = (home / ".config/systemd/user/onex-lane-census.service").read_text()
+    roots = set(re.findall(r"(/\S*?)/scripts/lane-census-check\.sh", service))
+    assert roots == {str(_REPO)}, f"the unit names more than one source: {roots}"
+    assert len(re.findall(r"^Environment=LANE_CENSUS_REVISION=", service, re.M)) == 1
