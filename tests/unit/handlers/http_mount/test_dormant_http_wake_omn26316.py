@@ -196,9 +196,10 @@ async def _booted(
     server.attach_manifest(ModelAutoWiringManifest(contracts=(boot,)))
     assert server._mount_task is not None
     await server._mount_task
-    index = server._http_mounts._dormant_index_task
-    assert index is not None
-    await index
+    # Wait for the dormant mounts to be indexed; the runtime before OMN-26316 has none.
+    index = getattr(server._http_mounts, "_dormant_index_task", None)
+    if index is not None:
+        await index
     assert server._site is not None
     return server, handler, int(server._site.port)
 
