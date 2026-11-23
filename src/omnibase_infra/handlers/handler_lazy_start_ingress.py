@@ -99,6 +99,7 @@ class HandlerLazyStartIngress:
                     else None,
                     self._container,
                     ModelTopicReadinessConfig(),
+                    topology=StoreLazyStartDormant.topology(),
                 ),
                 contracts,
                 policy,
