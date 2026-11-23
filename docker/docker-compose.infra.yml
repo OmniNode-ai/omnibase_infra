@@ -471,6 +471,11 @@ x-runtime-env: &runtime-env
   # the ref unresolved, which the provider-rung canary reads as UNRESOLVED and
   # the typed-decision effect refuses with CREDENTIAL_NOT_REGISTERED.
   LLM_TYPESAFE_API_KEY: ${LLM_TYPESAFE_API_KEY:-}
+  # OMN-26473: the runtime policy's dev resolver maps tenant_identity.database.dsn
+  # to this variable. The dev-lane overlay supplies the fail-closed value on the
+  # services that provision tenants; every other lane leaves it unset, which keeps
+  # the ref unresolved. Never a required env var in this file.
+  TENANT_IDENTITY_DATABASE_DSN: ${TENANT_IDENTITY_DATABASE_DSN}
   # Vertex bearer path (OMN-12971): ADDITIVE next to the Gemini API-key path. The
   # routing authority declares secret_ref=llm.vertex.access_token for
   # cloud-vertex-gemini; the secret resolver maps it to the mounted token FILE
