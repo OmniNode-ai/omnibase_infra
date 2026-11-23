@@ -27,23 +27,9 @@ requirements:
         statement: "AC5: the roll runs the principal one-shot, then the flip one-shot, then recreates the writers, and starts no one-shot on a lane whose compose declares none -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_broker_sasl_flip_omn26121.py -k 'flipped or declares_no' -q --no-cov` exits non-zero"
       - id: AC6
         statement: "AC6: a one-shot that does not exit 0 fails the roll and no writer is recreated -- falsifier: `uv run pytest scripts/deploy-agent/tests/unit/test_stability_broker_sasl_flip_omn26121.py -k 'does_not_exit or failed_principal' -q --no-cov` exits non-zero"
-  - id: req-omn26121-identity-schema-seam
-    statement: On a lane whose forward-migration carries ONEX_MIGRATION_GATEWAY_LANE (dev, stability_test) the grant seam's entry creates the missing tenant identity tables, adds tenant_api_keys.expires_at and reads the whole schema back; on every other lane it skips by name.
-    acceptance:
-      - id: AC1
-        statement: "AC1: the create step creates each of the eight tables only when it is absent, never alters, drops or deletes, and leaves expires_at to the expiry seam -- falsifier: `uv run pytest tests/unit/test_tenant_identity_schema_seam.py -k 'create_step' -q --no-cov` exits non-zero"
-      - id: AC2
-        statement: "AC2: the readback declares every column, constraint and index of the eight tables (expires_at and its index included) and raises on a difference -- falsifier: `uv run pytest tests/unit/test_tenant_identity_schema_seam.py -k 'readback' -q --no-cov` exits non-zero"
-      - id: AC3
-        statement: "AC3: the entry seam runs create, then expiry, then readback for dev and stability_test only, before the gateway grants, skips by name when the indicator is unset or unknown, and the runner gains no code line -- falsifier: `uv run pytest tests/unit/test_tenant_identity_schema_seam.py -k 'runner or entry or grants_seam' -q --no-cov` exits non-zero"
-      - id: AC4
-        statement: "AC4: the dev and stability compose files carry the indicator with their lane's value and no other compose file and no catalog file carries it -- falsifier: `uv run pytest tests/unit/test_tenant_identity_schema_seam.py -k 'indicator or carries' -q --no-cov` exits non-zero"
 evidence_requirements:
   - kind: tests
     description: The seam, runner and compose assertions in the new test file.
-    command: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -q --no-cov
-  - kind: tests
-    description: The roll order and refusal assertions in the new test file, and the neighbouring roll tests.
     command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_broker_sasl_flip_omn26121.py scripts/deploy-agent/tests/unit/test_stability_writers_follow_runtime_omn24903.py -q --no-cov
   - kind: tests
     description: The seam, runner and compose assertions in the new test file.
@@ -128,44 +114,3 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/docker/test_broker_sasl_converge_omn26121.py -q --no-cov -n 0
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn26121-ac1-create-step
-    description: The create step is gated per table, alters nothing and omits expires_at.
-    source: manual
-    binds_ac: [AC1]
-    checks:
-      - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -k create_step -q --no-cov
-        cwd: .
-  - id: dod-omn26121-ac2-readback
-    description: The readback declares the final catalog, expires_at included, and raises on any difference.
-    source: manual
-    binds_ac: [AC2]
-    checks:
-      - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -k readback -q --no-cov
-        cwd: .
-  - id: dod-omn26121-ac3-runner-case
-    description: The entry seam order, placement before the grants and fail-closed skips, and the runner's unchanged code lines.
-    source: manual
-    binds_ac: [AC3]
-    checks:
-      - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -k "runner or entry or grants_seam" -q --no-cov
-        cwd: .
-  - id: dod-omn26121-ac4-indicator-placement
-    description: The indicator is on the dev and stability compose files and nowhere else.
-    source: manual
-    binds_ac: [AC4]
-    checks:
-      - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -k "indicator or carries" -q --no-cov
-        cwd: .
-  - id: dod-omn26121-deploy
-    description: Hermetic probe of the landing branch, run by the hosted runner. It reads the readback seam from the checked-out tree and the PR branch and requires the expires_at row of the declared catalog; the file does not exist on the merge base, so the command exits non-zero before this change.
-    source: manual
-    binds_ac: [AC2, AC3]
-    checks:
-      - check_type: command
-        check_value: >-
-          grep -F 'tenant_api_keys|column|expires_at' docker/migrations/seams/tenant_identity_schema_readback.sql > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/seams/tenant_identity_schema_readback.sql?ref=omn-26121-tenant-identity-schema-seam' --jq .content | base64 -d | grep 'tenant_api_keys|column|expires_at' > /dev/null
-        cwd: .
