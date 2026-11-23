@@ -59,7 +59,7 @@ class HandlerWiringReportCounts:
 
     @property
     def handler_category(self) -> EnumHandlerTypeCategory:
-        return EnumHandlerTypeCategory.COMPUTE
+        return EnumHandlerTypeCategory.EFFECT
 
     def handle(self, request: ModelAutoWiringManifest) -> ModelWiringCounts:
         """Count from the manifest and the handler sources it names."""

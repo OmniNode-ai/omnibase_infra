@@ -15,7 +15,7 @@ from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_locat
 from omnibase_infra.handlers.handler_wiring_report_counts import (
     HandlerWiringReportCounts,
 )
-from omnibase_infra.handlers.handler_wiring_report_ratchet import (
+from omnibase_infra.handlers.handler_wiring_report_ratchet.handler import (
     COUNT_FIELDS,
     HandlerWiringReportRatchet,
 )
@@ -34,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT = Path(
     "src/omnibase_infra/nodes/node_wiring_report_ratchet_compute/contract.yaml"
 )
-HANDLER_MODULE = "omnibase_infra.handlers.handler_wiring_report_ratchet"
+HANDLER_MODULE = "omnibase_infra.handlers.handler_wiring_report_ratchet.handler"
 
 
 def _ratchet_values(text: str) -> dict[str, dict[str, int]]:

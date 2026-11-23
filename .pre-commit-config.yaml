@@ -213,7 +213,7 @@ repos:
         name: Wiring report counts only fall (OMN-26335)
         entry: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly
         language: system
-        files: ^(src/omnibase_infra/(handlers/handler_wiring_report_(counts|ratchet)\.py|models/wiring_ratchet/.*|nodes/node_wiring_report_ratchet_compute/.*|runtime/auto_wiring/.*)|tests/ci/(test_wiring_report_ratchet_omn26335\.py|fixtures/wiring_report_2026_11_21\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        files: ^(src/omnibase_infra/(handlers/(handler_wiring_report_counts\.py|handler_wiring_report_ratchet/.*)|models/wiring_ratchet/.*|nodes/node_wiring_report_ratchet_compute/.*|runtime/auto_wiring/.*)|tests/ci/(test_wiring_report_ratchet_omn26335\.py|fixtures/wiring_report_2026_11_21\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: linear-transport-consolidation

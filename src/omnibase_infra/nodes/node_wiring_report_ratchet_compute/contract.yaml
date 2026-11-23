@@ -39,7 +39,7 @@ handler_routing:
       handler_type: "wiring_report_ratchet_check"
       handler:
         name: "HandlerWiringReportRatchet"
-        module: "omnibase_infra.handlers.handler_wiring_report_ratchet"
+        module: "omnibase_infra.handlers.handler_wiring_report_ratchet.handler"
       supported_operations:
         - "wiring_report_ratchet.check"
 descriptor:

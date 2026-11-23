@@ -76,5 +76,5 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_wiring_report_ratchet.py?ref=omn-26335-wiring-report-ratchet" --jq .content | base64 -d | grep -q 'class HandlerWiringReportRatchet' && grep -q 'class HandlerWiringReportRatchet' src/omnibase_infra/handlers/handler_wiring_report_ratchet.py
+        check_value: test "$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_wiring_report_ratchet/handler.py?ref=omn-26335-wiring-report-ratchet" --jq .content | base64 -d | grep -c 'class HandlerWiringReportRatchet')" -ge 1 && grep -q 'class HandlerWiringReportRatchet' src/omnibase_infra/handlers/handler_wiring_report_ratchet/handler.py
         cwd: .
