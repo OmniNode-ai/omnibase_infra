@@ -26,6 +26,10 @@ handler_routing:
       handler: {name: HandlerDeployJobReading, module: omnibase_infra.handlers.handler_deploy_job_reading}
     - operation: record_dev_merge_build_decision
       handler: {name: HandlerDevMergeBuildDecision, module: omnibase_infra.handlers.handler_dev_merge_build_decision}
+    - operation: check_routing_key_checks
+      handler: {name: HandlerRoutingKeyCheck, module: omnibase_infra.handlers.handler_routing_key_check}
+    - operation: alarm_routed_commands_without_job_record
+      handler: {name: HandlerRoutedCommandAlarm, module: omnibase_infra.handlers.handler_routed_command_alarm}
 # The reading writer's append route, by the names its overlay gives the two variables.
 settings:
   append_command_env: ONEX_LEDGER_BUS_APPEND_COMMAND
@@ -51,6 +55,8 @@ settings:
   alarm_owner: swarm-item-lane-OMN-24562
   alarm_job_owner_line: read the job's failing step on the deploy agent's host and open or hand the fix to the integrator lane that owns the pin
   alarm_pin_owner_line: the integrator lane that owns the pin lands or re-registers its unmerged fixes before expires_at; the orchestrator lands the open PRs
+  # OMN-26494: the alarm of an agent that restarted five times in ten minutes after adopting a code ref.
+  alarm_adoption_owner_line: the deploy-agent role reads the agent journal for the adopted ref's crash, fixes it on dev and lets the agent adopt the fix; the agent keeps refusing the adopted ref until dev moves on
   # OMN-26431: the build-decision rows. One STATUS row per dev merge sha decision; its key
   # (repository, sha, result, reason) is held in the agent's state directory, so a decision
   # that repeats on every idle tick writes one row.
@@ -58,9 +64,19 @@ settings:
   build_decision_actor: deploy-agent:build-decision
   # The bound on the one git diff that reads a sha's changed paths for its class.
   build_decision_git_diff_timeout_seconds: 30
+  # OMN-26485: a routed command with no job record on its instance after this many seconds
+  # writes one alarm row (ten minutes, the ticket's window). The row names the instance and
+  # the command; the append's request id is derived from them, so it is written once.
+  routed_command_no_job_window_seconds: 600
+  alarm_routed_command_owner: orchestrator-31d9-swarm
+  alarm_routed_command_owner_line: read the routed instance's job record and agent log for the command, then re-route it or hand the instance's key fix to the owner of that host's agent; the instance is never restarted or edited by hand from this alarm
   # The deploy phases in pipeline order; the first one that failed is the failing step.
   phase_order: [preflight, git, compose_gen, seed, core, runtime, verification]
 capabilities:
+  - name: deploy.routing_key_check
+    description: Judge the deploy lane routing table against each available instance's agent key check and the lane runtime's, refuse a mismatched instance with a typed refusal naming both values, and fall back to the default instance (OMN-26485).
+  - name: deploy.routed_command_no_job_alarm
+    description: Write one alarm row naming the instance and the command when a routed command has no job record on its instance within the declared window (OMN-26485).
   - name: deploy.job_reading
     description: Publish each deploy job's terminal outcome as a ledger reading row, so a failed job reads NOT_WORKING with its failing step where an owner reads it, and write an alarm row with an owner line for a failed job and for a code-ref pin within six hours of its expiry.
   - name: deploy.dev_merge_build_decision

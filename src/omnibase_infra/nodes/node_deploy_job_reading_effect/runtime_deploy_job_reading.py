@@ -273,6 +273,31 @@ def append_failures() -> int:
     return _append_failures[0]
 
 
+def record_adoption_revert(adopted_ref: str, previous_ref: str) -> str:
+    """Append the alarm row of a restart storm that returned the agent to ``previous_ref``.
+
+    Returns ``""`` when the append took the row, else why not; never raises (OMN-26494).
+    """
+    try:
+        settings = load_settings(_agent())
+        handler = handler_module.HandlerDeployJobReading(
+            settings=settings, environ=os.environ
+        )
+        result = handler.handle_adoption_revert(
+            adopted_ref=adopted_ref, previous_ref=previous_ref, now=datetime.now(UTC)
+        )
+        return str(getattr(result, "detail", ""))
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        ValidationError,
+        RuntimeError,
+        OSError,
+    ) as exc:
+        return f"{type(exc).__name__}: {exc}"
+
+
 def _agent() -> ModuleType:
     return importlib.import_module("deploy_agent.agent")
 
