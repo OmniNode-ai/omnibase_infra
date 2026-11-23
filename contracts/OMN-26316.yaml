@@ -21,6 +21,13 @@ requirements:
     acceptance:
       - id: AC4
         statement: "AC4: the contract_attach readiness detail carries a lazy_start block with the serving set, serving_count and each failed wake's reason, and ready is unchanged -- falsifier: uv run pytest tests/unit/runtime/test_lazy_start_serving_read_omn26316.py -q fails at the merge base (StoreLazyStartDormant has no record_front_door) and passes on the branch"
+  - id: req-omn26316-hotwake-first-request-wakes-dormant
+    statement: A first request on a dormant contract's HTTP mount, and a first message a client writes straight to the broker to a dormant consumer's topic, wakes that contract through the lazy-start front door; a request for no dormant contract wakes nothing.
+    acceptance:
+      - id: AC5
+        statement: "AC5: a request under the http_mount prefix of a contract the lane left dormant wakes that contract, mounts its app and is served, once, with no broker; a failed wake answers 503 and leaves the listener up -- falsifier: uv run pytest tests/integration/handlers/http_mount/test_dormant_http_wake_omn26316.py fails at origin/dev with 404 and passes on the PR branch"
+      - id: AC6
+        statement: "AC6: the first message to a topic a dormant contract subscribes to, written by a client straight to the broker, wakes that contract's consumers; the watch is group-less and reads from the end -- falsifier: uv run pytest tests/unit/handlers/test_lazy_start_bus_watch_omn26316.py fails at origin/dev (the watch module is absent) and passes on the PR branch"
   - id: req-omn26316-boot-failure-cause
     statement: A boot failure's recorded cause is the error that ended the kernel; a per-message dispatch error logged on the kernel's logger is set apart and never recorded as the cause.
     acceptance:
@@ -30,6 +37,9 @@ evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
     command: uv run --frozen pytest tests/unit/services/test_startup_health_degraded_omn26316.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The dormant HTTP mount and dormant topic watch regressions of the lazy-start front door.
+    command: uv run --frozen pytest tests/integration/handlers/http_mount/test_dormant_http_wake_omn26316.py tests/unit/handlers/test_lazy_start_bus_watch_omn26316.py -q --no-cov -n 0 -p no:randomly
   - kind: tests
     description: The boot failure cause regression built from the dev boot ledger event of the 2026-11-23T20:52Z exit.
     command: uv run --frozen pytest tests/unit/runtime/test_boot_failure_cause_omn26316.py -q --no-cov -n 0 -p no:randomly
@@ -91,6 +101,31 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: bash -c 'docker exec omninode-runtime curl -s -m 5 http://localhost:8085/ready | grep -q "\"serving_count\""'
+  - id: dod-omn26316-hotwake-http
+    description: "A request under a dormant contract's http_mount wakes it, mounts its app and is served once; the failing control is the 404 the dev runtime answered for /projection-api/health."
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_dormant_http_wake_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-hotwake-bus
+    description: "The first message to a dormant consumer's topic wakes its consumers through a group-less watch that reads from the end."
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_lazy_start_bus_watch_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-hotwake-deploy-live
+    description: >-
+      Post-deploy probe on the dev runtime host: the projection-api mount of node_projection_query_api_effect answers 200 on the runtime's HTTP port after the deploy agent rebuilt the container from this change. It reads the live container, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: bash -c 'test "$(curl -s -o /dev/null -w "%{http_code}" -m 30 http://localhost:8085/projection-api/health)" = 200'
   - id: dod-omn26316-boot-failure-cause
     description: "The capture sets the dispatch engine's records apart: the real ledger cause of the 823 s exit is the engine's own message, an exit after it records that no kernel error was logged, and a kernel error stays the cause."
     source: manual

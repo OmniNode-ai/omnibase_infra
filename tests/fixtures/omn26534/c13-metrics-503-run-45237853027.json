@@ -1,0 +1,19 @@
+{
+  "_provenance": {
+    "captured_utc": "2026-11-23T19:55:00Z",
+    "source": "github-actions job log: customer-local delegation check run 45237853027 (2026-11-23T18:23Z), job 137914255193, step 'Drive one customer delegation and grade it', read through onex scm job-log; lines copied verbatim, timestamps and runner paths dropped"
+  },
+  "request": "GET /metrics on the model host",
+  "response": {
+    "status": 503,
+    "reason": "Service Unavailable"
+  },
+  "failing_frames": [
+    "File \"/tmp/p21-probe.py\", line 994, in observe_live: tokens_after_configured = tokens_predicted(base_url)",
+    "File \"/tmp/p21-probe.py\", line 757, in tokens_predicted: return tokens_predicted_from_metrics(_http_get(f\"{base_url}/metrics\"))",
+    "File \"/tmp/p21-probe.py\", line 719, in _http_get: with urllib.request.urlopen(url, timeout=timeout) as response:"
+  ],
+  "exception": "urllib.error.HTTPError: HTTP Error 503: Service Unavailable",
+  "probe_exit_status": 1,
+  "step_8_failure": "test -s c13-customer-local.json (no record was written)"
+}
