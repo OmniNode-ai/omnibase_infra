@@ -48,6 +48,13 @@ requirements:
         statement: "AC11: a ledger readback block that names authorized_by resolves to its dsn_env name on a non-dev lane, a projection authorization does not authorize the ledger leg, and every unauthorized non-dev lane stays refused for both legs -- falsifier: `uv run pytest tests/unit/nodes/node_chain_canary_effect/test_lane_ledger_readback.py tests/unit/nodes/node_chain_canary_effect/test_projection_dsn_declaration_omn18060.py -q --no-cov` exits non-zero"
       - id: AC12
         statement: "AC12: the rebuild trigger's strict overlay model accepts authorized_by inside a readback block as a string, refuses it as any other type, and still refuses every other unknown key -- falsifier: `uv run pytest tests/unit/scripts/test_omn_18083_lane_model_tracks_the_live_overlay.py -q --no-cov` exits non-zero"
+  - id: req-omn26121-stability-reads-infisical
+    statement: The stability probes C15 (chain-canary.yml), C16 (chain-canary-c16-receipt-identity.yml) and C11 (chain-canary-c11-negative-paths.yml) read KAFKA_SASL_USERNAME, KAFKA_SASL_PASSWORD, CHAIN_CANARY_PROJECTION_DSN and CHAIN_CANARY_GATEWAY_API_KEY from the stability Infisical at run time through the runner's machine identity, never from a repository or environment secret, and a missing value fails the fetch step naming the variable, the Infisical name and the store path.
+    acceptance:
+      - id: AC13
+        statement: "AC13: no stability probe workflow reads secrets.KAFKA_SASL_*, secrets.CHAIN_CANARY_PROJECTION_DSN or secrets.CHAIN_CANARY_GATEWAY_API_KEY, each calls the fetch action before its probe step with exactly the names it needs, and no step re-declares a fetched name -- falsifier: `uv run pytest tests/ci/test_stability_probes_read_infisical_omn26121.py -k 'repository_secret or fetch_precedes or re_declare' -q --no-cov` exits non-zero"
+      - id: AC14
+        statement: "AC14: the fetch action masks every value before exporting it, prints no value outside the mask command, exports nothing when any name is missing, refused or the identity or login fails, and names the variable, the Infisical name and the store path -- falsifier: `uv run pytest tests/ci/test_stability_probes_read_infisical_omn26121.py -k 'masked or missing_value or refused or identity' -q --no-cov` exits non-zero"
 evidence_requirements:
   - kind: tests
     description: The roll order and refusal assertions in the new test file, and the neighbouring roll tests.
@@ -58,6 +65,9 @@ evidence_requirements:
   - kind: tests
     description: The stability lane declaration mount, the agent render and the stability refresh assertions.
     command: uv run --frozen pytest tests/ci/test_stability_lane_declaration_mount_omn26121.py scripts/deploy-agent/tests/unit/test_llm_endpoint_env_compose_omn24025.py scripts/deploy-agent/tests/unit/test_stability_refresh_llm_endpoint_env_omn24119.py -q --no-cov
+  - kind: tests
+    description: The fetch action's behaviour against a loopback store and the three workflows' wiring.
+    command: uv run --frozen pytest tests/ci/test_stability_probes_read_infisical_omn26121.py tests/ci/test_chain_canary_workflow.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
@@ -220,4 +230,29 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/chain_canary/test_stability_readback_lanes_omn26121.py -q --no-cov -n 0
+        cwd: .
+  - id: dod-omn26121-ac13-workflows-fetch-from-infisical
+    description: The three stability probe workflows hold no repository-secret reference for the four names and fetch them before the probe.
+    source: manual
+    binds_ac: [AC13]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_stability_probes_read_infisical_omn26121.py -k "repository_secret or fetch_precedes or re_declare" -q --no-cov
+        cwd: .
+  - id: dod-omn26121-ac14-fetch-action-masks-and-fails-named
+    description: The fetch action masks, exports all or nothing, and names the variable, the Infisical name and the store path on a failure.
+    source: manual
+    binds_ac: [AC14]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_stability_probes_read_infisical_omn26121.py -k "masked or missing_value or refused or identity" -q --no-cov
+        cwd: .
+  - id: dod-omn26121-stability-infisical-fetch-deploy
+    description: Hermetic probe of the landing branch, run by the hosted runner. It reads the C15 workflow from the checked-out tree and the PR branch and requires the fetch action call; the merge base reads repository secrets, so the command exits non-zero before this change.
+    source: manual
+    binds_ac: [AC13, AC14]
+    checks:
+      - check_type: command
+        check_value: >-
+          grep -F 'uses: ./.github/actions/fetch-stability-secrets' .github/workflows/chain-canary.yml > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/chain-canary.yml?ref=omn-26121-stability-infisical-fetch' --jq .content | base64 -d | grep -F 'uses: ./.github/actions/fetch-stability-secrets' > /dev/null
         cwd: .
