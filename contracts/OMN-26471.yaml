@@ -60,6 +60,9 @@ dod_evidence:
     binds_ac: ["AC4"]
     checks:
       - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -k gateway_grants_psql_run -q -n 0 --no-cov"
+        cwd: "."
+      - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/infra/test_gateway_runtime_login_role_omn26151.py -q -n 0 --no-cov"
         cwd: "."
   - id: "dod-omn26471-ac5-red-then-green"
