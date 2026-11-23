@@ -757,3 +757,14 @@ def test_every_service_naming_the_lane_overlay_mounts_it() -> None:
         "read-only bind of this lane's overlay file with create_host_path false; "
         "add `- *lane-overlay-mount` to their volumes"
     )
+
+
+# OMN-26472: the collaborator lane's cloud one-shot runs after the forward
+# migration runner finishes, so the runner must never run the tenant_api_keys
+# expiry seam there: its rendered forward-migration carries no gateway-lane
+# indicator.
+@pytest.mark.integration
+def test_lakshman_forward_migration_carries_no_gateway_lane_indicator() -> None:
+    services = _compose_config_json()["services"]
+    environment = services["forward-migration"].get("environment", {})
+    assert "ONEX_MIGRATION_GATEWAY_LANE" not in environment

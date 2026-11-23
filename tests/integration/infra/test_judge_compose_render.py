@@ -479,3 +479,13 @@ def test_judge_redpanda_render_matches_the_running_broker() -> None:
     assert "localhost" not in advertised
     # The shared REDPANDA_MEMORY (24G live) must not reach the judge broker.
     assert command[command.index("--memory") + 1] == "2G"
+
+
+# OMN-26472: judge never carries the gateway-lane indicator that scopes the
+# tenant_api_keys expiry seam to the dev and stability lanes. Read from the
+# layered render, the shape the host deploys (base infra + judge overlay).
+@pytest.mark.integration
+def test_judge_forward_migration_carries_no_gateway_lane_indicator() -> None:
+    services = _layered_compose_config_json()["services"]
+    environment = services["forward-migration"].get("environment", {})
+    assert "ONEX_MIGRATION_GATEWAY_LANE" not in environment
