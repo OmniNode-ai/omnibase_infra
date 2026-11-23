@@ -97,14 +97,7 @@ def test_the_dsn_is_declared_once_in_the_overlay_and_never_in_a_base_file() -> N
     declarations = re.findall(rf"^  {DSN_VAR}: ", overlay, flags=re.MULTILINE)
     assert len(declarations) == 1
     assert f"&{ANCHOR}" in overlay
-    # The base file only passes the variable through x-runtime-env so the resolver
-    # can read it; the credentialed value lives in the overlay alone.
-    base_lines = [
-        line.strip()
-        for line in COMPOSE_INFRA.read_text(encoding="utf-8").splitlines()
-        if DSN_VAR in line and not line.lstrip().startswith("#")
-    ]
-    assert base_lines == [f"{DSN_VAR}: ${{{DSN_VAR}}}"]
+    assert DSN_VAR not in COMPOSE_INFRA.read_text(encoding="utf-8")
     assert PASSWORD_VAR not in COMPOSE_INFRA.read_text(encoding="utf-8")
 
 
