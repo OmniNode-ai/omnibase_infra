@@ -67,7 +67,7 @@ dod_evidence:
     binds_ac: []
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_serving_read_omn26316.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_serving_read_omn26316.py tests/integration/runtime/test_lazy_start_serving_read_composed_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26316-deploy-lazy-start-serving-read
     description: >-
