@@ -37,6 +37,9 @@ import yaml
 from pydantic import BaseModel, JsonValue, ValidationError
 
 if TYPE_CHECKING:
+    from omnibase_infra.nodes.node_deploy_job_reading_effect.runtime_failed_head_gate import (
+        FailedHeadGate,
+    )
     from omnibase_infra.nodes.node_deploy_job_reading_effect.runtime_post_failure_converge import (
         PostFailureConverge,
     )
@@ -107,6 +110,25 @@ def post_failure_converge(
     *_, rule = (_load(relative) for relative in _POST_FAILURE_MODULES)
     converge: PostFailureConverge = rule.PostFailureConverge(host, converge_command)
     return converge
+
+
+_FAILED_HEAD_MODULES = (
+    *_POST_FAILURE_MODULES,
+    "enums/enum_failed_head_verdict_class.py",
+    "models/model_failed_head_refusal.py",
+    "nodes/node_deploy_job_reading_effect/runtime_failed_head_gate.py",
+)
+
+
+def failed_head_gate(host: ProtocolPostFailureHost) -> FailedHeadGate:
+    """The agent's failed-head rule for its idle builds (OMN-26493), loaded from this checkout once.
+
+    It reads the same job records as the post-failure rule and writes its one row per head
+    through this module's build decision entry.
+    """
+    *_, rule = (_load(relative) for relative in _FAILED_HEAD_MODULES)
+    gate: FailedHeadGate = rule.FailedHeadGate(host, record_failed_head)
+    return gate
 
 
 def contract_path(execution: ModuleType) -> Path:
@@ -398,6 +420,7 @@ def _emit(
     result: str = "",
     reason: str = "",
     job: str = "",
+    verdict_class: str = "",
     correlation: str = "",
     earliest_start: datetime | None = None,
 ) -> BaseModel | None:
@@ -411,6 +434,7 @@ def _emit(
             result=result,
             reason=reason,
             job=job,
+            verdict_class=verdict_class,
             correlation=correlation,
             earliest_start=earliest_start,
             decided_at=now,
@@ -540,6 +564,24 @@ def record_queued(
         now,
         result="queued",
         job=_field(cmd, "correlation_id"),
+    )
+
+
+def record_failed_head(refusal: object, now: datetime) -> BaseModel | None:
+    """An idle build refused for a head whose last dev job failed (OMN-26493); never raises.
+
+    One row per head: the key (repository, head, ``refused``, ``failed_head``) is marked in
+    the agent's state directory, so the next refusal of the head writes nothing.
+    """
+    return _emit(
+        "omnibase_infra",
+        _field(refusal, "head"),
+        _DETECTED,
+        now,
+        result="refused",
+        reason="failed_head",
+        job=_field(refusal, "failed_job"),
+        verdict_class=_field(refusal, "verdict_class"),
     )
 
 
