@@ -16,8 +16,8 @@ requirements:
   - id: req-omn25942-post-roll-ledger-proof
     statement: A dev runtime recreate is verified only when one work-ledger query from the agent's lab host answers inside the bound the repository declares; otherwise the roll reports failed and the dev boot guard restores the previous image.
     acceptance:
-      - id: AC-F2
-        statement: 'AC-F2: the dev boot guard of the deploy agent runs the post_roll_proof command of work_ledger_query_client.contract.yaml under its declared bound after every dev runtime recreate, fails the roll when it does not answer, and types neither value -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_post_roll_ledger_proof_omn25942.py -q fails at the merge base, where the dev boot guard runs no ledger read'
+      - id: AC3
+        statement: 'AC3: the dev boot guard of the deploy agent runs the post_roll_proof command of work_ledger_query_client.contract.yaml under its declared bound after every dev runtime recreate, fails the roll when it does not answer, and types neither value -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_post_roll_ledger_proof_omn25942.py -q fails at the merge base, where the dev boot guard runs no ledger read'
 evidence_requirements:
   - kind: tests
     description: Dev boot guard settings-drift tests.
@@ -71,7 +71,7 @@ dod_evidence:
   - id: dod-omn25942-acf2-post-roll-ledger-proof
     description: The dev boot guard's post-roll ledger proof fails a dev roll whose ledger read does not answer inside the declared bound, passes one that does, runs the declared command, and is not asked for during recovery.
     source: manual
-    binds_ac: [AC-F2]
+    binds_ac: [AC3]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_post_roll_ledger_proof_omn25942.py -q --no-cov -n 0 -p no:randomly
@@ -79,7 +79,7 @@ dod_evidence:
   - id: dod-omn25942-acf2-deploy
     description: Hosted-runner probe that reads the committed dev boot guard handler from GitHub at the checked-out commit and requires the post-roll ledger proof and the declaration it reads.
     source: manual
-    binds_ac: [AC-F2]
+    binds_ac: [AC3]
     checks:
       - check_type: command
         check_value: >-
