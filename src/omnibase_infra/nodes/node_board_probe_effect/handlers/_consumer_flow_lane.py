@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import json
+import re
+import stat
 import subprocess
 import time
 import urllib.error
@@ -12,6 +14,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
+from pathlib import Path
 from typing import IO, cast
 
 from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_constants import (
@@ -32,6 +35,57 @@ from omnibase_infra.nodes.node_board_probe_effect.models.typed_dict_consumer_flo
     TypedDictConsumerFlowResponse,
 )
 
+_BROKER_SASL_MECHANISM = "SCRAM-SHA-256"
+_REASON_CHARS = 300
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def check_broker_login_file(principal: str, env_file: Path) -> None:
+    """Refuse the broker login unless its password file is present and usable.
+
+    OMN-19812: the stability broker requires SASL, so the probe's rpk calls run
+    as the probe's own login. The workflow reads that login's password from the
+    dev secret store into ``env_file`` (a mode-600 ``RPK_PASS=`` line) before the
+    node runs; a failing read leaves the file absent and its cause in
+    ``<env_file>.reason``. Every path that cannot yield a usable file raises
+    ``ConsumerFlowInputError``, which the target grades INDETERMINATE, so a
+    missing credential never turns into an unauthenticated rpk call. The
+    password is never read into the error text.
+    """
+    try:
+        info = env_file.stat()
+    except OSError:
+        info = None
+    if info is None:
+        reason = ""
+        try:
+            raw = env_file.with_name(env_file.name + ".reason").read_text(
+                encoding="utf-8", errors="replace"
+            )
+            reason = _CONTROL_CHARS.sub(" ", raw).strip()[:_REASON_CHARS]
+        except OSError:
+            pass
+        said = f": {reason}" if reason else ""
+        raise ConsumerFlowInputError(
+            f"broker login {principal} password file is absent{said}"
+        )
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+        raise ConsumerFlowInputError(
+            f"broker login {principal} password file is not a private regular file"
+        )
+    try:
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+    except (OSError, ValueError) as exc:
+        raise ConsumerFlowInputError(
+            f"broker login {principal} password file is unreadable: {type(exc).__name__}"
+        ) from exc
+    if not any(
+        line.startswith("RPK_PASS=") and len(line) > len("RPK_PASS=") for line in lines
+    ):
+        raise ConsumerFlowInputError(
+            f"broker login {principal} password file holds no RPK_PASS value"
+        )
+
 
 class ConsumerFlowLane:
     """One request's Docker socket, lane containers, projection endpoint and I/O."""
@@ -42,6 +96,8 @@ class ConsumerFlowLane:
         docker: str,
         base_url: str,
         containers: ModelConsumerFlowLane,
+        broker_principal: str | None = None,
+        broker_password_env_file: Path | None = None,
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
         urlopen: Callable[
             ..., AbstractContextManager[IO[bytes]]
@@ -53,6 +109,8 @@ class ConsumerFlowLane:
         self.base_url = base_url
         self.containers = containers
         self.http_timeout = 30.0
+        self.broker_principal = broker_principal
+        self.broker_password_env_file = broker_password_env_file
         self.runner = runner
         self.urlopen = urlopen
         self.sleep = sleep
@@ -135,9 +193,41 @@ class ConsumerFlowLane:
     def rpk(self, *args: str, stdin: str | None = None, timeout: float = 60.0) -> str:
         # The credential reaches rpk through its environment, never as a -X flag:
         # the expanded flag would sit in the in-container rpk argv, which every user
-        # on the host reads through `ps` (OMN-17427). OMN-21485: SASL only where
-        # the broker container carries a login; the stability lane's internal
-        # listener takes none, and an empty SCRAM user would be refused there.
+        # on the host reads through `ps` (OMN-17427).
+        if self.broker_principal is not None:
+            # OMN-19812: the broker requires SASL. rpk runs as the probe's own
+            # login: the user and mechanism ride `-e`, the password rides
+            # `--env-file` (a mode-600 file the workflow wrote from the dev secret
+            # store), so it is in no argv and no ambient environment. There is no
+            # fallback to the container's own credential or to no credential.
+            if self.broker_password_env_file is None:
+                raise ConsumerFlowInputError(
+                    f"broker login {self.broker_principal} has no password file"
+                )
+            return self._run(
+                [
+                    self.docker,
+                    "exec",
+                    "-i",
+                    "-e",
+                    f"RPK_USER={self.broker_principal}",
+                    "-e",
+                    f"RPK_SASL_MECHANISM={_BROKER_SASL_MECHANISM}",
+                    "--env-file",
+                    str(self.broker_password_env_file),
+                    self.containers.broker_container,
+                    "sh",
+                    "-c",
+                    f'rpk "$@" -X brokers="{BROKER_INTERNAL_ADDRESS}"',
+                    "rpk",
+                    *args,
+                ],
+                stdin=stdin,
+                timeout=timeout,
+            )
+        # OMN-21485: SASL only where the broker container carries a login; the
+        # lane's internal listener may take none, and an empty SCRAM user would be
+        # refused there.
         script = (
             'if [ -n "${DEV_KAFKA_SASL_USERNAME:-}" ]; then '
             'export RPK_USER="$DEV_KAFKA_SASL_USERNAME" RPK_PASS="$DEV_KAFKA_SASL_PASSWORD" '
