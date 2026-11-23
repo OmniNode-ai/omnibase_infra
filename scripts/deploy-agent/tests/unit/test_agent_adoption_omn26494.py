@@ -188,7 +188,7 @@ def test_agent_keeps_previous_ref_on_failed_self_check(tmp_path: Path) -> None:
     synced: list[str] = []
 
     adopted = adoption.adopts(
-        AGENT_DIR, tmp_path, OLD, NEW, run, lambda d: synced.append(d)
+        AGENT_DIR, tmp_path, (OLD, NEW), run, lambda d: synced.append(d)
     )
 
     assert adopted is False
@@ -284,7 +284,7 @@ def _storm(
 ) -> tuple[list[bool], list[str], list[tuple[str, str]]]:
     """Adopt NEW over OLD, then start NEW at each offset (seconds); what each start did."""
     adoption = _adoption()
-    adoption.adopts(AGENT_DIR, tmp_path, OLD, NEW, _Git(0), lambda d: None)
+    adoption.adopts(AGENT_DIR, tmp_path, (OLD, NEW), _Git(0), lambda d: None)
     reverted: list[str] = []
     alarms: list[tuple[str, str]] = []
 

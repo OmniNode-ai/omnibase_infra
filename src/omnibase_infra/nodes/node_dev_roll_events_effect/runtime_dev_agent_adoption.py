@@ -206,12 +206,13 @@ def candidate_self_check(
 def adopts(
     agent_dir: str,
     state_dir: Path | None,
-    loaded_ref: str,
-    candidate_ref: str,
+    refs: tuple[str, str],
     run: Runner,
     resync: Callable[[str], None],
 ) -> bool:
     """Whether the agent may re-exec onto ``candidate_ref``, the clone's HEAD after the pull.
+
+    ``refs`` is ``(loaded_ref, candidate_ref)``: the ref the process loaded and the candidate.
 
     A ref refused earlier is put back without a second check. Otherwise ``resync(agent_dir)``
     installs the clone's dependencies so the candidate's imports resolve, and the
@@ -220,6 +221,7 @@ def adopts(
     dependencies, the reason is kept and the agent stays where it is. On success the adoption is
     recorded (previous ref = ``loaded_ref``) before the caller re-execs.
     """
+    loaded_ref, candidate_ref = refs
     settings = settings_at(_root(agent_dir))
     earlier = refused_reason(state_dir, settings, candidate_ref)
     if earlier is not None:

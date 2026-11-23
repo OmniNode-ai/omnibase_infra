@@ -3926,8 +3926,7 @@ class DeployExecutor:
         if not load_dev_boot_guard(ADOPTION_MODULE).adopts(
             agent_dir,
             self._migration_record_dir,
-            loaded_sha,
-            disk_sha,
+            (loaded_sha, disk_sha),
             _run,
             lambda clone: _uv_sync_after_pull(clone, boundary),
         ):

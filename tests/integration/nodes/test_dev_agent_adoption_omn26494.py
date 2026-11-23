@@ -50,7 +50,7 @@ def test_adoption_records_ref_after_passing_self_check(tmp_path: Path) -> None:
     synced: list[str] = []
     agent_dir = str(REPO_ROOT / "scripts" / "deploy-agent")
 
-    assert adoption.adopts(agent_dir, tmp_path, OLD, NEW, _runner(0), synced.append)
+    assert adoption.adopts(agent_dir, tmp_path, (OLD, NEW), _runner(0), synced.append)
 
     settings = adoption.settings_at(REPO_ROOT)
     state = adoption.read_state(tmp_path, settings)
@@ -64,7 +64,7 @@ def test_adoption_refuses_ref_after_failing_self_check(tmp_path: Path) -> None:
     agent_dir = str(REPO_ROOT / "scripts" / "deploy-agent")
 
     assert not adoption.adopts(
-        agent_dir, tmp_path, OLD, NEW, _runner(1), lambda _d: None
+        agent_dir, tmp_path, (OLD, NEW), _runner(1), lambda _d: None
     )
 
     settings = adoption.settings_at(REPO_ROOT)

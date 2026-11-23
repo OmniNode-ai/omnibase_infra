@@ -77,8 +77,6 @@ dod_evidence:
     description: The adoption gate runs against the node contract's real settings and a real state directory - a passing self-check records the adopted and previous refs, a failing one keeps the reason.
     source: manual
     execution_scope: local_done_gate
-    binds_ac:
-      - AC2
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/nodes/test_dev_agent_adoption_omn26494.py -q -p no:randomly
