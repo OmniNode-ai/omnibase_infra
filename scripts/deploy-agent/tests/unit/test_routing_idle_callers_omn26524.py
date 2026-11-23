@@ -364,7 +364,7 @@ def test_overdue_dev_merge_is_requested_once_its_window_has_passed_with_no_dev_b
     assert any(
         r.levelno == logging.WARNING
         and "overdue dev merge build sha=" + old in r.message
-        and seen[old].request_id in r.message
+        and str(seen[old].request_id) in r.message
         for r in caplog.records
     )
     assert any(
@@ -392,7 +392,7 @@ def test_a_dev_job_accepted_after_the_merge_satisfies_it_and_nothing_is_requeste
     (agent_env / "agent-adoption.json").write_text('{"alarmed": false}')
     result = runtime_mod.check_overdue_dev_merges(force=True)
     assert result is not None
-    assert (_by_sha(result)[sha].outcome, _by_sha(result)[sha].job_id) == (
+    assert (_by_sha(result)[sha].outcome, str(_by_sha(result)[sha].job_id)) == (
         "SATISFIED",
         job["correlation_id"],
     )

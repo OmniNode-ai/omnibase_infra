@@ -99,7 +99,7 @@ def test_contract_window_is_one_hour_and_the_merge_waits_until_it_ends() -> None
 def test_contract_window_requests_one_build_when_it_ends_with_no_dev_build() -> None:
     decision = _handler().handle(_request("2026-11-23T18:46:52Z", drop=("2098b18c",)))
     assert (decision.outcome, decision.reason) == ("REQUEST", "overdue_no_build")
-    assert decision.request_id
+    assert decision.request_id is not None
     again = _handler().handle(_request("2026-11-23T19:30:00Z", drop=("2098b18c",)))
     assert again.request_id == decision.request_id
 
@@ -107,4 +107,4 @@ def test_contract_window_requests_one_build_when_it_ends_with_no_dev_build() -> 
 def test_the_dev_job_accepted_at_1900_satisfies_the_merge() -> None:
     decision = _handler().handle(_request("2026-11-23T20:00:00Z"))
     assert (decision.outcome, decision.reason) == ("SATISFIED", "built_by_job")
-    assert decision.job_id.startswith("2098b18c")
+    assert str(decision.job_id).startswith("2098b18c")

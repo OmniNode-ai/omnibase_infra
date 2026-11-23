@@ -14,6 +14,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import pytest
 import yaml
@@ -90,7 +91,7 @@ def test_the_merge_is_inside_its_window_one_second_before_the_hour_ends() -> Non
     decision = _decide(_request("2026-11-23T18:46:51Z", drop=("2098b18c",)))
     assert (decision.outcome, decision.reason) == ("WAIT", "within_window")
     assert decision.due_at == _at("2026-11-23T18:46:52Z")
-    assert decision.request_id == ""
+    assert decision.request_id is None
 
 
 def test_the_merge_is_requested_the_second_its_hour_ends_with_no_dev_build() -> None:
@@ -120,7 +121,7 @@ def test_a_job_of_another_lane_after_the_merge_does_not_satisfy_the_dev_lane() -
 def test_the_dev_job_accepted_before_the_merge_never_carries_it() -> None:
     """82d5fd01 was accepted at 17:39:09Z, seven minutes before the merge."""
     decision = _decide(_request("2026-11-23T18:50:00Z", drop=("2098b18c",)))
-    assert decision.job_id == ""
+    assert decision.job_id is None
     assert decision.reason == "overdue_no_build"
 
 
@@ -135,13 +136,13 @@ def test_the_agent_job_accepted_at_19_00_is_in_flight_and_nothing_more_is_reques
     ]
     decision = _decide(_request("2026-11-23T19:05:00Z", jobs_override=running))
     assert (decision.outcome, decision.reason) == ("WAIT", "job_in_flight")
-    assert decision.job_id == "2098b18c-b02e-4721-97ec-43d744ab1120"
+    assert decision.job_id == UUID("2098b18c-b02e-4721-97ec-43d744ab1120")
 
 
 def test_the_completed_agent_job_satisfies_the_merge() -> None:
     decision = _decide(_request("2026-11-23T19:14:00Z"))
     assert (decision.outcome, decision.reason) == ("SATISFIED", "built_by_job")
-    assert decision.job_id == "2098b18c-b02e-4721-97ec-43d744ab1120"
+    assert decision.job_id == UUID("2098b18c-b02e-4721-97ec-43d744ab1120")
 
 
 def test_a_non_runtime_merge_is_never_owed_a_build() -> None:
@@ -165,7 +166,7 @@ def test_a_failed_job_that_carries_the_merge_is_left_to_the_failed_head_gate() -
         _request("2026-11-23T19:00:00Z", drop=("2098b18c",), extra=(failed,))
     )
     assert (decision.outcome, decision.reason) == ("WAIT", "failed_head")
-    assert decision.job_id == failed["job_id"]
+    assert decision.job_id == UUID(failed["job_id"])
 
 
 def test_a_superseded_job_and_a_job_pinned_to_another_sha_carry_nothing() -> None:

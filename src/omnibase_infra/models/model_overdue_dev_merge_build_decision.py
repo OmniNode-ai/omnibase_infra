@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
@@ -34,5 +35,5 @@ class ModelOverdueDevMergeBuildDecision(BaseModel):
     ]
     merge_sha: str
     due_at: datetime
-    job_id: str = ""
-    request_id: str = ""
+    job_id: UUID | None = None
+    request_id: UUID | None = None

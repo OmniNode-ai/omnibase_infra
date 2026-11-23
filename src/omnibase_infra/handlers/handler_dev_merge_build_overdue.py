@@ -39,8 +39,10 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 from typing import Final
+from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums.enum_job_status import EnumJobStatus
 from omnibase_infra.models.model_overdue_dev_merge_build_decision import (
     ModelOverdueDevMergeBuildDecision,
 )
@@ -52,14 +54,16 @@ from omnibase_infra.models.model_overdue_dev_merge_job import ModelOverdueDevMer
 _DEV_LANE: Final = "dev"
 _DEV_HEAD: Final = "origin/dev"
 #: Statuses that end a job. Any other status is a job still on the agent.
-_TERMINAL: Final = frozenset({"success", "failed", "superseded"})
+_TERMINAL: Final = frozenset(
+    {EnumJobStatus.SUCCESS, EnumJobStatus.FAILED, EnumJobStatus.SUPERSEDED}
+)
 #: Fixed namespace of the request ids: the id depends on the repository and sha alone.
 _REQUEST_NAMESPACE: Final = uuid.UUID("5b0f3d6e-0f55-4c58-9d0e-6c1d2b7e4a31")
 
 
-def request_id_for(repository: str, merge_sha: str) -> str:
+def request_id_for(repository: str, merge_sha: str) -> UUID:
     """The one request id of a merge sha: the same value every time it is asked for."""
-    return str(uuid.uuid5(_REQUEST_NAMESPACE, f"{repository}:{merge_sha}"))
+    return uuid.uuid5(_REQUEST_NAMESPACE, f"{repository}:{merge_sha}")
 
 
 def _carries(
@@ -88,7 +92,10 @@ class HandlerDevMergeBuildOverdue:
         due_at = request.merged_at + timedelta(seconds=request.window_seconds)
 
         def decide(
-            outcome: str, reason: str, job_id: str = "", request_id: str = ""
+            outcome: str,
+            reason: str,
+            job_id: UUID | None = None,
+            request_id: UUID | None = None,
         ) -> ModelOverdueDevMergeBuildDecision:
             return ModelOverdueDevMergeBuildDecision.model_validate(
                 {
@@ -110,13 +117,13 @@ class HandlerDevMergeBuildOverdue:
         )
         carrying = [job for job in dev_jobs if _carries(job, request)]
         for job in carrying:
-            if job.status == "success":
+            if job.status == EnumJobStatus.SUCCESS:
                 return decide("SATISFIED", "built_by_job", job.job_id)
         for job in dev_jobs:
             if job.status not in _TERMINAL:
                 return decide("WAIT", "job_in_flight", job.job_id)
         for job in carrying:
-            if job.status == "failed":
+            if job.status == EnumJobStatus.FAILED:
                 return decide("WAIT", "failed_head", job.job_id)
         if request.now < due_at:
             return decide("WAIT", "within_window")
