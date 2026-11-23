@@ -7,6 +7,23 @@ is_seam_ticket: false
 interface_change: true
 interfaces_touched:
   - protocols
+context:
+  ac_binding_provenance:
+    dod-omn22291-ac2-accepted-20261123t1945z:
+      - label: AC2
+        criterion_hash: ff90fb2c28ce19113b0f4faed58b03058b4a89ecf1db0335d9bbbcf7caf0dec5
+        proposed_by: lane=dod-closeout-bind-2026-11-23T1945Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-23T1945Z-c3
+    dod-omn22291-ac3-accepted-20261123t1945z:
+      - label: AC3
+        criterion_hash: 877cfeb99fd00c3835b93cd1ee8ded170fc84e0e0f4048bb778da23e7c1028cf
+        proposed_by: lane=dod-closeout-bind-2026-11-23T1945Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-23T1945Z-c3
+    dod-omn22291-ac4-accepted-20261123t1945z:
+      - label: AC4
+        criterion_hash: 8e4c0d2c318a6d3f8fc0571148c6f20494c7816254159f452bbcdb8164caa3ac
+        proposed_by: lane=dod-closeout-bind-2026-11-23T1945Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-23T1945Z-c3
 requirements:
   - id: req-omn22291-ac1-zero-lag
     statement: "A zero-lag group advancing inside the stall window, and a standby holding no assignment with nothing waiting, are both in sync."
@@ -119,3 +136,30 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/services/service_runtime_health_monitor.py?ref=$(git rev-parse HEAD)" --jq .content |
             base64 -d | grep -F 'carrying a stall held inside the window' > /dev/null
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22291-ac2-accepted-20261123t1945z
+    description: 'AC2: the consumer_sync detail names each group held inside the readiness window, with its reason and the window. Fails with the product change of omnibase_infra#5660 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py::test_the_detail_names_exclusions" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn22291-ac3-accepted-20261123t1945z
+    description: 'AC3: the three incident groups replayed with no traffic and graded through evaluate_consumer_sync come out not CRITICAL. Fails with the product change of omnibase_infra#5660 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py::test_quiet_local_stack_not_critical_on_the_healthcheck_payload" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn22291-ac4-accepted-20261123t1945z
+    description: 'AC4: the committed incident fixture grades CRITICAL as recorded, and the same groups replayed through the current code grade non-CRITICAL. Fails with the product change of omnibase_infra#5660 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "tests/unit/runtime/test_consumer_sync_zero_lag_not_stalled.py::test_the_incident_payload_fixture_grades_critical_only_as_recorded" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
