@@ -53,6 +53,24 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/nodes/test_evidence_autoclose_backfill_width_omn21722.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21722-ac1-accepted-20261120t0145z
+    description: 'AC1: the request model default is 40, the worst measured run plus the added candidates at the worst per-call cost stays under half the job timeout, and the default slice covers a 133 pool in ceil(133/40) ticks. Fails with the merged fix reverted (default 5).'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21715_backfill_width.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21722-ac2-accepted-20261120t0145z
+    description: 'AC2: the handler rotation period equals the evidence-autoclose-sweep.yml cron interval, and the default slice at that cadence covers the 133 pool without partitioning it. The file holds the preservation invariant that predates the fix and the cadence test the fix added; the cadence test fails with the fix reverted (default width 5 leaves 113 of 133 unexamined).'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_evidence_autoclose_sweep_rotation_period_omn18748.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
 requirements:
   - id: req-backfill-width
     statement: The backfill arm drains the pool in hours, not days, inside the run budget.
@@ -61,3 +79,15 @@ requirements:
         statement: The request model's contract default for backfill_max_candidates is 40, a test fixes the sizing arithmetic against the job timeout and a test asserts the slice covers a 133 pool in ceil(133/40) consecutive ticks.
       - id: AC2
         statement: The rotation period still equals the workflow cron interval so the wider slice cannot partition the pool.
+context:
+  ac_binding_provenance:
+    dod-omn21722-ac1-accepted-20261120t0145z:
+      - label: AC1
+        criterion_hash: d6872f6729548f43fb2e00bf33a3a4d3cf29cec2c88aa6a0135fe17ba54f6fba
+        proposed_by: lane=dod-closeout-bind-2026-11-20T0145Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-20T0145Z-c1
+    dod-omn21722-ac2-accepted-20261120t0145z:
+      - label: AC2
+        criterion_hash: a4f7650ab1718c61c2e4361c80a5a805db83afd60167873ae11dabbb3491335b
+        proposed_by: lane=dod-closeout-bind-2026-11-20T0145Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-20T0145Z-c1
