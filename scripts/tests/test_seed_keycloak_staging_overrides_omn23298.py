@@ -147,7 +147,11 @@ class TestStagingGetsTheStagingHosts:
     def test_onex_api_keeps_its_base_shape_on_staging(self) -> None:
         """Its only override is prod, so staging moving from dev to staging
         keeps the confidential shape the staging runtime-effects needs."""
-        assert _resolved("staging")["onex-api"] == _resolved("dev")["onex-api"]
+        staging, dev = _resolved("staging"), _resolved("dev")
+        assert staging["onex-api"] == dev["onex-api"]
+        # Staging does move the browser clients, so this fails without the roster change.
+        for client_id in STAGING_SHAPE:
+            assert staging[client_id] != dev[client_id], client_id
 
     def test_dev_and_prod_are_unchanged_for_the_browser_clients(self) -> None:
         for environment in ("dev", "prod"):
