@@ -33,7 +33,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import yaml
 from pydantic import BaseModel, JsonValue, ValidationError
@@ -752,6 +752,48 @@ def _idle_class(
     except (RuntimeError, OSError, subprocess.TimeoutExpired):
         logger.exception("build decision class unread for %s %s", repository, head[:12])
     return _DETECTED
+
+
+def runtime_unchanged(repository: str, head: str, running: str) -> bool:
+    """Whether only declared not-runtime paths separate ``running`` from ``head`` (OMN-26316).
+
+    The same classifier writes ``NON_RUNTIME`` build decision rows, so the lag bound and the
+    rows agree on what a runtime change is.
+    """
+    return _idle_class(_agent(), repository, head, running) == "NON_RUNTIME"
+
+
+class _IdleRefsHost(Protocol):
+    _idle_read_running_ref: Callable[[str], str | None]
+    _idle_read_head_ref: Callable[[str], str | None]
+
+
+def lag_refs_reader(
+    host: _IdleRefsHost,
+) -> Callable[[str, bool], tuple[str | None, str | None]]:
+    """The running and head revisions an idle converge judges the lane on (OMN-26316).
+
+    A repository routed to another instance is judged against its dev head as read. For the
+    instance's own repository, a head whose only difference from the running revision is
+    declared not-runtime paths reads as the running revision: a not-runtime merge is no lag
+    and starts no rebuild. An unread classifier keeps the head, which stays a runtime head.
+    """
+
+    def read(repository: str, routed_elsewhere: bool) -> tuple[str | None, str | None]:
+        running = host._idle_read_running_ref(repository)
+        head = host._idle_read_head_ref(repository)
+        if routed_elsewhere or head is None or running is None or head == running:
+            return running, head
+        try:
+            unchanged = runtime_unchanged(repository, head, running)
+        except Exception:
+            logger.exception(
+                "runtime change class unread for %s %s", repository, head[:12]
+            )
+            unchanged = False
+        return running, running if unchanged else head
+
+    return read
 
 
 def record_idle(
