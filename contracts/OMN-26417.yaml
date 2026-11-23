@@ -57,7 +57,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/services/test_health_probe_unreachable_omn26417.py -k not_read_by_concurrent_probes -q --no-cov -n 0 -p no:randomly
         cwd: .
-  - id: dod-omn26417-ac4-concurrent-probes-read-verdict-unit
+  - id: dod-omn26417-ac4-probes-read-verdict-unit
     description: "The unit-level half of AC4, run by the hosted check: with the loop blocked past the probe timeout, concurrent container-healthcheck reads against the acceptor each get its typed verdict and none reads probe_unreachable, and a connection past the in-flight cap is closed. At the merge base two of the three reads are probe_unreachable. The live read of the rebuilt dev container is the next item."
     source: manual
     binds_ac: [AC4]
