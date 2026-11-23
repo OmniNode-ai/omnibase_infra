@@ -1,3 +1,21 @@
+## v0.38.82 (2026-11-23)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.82 by the scheduled release train.
+- 9 release-relevant commit(s) merged since v0.38.81.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.81
+- : the release train stages CHANGELOG.md for a repo whose release-cut gate requires it (#6172)
+- : mount the lane declaration folder in the stability runtime (#6171)
+- : a deploy agent adopts a code ref only after a one-shot self-check, and returns to the previous ref after a restart storm (#6170)
+- : tenant identity schema seams on the gateway lanes (T14, carrying T6's minimum) (#6163)
+- fix: a lazy wake of a handover contract attaches, a failed wake fails that contract only (#6162)
+- : refuse a routed instance whose agent key check differs, and alarm on a routed command with no job record (#6169)
+- : converge broker SASL before rolling stability lane writers (#6164)
+- : parse each contract once per boot (about 15,000 parses to 3,241; CPU to health about 190 s to 97 s) (#6145)
+- feat: vendor usage migration 0004, the nullable backend columns (#6156)
+
 ## v0.38.81 (2026-11-22)
 
 ### Release
