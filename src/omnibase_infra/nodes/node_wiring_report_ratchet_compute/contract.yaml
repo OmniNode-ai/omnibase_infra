@@ -48,7 +48,7 @@ descriptor:
   idempotent: true
   timeout_ms: 60000
 metadata:
-  description: "COMPUTE node: the boot wiring report's failed, duplicate, quarantined and unproduced counts can only fall."
+  description: "Ratchet on the boot wiring report: the failed, duplicate, quarantined and unproduced-subscription counts can only fall."
   author: "OmniNode Team"
   license: "MIT"
   ticket: "OMN-26335"
