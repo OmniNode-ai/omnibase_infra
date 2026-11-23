@@ -5,6 +5,13 @@ summary: timeout-minutes on the publish-baseline job clears the measured serial 
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn22128-ac2-accepted-20261123t0345z:
+      - label: AC2
+        criterion_hash: 4cce0899a45836bb7699692de164fcb3634710296d4947c2af2a276ca3f00911
+        proposed_by: lane=dod-closeout-bind-2026-11-23T0345Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-23T0345Z-c2
 requirements:
   - id: req-publisher-can-finish
     statement: The publish-baseline job's timeout clears the suite it runs serially.
@@ -50,3 +57,11 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_test_failure_ratchet.py -q --no-cov -k TestPublisherWorkflow
+  - id: dod-omn22128-ac2-accepted-20261123t0345z
+    description: 'AC2: the baseline commit step fetches, re-applies onto the current origin/dev and re-attempts the push. Fails against the pre-fix workflow text at the parent of omnibase_infra#5596.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_test_failure_ratchet.py::TestPublisherWorkflow::test_publisher_push_rebases_and_retries_onto_current_dev -q --no-cov
