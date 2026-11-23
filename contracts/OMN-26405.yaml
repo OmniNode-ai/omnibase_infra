@@ -49,12 +49,15 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/runtime -q -k prebuilt_manifest_boot_uses_manifest --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26405-ac2-negative-stale-still-stale
-    description: A distribution version, a contract file or the cloud mirroring switch changed after the manifest step still reads stale and falls back, with the field named.
+    description: A distribution version, a contract file or the cloud mirroring switch changed after the manifest step still reads stale and falls back, with the field named. The negative is only meaningful beside the positive, so the second check requires the unchanged boot to read fresh under the runtime policy environment; that one fails at the merge base, where every boot reads stale.
     source: manual
     binds_ac: [AC2]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_boot_omn26405.py -k negative_input_changed_after_the_build_reads_stale -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_boot_omn26405.py -k under_the_runtime_policy_environment -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26405-ac2-build-set-equals-compose-set
     description: The set the build reads from docker/runtime-policy.env is the set every runtime compose file that declares it passes, because each declares the policy variable as an interpolation with no default; the build argument wins over the file and a repeated key takes the last line.
@@ -73,12 +76,15 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_boot_omn26405.py -k fails_closed_without_a_usable_set -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26405-ac3-gates-unchanged
-    description: The diff touches docker/Dockerfile.runtime, the new test and this contract; the HEALTHCHECK line and its start period are asserted unchanged, and no compose file, boot guard or wait setting is in the diff.
+    description: The diff touches docker/Dockerfile.runtime, the new test and this contract; the HEALTHCHECK line and its start period are asserted unchanged, and no compose file, boot guard or wait setting is in the diff. The second check is the selection AC3 names (-k prebuilt_manifest_boot_uses_manifest), which holds the boot regressions that fail at the merge base.
     source: manual
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_omn26361.py -k prebuilt_manifest_gates_unchanged -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime -q -k prebuilt_manifest_boot_uses_manifest --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26405-ac4-boot-loads-manifest
     description: >-
