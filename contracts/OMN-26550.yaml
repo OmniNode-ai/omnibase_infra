@@ -33,6 +33,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q -p no:randomly
         cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q -p no:randomly -k stall_responder_omn26550
+        cwd: .
   - id: dod-omn26550-ac2-sources
     description: 'AC2: the NOT RUNNING verdict for omnimarket 6597 names the missing trigger attach and its fix (this contract file change plus the overlays boot-set entry); the exclusion test pins the attach.'
     source: manual
