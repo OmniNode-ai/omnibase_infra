@@ -14,20 +14,20 @@ requirements:
         statement: "AC3: the health gate, the boot guard and the compose files are unchanged by the PR -- falsifier: git diff origin/dev --stat on the PR branch lists no health gate setting, no boot guard file and no compose file, run with uv run pytest tests/nodes/node_projection_eval_results -q"
 evidence_requirements:
   - kind: tests
-    description: The attestation tests over the real dispatch callback (RED at origin/dev, GREEN on the branch) and the existing zero-row classification suites beside them.
-    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_projection_noop_attestation_omn26410.py tests/unit/runtime/test_omn18992_guard_refused_zero_rows.py tests/integration/runtime/test_omn18992_guard_refused_zero_rows_integration.py -q --no-cov
+    description: The attestation tests over the real dispatch callback, unit and integration (RED at origin/dev, GREEN on the branch) and the existing zero-row classification suites beside them.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_projection_noop_attestation_omn26410.py tests/unit/runtime/test_omn18992_guard_refused_zero_rows.py tests/integration/runtime/test_omn18992_guard_refused_zero_rows_integration.py tests/integration/runtime/test_projection_noop_attestation_omn26410_integration.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn26410-ac3-gate-unchanged
-    description: The change adds an enum, a classifier module and a branch in the projection dispatch callback; it touches no health gate setting, no boot guard file and no compose file, and the tick apply accounting tests of the health gate pass unchanged beside it.
+    description: The change adds an enum, a classifier module and a branch in the projection dispatch callback; it touches no health gate setting, no boot guard file and no compose file. The tick apply accounting tests of the health gate pass unchanged beside the attestation tests, so the check fails at the merge base (no classifier, the attestation tests are red) and passes only with the change in place and the gate's own accounting intact.
     source: manual
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_job_a7474c42_tick_apply_accounting_omn26419.py -q --no-cov
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_job_a7474c42_tick_apply_accounting_omn26419.py tests/unit/runtime/auto_wiring/test_projection_noop_attestation_omn26410.py -q --no-cov
         cwd: .
   - id: dod-omn26410-attestation
     description: "An attested tick and an attested skip log INFO and no zero-rows ERROR; an unattested tick zero, a valid judged event whose upsert returned no row, a tick attestation on a source topic and an unknown or malformed reason all still log the ERROR; a real write logs neither line."
