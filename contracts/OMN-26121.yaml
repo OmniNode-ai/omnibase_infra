@@ -239,7 +239,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_stability_probes_read_infisical_omn26121.py -k "repository_secret or fetch_precedes or re_declare" -q --no-cov
         cwd: .
-  - id: dod-omn26121-ac14-fetch-action-masks-and-fails-named
+  - id: dod-omn26121-ac14-fetch-action-masks
     description: The fetch action masks, exports all or nothing, and names the variable, the Infisical name and the store path on a failure.
     source: manual
     binds_ac: [AC14]
