@@ -382,9 +382,8 @@ class EnumLabLane(StrEnum):
     reads OMN-19508 names (omnimarket's sibling read and its release-cut premise)
     may admit it.
 
-    Which repositories an instance lane may prove is read from
-    ``config/deploy_lane_routing.yaml`` (``scripts/ci/instance_receipt_lanes.py``),
-    not from this enum.
+    Which repositories an instance lane may prove is read from ``config/deploy_lane_routing.yaml``
+    (``scripts/ci/instance_receipt_lanes.py``), not from this enum.
 
     ``PR_HEAD`` (OMN-19566) is the pre-merge proof lane. Its one emitter is the
     PR-head verifier, which mints a proof for one exact pull-request head and
@@ -404,6 +403,7 @@ class EnumLabLane(StrEnum):
     COMPOSE_DEV_CHAIN = "compose-dev-chain"
     COMPOSE_DEV_CORPUS = "compose-dev-corpus"
     COMPOSE_DEV_202 = "compose-dev-202"
+    RUNTIME_CANARY = "runtime-canary"
     PR_HEAD = "pr-head"
 
 

@@ -563,7 +563,8 @@ def _submit(
     )
     workflow_id = body.get("workflow_id") if isinstance(body, dict) else None
     if status != 202 and error is None:
-        error = f"submit answered {status}"
+        # The gateway's own refusal (never the request), so a red names its cause.
+        error = f"submit answered {status}: {str(body)[:200] or 'no body'}"
     return _Submitted(status, _text(workflow_id), correlation_id, error)
 
 

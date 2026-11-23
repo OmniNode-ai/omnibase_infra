@@ -32,7 +32,6 @@ import asyncio
 import json
 import logging
 import re
-import shutil
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable
@@ -232,12 +231,20 @@ def merge_candidates(
 
 
 def _gateway_args(
-    verb: str, repo: str, extra: list[str], lane: str, workspace_root: str
+    verb: str,
+    repo: str,
+    extra: list[str],
+    lane: str,
+    workspace_root: str,
 ) -> list[str]:
-    onex = Path(sys.executable).parent / "onex"
-    binary = str(onex) if onex.exists() else (shutil.which("onex") or "onex")
+    """Argv for one ``onex scm`` read, run as omnibase-core's CLI module with this
+    interpreter (OMN-25070): the launcher file leaves omnibase-core, and an
+    ``onex`` on PATH belongs to whatever install put it there.
+    """
     return [
-        binary,
+        sys.executable,
+        "-m",
+        "omnibase_core.cli.cli_commands",
         "scm",
         verb,
         repo,
@@ -247,7 +254,14 @@ def _gateway_args(
         "--bus-lane",
         lane,
         # The lane declaration lives in the workspace root's omnimarket checkout.
-        *(["--omnibase-path", workspace_root] if workspace_root else []),
+        *(
+            [
+                "--omnibase-path",
+                workspace_root,
+            ]
+            if workspace_root
+            else []
+        ),
     ]
 
 

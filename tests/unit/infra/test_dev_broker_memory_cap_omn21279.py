@@ -201,6 +201,7 @@ def test_deploy_preflight_checks_the_real_dev_stack(advertise_host: str | None) 
         OMNINODE_RUNTIME_PASSWORD="a" * 64,
         TENANT_PROJECTION_WRITER_PASSWORD="b" * 64,
         GATEWAY_RUNTIME_PASSWORD="c" * 64,
+        TENANT_IDENTITY_WRITER_PASSWORD="e" * 64,
         DEV_REDPANDA_MEMORY="12G",
     )
     env.pop("DEV_REDPANDA_ADVERTISE_HOST", None)

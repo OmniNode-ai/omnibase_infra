@@ -32,6 +32,8 @@ class ModelDevMergeBuildDecisionRequest(BaseModel):
     result: Literal["queued", "deferred", "refused", ""] = ""
     reason: str = ""
     job: str = ""
+    #: The recorded verdict class of the failed job a ``failed_head`` refusal names (OMN-26493).
+    verdict_class: str = ""
     correlation: str = ""
     earliest_start: datetime | None = None
     decided_at: datetime
