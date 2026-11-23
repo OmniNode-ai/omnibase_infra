@@ -226,3 +226,12 @@ def test_prod_runtime_services_mount_the_lane_overlay_the_renderer_reads() -> No
         assert mounted[0]["type"] == "bind"
         assert mounted[0]["read_only"] is True
         assert mounted[0]["source"].endswith("/omnibase-infra-prod.bifrost.yaml")
+
+
+# OMN-26472: prod never carries the gateway-lane indicator that scopes the
+# tenant_api_keys expiry seam to the dev and stability lanes.
+@pytest.mark.integration
+def test_prod_forward_migration_carries_no_gateway_lane_indicator() -> None:
+    services = _compose_config_json()["services"]
+    environment = services["forward-migration"].get("environment", {})
+    assert "ONEX_MIGRATION_GATEWAY_LANE" not in environment
