@@ -32,12 +32,15 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn26472-ac1-seam-form
-    description: "The parse test reads the committed seam: ADD COLUMN IF NOT EXISTS expires_at timestamptz NULL, the partial index, and a readback that raises and ends with the ok line the dev runner log must carry. The omni-201 column read and the runner-log read are post-merge readbacks after the next dev migration run, listed in the PR body."
+    description: "The parse test reads the committed seam and the runner test on a scratch Postgres, which needs this change's identity readback normalisation, adds the column through it: ADD COLUMN IF NOT EXISTS expires_at timestamptz NULL, the partial index, and a readback that raises and ends with the ok line the dev runner log must carry. The omni-201 column read and the runner-log read are post-merge readbacks after the next dev migration run, listed in the PR body."
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/test_tenant_api_keys_expiry_seam.py -q --no-cov
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_tenant_api_keys_expiry_runner_omn26472.py -k leaves_the_rows_alone -q --no-cov
         cwd: .
   - id: dod-omn26472-ac2-rows-unchanged
     description: "The seam carries no data write and no default, and the runner test seeds two key rows, runs the runner twice on a scratch Postgres and reads the key list back unchanged. The omni-201 before and after key list is a post-merge readback, listed in the PR body."
@@ -60,6 +63,9 @@ dod_evidence:
         cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/scripts/test_node_migration_fence_parity.py -q --no-cov
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/migrations/test_tenant_api_keys_expiry_runner_omn26472.py -k leaves_the_rows_alone -q --no-cov
         cwd: .
   - id: dod-omn26472-ac4-named-skips
     description: "The parse test plus the runner test on a scratch Postgres: the expiry seam applied alone with omninode_cloud and no tenant_api_keys exits 0 with the table-absent skip line (through the runner the create step of omnibase_infra#6163 builds the table first, so the table-absent state is reached by the seam alone); with the indicator unset the runner logs the unset skip line, creates nothing and issues no ALTER; an unknown value warns and skips."
