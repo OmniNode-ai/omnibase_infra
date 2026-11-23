@@ -63,11 +63,11 @@ dod_evidence:
     binds_ac:
       - AC1
   - id: dod-omn21722-ac2-accepted-20261120t0145z
-    description: 'AC2: the handler rotation period equals the evidence-autoclose-sweep.yml cron interval. A preservation invariant that predates the fix.'
+    description: 'AC2: the handler rotation period equals the evidence-autoclose-sweep.yml cron interval, and the default slice at that cadence covers the 133 pool without partitioning it. The file holds the preservation invariant that predates the fix and the cadence test the fix added; the cadence test fails with the fix reverted (default width 5 leaves 113 of 133 unexamined).'
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_evidence_autoclose_sweep_rotation_period_omn18748.py::test_the_rotation_period_equals_the_sweep_cron_interval -q --no-cov
+        check_value: uv run --frozen pytest tests/ci/test_evidence_autoclose_sweep_rotation_period_omn18748.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
