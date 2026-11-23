@@ -190,6 +190,13 @@ x-dev-lane-analytics-env: &dev_lane_analytics_env
 # base, and a fail-closed reference there would refuse prod's compose render.
 x-dev-lane-gateway-env: &dev_lane_gateway_env
   GATEWAY_DATABASE_DSN: "postgresql://gateway_runtime:${GATEWAY_RUNTIME_PASSWORD:?GATEWAY_RUNTIME_PASSWORD must be set — the lab workflow gateway connects to omninode_cloud as the least-grant gateway_runtime principal (OMN-26151), never as role_omninode or the postgres superuser}@postgres:5432/omninode_cloud"
+# OMN-26471: the tenant and key writer's database (secret tenant_identity.database.dsn, mapped to
+# this env by the dev profile of contracts/services/runtime_policy.contract.yaml). It connects to
+# omninode_cloud on this lane's own postgres as tenant_identity_writer, a login-only role whose
+# grants are docker/migrations/seams/tenant_identity_writer_grants.sql (no DELETE, no TRUNCATE,
+# no CREATE). Declared in this overlay, never in docker-compose.infra.yml, for the reason above.
+x-dev-lane-tenant-identity-env: &dev_lane_tenant_identity_env
+  TENANT_IDENTITY_DATABASE_DSN: "postgresql://tenant_identity_writer:${TENANT_IDENTITY_WRITER_PASSWORD:?TENANT_IDENTITY_WRITER_PASSWORD must be set — the tenant and key writer connects to omninode_cloud as the least-grant tenant_identity_writer principal (OMN-26471), never as role_omninode or the postgres superuser}@postgres:5432/omninode_cloud"
 # =============================================================================
 # THE INTERNAL-PROJECTION CONNECTION IDENTITY (OMN-18109)
 # =============================================================================
@@ -831,6 +838,12 @@ services:
       # committed in the runner, not supplied here — this names a policy, it
       # does not carry migration ids.
       ONEX_MIGRATION_LANE: dev
+      # OMN-26471: the tenant and key writer's login on omninode_cloud. Minted and
+      # re-asserted by docker/migrations/seams/tenant_identity_writer_grants.sql, which the
+      # runner applies beside the gateway grants; it is not a LOGIN_ONLY_ROLE_MAP entry, so
+      # it is passed here, on the one lane that renders its DSN, and not in the base compose
+      # that every lane layers.
+      TENANT_IDENTITY_WRITER_PASSWORD: ${TENANT_IDENTITY_WRITER_PASSWORD:?TENANT_IDENTITY_WRITER_PASSWORD must be set — the dev lane's migration runner asserts the least-grant tenant_identity_writer login (OMN-26471)}
       # OMN-26121: the dev lane mounts the gateway on omninode_cloud; the runner creates and
       # reads back the tenant identity schema only where this is set.
       ONEX_MIGRATION_GATEWAY_LANE: dev
@@ -950,7 +963,7 @@ services:
   omninode-runtime:
     build: *dev_lane_composed_runtime_build
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_gateway_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_identity_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_gateway_env, *dev_lane_tenant_identity_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_identity_env]
       # OMN-20867: this lane's main runtime publishes the runtime tick
       # (onex.intent.platform.runtime-tick.v1), so every tick-subscribing
       # contract deployed here runs on its contract interval. Opt-in per lane
