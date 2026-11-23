@@ -13,10 +13,14 @@ whatever an earlier test already loaded.
 """
 
 import json
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
+
+import omnibase_infra
 
 pytestmark = pytest.mark.unit
 
@@ -37,14 +41,24 @@ print(json.dumps(heavy))
 """
 
 
-def test_config_construction_imports_no_adapter_or_qdrant_module() -> None:
+def test_config_construction_imports_no_adapter_or_qdrant_module(
+    tmp_path: Path,
+) -> None:
+    # CI syncs with ``--no-install-project``: the package reaches the test
+    # process through pytest's ``pythonpath``, not the venv, so the fresh child
+    # gets the same source root explicitly. It runs from an empty directory so
+    # nothing else on the working path can be imported.
+    src_root = str(Path(omnibase_infra.__file__).resolve().parent.parent)
     result = subprocess.run(
-        [sys.executable, "-I", "-c", _PROBE],
+        [sys.executable, "-c", _PROBE],
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
         timeout=120,
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": src_root},
     )
+    assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout.strip().splitlines()[-1]) == []
 
 
