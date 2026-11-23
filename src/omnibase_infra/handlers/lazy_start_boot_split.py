@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from omnibase_core.models.core.model_deployment_topology import (
         ModelDeploymentTopology,
     )
+    from omnibase_infra.handlers.lazy_start_front_door import LazyStartFrontDoor
 
 __all__: list[str] = [
     "StoreLazyStartDormant",
@@ -52,6 +53,7 @@ class StoreLazyStartDormant:
 
     _policy: ModelLazyStartPolicy | None = None
     _contracts: dict[str, ModelDiscoveredContract] = {}
+    _front_door: LazyStartFrontDoor | None = None
     _wired: dict[str, ModelDiscoveredContract] = {}
     _provisioner: object | None = None
     _topology: ModelDeploymentTopology | None = None
@@ -99,8 +101,25 @@ class StoreLazyStartDormant:
         return dict(cls._wired)
 
     @classmethod
+    def record_front_door(cls, front_door: LazyStartFrontDoor) -> None:
+        """Keep the boot's front door so ``/ready`` can read its serving set (OMN-26316)."""
+        cls._front_door = front_door
+
+    @classmethod
+    def serving_detail(cls) -> dict[str, object]:
+        """The ``lazy_start`` block of the ``/ready`` detail, or nothing (OMN-26316).
+
+        Nothing before the policy and the front door exist.
+        """
+        if cls._policy is None or cls._front_door is None:
+            return {}
+        status = cls._front_door.serving_status()
+        return {"lazy_start": status.model_dump(mode="json")}
+
+    @classmethod
     def clear(cls) -> None:
         cls._policy = None
+        cls._front_door = None
         cls._contracts = {}
         cls._wired = {}
         cls._provisioner = None
