@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING
 
 from omnibase_infra.models.lazy_start import ModelLazyStartPolicy
@@ -55,6 +55,7 @@ class StoreLazyStartDormant:
     _wired: dict[str, ModelDiscoveredContract] = {}
     _provisioner: object | None = None
     _topology: ModelDeploymentTopology | None = None
+    _waker: Callable[[str], Awaitable[None]] | None = None
 
     @classmethod
     def record(
@@ -74,6 +75,20 @@ class StoreLazyStartDormant:
     def record_topology(cls, topology: ModelDeploymentTopology | None) -> None:
         """Keep the boot's database topology beside the dormant contracts (OMN-26594)."""
         cls._topology = topology
+
+    @classmethod
+    def record_waker(cls, waker: Callable[[str], Awaitable[None]] | None) -> None:
+        """Keep the front door's wake beside the dormant contracts (OMN-26316).
+
+        The always-wired ingress records it. A caller outside the bus (the HTTP
+        listener's mount middleware) wakes a dormant contract through it.
+        """
+        cls._waker = waker
+
+    @classmethod
+    def waker(cls) -> Callable[[str], Awaitable[None]] | None:
+        """The front door's wake of one contract by name, once the ingress is wired."""
+        return cls._waker
 
     @classmethod
     def provisioner(cls) -> object | None:
@@ -105,6 +120,7 @@ class StoreLazyStartDormant:
         cls._wired = {}
         cls._provisioner = None
         cls._topology = None
+        cls._waker = None
 
 
 def lazy_start_policy_of_this_lane(

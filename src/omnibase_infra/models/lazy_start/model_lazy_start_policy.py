@@ -44,6 +44,16 @@ class ModelLazyStartPolicy(BaseModel):
         description="Further start attempts after a failed start, per request",
     )
 
+    topic_request_chunk: int = Field(
+        default=100,
+        ge=1,
+        description=(
+            "Topics per metadata request and partitions per offset request of the "
+            "dormant-topic watch (OMN-26316): one request across a whole broker "
+            "timed out on the lab"
+        ),
+    )
+
     @model_validator(mode="after")
     def _names_are_unique_and_not_blank(self) -> Self:
         names = (self.ingress_contract, *self.boot_contracts)
