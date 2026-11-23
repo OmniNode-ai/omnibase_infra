@@ -123,6 +123,7 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     "TENANT_PROJECTION_WRITER_PASSWORD": "render-only-tenant-projection-writer-password",
     # OMN-26151: the lab gateway login, fail-closed in the lane overlay. Render-only.
     "GATEWAY_RUNTIME_PASSWORD": "d" * 64,
+    "TENANT_IDENTITY_WRITER_PASSWORD": "e" * 64,
     "LINEAR_API_KEY": "test-linear-api-key",
     "GITHUB_TOKEN": "test-github-token",
     "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",

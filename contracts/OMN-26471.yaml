@@ -1,0 +1,90 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26471"
+title: "omnibase_infra: a least-grant tenant_identity_writer role and the omninode_cloud topology entry exist on the dev lane"
+summary: >-
+  Adds the login tenant_identity_writer on omninode_cloud: one seam, docker/migrations/seams/tenant_identity_writer_grants.sql, mints and re-asserts its credential from TENANT_IDENTITY_WRITER_PASSWORD and grants exactly the declared set (column-scoped UPDATE on tenants, tenant_api_keys and tenant_event_outbox, no DELETE and no TRUNCATE), then reads the effective privileges back, including every grant-option form, and fails the run on any difference. The dev overlay renders TENANT_IDENTITY_DATABASE_DSN and passes the password to the migration runner, both fail-closed. AC6 (the omninode_cloud topology entry) is not built here: the omninode_cloud ledger carries no stream or domain column, so a conforming checksum_ledger would be an invented fact.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26471-tenant-identity-writer"
+    statement: "The dev lane holds a least-grant login role tenant_identity_writer on omninode_cloud, minted and bounded by one seam, with its DSN wired fail-closed."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the role holds exactly the listed set -- falsifier: on omni-201 the effective-privilege readback the seam itself runs (has_table_privilege, has_column_privilege, has_sequence_privilege, has_database_privilege, has_schema_privilege, plus the WITH GRANT OPTION forms and a positive control that a grant with delegation rights makes it raise) differs from the list, or `select table_name, column_name, privilege_type from information_schema.role_column_grants where grantee='tenant_identity_writer' order by 1,2,3` prints a column not in the list (role_table_grants alone is not enough because it does not show column-scoped UPDATE)
+      - id: "AC2"
+        statement: >-
+          AC2: the runtime connects as tenant_identity_writer on a fresh slot and on omni-201's warm volume -- falsifier: a `select session_user, current_user, current_database()` through the T3 node's DSN does not print `tenant_identity_writer, tenant_identity_writer, omninode_cloud` on either
+      - id: "AC3"
+        statement: >-
+          AC3: the runner asserts the role's credential on omni-201 and does not skip it -- falsifier: the dev lane's forward-migration log for the run after deploy has a `skip` line for tenant_identity_writer or no credential line for it at all
+      - id: "AC4"
+        statement: >-
+          AC4: gateway_runtime's nine grants are unchanged -- falsifier: the existing gateway_runtime_grants.sql readback raises on the next run, or its output on omni-201 is a `skip` line instead of `ok ... nine gateway grants`
+      - id: "AC5"
+        statement: >-
+          AC5: the failing test is red before the seam and green after -- falsifier: `uv run pytest tests/unit/test_tenant_identity_writer_grants.py -q` exits non-zero after the change, or the PR's first commit shows it passing
+evidence_requirements:
+  - kind: "tests"
+    description: "The seam grants exactly the declared set, the readback raises on any difference, and the compose and runner wiring is pinned."
+    command: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn26471-ac1-grant-set"
+    description: "The seam's GRANT statements and its readback literals each equal the one declared list in the test, the readback covers the table, column, sequence, schema and database functions and every WITH GRANT OPTION form, and the positive controls (a dropped grant, an extra grant, a widened literal) fire."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26471-ac2-dsn-and-login"
+    description: "The dev overlay renders TENANT_IDENTITY_DATABASE_DSN fail-closed as tenant_identity_writer on omninode_cloud, no base compose file names it, and the seam mints the role with LOGIN and no wider attribute (hosted part; the connection readback is the lab line in the PR)."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26471-ac3-credential-asserted"
+    description: "The runner applies the seam in the gateway grants psql run, the dev overlay's migration service receives TENANT_IDENTITY_WRITER_PASSWORD fail-closed, and the seam names its skip lines and its credential ok line (hosted part; the lane's forward-migration log is the lab line in the PR)."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26471-ac4-gateway-unchanged"
+    description: "The gateway_runtime grants file and its tests are unchanged and pass at the head."
+    source: "manual"
+    binds_ac: ["AC4"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -k gateway_grants_psql_run -q -n 0 --no-cov"
+        cwd: "."
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_gateway_runtime_login_role_omn26151.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26471-ac5-red-then-green"
+    description: "The focused test file passes at the head; it was red at the PR's first commit, which carries the test and no seam."
+    source: "manual"
+    binds_ac: ["AC5"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26471-ac2-hosted-deploy-probe"
+    description: "Deploy scope: the pushed head renders TENANT_IDENTITY_DATABASE_DSN as tenant_identity_writer in the dev-lane overlay and carries the grants seam the migration runner applies, read from GitHub at the checked-out revision so the hosted runner can run it."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "command"
+        check_value: "bash -o pipefail -c 'gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F \"TENANT_IDENTITY_DATABASE_DSN: \\\"postgresql://tenant_identity_writer:\" >/dev/null'"
+        cwd: "."
+      - check_type: "command"
+        check_value: "bash -o pipefail -c 'gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/seams/tenant_identity_writer_grants.sql?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F \"GRANT UPDATE (is_active, revoked_at) ON public.tenant_api_keys\" >/dev/null'"
+        cwd: "."
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
