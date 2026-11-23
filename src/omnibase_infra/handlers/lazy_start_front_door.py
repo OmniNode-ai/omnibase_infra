@@ -43,6 +43,7 @@ from omnibase_infra.models.lazy_start import (
     ModelLazyStartPolicy,
     ModelLazyStartRequest,
     ModelLazyStartResult,
+    ModelLazyStartServingStatus,
 )
 from omnibase_infra.protocols.protocol_lazy_start_transaction import (
     ProtocolLazyStartTransaction,
@@ -90,6 +91,16 @@ class LazyStartFrontDoor:
     def serving(self) -> frozenset[str]:
         """The contracts whose wake completed: started and committed."""
         return frozenset(self._serving)
+
+    def serving_status(self) -> ModelLazyStartServingStatus:
+        """The serving set and the failed wakes, as ``/ready`` reports them (OMN-26316)."""
+        serving = tuple(sorted(self._serving))
+        return ModelLazyStartServingStatus(
+            dormant_contract_count=len(self._dormant),
+            serving_contracts=serving,
+            serving_count=len(serving),
+            wake_failures=dict(sorted(self.wake_failures.items())),
+        )
 
     async def handle(self, request: ModelLazyStartRequest) -> ModelLazyStartResult:
         """Deliver ``request`` to its node, starting the node first when dormant."""
