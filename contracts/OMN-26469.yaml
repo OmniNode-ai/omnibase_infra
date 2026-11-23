@@ -1,0 +1,31 @@
+schema_version: 1.0.0
+ticket_id: OMN-26469
+title: The omnibase_infra documentation no longer presents onex-api as a current service
+summary: >-
+  docs/env-example-full.txt named onex-api as a consumer of the Keycloak admin keys and as the holder of the Infisical path /services/onex-api/auth/. The comment block now states that onex-api is retired (RULING 2026-11-02T15:02:01Z D3, OMN-21288) and that the runtime is the one runtime, and the two key lines name the path as a legacy name. No code, workflow or config file changes; the remaining onex-api hits in this repository are code, tests, workflow comments and release history, outside this documentation change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26469-infra-docs
+    statement: No documentation file of omnibase_infra, outside the change history, presents onex-api as running.
+    acceptance:
+      - id: AC5
+        statement: "AC5: every line of the docs tree that names onex-api says it is retired"
+evidence_requirements:
+  - kind: command
+    description: The documentation sweep for onex-api finds no line that does not say retired.
+    command: "! git grep -n -i onex-api -- docs | grep -v -i retired"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26469-ac5-docs-sweep
+    description: "The sweep over the docs tree prints no line that lacks the word retired; at the base it prints four."
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: command
+        check_value: "! git grep -n -i onex-api -- docs | grep -v -i retired"
+        cwd: .
