@@ -152,6 +152,15 @@ if [[ ! -f "${REPO_ROOT}/scripts/lane-census-check.sh" ]]; then
   echo "ERROR: ${REPO_ROOT}/scripts/lane-census-check.sh not found; pass --repo-root <omnibase_infra clone>" >&2
   exit 2
 fi
+# OMN-26379: the installed unit names the revision it runs. A clone path alone
+# is not a record: a hand-placed copy of the scripts (a proof copy under a lab
+# scratch path) carries none, and ran a host's census for weeks with nothing to
+# say which code it was. The revision is the clone's HEAD, with -dirty when a
+# tracked file under scripts/ or deploy/lane-census/ differs from it. A
+# directory that is not a git work tree installs nothing.
+REVISION="$(git -C "$REPO_ROOT" rev-parse --verify HEAD 2>/dev/null)" || { echo "ERROR: ${REPO_ROOT} is not a git work tree, so the unit would run code with no revision record; pass --repo-root <omnibase_infra clone>" >&2; exit 2; }
+git -C "$REPO_ROOT" diff --quiet HEAD -- scripts deploy/lane-census || REVISION="${REVISION}-dirty"
+
 # resolve_unit_dir -- the private directory that holds the units, or rc=1 with
 # the reason on stderr. There is no fallback directory.
 resolve_unit_dir() {
@@ -191,12 +200,12 @@ CENSUS_REGISTRY="${LANE_CENSUS_REGISTRY:-}"
 [[ -f "$CENSUS_REGISTRY" ]] || { echo "ERROR: LANE_CENSUS_REGISTRY is '${CENSUS_REGISTRY:-unset}', not a file; set it to the absolute path of the lane census node's overlay.yaml (the node's \`registry path\` verb prints it) so the unit can read the host registry" >&2; exit 2; }
 
 # Render a shipped unit: the clone path, then the broker container, the
-# config root and the host registry as the last [Service] settings (every shipped unit ends inside its
+# revision, the config root and the host registry as the last [Service] settings (every shipped unit ends inside its
 # [Service] section or carries [Install] after it, so the lines are inserted
 # before [Install] if any).
 render_unit() {
   local src="$1" dst="$2"
-  local env_line="Environment=LANE_MEMORY_BROKER_CONTAINER=${BROKER_CONTAINER}"
+  local env_line="Environment=LANE_MEMORY_BROKER_CONTAINER=${BROKER_CONTAINER}\nEnvironment=LANE_CENSUS_REVISION=${REVISION}"
   local root_line="Environment=ONEX_WORKSPACE_CONFIG_ROOT=${ONEX_WORKSPACE_CONFIG_ROOT}\nEnvironment=LANE_CENSUS_REGISTRY=${CENSUS_REGISTRY}"
   sed "s#${SHIPPED_REPO_ROOT}#${REPO_ROOT}#g" "$src" | awk -v line="$env_line" -v root="$root_line" '
     /^\[Install\]/ && !done { print line; print root; print ""; done=1 }
@@ -206,7 +215,6 @@ render_unit() {
 }
 
 mkdir -p "$USER_UNIT_DIR"
-chmod +x "${REPO_ROOT}/scripts/lane-census-check.sh" 2>/dev/null || true
 
 if [[ "$STANDALONE" == true ]]; then
   if [[ -f "$BASE_SERVICE" ]]; then
@@ -219,7 +227,6 @@ if [[ "$STANDALONE" == true ]]; then
   rm -f "$DROPIN_DST"
   systemctl --user daemon-reload
   systemctl --user enable --now onex-lane-census.timer
-  echo ""
   echo "Done. Unit: $STANDALONE_SERVICE_DST (clone ${REPO_ROOT}, broker ${BROKER_CONTAINER})"
   echo "Run now:  systemctl --user start onex-lane-census.service"
   echo "Logs:     journalctl --user -u onex-lane-census.service -f"
@@ -240,7 +247,6 @@ systemctl --user disable --now onex-lane-census.timer 2>/dev/null || true
 rm -f "$STANDALONE_SERVICE_DST" "$STANDALONE_TIMER_DST"
 systemctl --user daemon-reload
 
-echo ""
 echo "Done. lane-census reconcile registered on the shared onex-disk-gc timer."
 echo "  Drop-in: $DROPIN_DST (clone ${REPO_ROOT}, broker ${BROKER_CONTAINER})"
 echo ""
