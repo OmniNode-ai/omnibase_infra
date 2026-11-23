@@ -11,9 +11,13 @@ from omnibase_infra.models.lazy_start.model_lazy_start_request import (
 from omnibase_infra.models.lazy_start.model_lazy_start_result import (
     ModelLazyStartResult,
 )
+from omnibase_infra.models.lazy_start.model_lazy_start_serving_status import (
+    ModelLazyStartServingStatus,
+)
 
 __all__: list[str] = [
     "ModelLazyStartPolicy",
     "ModelLazyStartRequest",
     "ModelLazyStartResult",
+    "ModelLazyStartServingStatus",
 ]

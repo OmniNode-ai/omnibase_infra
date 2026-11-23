@@ -209,6 +209,13 @@ repos:
         files: ^(scripts/(lab_alarm|lane_census_plan)\.py|config/lab_alarm\.json|tests/ci/test_lab_alarm_omn18867\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: wiring-report-ratchet
+        name: Wiring report counts only fall (OMN-26335)
+        entry: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        files: ^(src/omnibase_infra/(handlers/(handler_wiring_report_counts\.py|handler_wiring_report_ratchet/.*)|models/wiring_ratchet/.*|nodes/node_wiring_report_ratchet_compute/.*|runtime/auto_wiring/.*)|tests/ci/(test_wiring_report_ratchet_omn26335\.py|fixtures/wiring_report_2026_11_21\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: linear-transport-consolidation
         name: Linear GraphQL has one transport owner (OMN-17678)
         entry: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q

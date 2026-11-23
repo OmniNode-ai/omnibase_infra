@@ -37,8 +37,6 @@
         <string>@OMNI_HOME@/omnibase_infra/config/lab_alarm.json</string>
         <string>--state-dir</string>
         <string>@OMNI_HOME@/.onex_state/lab-alarm</string>
-        <string>--ledger</string>
-        <string>@OMNI_HOME@/docs/tracking/ROLLING_WORK_LEDGER.md</string>
     </array>
 
     <key>EnvironmentVariables</key>
@@ -70,6 +68,19 @@
              like the two keys above. -->
         <key>ONEX_WORKSPACE_CONFIG_ROOT</key>
         <string>@ONEX_WORKSPACE_CONFIG_ROOT@</string>
+        <!-- OMN-26593: the work-ledger reader node finds its overlay (the
+             moved_readers listing of lab-alarm-projection and
+             lab-alarm-consent) under these roots; without them every read
+             answers unreadable and the alarm says so. -->
+        <key>ONEX_SKILL_OVERLAY_ROOTS</key>
+        <string>@ONEX_SKILL_OVERLAY_ROOTS@</string>
+        <!-- OMN-26593, interim: onex-ledger append-rows - still resolves the
+             ledger of record from this variable until the ledger tool change
+             (OMN-26592) lets the bus append run without a path. It is used
+             for the append only; the alarm reads nothing from that file.
+             Drop this key in the change that lands after OMN-26592. -->
+        <key>ONEX_LEDGER_PATH</key>
+        <string>@LAB_ALARM_LEDGER_RECORD@</string>
     </dict>
 
     <!-- Hourly, at :25. A Minute-only StartCalendarInterval matches every

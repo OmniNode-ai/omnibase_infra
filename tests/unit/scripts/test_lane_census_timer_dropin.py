@@ -24,6 +24,9 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
 from tests.helpers.lane_census_fixtures import (
     NEUTRAL_CONFIG_ROOT,
     NEUTRAL_MANIFEST,
@@ -277,3 +280,114 @@ def test_installer_requires_the_manifest_under_the_config_root(
     assert "lane-manifest.yaml" in result.stderr
     assert "ONEX_WORKSPACE_CONFIG_ROOT" in result.stderr
     assert not (units / "onex-disk-gc.service.d/20-lane-census.conf").exists()
+
+
+# ---------------------------------------------------------------------------
+# OMN-26379 -- an install records the revision it runs, or installs nothing
+# ---------------------------------------------------------------------------
+
+
+def _head(clone: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    ).stdout.strip()
+
+
+def test_standalone_unit_records_the_revision_it_runs(tmp_path: Path) -> None:
+    """`systemctl cat` of the unit names the clone's revision, not only its path."""
+    env, home = _installer_env(tmp_path)
+    result = _install(
+        env,
+        "--standalone",
+        "--broker-container",
+        "census-test-broker",
+        "--repo-root",
+        str(_REPO),
+    )
+    assert result.returncode == 0, result.stderr
+    service = (home / ".config/systemd/user/onex-lane-census.service").read_text()
+    match = re.search(r"^Environment=LANE_CENSUS_REVISION=(\S+)$", service, re.M)
+    assert match, "the unit carries no revision record"
+    assert match.group(1).removesuffix("-dirty") == _head(_REPO)
+
+
+def test_dropin_records_the_revision_it_runs(tmp_path: Path) -> None:
+    env, home = _installer_env(tmp_path)
+    units = home / ".config/systemd/user"
+    (units / "onex-disk-gc.service").write_text("[Service]\n")
+    result = _install(
+        env, "--broker-container", "omnibase-infra-redpanda", "--repo-root", str(_REPO)
+    )
+    assert result.returncode == 0, result.stderr
+    body = (units / "onex-disk-gc.service.d/20-lane-census.conf").read_text()
+    match = re.search(r"^Environment=LANE_CENSUS_REVISION=(\S+)$", body, re.M)
+    assert match, "the drop-in carries no revision record"
+    assert match.group(1).removesuffix("-dirty") == _head(_REPO)
+
+
+def test_installer_refuses_a_copy_with_no_revision_record(tmp_path: Path) -> None:
+    """A plain copy of the scripts (a proof copy) has no revision: nothing installs."""
+    env, home = _installer_env(tmp_path)
+    copy = tmp_path / "lab-proof" / "omnibase_infra"
+    (copy / "scripts").mkdir(parents=True)
+    shutil.copyfile(
+        _REPO / "scripts" / "lane-census-check.sh",
+        copy / "scripts" / "lane-census-check.sh",
+    )
+    result = _install(
+        env,
+        "--standalone",
+        "--broker-container",
+        "census-test-broker",
+        "--repo-root",
+        str(copy),
+    )
+    assert result.returncode == 2, result.stderr
+    assert "revision" in result.stderr
+    assert not (home / ".config/systemd/user/onex-lane-census.service").exists()
+    assert not (tmp_path / "systemctl.log").exists()
+
+
+def test_standalone_unit_keeps_the_collector_beside_its_revision(
+    tmp_path: Path,
+) -> None:
+    """The unit a scheduled run starts is the collector, and it names its revision."""
+    env, home = _installer_env(tmp_path)
+    result = _install(
+        env,
+        "--standalone",
+        "--broker-container",
+        "census-test-broker",
+        "--repo-root",
+        str(_REPO),
+    )
+    assert result.returncode == 0, result.stderr
+    service = (home / ".config/systemd/user/onex-lane-census.service").read_text()
+    assert f"ExecStart=/bin/bash {_REPO}/scripts/lane-census-check.sh" in service
+    assert re.search(r"^Environment=LANE_CENSUS_REVISION=\S+$", service, re.M), (
+        "the unit carries no revision record"
+    )
+
+
+def test_standalone_unit_runs_one_source_whose_revision_is_recorded(
+    tmp_path: Path,
+) -> None:
+    """One script root in the unit, and exactly one revision record for it."""
+    env, home = _installer_env(tmp_path)
+    result = _install(
+        env,
+        "--standalone",
+        "--broker-container",
+        "census-test-broker",
+        "--repo-root",
+        str(_REPO),
+    )
+    assert result.returncode == 0, result.stderr
+    service = (home / ".config/systemd/user/onex-lane-census.service").read_text()
+    roots = set(re.findall(r"(/\S*?)/scripts/lane-census-check\.sh", service))
+    assert roots == {str(_REPO)}, f"the unit names more than one source: {roots}"
+    assert len(re.findall(r"^Environment=LANE_CENSUS_REVISION=", service, re.M)) == 1
