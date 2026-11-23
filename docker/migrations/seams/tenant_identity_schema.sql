@@ -139,8 +139,8 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'omninode_cl
         is_active boolean DEFAULT true NOT NULL,
         CONSTRAINT tenant_api_keys_pkey PRIMARY KEY (id),
         CONSTRAINT tenant_api_keys_key_hash_key UNIQUE (key_hash),
-        CONSTRAINT chk_key_hash_valid CHECK (length(TRIM(BOTH FROM key_hash)) >= 32),
-        CONSTRAINT chk_name_valid CHECK ((length(TRIM(BOTH FROM name)) > 0) AND (length(name) <= 255)),
+        CONSTRAINT chk_key_hash_valid CHECK (length(btrim(key_hash)) >= 32),
+        CONSTRAINT chk_name_valid CHECK ((length(btrim(name)) > 0) AND (length(name) <= 255)),
         CONSTRAINT chk_revocation_consistency CHECK (((is_active = true) AND (revoked_at IS NULL)) OR ((is_active = false) AND (revoked_at IS NOT NULL))),
         CONSTRAINT tenant_api_keys_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(tenant_id) ON DELETE CASCADE
     );

@@ -179,7 +179,7 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'omninode_cl
         FROM information_schema.columns c JOIN t ON t.name = c.table_name
        WHERE c.table_schema = 'public'
       UNION ALL
-      SELECT cl.relname || '|constraint|' || co.conname || '|' || pg_get_constraintdef(co.oid)
+      SELECT cl.relname || '|constraint|' || co.conname || '|' || regexp_replace(pg_get_constraintdef(co.oid), 'btrim\(([a-z_]+)\)', 'TRIM(BOTH FROM \1)', 'g')
         FROM pg_catalog.pg_constraint co
         JOIN pg_catalog.pg_class cl ON cl.oid = co.conrelid
         JOIN t ON t.name = cl.relname
