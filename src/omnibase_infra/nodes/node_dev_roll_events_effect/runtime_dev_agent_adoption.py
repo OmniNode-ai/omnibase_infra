@@ -186,17 +186,23 @@ def _refuse(
 def candidate_self_check(
     agent_dir: str, run: Runner, settings: AdoptionSettings
 ) -> subprocess.CompletedProcess[str]:
-    """Run the one-shot self-check of the clone at ``agent_dir`` in a subprocess."""
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [agent_dir, *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
-    )
-    return run(
-        [sys.executable, str(_root(agent_dir) / SELF_CHECK_ENTRY)],
-        timeout=settings.self_check_timeout_seconds,
-        cwd=agent_dir,
-        env=env,
-    )
+    """Run the one-shot self-check of the clone at ``agent_dir`` in a subprocess.
+
+    The subprocess gets its own scratch state directory (``DEPLOY_AGENT_STATE_DIR``), so no tick
+    reads or writes the agent's job records.
+    """
+    with tempfile.TemporaryDirectory(prefix="deploy-agent-self-check-") as scratch:
+        env = dict(os.environ)
+        env["DEPLOY_AGENT_STATE_DIR"] = str(Path(scratch) / "jobs")
+        env["PYTHONPATH"] = os.pathsep.join(
+            [agent_dir, *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
+        )
+        return run(
+            [sys.executable, str(_root(agent_dir) / SELF_CHECK_ENTRY)],
+            timeout=settings.self_check_timeout_seconds,
+            cwd=agent_dir,
+            env=env,
+        )
 
 
 def adopts(
