@@ -3,31 +3,6 @@
 # SPDX-License-Identifier: MIT
 """Watch three lab conditions on a durable timer and raise once each (OMN-18867).
 
-THE DEFECT THIS EXISTS TO CLOSE
-
-Three lab conditions ran unobserved in one window:
-
-* the savings writer crash-looping on an oversize snapshot, frozen **nine
-  days** at lag 498 (OMN-18851);
-* ``omninode-runtime`` crash-looping on a projection grant from a stale pin
-  (omnibase_infra#3857);
-* compose-dev lab-pass receipts FAILing for hours while a release lane waited.
-
-Every one was found by a person looking, and the first nine days late.
-**Detection time is the defect, not the conditions.**
-
-WHY A LAUNCH AGENT AND NOT A SESSION TICK
-
-Session-scoped scheduling is in-memory and dies with the session; this has to
-survive one. ``StartCalendarInterval`` under launchd is the durable local
-trigger, installed by ``scripts/launchd/install-lab-alarm.sh``.
-
-The OMN-17173 correction applies and is the reason the installer prints a
-readback: **launchd DOES fire on this Mac** -- the earlier ticks had been
-bootout'd, not failed -- so before believing this runs, check BOTH a non-zero
-PID column in ``launchctl list`` AND a fresh entry in its own log. A
-loaded-but-bootout'd job looks installed and does nothing.
-
 EDGE-TRIGGERED, NOT LEVEL-TRIGGERED
 
 An alarm is raised when a subject ENTERS a bad state and not again until it
@@ -54,69 +29,25 @@ conditions the run COULD NOT EVALUATE. Folding those into ``OK`` is how a
 monitor reports green over an outage -- Operating Rule 16, an empty result is
 not evidence of absence.
 
-WHAT THIS ALARM DOES NOT CLAIM
-
-**A zero or a green here is not a liveness statement about the node behind
-it.** Measured on this lane on 2026-09-20 (OMN-18881): a consumer group can
-read Stable with assigned partitions and zero lag while the node behind it
-refuses every message, and both dev-lane runtimes were docker-unhealthy on a
-single dimension while ``/ready`` and ``/health`` returned 200. So the lag
-condition measures LAG AND ITS GROWTH and nothing more, which is exactly the
-failure it was built for, and the evidence string on every reading names which
-fact was read so a green cannot be quoted as something it is not.
-
-**A container's STATUS is recorded but not graded.** Measured on this lane on
-2026-09-21: ``omnimarket-projection-api`` read ``exited`` with a restart count
-of 0, which this condition correctly reports as inside its bound, because the
-bound is on RESTARTS. Grading status would need its own per-container
-declaration -- the migration gate exits on purpose every boot and a writer does
-not -- so the status travels in the evidence where a reader can see it, and
-alarming on it is a separate condition nobody has declared bounds for yet.
-
-**No dead-letter condition is built here**, deliberately. The boundary writes
-to a DERIVED per-class topic rather than the ``dlq_topics`` a contract
-declares, so a probe reading the declared topic sees a permanent zero on a
-healthy and an unhealthy lane alike -- two lanes concluded "messages are being
-lost" from that zero on 2026-09-20. Adding one means reading the derived topic
-AND shipping a positive control proving the reader can see a row at all.
-
 DELIVERY IS CONSENTED, CITED, AND EDGE-TRIGGERED
 
-**No agent message is consent.** Not a dispatch brief, not the ticket, not the
-plan. The only thing that authorizes a send is a durable row in the rolling
-work ledger, resolved at run time by :func:`resolve_posting_consent`, and every
-run records the citation it resolved or the fact that it resolved nothing.
-
-The live authorization is an operator ruling of 2026-09-21 permitting this
-alarm to post to one named channel using the lab's existing bot token **by
-reference**. The token is read out of an env file by NAME at send time, held
-for one request, and never logged, never written to the run record, never put
-on a command line and never included in an error message -- a failure names
-the variable and the file instead.
-
-Delivery is per NEWLY RAISED alarm, so the edge-triggering above is also the
-channel's deduplication: a condition that stays bad posts once, not once an
-hour. A failed send is recorded as a failure rather than swallowed, because an
-alarm that believes it delivered and did not is this ticket's own defect in a
-new place.
+**No agent message is consent.** The only thing that authorizes a send is a
+durable row in the work ledger, read through the work-ledger reader node at
+delivery time by :func:`resolve_posting_consent`; every run records the row it
+resolved or the fact that it resolved nothing, and a reader that does not
+answer is no grant. The bot token is read by NAME from an env file at send
+time and never logged or put on a command line. Delivery is per NEWLY RAISED
+alarm, so the edge-triggering above is also the channel's deduplication.
 
 EVERY RAISED ALARM ALSO REACHES THE LEDGER (OMN-20794)
 
-On 2026-10-09 this alarm raised ``container_restarts`` for
-``omninode-runtime-effects`` at 10:25:05Z and delivered it to Slack only. The
-rolling ledger carried no ``lab-alarm`` row, so the orchestrator learned of the
-crash fifteen minutes later from a stale projection. Each newly raised alarm now
-appends ONE FRICTION row through the ledger's own append
-(:func:`make_ledger_appender`), naming the condition, the subject and the
-evidence the condition read. It does not wait on Slack: a channel with no
-consent row, no token or no route still leaves the ledger row. No new ssh or
-HTTP read is made for it.
+Each newly raised alarm appends ONE FRICTION row through the ledger tool's own
+``append-rows -`` with the row on stdin (:func:`make_ledger_appender`); it does
+not wait on Slack. A row that could not be written is kept in the state file
+and retried every tick, and the run exits as an alarm meanwhile. The alarm
+opens no ledger file (OMN-26593).
 
-A row that could not be written is kept in the state file and retried on every
-tick until it lands, and the run exits as an alarm meanwhile: an alarm that
-believes it recorded and did not is the defect again. A subject that clears and
-re-raises inside ``ledger_dedupe_window`` appends no second row, so a flapping
-condition leaves one row, not one per flap.
+Design history of the sections moved out: ``docs/lab_alarm_design_notes.md``.
 """
 
 from __future__ import annotations
@@ -240,8 +171,8 @@ class EnumAlarmCondition(StrEnum):
     a broker that stays up with its external listener unbound restarts
     nothing, and the lag condition reads a refusing broker as INDETERMINATE.
 
-    WORK_LEDGER_PROJECTION_STALE (OMN-20248) compares the rolling ledger
-    file's newest canonical row against ``max(row_ts)`` in the work-ledger
+    WORK_LEDGER_PROJECTION_STALE (OMN-20248) compares the rolling ledger's
+    newest canonical row (read through the work-ledger reader node) against ``max(row_ts)`` in the work-ledger
     projection table. The projection sat frozen for about 36 hours while its
     consumer groups read Stable at lag 0, because nothing new reached the
     topics -- a freeze no offset-based condition can see.
@@ -276,16 +207,21 @@ class CommandRunner(Protocol):
     """
 
     def __call__(
-        self, argv: Sequence[str], *, timeout: float
+        self, argv: Sequence[str], *, timeout: float, stdin: str | None = None
     ) -> subprocess.CompletedProcess[str]: ...
 
 
 def _run_read_only(
-    argv: Sequence[str], *, timeout: float
+    argv: Sequence[str], *, timeout: float, stdin: str | None = None
 ) -> subprocess.CompletedProcess[str]:
-    """Run a fixed-argv, no-shell, read-only command."""
+    """Run a fixed-argv, no-shell command; *stdin* is the row an append feeds it."""
     return subprocess.run(
-        list(argv), capture_output=True, text=True, check=False, timeout=timeout
+        list(argv),
+        input=stdin,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
     )
 
 
@@ -1608,7 +1544,7 @@ def evaluate_effects_held_behind_runtime(
 
 
 # ---------------------------------------------------------------------------
-# Condition 5 — the work-ledger projection behind the ledger file (OMN-20248)
+# Condition 5 — the work-ledger projection behind the ledger (OMN-20248)
 # ---------------------------------------------------------------------------
 #
 # Measured 2026-10-01: ``omninode_internal.work_ledger_rows`` sat frozen at
@@ -1642,9 +1578,12 @@ _WORK_LEDGER_ROW = re.compile(
     re.MULTILINE,
 )
 
-#: The rolling ledger is tens of megabytes; its newest rows are at the end.
-#: 256 KiB holds hundreds of rows, far more than one hourly tick ever appends.
-WORK_LEDGER_TAIL_BYTES = 256 * 1024
+#: The reader names the overlays repository lists in ``moved_readers`` for this
+#: alarm (OMN-26593): one per read, so either one can be rolled back alone. A
+#: name that is not listed answers not-moved (exit 3) and the read is refused;
+#: the ledger file is never read in its place.
+LEDGER_READER_PROJECTION = "lab-alarm-projection"
+LEDGER_READER_CONSENT = "lab-alarm-consent"
 
 WORK_LEDGER_TABLE = "omninode_internal.work_ledger_rows"
 _WORK_LEDGER_MAX_ROW_TS_SQL = (
@@ -1652,31 +1591,104 @@ _WORK_LEDGER_MAX_ROW_TS_SQL = (
 )
 
 
+class LedgerReadError(RuntimeError):
+    """The work-ledger reader node did not answer the read."""
+
+
+def _run_ledger_tool(
+    prefix: Sequence[str],
+    tail: Sequence[str],
+    *,
+    runner: CommandRunner,
+    timeout_seconds: float,
+    error: type[RuntimeError],
+    stdin: str | None = None,
+) -> str:
+    """Run the ledger tool; anything but exit 0 is *error*."""
+    try:
+        result = runner([*prefix, *tail], timeout=timeout_seconds, stdin=stdin)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise error(
+            f"{type(exc).__name__}: timed out or could not start {prefix[0]}"
+        ) from exc
+    if result.returncode != 0:
+        raise error(
+            f"exited {result.returncode}: "
+            f"{(result.stderr or result.stdout or '').strip()[-300:]}"
+        )
+    return result.stdout
+
+
+class LedgerRowsReader(Protocol):
+    def __call__(
+        self,
+        *,
+        reader: str,
+        kinds: Sequence[str],
+        window_hours: int,
+        term: str | None = None,
+    ) -> tuple[str, ...]:
+        """The ledger rows of the last *window_hours*, or raise :class:`LedgerReadError`."""
+
+
+def make_ledger_rows_reader(
+    command: Sequence[str],
+    *,
+    timeout_seconds: float,
+    runner: CommandRunner = _run_read_only,
+) -> LedgerRowsReader:
+    """The work-ledger reader node's ``rows`` read; exit 0 answers, any other exit refuses."""
+
+    def read(
+        *,
+        reader: str,
+        kinds: Sequence[str],
+        window_hours: int,
+        term: str | None = None,
+    ) -> tuple[str, ...]:
+        tail = [
+            "--reader",
+            reader,
+            "--query",
+            "rows",
+            "--window-hours",
+            str(window_hours),
+        ]
+        tail += [part for kind in kinds for part in ("--kind", kind)]
+        tail += [] if term is None else ["--term", term]
+        out = _run_ledger_tool(
+            command,
+            tail,
+            runner=runner,
+            timeout_seconds=timeout_seconds,
+            error=LedgerReadError,
+        )
+        return tuple(line for line in out.splitlines() if line.strip())
+
+    return read
+
+
 def read_ledger_newest_canonical_row(
-    ledger_path: Path, *, tail_bytes: int = WORK_LEDGER_TAIL_BYTES
+    rows_reader: LedgerRowsReader, *, window_hours: int
 ) -> tuple[datetime, str]:
-    """Return ``(timestamp, row type)`` of the newest canonical row in the tail.
+    """Return ``(timestamp, row type)`` of the newest canonical row in the window.
 
     Raises:
-        ValueError: the file could not be read, or its tail holds no canonical
+        ValueError: the reader did not answer, or its window holds no canonical
             row. A ledger this alarm cannot date is not one the projection
             matches -- the caller grades it INDETERMINATE, never OK.
     """
     try:
-        with ledger_path.open("rb") as handle:
-            size = handle.seek(0, os.SEEK_END)
-            start = max(0, size - tail_bytes)
-            handle.seek(start)
-            raw = handle.read()
-    except OSError as exc:
-        raise ValueError(f"ledger {ledger_path} could not be read: {exc}") from exc
-    text = raw.decode("utf-8", errors="replace")
-    if start > 0:
-        # The first line of a mid-file read is a fragment, not a row.
-        text = text.partition("\n")[2]
+        rows = rows_reader(
+            reader=LEDGER_READER_PROJECTION,
+            kinds=WORK_LEDGER_CANONICAL_ROW_TYPES,
+            window_hours=window_hours,
+        )
+    except LedgerReadError as exc:
+        raise ValueError(f"ledger could not be read: {exc}") from exc
 
     newest: tuple[datetime, str] | None = None
-    for match in _WORK_LEDGER_ROW.finditer(text):
+    for match in _WORK_LEDGER_ROW.finditer("\n".join(rows)):
         stamp = datetime.strptime(match.group("ts"), "%Y-%m-%dT%H:%M:%SZ").replace(
             tzinfo=UTC
         )
@@ -1684,8 +1696,7 @@ def read_ledger_newest_canonical_row(
             newest = (stamp, match.group("type"))
     if newest is None:
         raise ValueError(
-            f"ledger {ledger_path} holds no canonical row in its last "
-            f"{tail_bytes} bytes"
+            f"ledger holds no canonical row in its last {window_hours} hour(s)"
         )
     return newest
 
@@ -1744,14 +1755,15 @@ def read_projection_max_row_ts(
 
 def evaluate_work_ledger_projection_stale(
     *,
-    ledger_path: Path,
+    rows_reader: LedgerRowsReader,
+    window_hours: int,
     container: str,
     database: str,
     max_lag: timedelta,
     runner: CommandRunner,
     timeout_seconds: float = 30.0,
 ) -> ModelConditionReport:
-    """ALARM when the ledger file's newest canonical row is more than
+    """ALARM when the ledger's newest canonical row is more than
     *max_lag* ahead of the projection's ``max(row_ts)``.
 
     An empty table is infinitely behind. An unreadable ledger, a ledger tail
@@ -1765,14 +1777,16 @@ def evaluate_work_ledger_projection_stale(
     """
     condition = EnumAlarmCondition.WORK_LEDGER_PROJECTION_STALE
     read_fact = (
-        f"newest canonical row in the last {WORK_LEDGER_TAIL_BYTES} bytes of "
-        f"{ledger_path} vs. max(row_ts) of {WORK_LEDGER_TABLE} in {database} "
-        f"(read via psql in {container}); this measures file-vs-projection "
-        "freshness only and is not a liveness statement about the emit path "
-        "or the projection writer"
+        f"newest canonical row of the last {window_hours} hour(s) read through "
+        f"the work-ledger reader node ({LEDGER_READER_PROJECTION}) vs. "
+        f"max(row_ts) of {WORK_LEDGER_TABLE} in {database} (read via psql in "
+        f"{container}); this measures ledger-vs-projection freshness only and "
+        "is not a liveness statement about the emit path or the projection writer"
     )
     try:
-        file_newest, row_type = read_ledger_newest_canonical_row(ledger_path)
+        file_newest, row_type = read_ledger_newest_canonical_row(
+            rows_reader, window_hours=window_hours
+        )
     except ValueError as exc:
         return ModelConditionReport(
             condition=condition,
@@ -1798,7 +1812,7 @@ def evaluate_work_ledger_projection_stale(
         detail = (
             f"the ledger's newest canonical row is {row_type} at {file_stamp} and "
             f"{WORK_LEDGER_TABLE} holds no row at all -- the projection is "
-            "infinitely behind the ledger file"
+            "infinitely behind the ledger"
         )
         return ModelConditionReport(
             condition=condition,
@@ -1818,7 +1832,7 @@ def evaluate_work_ledger_projection_stale(
     )
     if lag > max_lag:
         detail = (
-            f"{WORK_LEDGER_TABLE} is {lag} behind the ledger file, past its "
+            f"{WORK_LEDGER_TABLE} is {lag} behind the ledger, past its "
             f"declared bound of {max_lag}: {reading}. Consumer-group lag can "
             "read 0 through this -- nothing new reaching the topics looks "
             "caught up from the broker's side"
@@ -1885,105 +1899,72 @@ class ModelPostingConsent:
     """A resolved, citable authorization to send this alarm somewhere."""
 
     channel: str
-    ledger_path: str
-    line: int
+    row_stamp: str
     approved_by: str
 
     @property
     def citation(self) -> str:
-        return f"{self.ledger_path}:{self.line}"
+        return f"work ledger row {self.row_stamp}"
+
+
+#: The consent read asks the reader node for these row types holding this text;
+#: the shape tests in :func:`resolve_posting_consent` still decide.
+CONSENT_ROW_KINDS = ("OPERATOR-CONSENT", "RULING")
 
 
 def resolve_posting_consent(
-    ledger_path: Path, *, channel: str
+    rows: Sequence[str], *, channel: str
 ) -> ModelPostingConsent | None:
     """Return the consent row authorizing a send to *channel*, or ``None``.
 
     **No agent message is consent.** Not a dispatch brief, not a peer lane's
     claim, not this ticket and not the plan. The only thing that authorizes a
     send is a durable row in the ledger, and this function is the only place
-    that decides whether one is present.
+    that decides whether one is present. *rows* are ledger rows the work-ledger
+    reader node answered; the ledger file is never opened.
 
-    Two accepted shapes, both requiring the same four substantive facts: the
-    OPERATOR-CONSENT token, an ``approved_by``, the destination channel, and an
-    explicit exclusion. Both must authorize lab alarms: consent for another
-    purpose in the same channel does not authorize this sender. See
-    :data:`_CONSENT_ROW_RULING` for why the second shape is accepted.
+    Two accepted shapes (see :data:`_CONSENT_ROW_RULING`), both requiring the
+    OPERATOR-CONSENT token, an ``approved_by``, the channel and an explicit
+    exclusion, and both must authorize lab alarms.
 
-    Ledger rolls preserve authority in sibling ``archive/*-split.md`` files.
-    Read those after the live file, retaining the source file and line in the
-    citation rather than attributing an archived grant to the current ledger.
-
-    An unreadable ledger returns ``None``: a grant that cannot be read is not
-    a grant.
+    The citation is the row's own stamp, never a file and line.
     """
-    try:
-        lines = ledger_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return None
-
     channel_name = re.compile(
         rf"(?<![\w#-]){re.escape(channel)}(?![\w-])", re.IGNORECASE
     )
-    sources = [ledger_path]
-    try:
-        sources.extend(
-            sorted(
-                (ledger_path.parent / "archive").glob(f"{ledger_path.stem}_*-split.md"),
-                reverse=True,
-            )
+    for line in rows:
+        stamp = line.split(" | ", 1)[0].strip()
+        labelled = _CONSENT_ROW_LABELLED.search(line)
+        if labelled is not None:
+            approved = labelled.group("approved")
+            who = _APPROVED_BY.search(line)
+            if (
+                who is not None
+                and labelled.group("out").strip()
+                and channel_name.search(approved) is not None
+                and _LAB_ALARM_SCOPE.search(approved) is not None
+            ):
+                return ModelPostingConsent(
+                    channel=channel, row_stamp=stamp, approved_by=who.group("who")
+                )
+            continue
+
+        ruling = _CONSENT_ROW_RULING.search(line)
+        if ruling is None:
+            continue
+        body = ruling.group("body")
+        who = _APPROVED_BY.search(body)
+        if who is None:
+            continue
+        if channel_name.search(body) is None:
+            continue
+        if _LAB_ALARM_SCOPE.search(body) is None:
+            continue
+        if _EXCLUSION.search(body) is None:
+            continue
+        return ModelPostingConsent(
+            channel=channel, row_stamp=stamp, approved_by=who.group("who")
         )
-    except OSError:
-        return None
-
-    for source in sources:
-        if source == ledger_path:
-            source_lines = lines
-        else:
-            try:
-                source_lines = source.read_text(
-                    encoding="utf-8", errors="replace"
-                ).splitlines()
-            except OSError:
-                continue
-        for number, line in enumerate(source_lines, start=1):
-            labelled = _CONSENT_ROW_LABELLED.search(line)
-            if labelled is not None:
-                approved = labelled.group("approved")
-                who = _APPROVED_BY.search(line)
-                if (
-                    who is not None
-                    and labelled.group("out").strip()
-                    and channel_name.search(approved) is not None
-                    and _LAB_ALARM_SCOPE.search(approved) is not None
-                ):
-                    return ModelPostingConsent(
-                        channel=channel,
-                        ledger_path=str(source),
-                        line=number,
-                        approved_by=who.group("who"),
-                    )
-                continue
-
-            ruling = _CONSENT_ROW_RULING.search(line)
-            if ruling is None:
-                continue
-            body = ruling.group("body")
-            who = _APPROVED_BY.search(body)
-            if who is None:
-                continue
-            if channel_name.search(body) is None:
-                continue
-            if _LAB_ALARM_SCOPE.search(body) is None:
-                continue
-            if _EXCLUSION.search(body) is None:
-                continue
-            return ModelPostingConsent(
-                channel=channel,
-                ledger_path=str(source),
-                line=number,
-                approved_by=who.group("who"),
-            )
     return None
 
 
@@ -2140,40 +2121,21 @@ class LedgerAppender(Protocol):
 
 def make_ledger_appender(
     command: Sequence[str],
-    ledger_path: Path,
     *,
     runner: CommandRunner = _run_read_only,
     timeout_seconds: float = 120.0,
 ) -> LedgerAppender:
-    """Bind the ledger's own append to *ledger_path*.
-
-    ``command`` is the ledger tool's argv prefix (``... onex-ledger``); the
-    ledger path and ``--append <row>`` are added here, as fixed argv with no
-    shell, so a row can carry any text without being interpreted. The write
-    itself is the tool's locked, grammar-checked append, so a row the ledger
-    refuses (a missing cost, a bad ticket) is a failure here and not a
-    swallowed one. ``runner`` is the same fixed-argv seam the conditions are
-    tested through; the default runs the command and the append happens inside
-    the tool.
-    """
-    prefix = list(command)
-    if not prefix:
-        raise ValueError("ledger append command is empty")
+    """Bind the ledger's own append: ``append-rows -`` with the row on stdin, no shell, no path."""
 
     def append(row: str) -> None:
-        argv = [*prefix, str(ledger_path), "--timeout", "60s", "--append", row]
-        try:
-            result = runner(argv, timeout=timeout_seconds)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise LedgerAppendError(
-                f"ledger append {type(exc).__name__}: timed out or could not start "
-                f"{prefix[0]}"
-            ) from exc
-        if result.returncode != 0:
-            raise LedgerAppendError(
-                f"onex-ledger exited {result.returncode}: "
-                f"{(result.stderr or result.stdout or '').strip()[:300]}"
-            )
+        _run_ledger_tool(
+            command,
+            ["append-rows", "-", "--timeout", "60s"],
+            runner=runner,
+            timeout_seconds=timeout_seconds,
+            error=LedgerAppendError,
+            stdin=row + "\n",
+        )
 
     return append
 
@@ -2790,7 +2752,7 @@ class ModelAlarmConfig:
     effects_group_prefix: str
     effects_group_suffix: str
     #: OMN-20248: where the work-ledger projection lives, and how far it may
-    #: trail the ledger file before WORK_LEDGER_PROJECTION_STALE alarms.
+    #: trail the ledger before WORK_LEDGER_PROJECTION_STALE alarms.
     work_ledger_db_container: str
     work_ledger_database: str
     work_ledger_max_lag: timedelta
@@ -2814,9 +2776,16 @@ class ModelAlarmConfig:
     #: ``DEV_TAG_FOLLOWED_REPOSITORIES``) and how old a beat may be.
     dev_tag_heartbeat_repositories: tuple[str, ...] = ("omnimarket",)
     dev_tag_heartbeat_max_age: timedelta = timedelta(minutes=30)
-    #: OMN-20794: the ledger tool's argv prefix, ledger path and ``--append``
+    #: OMN-20794: the ledger tool's argv prefix, the ``append-rows -`` verb
     #: excluded. Empty only for a caller that injects its own appender.
     ledger_append_command: tuple[str, ...] = ()
+    #: OMN-26593: the work-ledger reader node's argv prefix (interpreter and
+    #: module), the reader's own flags excluded, and the hours each of the two
+    #: reads asks for. The ledger file is never opened.
+    ledger_reader_command: tuple[str, ...] = ()
+    ledger_projection_window_hours: int = 1
+    ledger_consent_window_hours: int = 720
+    ledger_reader_timeout_seconds: int = 0
 
     @classmethod
     def load(cls, path: Path) -> ModelAlarmConfig:
@@ -2861,15 +2830,21 @@ class ModelAlarmConfig:
             raise ValueError(
                 f"{path}: dev_tag_heartbeat_max_age_minutes must be a positive integer"
             )
-        ledger_command = payload["ledger_append_command"]
-        if (
-            not isinstance(ledger_command, list)
-            or not ledger_command
-            or not all(isinstance(part, str) and part for part in ledger_command)
+        for key in ("ledger_append_command", "ledger_reader_command"):
+            command = payload[key]
+            if not (
+                isinstance(command, list)
+                and command
+                and all(isinstance(part, str) and part for part in command)
+            ):
+                raise ValueError(f"{path}: {key} must be a non-empty string list")
+        for key in (
+            "ledger_projection_window_hours",
+            "ledger_consent_window_hours",
+            "ledger_reader_timeout_seconds",
         ):
-            raise ValueError(
-                f"{path}: ledger_append_command must be a non-empty string list"
-            )
+            if type(payload[key]) is not int or not 0 < payload[key] <= 720 * 3600:
+                raise ValueError(f"{path}: {key} must be a positive integer")
         ledger_ticket = str(payload["ledger_row_ticket"])
         if not re.fullmatch(r"OMN-\d+", ledger_ticket):
             raise ValueError(f"{path}: ledger_row_ticket must be an OMN id")
@@ -2899,8 +2874,16 @@ class ModelAlarmConfig:
             ledger_row_ticket=ledger_ticket,
             ledger_dedupe_window=timedelta(minutes=ledger_window_minutes),
             ledger_append_command=tuple(
-                expand_env(part, source=path) for part in ledger_command
+                expand_env(part, source=path)
+                for part in payload["ledger_append_command"]
             ),
+            ledger_reader_command=tuple(
+                expand_env(part, source=path)
+                for part in payload["ledger_reader_command"]
+            ),
+            ledger_projection_window_hours=payload["ledger_projection_window_hours"],
+            ledger_consent_window_hours=payload["ledger_consent_window_hours"],
+            ledger_reader_timeout_seconds=payload["ledger_reader_timeout_seconds"],
             runtime_path_validator=expand_env(
                 str(payload.get("runtime_path_validator", "")), source=path
             ),
@@ -2932,7 +2915,7 @@ def run_once(
     config: ModelAlarmConfig,
     *,
     state_dir: Path,
-    ledger_path: Path,
+    ledger_reader: LedgerRowsReader,
     sha: str,
     receipt_reader: ReceiptReader,
     runner: CommandRunner,
@@ -2975,7 +2958,8 @@ def run_once(
         effects_reader, state=state, now=started
     )
     work_ledger_report = evaluate_work_ledger_projection_stale(
-        ledger_path=ledger_path,
+        rows_reader=ledger_reader,
+        window_hours=config.ledger_projection_window_hours,
         container=config.work_ledger_db_container,
         database=config.work_ledger_database,
         max_lag=config.work_ledger_max_lag,
@@ -3034,16 +3018,30 @@ def run_once(
         now=started,
     )
 
-    consent = resolve_posting_consent(ledger_path, channel=posting_channel)
-    if consent is None:
-        posting = (
-            f"disabled: no OPERATOR-CONSENT row in {ledger_path} authorizes "
-            f"{posting_channel}"
-        )
-    elif not raised and not recoveries:
-        posting = (
-            f"authorized by {consent.citation} (approved_by={consent.approved_by}); "
-            "nothing new to deliver this run"
+    # The consent read is a bus read that takes seconds, so a run with nothing
+    # to deliver does not make it (OMN-26593).
+    consent: ModelPostingConsent | None = None
+    unread = ""
+    if raised or recoveries:
+        try:
+            consent = resolve_posting_consent(
+                ledger_reader(
+                    reader=LEDGER_READER_CONSENT,
+                    kinds=CONSENT_ROW_KINDS,
+                    window_hours=config.ledger_consent_window_hours,
+                    term="lab alarm",
+                ),
+                channel=posting_channel,
+            )
+        except LedgerReadError as exc:
+            unread = f"the work-ledger reader did not answer: {exc}"
+    if not raised and not recoveries:
+        posting = "nothing new to deliver this run; consent not read"
+    elif consent is None:
+        posting = "disabled: " + (
+            unread
+            or f"no OPERATOR-CONSENT row in the last {config.ledger_consent_window_hours} "
+            f"hours of the work ledger authorizes {posting_channel}"
         )
     else:
         # Delivery is per NEWLY RAISED alarm, so the edge-triggering above is
@@ -3149,7 +3147,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--state-dir", required=True, type=Path)
-    parser.add_argument("--ledger", required=True, type=Path)
     parser.add_argument(
         "--sha",
         default="",
@@ -3273,7 +3270,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     run = run_once(
         config,
         state_dir=args.state_dir,
-        ledger_path=args.ledger,
+        ledger_reader=make_ledger_rows_reader(
+            config.ledger_reader_command,
+            timeout_seconds=config.ledger_reader_timeout_seconds,
+        ),
         sha=sha,
         receipt_reader=read_latest_receipt,
         runner=make_runner(config.docker_command),
@@ -3291,7 +3291,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         listener_probe=probe_tcp_listener,
         posting_channel=args.posting_channel,
         env_file=args.env_file,
-        ledger_appender=make_ledger_appender(config.ledger_append_command, args.ledger),
+        ledger_appender=make_ledger_appender(config.ledger_append_command),
         subject_resolver=make_clone_subject_resolver(
             clone=_REPO_ROOT,
             runtime_path_validator=config.runtime_path_validator,
