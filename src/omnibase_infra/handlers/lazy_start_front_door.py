@@ -22,6 +22,7 @@ second waits on the first. A contract is committed as serving only when the wake
 that needed it completes; a wake that fails rolls back every contract it started
 that no live wake still holds and that no completed wake committed, and keeps what
 another workflow already serves. A topic a failed wake created is never deleted.
+A request on a dormant contract's HTTP mount wakes it through ``wake`` (OMN-26316).
 A bus message addressed to a dormant consumer wakes it through ``wake_for_topic``
 before the message is published. A wake that fails there fails that contract only
 (OMN-21753): the failure is logged with the contract's name and kept in
@@ -67,6 +68,11 @@ class LazyStartFrontDoor:
     ) -> None:
         self._transaction = transaction
         self._dormant = frozenset(dormant_contracts)
+        self._topicless = frozenset(
+            name
+            for name, contract in dormant_contracts.items()
+            if contract.event_bus is None or not contract.event_bus.subscribe_topics
+        )
         self._graph = LazyStartClosureGraph(
             {**(wired_contracts or {}), **dormant_contracts}
         )
@@ -130,6 +136,42 @@ class LazyStartFrontDoor:
                 detail=sanitize_error_message(exc),
             )
         return await self._deliver(request)
+
+    @property
+    def dormant_topics(self) -> frozenset[str]:
+        """Every topic a dormant contract subscribes to (OMN-26316)."""
+        return self._graph.topics_consumed_by(self._dormant)
+
+    async def wake(self, name: str) -> None:
+        """Wake ``name``'s closure for a request that does not ride the ingress (OMN-26316).
+
+        A request on a contract's own HTTP mount reaches the runtime's listener,
+        never the ingress topic and never the publish gate. Returns at once when
+        ``name`` is not dormant or already serves. Waits for the wake in flight
+        when there is one. A contract that subscribes to no topic has no
+        dispatcher, subscription or topic to start (the kernel's wiring skips it
+        the same way): it serves through its mount alone, so it is committed as
+        serving and its closure is not walked.
+
+        Raises:
+            TimeoutError: The wake did not finish inside the policy's budget; it
+                goes on, and the next call waits on it again.
+            Exception: The wake failed; it has rolled the contract back, and the
+                next call starts it again.
+        """
+        if name not in self._dormant or name in self._serving:
+            return
+        if name in self._topicless:
+            self._serving.add(name)
+            logger.info(
+                "Lazy start: contract '%s' has no subscription to attach; it serves "
+                "through its HTTP mount on its first request (OMN-26316)",
+                name,
+            )
+            return
+        await asyncio.wait_for(
+            asyncio.shield(self._wake_of(name)), timeout=self._policy.budget_seconds
+        )
 
     async def wake_for_topic(self, topic: str) -> None:
         """Wake every dormant consumer of ``topic``, before a message is published to it.
