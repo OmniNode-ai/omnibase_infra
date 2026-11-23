@@ -176,7 +176,9 @@ class LazyStartFrontDoor:
     async def wake_for_topic(self, topic: str) -> None:
         """Wake every dormant consumer of ``topic``, before a message is published to it.
 
-        Returns at once when no dormant consumer is left. Waits on the wake in
+        Returns at once when no dormant consumer is left. Wakes every dormant
+        consumer at once and waits on them together (OMN-26316), so the hold is
+        at most one budget. Waits on the wake in
         flight when there is one (the message is held, never published into a
         topic whose consumer is still starting). A wake that fails, or does not
         finish inside the policy's budget, fails that contract only (OMN-21753):
@@ -184,23 +186,38 @@ class LazyStartFrontDoor:
         this returns so the publish goes on. The start itself has already rolled
         the contract back; a later message wakes it again.
         """
-        for name in self._graph.consumers_of(topic):
-            if name in self._dormant and name not in self._serving:
-                try:
-                    await asyncio.wait_for(
-                        asyncio.shield(self._wake_of(name)),
-                        timeout=self._policy.budget_seconds,
-                    )
-                except Exception as exc:
-                    detail = sanitize_error_message(exc)
-                    self.wake_failures[name] = detail
-                    logger.exception(
-                        "Lazy start: contract '%s' did not wake for a message to "
-                        "'%s'; the publish goes on and only this contract is "
-                        "affected (OMN-21753)",
-                        name,
-                        topic,
-                    )
+        pending = [
+            name
+            for name in self._graph.consumers_of(topic)
+            if name in self._dormant and name not in self._serving
+        ]
+        if not pending:
+            return
+        await asyncio.gather(*(self._wake_for_message(name, topic) for name in pending))
+
+    async def _wake_for_message(self, name: str, topic: str) -> None:
+        """Wait, inside the policy's budget, for one dormant consumer's wake.
+
+        Every consumer of the topic waits at once, so the message is held for the
+        slowest wake or one budget, never the sum of them (OMN-26316): the runtime's
+        first heartbeat sat behind 7 consumers woken one at a time, 4 of which ran
+        out the budget, and ``/ready`` kept its ``heartbeat`` row false for 3m22s.
+        """
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(self._wake_of(name)),
+                timeout=self._policy.budget_seconds,
+            )
+        except Exception as exc:
+            detail = sanitize_error_message(exc)
+            self.wake_failures[name] = detail
+            logger.exception(
+                "Lazy start: contract '%s' did not wake for a message to "
+                "'%s'; the publish goes on and only this contract is "
+                "affected (OMN-21753)",
+                name,
+                topic,
+            )
 
     def _wake_of(self, name: str) -> asyncio.Task[None]:
         """The one in-flight wake of ``name``'s closure; a failed wake is replaced."""
