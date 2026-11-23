@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26444"
+title: "The shared Postgres savings view counts unpriced runs by the shared metering refresh's rule"
+summary: "omnimarket#6629 adds savings migration 102, which creates savings_priced_models, grants the tenant projection writer read and write on it, and counts unpriced runs by the shared metering refresh's rule. The runtime resolver proves projection bindings against the topology's declared grants, so this declares the writer on savings_priced_models in every topology instance that declares the writer, regenerates the rendered database topologies, and vendors 102 byte-identical with its tenant ledger row and forward-only class, the way #5763 vendored 101."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26444-infra-declare-and-vendor-102"
+    statement: |-
+      The topology declares tenant_projection_writer SELECT, INSERT and UPDATE on public.savings_priced_models, and migration 102, which delivers that grant, is deployed byte-identical to its omnimarket source with one checksum-bound tenant ledger row and the forward-only class.
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: on a real Postgres seeded with the OMN-26413 cases, the shared savings view's unpriced_call_count equals the shared metering summary's runs_unknown_spend for the same tenant -- falsifier: a real-Postgres pytest written before the fix that fails on dev unless the two agree."
+evidence_requirements:
+  - kind: "tests"
+    description: "Infra deployment half only; the writer's declared grant on savings_priced_models in every instance, and the vendored 102 bytes, tenant ledger checksum and forward-only class."
+    command: "uv run pytest tests/unit/topology/test_topology_savings_priced_models_omn26444.py tests/unit/migrations/test_omn26444_savings_unpriced_matches_refresh_vendored.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn26444-ac1-infra-declare-and-vendor-102"
+    description: "Infra half only. Pins the tenant projection writer's declared grant on savings_priced_models in every instance that declares it, and 102's source bytes (omnimarket#6629 at cc8329235c228c1e7c4624cc71e1791ba2b7414a), its exact tenant ledger checksum and forward-only class; at the merge base the grant and the file are absent, so it fails there. It does not prove the view's counts, which omnimarket#6629's real-Postgres tests prove."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/topology/test_topology_savings_priced_models_omn26444.py tests/unit/migrations/test_omn26444_savings_unpriced_matches_refresh_vendored.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"

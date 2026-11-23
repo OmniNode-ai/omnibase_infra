@@ -312,6 +312,7 @@ databases:
               - router_performance_metrics
               - run_trace
               - savings_estimates
+              - savings_priced_models
               - skill_execution_snapshots
               - skill_executions
               - tenant_inference_credentials
