@@ -273,3 +273,139 @@ def test_a_peer_health_answer_is_read_for_its_key_check(
 def test_an_unreachable_or_non_http_peer_reads_as_unread() -> None:
     assert runtime_mod._read_key_check("http://127.0.0.1:9/health", 1.0) == ""
     assert runtime_mod._read_key_check("file:///etc/hostname", 1.0) == ""
+
+
+# --- OMN-26316: the overdue dev merge build caller -----------------------------------------
+
+
+def _git(repo: Path, *args: str, when: datetime | None = None) -> str:
+    import os
+    import subprocess
+
+    env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_SYSTEM": "/dev/null",
+    }
+    if when is not None:
+        env["GIT_COMMITTER_DATE"] = env["GIT_AUTHOR_DATE"] = when.isoformat()
+    done = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    )
+    return done.stdout.strip()
+
+
+@pytest.fixture
+def dev_clone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A checkout with a tracked upstream, standing in for the agent's deploy clone."""
+    origin = tmp_path / "origin.git"
+    origin.mkdir()
+    _git(origin, "init", "--bare", "-b", "dev")
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    _git(clone, "init", "-b", "dev")
+    _git(clone, "remote", "add", "origin", str(origin))
+    monkeypatch.setattr(agent_mod, "REPO_DIR", str(clone), raising=False)
+    monkeypatch.setattr(runtime_mod, "_overdue_last", [])
+    return clone
+
+
+def _commit(clone: Path, path: str, when: datetime) -> str:
+    target = clone / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(f"{when.isoformat()}\n")
+    _git(clone, "add", path)
+    _git(clone, "commit", "-m", path, when=when)
+    return _git(clone, "rev-parse", "HEAD")
+
+
+def _track(clone: Path) -> None:
+    _git(clone, "push", "-u", "origin", "dev")
+
+
+def _by_sha(result: Any) -> dict[str, Any]:
+    return {d.merge_sha: d for d in result}
+
+
+def test_overdue_dev_merge_is_requested_once_its_window_has_passed_with_no_dev_build(
+    dev_clone: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    now = datetime.now(UTC)
+    _commit(dev_clone, "base.txt", now - timedelta(days=3))
+    docs = _commit(dev_clone, "docs/note.md", now - timedelta(hours=3))
+    old = _commit(
+        dev_clone, "src/omnibase_infra/handlers/old.py", now - timedelta(hours=2)
+    )
+    fresh = _commit(
+        dev_clone, "src/omnibase_infra/handlers/new.py", now - timedelta(minutes=10)
+    )
+    _track(dev_clone)
+    with caplog.at_level(logging.INFO):
+        result = runtime_mod.check_overdue_dev_merges(force=True)
+    assert result is not None
+    seen = _by_sha(result)
+    assert (seen[docs].outcome, seen[docs].reason) == ("SATISFIED", "non_runtime")
+    assert (seen[old].outcome, seen[old].reason) == ("REQUEST", "overdue_no_build")
+    assert seen[old].request_id
+    assert (seen[fresh].outcome, seen[fresh].reason) == ("WAIT", "within_window")
+    assert any(
+        r.levelno == logging.WARNING
+        and "overdue dev merge build sha=" + old in r.message
+        and seen[old].request_id in r.message
+        for r in caplog.records
+    )
+    assert any(
+        "overdue dev merge builds merges=3 satisfied=1 waiting=1 requests=1"
+        in r.message
+        for r in caplog.records
+    )
+
+
+def test_a_dev_job_accepted_after_the_merge_satisfies_it_and_nothing_is_requested(
+    dev_clone: Path, agent_env: Path
+) -> None:
+    now = datetime.now(UTC)
+    merged = now - timedelta(hours=2)
+    _commit(dev_clone, "base.txt", now - timedelta(days=3))
+    sha = _commit(dev_clone, "src/omnibase_infra/handlers/old.py", merged)
+    _track(dev_clone)
+    job = {
+        "correlation_id": str(uuid4()),
+        "command": {"runtime_lane": "dev", "git_ref": "origin/dev", "scope": "runtime"},
+        "accepted_at": (merged + timedelta(minutes=5)).isoformat(),
+        "status": "success",
+    }
+    (agent_env / f"{job['correlation_id']}.json").write_text(json.dumps(job))
+    (agent_env / "agent-adoption.json").write_text('{"alarmed": false}')
+    result = runtime_mod.check_overdue_dev_merges(force=True)
+    assert result is not None
+    assert (_by_sha(result)[sha].outcome, _by_sha(result)[sha].job_id) == (
+        "SATISFIED",
+        job["correlation_id"],
+    )
+
+
+def test_overdue_check_is_throttled_and_an_unread_checkout_is_skipped(
+    dev_clone: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.ERROR):
+        assert runtime_mod.check_overdue_dev_merges(force=True) is None
+    assert any("overdue dev merge builds skipped" in r.message for r in caplog.records)
+    _commit(dev_clone, "base.txt", datetime.now(UTC) - timedelta(days=3))
+    _commit(dev_clone, "docs/note.md", datetime.now(UTC) - timedelta(hours=3))
+    _track(dev_clone)
+    assert runtime_mod.check_overdue_dev_merges(force=True) is not None
+    assert runtime_mod.check_overdue_dev_merges() is None
