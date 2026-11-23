@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from pathlib import Path
@@ -35,7 +34,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT = Path(
     "src/omnibase_infra/nodes/node_wiring_report_ratchet_compute/contract.yaml"
 )
-FIXTURE = Path(__file__).parent / "fixtures" / "wiring_report_2026_11_21.json"
 HANDLER_MODULE = "omnibase_infra.handlers.handler_wiring_report_ratchet"
 
 
@@ -222,9 +220,10 @@ def test_wiring_ratchet_live_catalog() -> None:
         print(finding.message)
 
 
-def test_wiring_report_2026_11_21() -> None:
+@pytest.mark.live_contact("tests/ci/fixtures/wiring_report_2026_11_21.json")
+def test_wiring_report_2026_11_21(recorded_response: dict[str, object]) -> None:
     """The recorded lab report holds at its recorded counts and fails when one rises."""
-    recorded = json.loads(FIXTURE.read_text(encoding="utf-8"))["report"]
+    recorded = recorded_response["report"]
     baseline_values = _ratchet_values((REPO_ROOT / CONTRACT).read_text("utf-8"))[
         "lab_report_2026_11_21"
     ]

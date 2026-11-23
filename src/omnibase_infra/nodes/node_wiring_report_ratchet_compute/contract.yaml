@@ -63,7 +63,7 @@ metadata:
       failed: 0
       duplicates: 12
       quarantined: 0
-      unproduced_subscriptions: 73
+      unproduced_subscriptions: 74
     # Recorded lab runtime wiring report of 2026-11-21, from the omnibase_infra#6133
     # body (runtime counts, wired=436 skipped=332). Reference for the regression test only.
     lab_report_2026_11_21:
