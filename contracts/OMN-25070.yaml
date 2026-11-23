@@ -9,26 +9,26 @@ requirements:
   - id: req-omn25070-infra-no-launcher-callers
     statement: No CI step, pre-commit hook, compose command or CI probe in omnibase_infra runs the onex launcher, so CI and the dev lane keep working once only omninode-onex declares it.
     acceptance:
-      - id: AC3
-        statement: "AC3 (this repository's launcher-move part): the CI, hook, compose and probe callers run python -m omnibase_core.cli.cli_commands -- falsifier: the bound tests fail at the merge base, where the workflows, compose files and probes still name onex"
+      - id: AC3a
+        statement: "AC3a (this repository's launcher-move part): the CI, hook, compose and probe callers run python -m omnibase_core.cli.cli_commands -- falsifier: the bound tests fail at the merge base, where the workflows, compose files and probes still name onex"
   - id: req-omn25070-infra-build-loop-script
     statement: scripts/fire-build-loop.sh runs the core CLI as a module, not the onex launcher.
     acceptance:
-      - id: AC3
+      - id: AC3b
         statement: >-
-          AC3 (the launcher move), the part this script carries: omnibase-core stops declaring onex, so scripts/fire-build-loop.sh runs uv run python -m omnibase_core.cli.cli_commands run build_loop_workflow.yaml with the same arguments and runs no onex launcher -- falsifier: uv run pytest tests/ci/test_fire_build_loop_runs_core_module_omn25070.py, which fails on dev, where the script runs uv run onex run.
+          AC3b (the launcher move), the part this script carries: omnibase-core stops declaring onex, so scripts/fire-build-loop.sh runs uv run python -m omnibase_core.cli.cli_commands run build_loop_workflow.yaml with the same arguments and runs no onex launcher -- falsifier: uv run pytest tests/ci/test_fire_build_loop_runs_core_module_omn25070.py, which fails on dev, where the script runs uv run onex run.
   - id: req-omn25070-infra-runtime-callers
     statement: The evidence autoclose sweep runs omnibase-core's CLI module with its own interpreter, never an onex launcher file or an onex from PATH.
     acceptance:
-      - id: AC3
+      - id: AC3c
         statement: >-
-          AC3 (the launcher move), the part the runtime code carries: done_write_receipt_guard.dod_verify_argv and offer_companion_sources._gateway_args return sys.executable -m omnibase_core.cli.cli_commands followed by the same skill dod_verify and scm arguments, so a runtime or dispatch venv that carries omnibase-core without omninode-onex still verifies tickets and reads pull requests -- falsifier: uv run pytest tests/unit/test_runtime_callers_run_core_module_omn25070.py, which fails on dev, where the verifier runs the onex beside the interpreter and the gateway falls back to an onex on PATH.
+          AC3c (the launcher move), the part the runtime code carries: done_write_receipt_guard.dod_verify_argv and offer_companion_sources._gateway_args return sys.executable -m omnibase_core.cli.cli_commands followed by the same skill dod_verify and scm arguments, so a runtime or dispatch venv that carries omnibase-core without omninode-onex still verifies tickets and reads pull requests -- falsifier: uv run pytest tests/unit/test_runtime_callers_run_core_module_omn25070.py, which fails on dev, where the verifier runs the onex beside the interpreter and the gateway falls back to an onex on PATH.
   - id: req-omn25070-infra-developer-wrapper
     statement: The developer wrapper scripts/onex runs omnibase-core's CLI module with the dispatch venv's own interpreter, never a bin/onex launcher.
     acceptance:
-      - id: AC3
+      - id: AC3d
         statement: >-
-          AC3 (the launcher move), the part the developer path carries: once omnibase-core stops declaring onex, the dispatch venv has no bin/onex, so scripts/onex execs the dispatch venv's python -m omnibase_core.cli.cli_commands with the same arguments after checking that omnibase-core's CLI is installed there; a dispatch venv without it is reconciled once and then refused with a message naming the module; a bin/onex left in the dispatch venv is never run; the PATH-shadow warning and the one reconcile retry are unchanged -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_core_module_omn25070.py, which fails on dev, where the wrapper execs the dispatch venv's bin/onex.
+          AC3d (the launcher move), the part the developer path carries: once omnibase-core stops declaring onex, the dispatch venv has no bin/onex, so scripts/onex execs the dispatch venv's python -m omnibase_core.cli.cli_commands with the same arguments after checking that omnibase-core's CLI is installed there; a dispatch venv without it is reconciled once and then refused with a message naming the module; a bin/onex left in the dispatch venv is never run; the PATH-shadow warning and the one reconcile retry are unchanged -- falsifier: uv run pytest tests/scripts/test_onex_wrapper_core_module_omn25070.py, which fails on dev, where the wrapper execs the dispatch venv's bin/onex.
 evidence_requirements:
   - kind: tests
     description: The tests that pin each caller's command text, and the compose render probe.
@@ -41,7 +41,7 @@ dod_evidence:
   - id: dod-omn25070-ac3-infra-module-callers
     description: The tests that pin the live-contact, chain-canary, c28 and R1 probe commands and the dev-lane ledger-read command now pin the module form; they fail at the merge base, where those callers run onex.
     source: manual
-    binds_ac: [AC3]
+    binds_ac: [AC3a]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_ci_live_contact.py tests/ci/test_chain_canary_workflow.py tests/ci/test_c28_workflow_ac2_omn19812.py tests/ci/test_r1_front_door_probe_omn19445.py "tests/ci/test_dev_lane_ledger_source_binding.py::test_the_read_command_is_one_the_ledger_cli_accepts" -q --no-cov
@@ -56,7 +56,7 @@ dod_evidence:
   - id: dod-omn25070-infra-build-loop-script
     description: scripts/fire-build-loop.sh runs the build loop through the core module and runs no onex launcher. Fails on dev, where it runs uv run onex run build_loop_workflow.yaml.
     source: manual
-    binds_ac: [AC3]
+    binds_ac: [AC3b]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_fire_build_loop_runs_core_module_omn25070.py -q --no-cov
@@ -64,7 +64,7 @@ dod_evidence:
   - id: dod-omn25070-infra-runtime-callers
     description: The sweep's verifier argv and gateway argv run the core module with the sweep's interpreter, and the module prefix reaches core's skill command in this venv. Fails on dev, where the verifier argv starts with the onex beside the interpreter and the gateway takes an onex from PATH when none is beside it.
     source: manual
-    binds_ac: [AC3]
+    binds_ac: [AC3c]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/test_runtime_callers_run_core_module_omn25070.py -q --no-cov
@@ -72,7 +72,7 @@ dod_evidence:
   - id: dod-omn25070-infra-developer-wrapper
     description: The wrapper execs the dispatch venv's python -m omnibase_core.cli.cli_commands, never a leftover bin/onex, and refuses naming the module when omnibase-core's CLI is missing; every other wrapper test passes through a fake interpreter that refuses any other invocation. Fails on dev, where the wrapper execs bin/onex.
     source: manual
-    binds_ac: [AC3]
+    binds_ac: [AC3d]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/scripts/test_onex_wrapper_core_module_omn25070.py tests/scripts/test_onex_wrapper.py -q --no-cov
