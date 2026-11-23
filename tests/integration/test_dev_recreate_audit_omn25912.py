@@ -31,7 +31,7 @@ from omnibase_infra.models.model_dev_recreate_policy import ModelDevRecreatePoli
 from omnibase_infra.models.model_dev_roll_manifest import ModelDevRollManifest
 from omnibase_infra.models.model_dev_runtime_started import ModelDevRuntimeStarted
 from omnibase_infra.nodes.node_dev_roll_events_effect.dev_recreate_audit import (
-    HandlerDevRecreateAudit,
+    DevRecreateAuditReader,
 )
 from omnibase_infra.nodes.node_dev_roll_events_effect.dev_roll_events import (
     audit_settings,
@@ -79,7 +79,7 @@ def test_audit_from_rendered_policy_and_contract_flags_the_recorded_window() -> 
         ),
     )
 
-    result = HandlerDevRecreateAudit().handle(request)
+    result = DevRecreateAuditReader().handle(request)
 
     counts = Counter(v.kind for v in result.violations)
     assert result.recreates_read == 16

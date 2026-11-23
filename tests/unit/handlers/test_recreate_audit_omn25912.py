@@ -42,7 +42,7 @@ from omnibase_infra.models.model_dev_recreate_violation import (
 from omnibase_infra.models.model_dev_roll_manifest import ModelDevRollManifest
 from omnibase_infra.models.model_dev_runtime_started import ModelDevRuntimeStarted
 from omnibase_infra.nodes.node_dev_roll_events_effect.dev_recreate_audit import (
-    HandlerDevRecreateAudit,
+    DevRecreateAuditReader,
     audit_and_publish,
 )
 from omnibase_infra.nodes.node_dev_roll_events_effect.dev_roll_events import (
@@ -147,7 +147,7 @@ def _hand_count(fixture: dict[str, Any]) -> dict[str, Any]:
 def test_recreate_audit_24h_window_emits_one_violation_per_case() -> None:
     fixture = _fixture()
     expected = fixture["expected"]
-    result = HandlerDevRecreateAudit().handle(_window_request())
+    result = DevRecreateAuditReader().handle(_window_request())
     counts = _by_kind(result.violations)
 
     assert result.recreates_read == expected["recreates"] == 16
@@ -162,7 +162,7 @@ def test_recreate_audit_24h_window_emits_one_violation_per_case() -> None:
 def test_recreate_audit_count_equals_the_hand_count_from_the_job_records() -> None:
     fixture = _fixture()
     hand = _hand_count(fixture)
-    result = HandlerDevRecreateAudit().handle(_window_request())
+    result = DevRecreateAuditReader().handle(_window_request())
 
     two = sorted(
         v.window_start.strftime("%Y-%m-%dT%H")
@@ -188,7 +188,7 @@ def test_recreate_audit_count_equals_the_hand_count_from_the_job_records() -> No
 
 
 def test_recreate_audit_each_violation_carries_the_rows_that_show_it() -> None:
-    result = HandlerDevRecreateAudit().handle(_window_request())
+    result = DevRecreateAuditReader().handle(_window_request())
     two = [v for v in result.violations if v.kind is Kind.TWO_STARTS_IN_WINDOW]
     twelve = next(v for v in two if v.window_start == _at("2026-11-23T12:00:00Z"))
     assert [(r.requested_by, r.at) for r in twelve.rows] == [
@@ -211,7 +211,7 @@ def test_recreate_audit_each_violation_carries_the_rows_that_show_it() -> None:
 
 def test_recreate_audit_a_hold_announcement_does_not_announce_the_start() -> None:
     """92ab0ad6 named 05:00 as the next recreate 141 s before the 04:46:07Z rollback."""
-    result = HandlerDevRecreateAudit().handle(_window_request())
+    result = DevRecreateAuditReader().handle(_window_request())
     rollgate = next(
         v
         for v in result.violations
@@ -225,7 +225,7 @@ def test_recreate_audit_a_hold_announcement_does_not_announce_the_start() -> Non
 
 
 def test_recreate_audit_a_start_with_no_job_record_carries_the_restart_count() -> None:
-    result = HandlerDevRecreateAudit().handle(_window_request())
+    result = DevRecreateAuditReader().handle(_window_request())
     found = sorted(
         (v.at, v.restart_count)
         for v in result.violations
@@ -240,7 +240,7 @@ def test_recreate_audit_a_start_with_no_job_record_carries_the_restart_count() -
 
 
 def test_recreate_audit_without_container_readings_no_restart_is_seen() -> None:
-    result = HandlerDevRecreateAudit().handle(_window_request(with_observations=False))
+    result = DevRecreateAuditReader().handle(_window_request(with_observations=False))
     assert Kind.START_WITHOUT_JOB_RECORD not in _by_kind(result.violations)
     assert len(result.violations) == 11
 
@@ -292,7 +292,7 @@ def test_recreate_audit_a_clean_window_emits_nothing() -> None:
                 "exit_code": None,
             }
         )
-    result = HandlerDevRecreateAudit().handle(
+    result = DevRecreateAuditReader().handle(
         _request(
             starts=starts,
             manifests=manifests,
@@ -305,8 +305,8 @@ def test_recreate_audit_a_clean_window_emits_nothing() -> None:
 
 
 def test_recreate_audit_reading_the_window_twice_names_each_case_once() -> None:
-    first = HandlerDevRecreateAudit().handle(_window_request())
-    second = HandlerDevRecreateAudit().handle(_window_request())
+    first = DevRecreateAuditReader().handle(_window_request())
+    second = DevRecreateAuditReader().handle(_window_request())
     assert [v.event_id for v in first.violations] == [
         v.event_id for v in second.violations
     ]
@@ -333,7 +333,7 @@ def test_recreate_audit_publishes_one_event_per_violation_on_the_declared_topic(
 ):
     bus = _Bus()
     result = audit_and_publish(
-        HandlerDevRecreateAudit(),
+        DevRecreateAuditReader(),
         _window_request(),
         DevRollEventsPublisher(bus, _topics()),
     )
@@ -362,7 +362,7 @@ def test_recreate_audit_a_refusing_bus_is_logged_and_never_raises(
     bus = _Bus(accepts=False)
     with caplog.at_level(logging.ERROR):
         result = audit_and_publish(
-            HandlerDevRecreateAudit(),
+            DevRecreateAuditReader(),
             _window_request(),
             DevRollEventsPublisher(bus, _topics()),
         )

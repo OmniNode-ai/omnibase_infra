@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_infra.enums.enum_dev_recreate_violation_kind import (
     EnumDevRecreateViolationKind,
 )
+from omnibase_infra.models.model_dev_runtime_started import JobId
 
 
 class ModelDevRecreateViolationRow(BaseModel):
@@ -18,7 +19,7 @@ class ModelDevRecreateViolationRow(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    job_id: str
+    job_id: JobId
     at: datetime
     requested_by: str
     announced: bool

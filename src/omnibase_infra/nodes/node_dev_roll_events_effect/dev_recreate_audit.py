@@ -57,7 +57,7 @@ _KEY_NAMESPACE = "onex:dev-recreate-violation"
 
 
 @dataclass(frozen=True)
-class _Recreate:
+class RecreateRecord:
     job_id: str
     at: datetime
     requested_by: str
@@ -72,7 +72,7 @@ def _stamp(at: datetime) -> str:
     return at.isoformat()
 
 
-class HandlerDevRecreateAudit:
+class DevRecreateAuditReader:
     """Read one window of dev recreate events and name each rule a start broke (pure)."""
 
     @property
@@ -100,7 +100,7 @@ class HandlerDevRecreateAudit:
             recreates_read=len(recreates), violations=tuple(violations)
         )
 
-    def _recreates(self, request: ModelDevRecreateAuditRequest) -> list[_Recreate]:
+    def _recreates(self, request: ModelDevRecreateAuditRequest) -> list[RecreateRecord]:
         """Each start with its recreate time, requester and whether an announcement preceded it.
 
         The recreate time is the manifest's ``accepted_at`` (what the window gate and the job
@@ -122,13 +122,13 @@ class HandlerDevRecreateAudit:
             seen.add(start.job_id)
             at = manifest.accepted_at if manifest and first else start.started_at
             timed.append((at, start.job_id, manifest.issuer if manifest else ""))
-        recreates: list[_Recreate] = []
+        recreates: list[RecreateRecord] = []
         for at, job_id, issuer in sorted(timed):
             match = self._latest_before(unused, at, lookback)
             if match is not None:
                 unused.remove(match)
             recreates.append(
-                _Recreate(
+                RecreateRecord(
                     job_id=job_id,
                     at=at,
                     requested_by=match.requested_by if match else issuer,
@@ -147,7 +147,7 @@ class HandlerDevRecreateAudit:
         return candidates[-1] if candidates else None
 
     @staticmethod
-    def _row(recreate: _Recreate) -> ModelDevRecreateViolationRow:
+    def _row(recreate: RecreateRecord) -> ModelDevRecreateViolationRow:
         return ModelDevRecreateViolationRow(
             job_id=recreate.job_id,
             at=recreate.at,
@@ -156,9 +156,9 @@ class HandlerDevRecreateAudit:
         )
 
     def _two_in_window(
-        self, policy: ModelDevRecreatePolicy, recreates: list[_Recreate]
+        self, policy: ModelDevRecreatePolicy, recreates: list[RecreateRecord]
     ) -> list[ModelDevRecreateViolation]:
-        by_window: dict[datetime, list[_Recreate]] = defaultdict(list)
+        by_window: dict[datetime, list[RecreateRecord]] = defaultdict(list)
         for recreate in recreates:
             by_window[window_start(policy, recreate.at)].append(recreate)
         return [
@@ -178,7 +178,7 @@ class HandlerDevRecreateAudit:
         ]
 
     def _off_window(
-        self, policy: ModelDevRecreatePolicy, recreates: list[_Recreate]
+        self, policy: ModelDevRecreatePolicy, recreates: list[RecreateRecord]
     ) -> list[ModelDevRecreateViolation]:
         grace = timedelta(seconds=policy.start_grace_seconds)
         found: list[ModelDevRecreateViolation] = []
@@ -208,7 +208,7 @@ class HandlerDevRecreateAudit:
         return found
 
     def _unannounced(
-        self, policy: ModelDevRecreatePolicy, recreates: list[_Recreate]
+        self, policy: ModelDevRecreatePolicy, recreates: list[RecreateRecord]
     ) -> list[ModelDevRecreateViolation]:
         return [
             ModelDevRecreateViolation(
@@ -264,7 +264,7 @@ class HandlerDevRecreateAudit:
 
 
 def audit_and_publish(
-    handler: HandlerDevRecreateAudit,
+    handler: DevRecreateAuditReader,
     request: ModelDevRecreateAuditRequest,
     events: ProtocolDevRollEvents,
 ) -> ModelDevRecreateAuditResult:
