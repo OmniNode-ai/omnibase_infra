@@ -174,8 +174,8 @@ async def test_the_ingress_builds_its_transaction_with_the_recorded_topology(
         (_contract(tmp_path, DORMANT),),
         None,
         (),
-        topology,
     )
+    StoreLazyStartDormant.record_topology(topology)
     built: dict[str, Any] = {}
 
     class _Capturing:

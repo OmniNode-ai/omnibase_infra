@@ -60,3 +60,11 @@ dod_evidence:
         check_value: |-
           ssh omni-201 '! docker logs --since 15m omninode-runtime 2>&1 | grep -q "Lazy start: contract .projection_metering_summary. did not start"'
         cwd: .
+  - id: dod-omn26594-integration-proof
+    description: 'The real local database topology profile loads at boot and reaches wire_from_manifest through a real lazy-start transaction.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_lazy_start_db_io_topology_omn26594.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .

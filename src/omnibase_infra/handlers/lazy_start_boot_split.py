@@ -63,13 +63,17 @@ class StoreLazyStartDormant:
         dormant: tuple[ModelDiscoveredContract, ...],
         provisioner: object | None = None,
         wired: tuple[ModelDiscoveredContract, ...] = (),
-        topology: ModelDeploymentTopology | None = None,
     ) -> None:
-        cls._topology = topology
+        cls._topology = None
         cls._policy = policy
         cls._contracts = {contract.name: contract for contract in dormant}
         cls._wired = {contract.name: contract for contract in wired}
         cls._provisioner = provisioner
+
+    @classmethod
+    def record_topology(cls, topology: ModelDeploymentTopology | None) -> None:
+        """Keep the boot's database topology beside the dormant contracts (OMN-26594)."""
+        cls._topology = topology
 
     @classmethod
     def provisioner(cls) -> object | None:
@@ -156,7 +160,9 @@ def boot_manifest(
         dormant,
         provisioner,
         boot.contracts,
-        topology if topology is not None else _boot_database_topology(environ),
+    )
+    StoreLazyStartDormant.record_topology(
+        topology if topology is not None else _boot_database_topology(environ)
     )
     missing = sorted(policy.boot_set - {c.name for c in boot.contracts})
     logger.info(
