@@ -21,7 +21,7 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn26418-ac3-kernel-awaits-no-savings-subscribe
+  - id: dod-omn26418-ac3-kernel-awaits-no-savings-join
     description: "Read from the kernel source: the savings step awaits no event_bus.subscribe outside the savings correlation task, and that task joins the signal topics through subscribe_topics_concurrently before its periodic loop. At the merge base the kernel awaits the three subscribes in a loop and the test fails."
     source: manual
     binds_ac: [AC3]
