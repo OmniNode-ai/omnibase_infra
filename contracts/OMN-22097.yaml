@@ -7,6 +7,18 @@ summary: "configure_tracing built OTLPSpanExporter(endpoint=<base url>), which t
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn22097-ac2-accepted-20261122t2345z:
+      - label: AC2
+        criterion_hash: fcefe8c6847933db78fb17b5b1e925ee935b1d54e386e80cfadfa527a3cfe5c7
+        proposed_by: lane=dod-closeout-bind-2026-11-22T2345Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-22T2345Z-c2
+    dod-omn22097-ac3-accepted-20261122t2345z:
+      - label: AC3
+        criterion_hash: 08276fda3e9a095dbc21e0c7600737411af83c1791f7956200e4fa4fcc50e315
+        proposed_by: lane=dod-closeout-bind-2026-11-22T2345Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-22T2345Z-c2
 requirements:
   - id: req-omn22097-spans-reach-phoenix
     statement: "The exporter configure_tracing builds posts to <endpoint>/v1/traces, every dispatch emits one span, and no LAN address enters tracked source."
@@ -69,3 +81,19 @@ dod_evidence:
         check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/observability/model_otlp_traces_endpoint.py?ref=omn-22097-phoenix-dispatch-spans" | grep -Fq "/v1/traces"'
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/runtime/test_dispatch_tracing_http_omn22097.py -q -p no:cacheprovider
+  - id: dod-omn22097-ac2-accepted-20261122t2345z
+    description: 'AC2: configure_tracing with endpoint http://phoenix:6006 (and variants) builds an exporter whose URL ends in /v1/traces, across 8 parametrizations. Fails (6 of 8) with the product changes of omnibase_infra#5593 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest -q -p no:cacheprovider "tests/unit/runtime/test_tracing_exporter_path.py::TestConfigureTracingExporterUrl::test_exporter_targets_traces_path"
+    binds_ac:
+      - AC2
+  - id: dod-omn22097-ac3-accepted-20261122t2345z
+    description: 'AC3: one span per MessageDispatchEngine.dispatch carrying topic, category, success and duration_ms, success false on a failed dispatch, and no span without a TracerProvider. Fails (4 of 6) with the product changes of omnibase_infra#5593 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest -q -p no:cacheprovider "tests/unit/runtime/test_dispatch_engine_span.py::TestDispatchSpan"
+    binds_ac:
+      - AC3
