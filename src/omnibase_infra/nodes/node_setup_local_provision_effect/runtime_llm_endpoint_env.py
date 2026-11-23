@@ -349,13 +349,14 @@ def render_dev_lane(
         return {}, None
     # OMN-24854: the declaration folder, taken before the caller repoints the overlay
     # directory at the rendered copy, so the compose mount keeps the real config/lab. A
-    # refusal here is about the folder, not the llm_endpoints overlay, and says so. Only
-    # the dev lane's compose files mount it: a stability job of this agent takes the render
-    # and neither needs nor is refused for the folder.
+    # refusal here is about the folder, not the llm_endpoints overlay, and says so. The dev
+    # lane's compose files mount it, and so does the stability runtime (OMN-26121): the
+    # batch-ingest door's lifespan reads ci_bus_lanes.yaml from it.
     overlay_dir = lane_overlay_dir_or_refuse(execution, environ)
     mounts_declaration = execution._ActiveDeployLane.lane in (
         None,
         execution.EnumRuntimeLane.DEV,
+        execution.EnumRuntimeLane.STABILITY_TEST,
     )
     declaration_dir = (
         lane_declaration_dir(execution, environ) if mounts_declaration else None
@@ -392,9 +393,9 @@ def refresh_exports(
     already names one; the rewritten lane overlay directory lands under ``state_dir`` unless
     ``environ`` names a state directory. An overlay that cannot be rendered is a RuntimeError.
     ``mounts_lane_declaration`` is true for the dev lane, whose compose files mount the lane
-    declaration folder (OMN-24854): the exports then carry ``ONEX_LANE_DECLARATION_DIR``, and a
-    folder that holds no ``ci_bus_lanes.yaml`` is refused. The stability lane mounts nothing,
-    so its refresh derives, exports and refuses nothing about the folder.
+    declaration folder (OMN-24854), and for the stability lane, whose runtime mounts it too
+    (OMN-26121): the exports then carry ``ONEX_LANE_DECLARATION_DIR``, and a folder that holds
+    no ``ci_bus_lanes.yaml`` is refused.
     """
     from deploy_agent.instance_lanes import (  # the agent source tree holds this
         discover_lane_overlay_clone,
