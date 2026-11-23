@@ -29,7 +29,7 @@ RELATIVE = (
 )
 NODE = "node:node_projection_savings"
 # SHA-256 digest of the approved omnimarket source migration.
-DIGEST = "894b70ec0c831877518f2eb04f2c7fefd59ba4fc2da0fbcbfe33712e8bbaf920"
+DIGEST = "547d4f3d0e17c8bc86f163973ed28fa45e053b0fc1efd03d4aeaf7204af986de"
 
 
 def test_migration_102_is_byte_identical_ledgered_and_forward_only() -> None:
