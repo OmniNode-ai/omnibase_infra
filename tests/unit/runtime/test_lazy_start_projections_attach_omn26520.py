@@ -217,9 +217,9 @@ def test_the_ingress_front_door_wakes_with_the_boot_database_topology(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Fails at origin/dev: the ingress builds its transaction with no topology."""
-    monkeypatch.setenv("ONEX_DATABASE_TOPOLOGY_PROFILE", "local")
     dormant = _contract("projection_lab_lane_health", db_io=True)
     StoreLazyStartDormant.record(POLICY, (dormant,), None, ())
+    StoreLazyStartDormant.record_topology(load_topology_profile("local"))
     container = cast(
         "ModelONEXContainer",
         type("_Container", (), {"get_service": lambda self, key: _Bus()})(),

@@ -133,6 +133,14 @@ ALLOWED_EMPTY_DEFAULTS = {
     # the provider-rung canary reads the ref as UNRESOLVED and the typed-decision
     # effect refuses with CREDENTIAL_NOT_REGISTERED; nothing substitutes a default.
     "LLM_TYPESAFE_API_KEY",
+    # OMN-26473: the runtime policy's dev resolver maps tenant_identity.database.dsn
+    # to this variable, and tests/ci/test_runtime_env_anchor.py requires every
+    # env-sourced mapping variable to appear in x-runtime-env. The credentialed,
+    # fail-closed `:?` value is declared once in the dev-lane overlay, on the
+    # services that provision tenants; every other lane must still render with it
+    # unset. Empty is NOT a silent disable: the ref stays unresolved and the
+    # tenant provision effect refuses at its boundary; nothing substitutes a default.
+    "TENANT_IDENTITY_DATABASE_DSN",
     # OMN-19492 / OMN-14375: the onexbot-pr-reader App webhook's HMAC secret,
     # on the identical contract as the OnexBot App identity above -- minted
     # onto a specific runtime host by the operator, so every other lane must

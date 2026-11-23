@@ -133,6 +133,11 @@ from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
 from omnibase_infra.handlers.projection_failure_classification import is_content_failure
+from omnibase_infra.handlers.projection_noop_classification import (
+    ROWS_REFUSED_KEY,
+    is_windowless_consumer_flow_heartbeat,
+    read_attested_noop_reason,
+)
 from omnibase_infra.handlers.topic_migration_dependencies import (
     TOPIC_MIGRATION_EXECUTOR_DEPS,
     required_handler_init_params,
@@ -4219,12 +4224,6 @@ def _bind_handler_owned_projection_database(
     bind(db_urls[binding_refs[0]])
 
 
-#: OMN-18992. The optional field a projection handler uses to say "I wrote
-#: nothing ON PURPOSE, and here is how many rows an ordering guard refused".
-#: Optional by construction: a handler omitting it is read exactly as it is
-#: today, which is what makes this consumer-first across the repo boundary.
-ROWS_REFUSED_KEY: Final[str] = "rows_refused_by_ordering_guard"
-
 # OMN-26520. The optional field a projection handler uses to say "my contract's
 # filter owes this event no row" (a work-ledger TERMINAL that is not done). An
 # event so reported is not counted as consumed, the way a runtime tick is not
@@ -4294,30 +4293,6 @@ def _extract_rows_refused(result: object) -> int:
     # here and is treated exactly as it is today, which is what lets this land
     # in ``omnibase_infra`` before any writer in ``omnimarket`` sends the field.
     return _extract_count(result, ROWS_REFUSED_KEY)
-
-
-def _is_windowless_consumer_flow_heartbeat(
-    *, contract_name: str, event_type: str, payload: object, result: object
-) -> bool:
-    """Recognize the consumer-flow contract's deliberate empty heartbeat.
-
-    OMN-18992 / B23. This contract projects ``flow_window``, not node liveness.
-    Only its new, explicit zero/refusal result shape can attest the no-op;
-    legacy or malformed results keep the zero-write ERROR. Other heartbeat
-    projections may still owe rows, so event type alone cannot exempt them.
-    """
-    return (
-        contract_name == "projection_consumer_flow"
-        and event_type == "heartbeat"
-        and isinstance(payload, dict)
-        and payload.get("flow_window") is None
-        and isinstance(result, dict)
-        and type(result.get("rows_upserted")) is int
-        and result["rows_upserted"] == 0
-        and result.get("flow_rows") == []
-        and type(result.get(ROWS_REFUSED_KEY)) is int
-        and result[ROWS_REFUSED_KEY] == 0
-    )
 
 
 def _record_projection_apply(
@@ -5259,7 +5234,7 @@ def _make_projection_dispatch_callback(
                         topic or "unknown",
                         event_type,
                     )
-                elif _is_windowless_consumer_flow_heartbeat(
+                elif is_windowless_consumer_flow_heartbeat(
                     contract_name=contract_name,
                     event_type=event_type,
                     payload=projection_payload,
@@ -5271,6 +5246,18 @@ def _make_projection_dispatch_callback(
                         "outcome=WINDOW_LESS_HEARTBEAT "
                         "handler=%s topic=%s event_type=%s",
                         handler_name,
+                        topic or "unknown",
+                        event_type,
+                    )
+                elif (
+                    noop := read_attested_noop_reason(result, topic=topic)
+                ) is not None:
+                    logger.info(
+                        "Projection handler wrote zero rows, attested no-op "
+                        "(expected, no terminal owed): outcome=NOOP_ATTESTED "
+                        "reason=%s handler=%s topic=%s event_type=%s",
+                        noop.value,
+                        type(handler_instance).__name__,
                         topic or "unknown",
                         event_type,
                     )

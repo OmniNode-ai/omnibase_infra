@@ -153,6 +153,9 @@ class LazyStartRuntimeTransaction:
         self._provisioner = provisioner
         self._container = container
         self._readiness_config = readiness_config
+        # OMN-26594: the topology the kernel loaded at boot. A db_io contract wires only
+        # with it, so a lazy start that omits it fails every db_io projection it starts.
+        self._topology = topology
         self._starts: dict[str, NodeStart] = {}
 
     def node_engine(self, contract_name: str) -> MessageDispatchEngine | None:

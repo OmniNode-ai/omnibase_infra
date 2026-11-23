@@ -22,7 +22,7 @@ runtime's own publish path, installed once by this always-wired node.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
@@ -50,25 +50,9 @@ from omnibase_infra.protocols.protocol_topic_provisioner import (
     ProtocolTopicProvisioner,
 )
 
-if TYPE_CHECKING:
-    from omnibase_core.models.core.model_deployment_topology import (
-        ModelDeploymentTopology,
-    )
-
 __all__: list[str] = ["HandlerLazyStartIngress"]
 
 logger = logging.getLogger(__name__)
-
-
-def _boot_database_topology() -> ModelDeploymentTopology | None:
-    """The checked-in database topology the kernel wired this boot with (OMN-26520).
-
-    The kernel resolves it from ``ONEX_DATABASE_TOPOLOGY_PROFILE``; a woken contract
-    that declares ``db_io`` refuses to wire without it.
-    """
-    from omnibase_infra.runtime import service_kernel
-
-    return service_kernel._load_runtime_database_topology()
 
 
 class HandlerLazyStartIngress:
@@ -115,7 +99,7 @@ class HandlerLazyStartIngress:
                     else None,
                     self._container,
                     ModelTopicReadinessConfig(),
-                    _boot_database_topology(),
+                    topology=StoreLazyStartDormant.topology(),
                 ),
                 contracts,
                 policy,

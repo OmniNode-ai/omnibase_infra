@@ -241,6 +241,15 @@ profiles:
         source:
           source_type: env
           source_path: GATEWAY_DATABASE_DSN
+      # OMN-26473: the tenant and key writer's database (omnimarket node_tenant_provision_effect,
+      # placed on the effects runtime profile). Unmapped, the node cannot resolve its DSN and every
+      # command is refused. The container env carries the DSN (docker-compose.dev-lane.yml,
+      # TENANT_IDENTITY_DATABASE_DSN, role tenant_identity_writer on this lane's own omninode_cloud),
+      # on the main and the effects runtime. The value never appears here.
+      - logical_name: tenant_identity.database.dsn
+        source:
+          source_type: env
+          source_path: TENANT_IDENTITY_DATABASE_DSN
     services:
       main:
         runtime_id: dev-main
