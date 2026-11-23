@@ -10,64 +10,13 @@ wrap the existing infra-layer handlers (HandlerLlmOpenaiCompatible,
 HandlerLlmOllama) behind the protocol interfaces, enabling container-based
 dependency injection for LLM services.
 
+The package re-exports nothing: import each adapter from its own module.
+Importing a submodule runs this ``__init__`` first, so an eager export list
+made every such import (the Coding Plan predicate, from the endpoint health
+config's validator) load every adapter and, through the similarity adapter, the
+Qdrant client, inside the running event loop. The composed boot check measured
+that as a 1.66 s loop hold.
+
 Related Tickets:
     - OMN-2319: Implement SPI LLM protocol adapters
 """
-
-from omnibase_infra.adapters.llm.adapter_code_analysis_enrichment import (
-    AdapterCodeAnalysisEnrichment,
-)
-from omnibase_infra.adapters.llm.adapter_code_review_analysis import (
-    AdapterCodeReviewAnalysis,
-)
-from omnibase_infra.adapters.llm.adapter_documentation_generation import (
-    AdapterDocumentationGeneration,
-)
-from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
-    AdapterLlmProviderOpenai,
-)
-from omnibase_infra.adapters.llm.adapter_llm_tool_provider import (
-    AdapterLlmToolProvider,
-)
-from omnibase_infra.adapters.llm.adapter_model_router import AdapterModelRouter
-from omnibase_infra.adapters.llm.adapter_similarity_enrichment import (
-    AdapterSimilarityEnrichment,
-)
-from omnibase_infra.adapters.llm.adapter_summarization_enrichment import (
-    AdapterSummarizationEnrichment,
-)
-from omnibase_infra.adapters.llm.adapter_test_boilerplate_generation import (
-    AdapterTestBoilerplateGeneration,
-)
-from omnibase_infra.adapters.llm.model_llm_adapter_request import (
-    ModelLlmAdapterRequest,
-)
-from omnibase_infra.adapters.llm.model_llm_adapter_response import (
-    ModelLlmAdapterResponse,
-)
-from omnibase_infra.adapters.llm.model_llm_health_response import (
-    ModelLlmHealthResponse,
-)
-from omnibase_infra.adapters.llm.model_llm_model_capabilities import (
-    ModelLlmModelCapabilities,
-)
-from omnibase_infra.adapters.llm.model_llm_provider_config import (
-    ModelLlmProviderConfig,
-)
-
-__all__: list[str] = [
-    "AdapterLlmProviderOpenai",
-    "AdapterLlmToolProvider",
-    "AdapterModelRouter",
-    "AdapterCodeAnalysisEnrichment",
-    "AdapterCodeReviewAnalysis",
-    "AdapterDocumentationGeneration",
-    "AdapterSimilarityEnrichment",
-    "AdapterSummarizationEnrichment",
-    "AdapterTestBoilerplateGeneration",
-    "ModelLlmAdapterRequest",
-    "ModelLlmAdapterResponse",
-    "ModelLlmHealthResponse",
-    "ModelLlmModelCapabilities",
-    "ModelLlmProviderConfig",
-]
