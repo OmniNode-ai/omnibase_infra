@@ -28,12 +28,15 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn26417-ac1-measured-probe-path
-    description: "The PR body holds a section headed Measured probe path with the emitting file:line (container_healthcheck.py:193), the address and port (http://localhost:8085/health inside the container), the reason the call fails and a UTC read time. The section is read by the reviewer; no runner check reads a PR body. The check below confirms the emitter line and the default URL in the tree."
+    description: "The PR body holds a section headed Measured probe path with the emitting file:line (container_healthcheck.py:193), the address and port (http://localhost:8085/health inside the container), the reason the call fails and a UTC read time. The section is read by the reviewer; no runner check reads a PR body. The first check confirms the emitter line and the default URL in the tree. The second reproduces the named read, the container healthcheck's own fetch against the acceptor while the loop is blocked and other probes are in flight, and fails at the merge base, where two of the three reads are probe_unreachable."
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: command
         check_value: bash -c "grep -n 'probe_unreachable' src/omnibase_infra/runtime/health/container_healthcheck.py && grep -n 'DEFAULT_HEALTH_URL = ' src/omnibase_infra/runtime/health/container_healthcheck.py"
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/services/test_health_probe_unreachable_omn26417.py -k not_read_by_concurrent_probes -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26417-ac2-probe-unreachable-regression
     description: "Three container-healthcheck reads in flight while the loop is blocked past the probe timeout each get the acceptor's typed 503 inside the 5 s timeout; at origin/dev two of the three read probe_unreachable at 5.05 s."
@@ -44,19 +47,30 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/services/test_health_probe_unreachable_omn26417.py -k probe_unreachable -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26417-ac3-gate-unchanged
-    description: "The semantic container healthcheck still returns FAIL for the stalled-loop answer (the regression asserts the 503 verdict), and the change edits no compose file, boot guard, healthcheck setting or wait setting."
+    description: "The semantic container healthcheck still returns FAIL for the stalled-loop answer (the regression asserts the 503 verdict), and the change edits no compose file, boot guard, healthcheck setting or wait setting. The second check is the regression that asserts that same 503 verdict arrives inside the probe timeout with the gate unchanged; it fails at the merge base."
     source: manual
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/services/test_startup_health_degraded_omn26316.py -k answers_while_loop_is_blocked -q --no-cov -n 0 -p no:randomly
         cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/services/test_health_probe_unreachable_omn26417.py -k not_read_by_concurrent_probes -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26417-ac4-concurrent-probes-read-verdict-unit
+    description: "The unit-level half of AC4, run by the hosted check: with the loop blocked past the probe timeout, concurrent container-healthcheck reads against the acceptor each get its typed verdict and none reads probe_unreachable, and a connection past the in-flight cap is closed. At the merge base two of the three reads are probe_unreachable. The live read of the rebuilt dev container is the next item."
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/services/test_health_probe_unreachable_omn26417.py -k probe_unreachable -q --no-cov -n 0 -p no:randomly
+        cwd: .
   - id: dod-omn26417-deploy-probe-reads-verdict
     description: >-
-      Post-deploy read: on the rebuilt dev runtime container the healthcheck's last output is not probe_unreachable and its /health answers with a JSON status. It reads the live container, which carries this change only after the deploy agent has rebuilt it, so a pull request runner cannot pass it; only the local Done gate runs it and it binds AC4.
+      Post-deploy read: on the rebuilt dev runtime container the healthcheck's last output is not probe_unreachable and its /health answers with a JSON status. It reads the live container, which carries this change only after the deploy agent has rebuilt it, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion, because the unit-level half above binds AC4.
     source: manual
     execution_scope: local_done_gate
-    binds_ac: [AC4]
+    binds_ac: []
     checks:
       - check_type: command
         check_value: bash -c 'docker exec omninode-runtime curl -s -m 5 http://localhost:8085/health | grep -q "\"status\""'
