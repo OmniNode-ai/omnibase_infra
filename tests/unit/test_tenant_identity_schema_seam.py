@@ -162,6 +162,41 @@ def test_readback_declares_every_table_including_expires_at_and_raises() -> None
     assert "ALTER " not in text.upper()
 
 
+# pg_get_constraintdef prints a check written as TRIM(BOTH FROM x) one way and one written as
+# btrim(x) another. The warm dev lane carries the first; tenant_identity_schema.sql, which builds
+# a fresh volume, writes the second. A literal comparison failed whichever lane the declared set
+# was not read from (stability lane, 2026-11-23: the readback raised, the gateway_runtime grants
+# never ran, and the gateway answered 503 on every key lookup).
+_TRIM_FOLD = (
+    "regexp_replace({target}, 'TRIM\\(BOTH FROM ([a-z_]+)\\)', 'btrim(\\1)', 'g')"
+)
+
+
+def _folded_sides(text: str) -> set[str]:
+    """Which sides of the readback comparison pass through the TRIM(BOTH FROM) fold."""
+    sides = set()
+    if _TRIM_FOLD.format(target="x") in text and "declared := ARRAY(" in text:
+        sides.add("declared")
+    if _TRIM_FOLD.format(target="line") in text and "INTO actual" in text:
+        sides.add("actual")
+    return sides
+
+
+def test_readback_folds_the_trim_both_rendering_on_both_sides() -> None:
+    text = _sql(READBACK)
+    assert _folded_sides(text) == {"declared", "actual"}
+    # The fold is one rendering and nothing else: no looser pattern, and the raise stays.
+    assert text.count("regexp_replace(") == 2
+    assert "RAISE EXCEPTION" in text
+
+
+def test_the_create_seam_writes_the_btrim_rendering_the_readback_must_accept() -> None:
+    create = _sql(CREATE)
+    assert "length(btrim(key_hash))" in create
+    assert "length(btrim(name))" in create
+    assert "TRIM(BOTH FROM key_hash)" in READBACK.read_text()
+
+
 def test_readback_skips_by_name_when_the_database_is_absent() -> None:
     assert (
         "skip  tenant identity schema readback (database omninode_cloud absent on this lane)"
