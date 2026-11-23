@@ -40,8 +40,6 @@ from __future__ import annotations
 
 import logging
 import re
-import shlex
-import subprocess
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -51,6 +49,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import JsonValue
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.handlers.ledger_bus_calls import append_row_over_bus
 from omnibase_infra.models.model_deploy_job_reading_request import (
     ModelDeployJobReadingRequest,
 )
@@ -176,35 +175,16 @@ def append_ledger_row(
     host = environ.get(host_env, "").strip()
     if not command or not host:
         return f"{command_env} and {host_env} must both be set"
-    argv: Sequence[str] = [
-        *shlex.split(command),
-        "--lane",
-        _text(settings, "row_lane"),
-        "--host",
-        host,
-        "--request-id",
-        request_id,
-        "--rows-file",
-        "-",
-    ]
     timeout = settings["append_timeout_seconds"]
-    env = _append_env(settings, environ)
-    try:
-        done = subprocess.run(
-            argv,
-            input=f"{row} | req={request_id}\n",
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=float(timeout) if isinstance(timeout, int | float) else None,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return f"append-command-failed:{type(exc).__name__}"
-    if done.returncode != 0:
-        tail = done.stderr.strip()[-300:].replace("\n", " | ")
-        return f"append-command-exit-{done.returncode}: {tail}".rstrip(": ")
-    return ""
+    return append_row_over_bus(
+        command,
+        lane=_text(settings, "row_lane"),
+        host=host,
+        row=row,
+        request_id=request_id,
+        env=_append_env(settings, environ),
+        timeout=float(timeout) if isinstance(timeout, int | float) else None,
+    )
 
 
 def adoption_revert_alarm_row(
