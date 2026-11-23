@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.scripts.onex_dispatch_fake import install_fake_core_cli
 from tests.scripts.test_reconcile_workspace_venvs import (
     _EXIT_FAILED,
     _EXIT_OK,
@@ -86,10 +87,7 @@ def test_a_clone_advance_moves_the_floor_with_the_venv(ws: _Workspace) -> None:
     wrapper_dst.parent.mkdir(parents=True, exist_ok=True)
     wrapper_dst.write_text(wrapper_src.read_text(encoding="utf-8"), encoding="utf-8")
     wrapper_dst.chmod(0o755)
-    entrypoint = ws.dispatch_venv / "bin" / "onex"
-    entrypoint.parent.mkdir(parents=True, exist_ok=True)
-    entrypoint.write_text("#!/usr/bin/env bash\nexit 41\n", encoding="utf-8")
-    entrypoint.chmod(0o755)
+    install_fake_core_cli(ws.dispatch_venv, "exit 41\n")
 
     wrapped = subprocess.run(
         ["bash", str(wrapper_dst), "skill", "merge_sweep"],

@@ -47,7 +47,8 @@ def test_real_subprocess_reaches_a_verdict_in_an_unwritable_cwd(
     real_argv = guard_module.dod_verify_argv
 
     def _argv(ticket_id: str, **kwargs: str) -> list[str]:
-        return [sys.executable, str(script), *real_argv(ticket_id, **kwargs)[3:]]
+        real = real_argv(ticket_id, **kwargs)
+        return [sys.executable, str(script), *real[real.index("dod_verify") + 1 :]]
 
     monkeypatch.setattr(guard_module, "dod_verify_argv", _argv)
     result, exit_code, error = asyncio.run(

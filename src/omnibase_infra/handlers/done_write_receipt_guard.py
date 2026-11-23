@@ -35,7 +35,6 @@ import sys
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping
 from functools import lru_cache
-from pathlib import Path
 from typing import cast
 
 import yaml
@@ -208,17 +207,25 @@ def dod_verify_argv(
     ``FAILED ... Canonical venv is IMPURE``, ``behavior_proving=0``, without
     a single test having executed.
 
-    Dispatching through ``sys.executable``'s sibling ``onex`` makes the
-    verifier's environment a property of how the SWEEP was composed rather
-    than of where it happens to be standing. The dispatch venv can then carry
-    the co-installed omnimarket while the product clone's venv stays pure and
-    the behaviour checks actually run. It is also strictly more determinate
-    for the existing local path, where both resolved to the same venv anyway.
+    Dispatching through ``sys.executable`` itself makes the verifier's
+    environment a property of how the SWEEP was composed rather than of where
+    it happens to be standing. The dispatch venv can then carry the
+    co-installed omnimarket while the product clone's venv stays pure and the
+    behaviour checks actually run. It is also strictly more determinate for
+    the existing local path, where both resolved to the same venv anyway.
 
-    A missing sibling ``onex`` raises ``FileNotFoundError`` at exec time,
-    which the caller already converts into a named per-ticket error; the
-    sweep job additionally asserts the binary resolves before any ticket is
-    scanned, so the loud failure comes first.
+    OMN-25070. The ``onex`` launcher moves out of omnibase-core into the
+    customer package omninode-onex, so a runtime or dispatch venv that carries
+    omnibase-core alone has no ``onex`` beside its interpreter. The argv
+    therefore runs omnibase-core's own CLI module, ``sys.executable -m
+    omnibase_core.cli.cli_commands``, the same form the sweep workflow uses,
+    and needs no launcher file.
+
+    A venv without omnibase-core fails the import at exec time with a non-zero
+    exit, which the caller already converts into a named per-ticket error; the
+    sweep job's "Compose the dispatch venv" step additionally imports the
+    module in the dispatch venv and fails before any ticket is scanned, so the
+    loud failure comes first.
 
     OMN-25667. ``onex skill`` writes its input payload under ``--state-root``,
     whose default is the cwd-relative ``.onex_state``. The runtime's cwd is
@@ -228,7 +235,9 @@ def dod_verify_argv(
     CLI default applies, as before.
     """
     return [
-        str(Path(sys.executable).parent / "onex"),
+        sys.executable,
+        "-m",
+        "omnibase_core.cli.cli_commands",
         "skill",
         "dod_verify",
         ticket_id,
