@@ -1,0 +1,46 @@
+schema_version: 1.0.0
+ticket_id: OMN-26410
+title: The dev runtime EvalResultsProjectionWriter upserts a row for a judged eval event on an image that carries omnimarket 6563, and the cause of the zero-row upserts is named and fixed
+summary: >-
+  The dev runtime logged Projection handler wrote zero rows at ERROR about once a second for EvalResultsProjectionWriter on the runtime tick topic (1,259 ERROR lines and 3 more with a published snapshot in a 30 minute read of omninode-runtime on 2026-11-23). A tick returns rows_upserted 0 by design, and the zero-row classifier in handler_wiring.py could not tell that from a lost write. A projection handler can now attest a designed zero-row return under the optional result key projection_noop_reason with a closed value (tick, honoured only on the runtime tick topic, or skipped); the classifier logs an attested no-op at INFO with the reason, while a zero with no attestation, a malformed or unknown reason, a tick attestation on a source topic, and a valid source event whose upsert returned no row all still log the ERROR. The classifier lives in handlers/projection_noop_classification.py and handler_wiring.py shrinks. The health gate, the boot guard and the compose files are unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26410-noop-attestation
+    statement: A projection handler can attest a designed zero-row return, and only an attested one is logged as an expected no-op instead of a failed write.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the health gate, the boot guard and the compose files are unchanged by the PR -- falsifier: git diff origin/dev --stat on the PR branch lists no health gate setting, no boot guard file and no compose file, run with uv run pytest tests/nodes/node_projection_eval_results -q"
+evidence_requirements:
+  - kind: tests
+    description: The attestation tests over the real dispatch callback (RED at origin/dev, GREEN on the branch) and the existing zero-row classification suites beside them.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_projection_noop_attestation_omn26410.py tests/unit/runtime/test_omn18992_guard_refused_zero_rows.py tests/integration/runtime/test_omn18992_guard_refused_zero_rows_integration.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26410-ac3-gate-unchanged
+    description: The change adds an enum, a classifier module and a branch in the projection dispatch callback; it touches no health gate setting, no boot guard file and no compose file, and the tick apply accounting tests of the health gate pass unchanged beside it.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_dev_job_a7474c42_tick_apply_accounting_omn26419.py -q --no-cov
+        cwd: .
+  - id: dod-omn26410-attestation
+    description: "An attested tick and an attested skip log INFO and no zero-rows ERROR; an unattested tick zero, a valid judged event whose upsert returned no row, a tick attestation on a source topic and an unknown or malformed reason all still log the ERROR; a real write logs neither line."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_projection_noop_attestation_omn26410.py -q --no-cov
+        cwd: .
+  - id: dod-omn26410-deploy
+    description: Hosted-runner probe that reads the committed handler_wiring.py from GitHub at the checked-out commit and requires the attested no-op branch of the zero-row classifier.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/auto_wiring/handler_wiring.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "noop := read_attested_noop_reason(result, topic=topic)" in src'
+        cwd: ${OMNI_HOME}/omnibase_infra
