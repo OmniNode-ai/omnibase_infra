@@ -113,9 +113,9 @@ def split_boot_manifest(
     selects (``select_projection_contracts``), so the boot set and the health
     surface cannot disagree about what a projection is.
     """
-    boot_set = policy.boot_set | {
+    boot_set = policy.boot_set.union(
         ref.name for ref in select_projection_contracts(manifest)
-    }
+    )
     boot = tuple(c for c in manifest.contracts if c.name in boot_set)
     dormant = tuple(c for c in manifest.contracts if c.name not in boot_set)
     return manifest.model_copy(update={"contracts": boot}), dormant

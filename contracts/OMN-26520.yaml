@@ -110,3 +110,12 @@ dod_evidence:
       - check_type: command
         check_value: ssh omni-201 docker inspect --format '{{.State.Health.Status}}' omninode-runtime
         cwd: .
+  - id: dod-omn26520-ac3-lazy-projections-boot-real-manifest
+    description: 'AC3: the real discovered manifest split keeps every contract and boots a declared projection; the file tests/integration/runtime/test_lazy_start_projections_boot_omn26520.py fails at origin/dev, where the projection lands dormant.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_lazy_start_projections_boot_omn26520.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
