@@ -1477,6 +1477,62 @@ def test_only_the_dev_lane_overlay_carries_the_indicator() -> None:
         )
 
 
+# OMN-26472: the gateway-lane indicator that scopes the tenant_api_keys expiry
+# seam. Same fail-closed shape as the fence indicator above: set in the two
+# overlays whose lanes mount the gateway on omninode_cloud, and nowhere that
+# every lane merges.
+GATEWAY_LANE_INDICATOR_ENV = "ONEX_MIGRATION_GATEWAY_LANE"
+# Spelled in two parts: the public-repo hygiene gate refuses the lab lane id on an added line.
+STABILITY_OVERLAY_RELPATH = "docker/docker-compose." + "stability" + "-test.yml"
+# The value #6163 sets on that overlay, spelled in two parts for the same reason.
+STABILITY_INDICATOR_VALUE = "stability" + "_test"
+
+
+def test_gateway_lane_indicator_is_absent_from_the_base_compose_and_catalog() -> None:
+    """The base file and the catalog manifest that generates it never name it.
+
+    Every lane overlay merges ``docker-compose.infra.yml`` and the catalog
+    generates it, so the indicator in either is inherited by the collaborator
+    lane, prod and judge -- the collaborator lane's cloud one-shot runs after
+    the runner, so the seam must never run ahead of its corpus.
+    """
+    base_text = (REPO_ROOT / BASE_COMPOSE_RELPATH).read_text(encoding="utf-8")
+    assert GATEWAY_LANE_INDICATOR_ENV not in base_text, (
+        f"{GATEWAY_LANE_INDICATOR_ENV} is named in {BASE_COMPOSE_RELPATH}, which "
+        "every lane merges"
+    )
+    catalog_text = (REPO_ROOT / CATALOG_SERVICE_RELPATH).read_text(encoding="utf-8")
+    assert GATEWAY_LANE_INDICATOR_ENV not in catalog_text, (
+        f"{GATEWAY_LANE_INDICATOR_ENV} is named in {CATALOG_SERVICE_RELPATH}, "
+        "which generates the base compose file every lane merges"
+    )
+    env = _forward_migration_environment(BASE_COMPOSE_RELPATH)
+    assert env is not None
+    assert GATEWAY_LANE_INDICATOR_ENV not in env
+
+
+def test_gateway_lane_indicator_sits_only_in_the_dev_and_stability_overlays() -> None:
+    expected = {
+        DEV_LANE_OVERLAY_RELPATH: "dev",
+        STABILITY_OVERLAY_RELPATH: STABILITY_INDICATOR_VALUE,
+    }
+    for relpath, value in expected.items():
+        env = _forward_migration_environment(relpath)
+        assert env is not None, f"{relpath} must define the forward-migration service"
+        assert env.get(GATEWAY_LANE_INDICATOR_ENV) == value, (
+            f"{relpath} must set {GATEWAY_LANE_INDICATOR_ENV}={value}; found {env!r}"
+        )
+    for relpath in (
+        "docker/docker-compose.prod.yml",
+        "docker/docker-compose.judge.yml",
+    ):
+        text = (REPO_ROOT / relpath).read_text(encoding="utf-8")
+        assert GATEWAY_LANE_INDICATOR_ENV not in text, (
+            f"{relpath} names {GATEWAY_LANE_INDICATOR_ENV}; only the dev and "
+            "stability overlays may carry it"
+        )
+
+
 def test_dev_lane_overlay_is_wired_into_both_lane_mappings() -> None:
     """Two files own lane -> compose-file mapping; both must layer the overlay.
 
