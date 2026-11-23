@@ -27,7 +27,7 @@ SAMPLE_INTERVAL_SECONDS: Final = 0.05
 """Length of the scheduled sleep; the gap is the time between two wake-ups."""
 
 
-class _ClockState:
+class BootClockState:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.active: list[str] = []
@@ -69,7 +69,7 @@ class _ClockState:
                 task.cancel()
 
 
-_STATE = _ClockState()
+_STATE = BootClockState()
 
 
 class ModelBootClock(BaseModel):

@@ -52,6 +52,15 @@ dod_evidence:
       - check_type: command
         check_value: bash -c 'test "$(wc -l < src/omnibase_infra/runtime/service_kernel.py)" -le 5988 && test "$(wc -l < src/omnibase_infra/runtime/runtime_host_process.py)" -le 7778 && test "$(wc -l < src/omnibase_infra/services/health_checker.py)" -le 1784'
         cwd: .
+  - id: dod-omn26561-ac4-real-health-request-integration
+    description: >-
+      A real GET /health against ServiceHealth served on an aiohttp server logs exactly one boot summary: parse_runs= line across two 200 answers. Fails at the merge base, where no line is logged.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_boot_summary_line_integration_omn26561.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
   - id: dod-omn26561-local-no-compose-in-diff
     description: >-
       Read after the branch exists: git diff origin/dev --name-only lists no compose file. A hosted runner may not hold origin/dev, so only the local Done gate runs it and it binds no acceptance criterion.
