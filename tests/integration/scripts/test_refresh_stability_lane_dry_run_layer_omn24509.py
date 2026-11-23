@@ -111,6 +111,8 @@ def _make_sandbox(
 
     lane_overlays = tmp_path / "cfg" / "config" / "lab" / "lane-overlays"
     lane_overlays.mkdir(parents=True)
+    # OMN-26121: the stability refresh exports the lane declaration folder (config/lab), which must hold the declaration.
+    (lane_overlays.parent / "ci_bus_lanes.yaml").write_text("lanes: {}\n")
     (lane_overlays / f"{LANE}.release-pin.yaml").write_text(
         f"schema_version: 1\nlane: {LANE}\npin:\n"
         "  omnibase_infra: v1.2.3\n  omnibase_core: v1.2.3\n  omnimarket: v1.2.3\n",
