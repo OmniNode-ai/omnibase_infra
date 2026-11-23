@@ -1,0 +1,12 @@
+# Source: the dev runtime boot of 2026-11-22T16:59:29Z on omni-201, as quoted in the
+# lane brief lazyfix-1735 (ticket OMN-21753), which is the orchestrator's reading of
+# `docker logs --since 2026-11-22T16:59:00Z <runtime container>`.
+# UNVERIFIED BY THE LANE: omni-201 did not resolve from lab host h053, so these lines
+# are the brief's quotation, not a read of the container log. Replace them with the
+# grep output (`contracts wired at boot|consumer_group_handover|did not attach|BOOT
+# FAILED|heartbeat_publish_failed`) when a host that reaches omni-201 reads it.
+2026-11-22T17:00:05Z 54 contracts wired at boot, 1213 dormant
+TypeError: contract 'node_schedule_run_reducer' declares consumer_group_handover, but the wired event bus (RecordingBus) cannot hand a retired group's committed offsets over; joining at the bus default would drop the handover window (OMN-21753)
+RuntimeError: contract 'node_schedule_run_reducer' did not attach
+RuntimeHeartbeatRequiredError: node_registration_orchestrator heartbeat_publish_failed after 3 attempts
+BOOT FAILED 1/5
