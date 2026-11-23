@@ -49,3 +49,22 @@ dod_evidence:
       - check_type: command
         check_value: test -z "$(git diff origin/dev --name-only -- scripts/ci/deploy_lane_verify_route.py scripts/deploy-agent/deploy_agent/routing.py scripts/deploy-agent/deploy_agent/agent.py)"
         cwd: .
+  - id: dod-omn26524-integration-proof
+    description: The agent's idle tick runs the routing key check and the routed-command alarm through the agent's own loader against the checkout's real node contract and routing table.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC42]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/test_deploy_job_reading_idle_callers_omn26524.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26524-deploy-probe-run-lines
+    description: >-
+      Post-deploy read: after the deploy agent applies this branch on dev, its journal holds a routing key check run line and a routed command alarm run line from the idle tick. It reads the live agent, which carries this change only after the deploy agent has applied it, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion, because the unit-level halves above bind AC41 and AC42.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: ssh h201 "journalctl --user -u deploy-agent-dev --since '-3 hours' --no-pager | grep -q 'routed command alarm polled=' && journalctl --user -u deploy-agent-dev --since '-3 hours' --no-pager | grep -q 'routing key check outcome='"
+        cwd: .
