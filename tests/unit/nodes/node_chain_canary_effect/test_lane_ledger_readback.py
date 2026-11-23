@@ -47,6 +47,60 @@ def test_a_declared_dev_lane_resolves_to_the_name(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_a_non_dev_lane_resolves_when_its_block_names_its_authorization(
+    tmp_path: Path,
+) -> None:
+    """OMN-26121: the overlay authorizes a lane the canary is graded on.
+
+    The lane ids live in the overlay, never in this repository, so the lane here
+    is synthetic.
+    """
+    overlay = _overlay(
+        tmp_path,
+        "lanes:\n  lane-a:\n    ledger_readback:\n"
+        "      dsn_env: SOME_DECLARED_NAME\n      authorized_by: OMN-26121\n",
+    )
+
+    declaration = load_lane_ledger_readback(overlay, "lane-a")
+
+    assert declaration.lane == "lane-a"
+    assert declaration.dsn_env == "SOME_DECLARED_NAME"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "authorized_by", ["''", "'   '", "[OMN-26121]", "true"], ids=str
+)
+def test_a_non_dev_lane_whose_authorization_is_not_a_ticket_name_is_refused(
+    tmp_path: Path, authorized_by: str
+) -> None:
+    overlay = _overlay(
+        tmp_path,
+        "lanes:\n  lane-a:\n    ledger_readback:\n"
+        f"      dsn_env: SOME_NAME\n      authorized_by: {authorized_by}\n",
+    )
+
+    with pytest.raises(ValueError, match="may not declare"):
+        load_lane_ledger_readback(overlay, "lane-a")
+
+
+@pytest.mark.unit
+def test_the_projection_authorization_does_not_authorize_the_ledger_leg(
+    tmp_path: Path,
+) -> None:
+    """Two legs, two authorizations: widening one never widens the other."""
+    overlay = _overlay(
+        tmp_path,
+        "lanes:\n  lane-a:\n    projection_readback:\n"
+        "      dsn_env: SOME_NAME\n      authorized_by: OMN-26121\n"
+        "    ledger_readback:\n      dsn_env: SOME_NAME\n",
+    )
+
+    with pytest.raises(ValueError, match="may not declare"):
+        load_lane_ledger_readback(overlay, "lane-a")
+
+
+@pytest.mark.unit
 def test_the_exported_name_var_is_distinct_from_the_projection_one() -> None:
     """Two legs, two exported variables — never one serving both.
 
