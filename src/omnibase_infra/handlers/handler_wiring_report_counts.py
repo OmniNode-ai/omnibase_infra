@@ -15,6 +15,7 @@ import importlib.util
 from collections import defaultdict
 from pathlib import Path
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.wiring_ratchet import ModelWiringCounts
 from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
     ModelAutoWiringManifest,
@@ -51,6 +52,14 @@ def _class_bases(source: Path) -> dict[str, tuple[str, ...]]:
 
 class HandlerWiringReportCounts:
     """Count failed, duplicate, quarantined wiring and unproduced subscriptions."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.COMPUTE
 
     def handle(self, request: ModelAutoWiringManifest) -> ModelWiringCounts:
         """Count from the manifest and the handler sources it names."""

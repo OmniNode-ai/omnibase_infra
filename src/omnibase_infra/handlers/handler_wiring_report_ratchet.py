@@ -16,6 +16,7 @@ from omnibase_core.models.validation.model_validation_report import (
     ModelValidationReport,
     ModelValidationRequestRef,
 )
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.wiring_ratchet import (
     ModelWiringCounts,
     ModelWiringReportRatchetRequest,
@@ -27,6 +28,14 @@ COUNT_FIELDS: Final[tuple[str, ...]] = tuple(ModelWiringCounts.model_fields)
 
 class HandlerWiringReportRatchet:
     """Compare observed counts to the baseline; the baseline can only be lowered."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.COMPUTE
 
     def handle(self, request: ModelWiringReportRatchetRequest) -> ModelValidationReport:
         """Decide from the request alone, without filesystem, git, clock or env I/O."""
