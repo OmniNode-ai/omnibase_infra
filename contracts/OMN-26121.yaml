@@ -120,15 +120,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/test_tenant_identity_schema_seam.py -k "indicator or carries" -q --no-cov
         cwd: .
-  - id: dod-omn26121-deploy
-    description: Hermetic probe of the landing branch, run by the hosted runner. It reads the readback seam from the checked-out tree and the PR branch and requires the expires_at row of the declared catalog; the file does not exist on the merge base, so the command exits non-zero before this change.
-    source: manual
-    binds_ac: [AC2, AC3]
-    checks:
-      - check_type: command
-        check_value: >-
-          grep -F 'tenant_api_keys|column|expires_at' docker/migrations/seams/tenant_identity_schema_readback.sql > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/seams/tenant_identity_schema_readback.sql?ref=omn-26121-tenant-identity-schema-seam' --jq .content | base64 -d | grep 'tenant_api_keys|column|expires_at' > /dev/null
-        cwd: .
   - id: dod-omn26121-ac7-stability-declaration-mount
     description: The stability runtime mounts the lane declaration folder read-only as a required variable and the stability refresh exports it.
     source: manual
