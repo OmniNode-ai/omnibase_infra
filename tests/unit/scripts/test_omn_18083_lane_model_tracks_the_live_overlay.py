@@ -174,3 +174,44 @@ def test_an_unknown_key_inside_projection_readback_is_still_refused() -> None:
         ModelCiBusOverlay.model_validate(
             {"default": "inmemory", "lanes": {"dev": lane}}
         )
+
+
+def test_a_non_dev_readback_block_may_name_its_authorizing_ticket() -> None:
+    """OMN-26121: the block that authorizes a lane's reader carries its ticket id.
+
+    The reader in the chain canary refuses a non-dev lane's readback with no
+    such entry, so the overlay must be able to say it, and this strict model
+    must learn the key before the overlay carries it (the order the module
+    docstring above records three failures of).
+    """
+    lane = {
+        "broker": "inmemory",
+        "projection_readback": {
+            "dsn_env": "CHAIN_CANARY_PROJECTION_DSN",
+            "authorized_by": "OMN-26121",
+        },
+        "ledger_readback": {
+            "dsn_env": "CHAIN_CANARY_PROJECTION_DSN",
+            "authorized_by": "OMN-26121",
+        },
+    }
+    parsed = ModelCiBusOverlay.model_validate(
+        {"default": "inmemory", "lanes": {"lane-a": lane}}
+    )
+    projection = parsed.lanes["lane-a"].projection_readback
+    ledger = parsed.lanes["lane-a"].ledger_readback
+    assert projection is not None and ledger is not None
+    assert projection.authorized_by == "OMN-26121"
+    assert ledger.authorized_by == "OMN-26121"
+
+
+def test_an_authorization_that_is_not_a_string_is_refused() -> None:
+    """The entry is a ticket id; a structure of any other type is a typo."""
+    lane = {
+        "broker": "inmemory",
+        "projection_readback": {"dsn_env": "X", "authorized_by": ["OMN-26121"]},
+    }
+    with pytest.raises(ValidationError, match="authorized_by"):
+        ModelCiBusOverlay.model_validate(
+            {"default": "inmemory", "lanes": {"lane-a": lane}}
+        )
