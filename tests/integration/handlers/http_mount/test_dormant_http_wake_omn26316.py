@@ -33,7 +33,10 @@ from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.handlers import handler_lazy_start_ingress as ingress_module
 from omnibase_infra.handlers.handler_lazy_start_ingress import HandlerLazyStartIngress
-from omnibase_infra.handlers.lazy_start_boot_split import StoreLazyStartDormant
+from omnibase_infra.handlers.lazy_start_boot_split import (
+    StoreLazyStartDormant,
+    StoreLazyStartWaker,
+)
 from omnibase_infra.models.lazy_start import ModelLazyStartPolicy
 from omnibase_infra.runtime.auto_wiring.discovery import _parse_contract
 from omnibase_infra.runtime.auto_wiring.models.model_auto_wiring_manifest import (
@@ -44,9 +47,9 @@ from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import 
 )
 from omnibase_infra.services.health_checker import ServiceHealth
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
-FIXTURES = "tests.unit.handlers.http_mount.test_dormant_http_wake_omn26316"
+FIXTURES = "tests.integration.handlers.http_mount.test_dormant_http_wake_omn26316"
 LIFESPAN_LOG: list[str] = []
 BOOT = "node_boot_mount"
 DORMANT = "node_dormant_mount"
@@ -312,7 +315,7 @@ async def test_a_wake_that_raises_leaves_the_mount_dormant_and_the_server_up(
     async def refuse(_name: str) -> None:
         raise ConnectionError("join refused for the node")
 
-    StoreLazyStartDormant.record_waker(refuse)
+    StoreLazyStartWaker.record(refuse)
     try:
         status, body = await _get(port, "/dormant/ping")
         assert status == 503

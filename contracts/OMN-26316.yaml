@@ -25,7 +25,7 @@ requirements:
     statement: A first request on a dormant contract's HTTP mount, and a first message a client writes straight to the broker to a dormant consumer's topic, wakes that contract through the lazy-start front door; a request for no dormant contract wakes nothing.
     acceptance:
       - id: AC5
-        statement: "AC5: a request under the http_mount prefix of a contract the lane left dormant wakes that contract, mounts its app and is served, once, with no broker; a failed wake answers 503 and leaves the listener up -- falsifier: uv run pytest tests/unit/handlers/http_mount/test_dormant_http_wake_omn26316.py fails at origin/dev with 404 and passes on the PR branch"
+        statement: "AC5: a request under the http_mount prefix of a contract the lane left dormant wakes that contract, mounts its app and is served, once, with no broker; a failed wake answers 503 and leaves the listener up -- falsifier: uv run pytest tests/integration/handlers/http_mount/test_dormant_http_wake_omn26316.py fails at origin/dev with 404 and passes on the PR branch"
       - id: AC6
         statement: "AC6: the first message to a topic a dormant contract subscribes to, written by a client straight to the broker, wakes that contract's consumers; the watch is group-less and reads from the end -- falsifier: uv run pytest tests/unit/handlers/test_lazy_start_bus_watch_omn26316.py fails at origin/dev (the watch module is absent) and passes on the PR branch"
 evidence_requirements:
@@ -34,7 +34,7 @@ evidence_requirements:
     command: uv run --frozen pytest tests/unit/services/test_startup_health_degraded_omn26316.py -q --no-cov -n 0 -p no:randomly
   - kind: tests
     description: The dormant HTTP mount and dormant topic watch regressions of the lazy-start front door.
-    command: uv run --frozen pytest tests/unit/handlers/http_mount/test_dormant_http_wake_omn26316.py tests/unit/handlers/test_lazy_start_bus_watch_omn26316.py -q --no-cov -n 0 -p no:randomly
+    command: uv run --frozen pytest tests/integration/handlers/http_mount/test_dormant_http_wake_omn26316.py tests/unit/handlers/test_lazy_start_bus_watch_omn26316.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -99,7 +99,7 @@ dod_evidence:
     binds_ac: [AC5]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_dormant_http_wake_omn26316.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_dormant_http_wake_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26316-hotwake-bus
     description: "The first message to a dormant consumer's topic wakes its consumers through a group-less watch that reads from the end."

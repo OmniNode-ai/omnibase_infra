@@ -41,7 +41,10 @@ from omnibase_infra.enums.enum_lazy_start_outcome import EnumLazyStartOutcome
 from omnibase_infra.event_bus.model_topic_readiness_config import (
     ModelTopicReadinessConfig,
 )
-from omnibase_infra.handlers.lazy_start_boot_split import StoreLazyStartDormant
+from omnibase_infra.handlers.lazy_start_boot_split import (
+    StoreLazyStartDormant,
+    StoreLazyStartWaker,
+)
 from omnibase_infra.handlers.lazy_start_dormant_topic_watch import (
     LazyStartDormantTopicWatch,
 )
@@ -75,7 +78,7 @@ class HandlerLazyStartIngress:
         self._front_door: LazyStartFrontDoor | None = None
         self._watch_task: asyncio.Task[None] | None = None
         self._watch_stop: Callable[[], Awaitable[None]] | None = None
-        StoreLazyStartDormant.record_waker(self.wake_contract)
+        StoreLazyStartWaker.record(self.wake_contract)
         try:
             self._front_door_of_this_boot()
         except Exception:
@@ -176,7 +179,7 @@ class HandlerLazyStartIngress:
 
     async def shutdown(self) -> None:
         """Stop the dormant-topic watch and forget the recorded wake."""
-        StoreLazyStartDormant.record_waker(None)
+        StoreLazyStartWaker.record(None)
         if self._watch_task is not None:
             await asyncio.gather(self._watch_task, return_exceptions=True)
         if self._watch_stop is not None:

@@ -45,7 +45,10 @@ from omnibase_infra.handlers.http_mount.bounded_body import (
     decoded_chunks,
     replay,
 )
-from omnibase_infra.handlers.lazy_start_boot_split import StoreLazyStartDormant
+from omnibase_infra.handlers.lazy_start_boot_split import (
+    StoreLazyStartDormant,
+    StoreLazyStartWaker,
+)
 from omnibase_infra.models.model_http_mount import ModelHttpMount
 from omnibase_infra.runtime.auto_wiring.discovery import read_contract_yaml
 from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import (
@@ -339,7 +342,7 @@ class AsgiMounts:
             for live, app, _ in self._mounts:
                 if live.path_prefix == mount.path_prefix:
                     return app
-            waker = StoreLazyStartDormant.waker()
+            waker = StoreLazyStartWaker.waker()
             if waker is None:
                 raise self._failure(mount, "the lazy-start ingress is not wired")
             await waker(name)

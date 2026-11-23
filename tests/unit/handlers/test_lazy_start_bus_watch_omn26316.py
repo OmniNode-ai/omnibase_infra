@@ -33,7 +33,10 @@ from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.handlers import handler_lazy_start_ingress as ingress_module
 from omnibase_infra.handlers import lazy_start_dormant_topic_watch as watch_module
 from omnibase_infra.handlers.handler_lazy_start_ingress import HandlerLazyStartIngress
-from omnibase_infra.handlers.lazy_start_boot_split import StoreLazyStartDormant
+from omnibase_infra.handlers.lazy_start_boot_split import (
+    StoreLazyStartDormant,
+    StoreLazyStartWaker,
+)
 from omnibase_infra.handlers.lazy_start_dormant_topic_watch import (
     LazyStartDormantTopicWatch,
 )
@@ -376,7 +379,7 @@ async def test_the_ingress_arms_the_dormant_topics_and_a_first_message_wakes_the
     assert CALLS == [("build", HOUSE), ("attach", HOUSE)]
     await handler.shutdown()
     assert watch.stopped
-    assert StoreLazyStartDormant.waker() is None
+    assert StoreLazyStartWaker.waker() is None
 
 
 @pytest.mark.usefixtures("_ingress_env")

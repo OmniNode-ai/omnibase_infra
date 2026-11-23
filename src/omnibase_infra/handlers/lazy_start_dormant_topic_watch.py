@@ -24,7 +24,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Collection, Mapping
-from typing import Any
 
 from aiokafka.admin import AIOKafkaAdminClient
 from aiokafka.structs import TopicPartition
@@ -83,7 +82,7 @@ class LazyStartDormantTopicWatch:
         try:
             existing = set(await admin.list_topics())
             wanted = sorted(set(logical_of) & existing)
-            described: list[Mapping[str, Any]] = []
+            described: list[Mapping[str, object]] = []
             for start in range(0, len(wanted), request_chunk):
                 described.extend(
                     await admin.describe_topics(wanted[start : start + request_chunk])
@@ -93,7 +92,7 @@ class LazyStartDormantTopicWatch:
         partitions = [
             TopicPartition(str(entry["topic"]), int(partition["partition"]))
             for entry in described
-            if not entry.get("error_code")
+            if not entry.get("error_code") and isinstance(entry["partitions"], list)
             for partition in entry["partitions"]
         ]
         if not partitions:
