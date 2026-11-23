@@ -1,0 +1,101 @@
+schema_version: 1.0.0
+ticket_id: OMN-26463
+title: A runtime-only canary lane on h051 boots every dev candidate, wakes each dormant contract once and writes a PASS or FAIL receipt that the dev roll requires
+summary: >-
+  The 2026-11-22 16:59:29Z dev build wired 54 contracts, then waking node_schedule_run_reducer raised TypeError on consumer_group_handover, the first heartbeat failed, and deploy job 23837926 still ended SUCCESS. This change declares the canary lane as a deploy-agent instance row (canary-h051, its own compose project, container, ports, Redpanda and Postgres, no dev credential), adds the canary node and its handlers that wait for /ready, wake every dormant contract once, hold the heartbeat and write a PASS or FAIL receipt with the first failing line, and adds the receipt read to the dev roll's boot guard prepare, off until the agent's state directory holds a canary-receipts directory. The boot guard's supervision and the dev health gate are not edited: the guard handler gains only the receipt read and loses no line.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26463-runtime-canary
+    statement: A dev candidate is booted alone on a canary lane and judged before the dev roll builds it, and the roll refuses a candidate with no PASS receipt.
+    acceptance:
+      - id: AC1
+        statement: "AC1: one canary runtime container is declared through the deploy agent's instance-lane support with its own container name, ports, consumer group, broker and database, and no dev credential -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -q -k canary_isolation` fails when the canary env carries a dev consumer group or a dev broker"
+      - id: AC2
+        statement: "AC2: a canary run waits for /ready for at most 5 minutes, wakes every dormant contract once and holds the heartbeat for 15 minutes -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -q -k canary_wakes_every_dormant` fails when one dormant contract is left unwoken"
+      - id: AC3
+        statement: "AC3: every canary run writes a PASS or FAIL receipt with timings and the first failing line -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -q -k canary_receipt_first_failing_line` fails when a FAIL receipt omits the line"
+      - id: AC4
+        statement: "AC4: the dev roll refuses a candidate with no PASS receipt, and one with a FAIL receipt -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -q -k roll_refuses_without_canary_pass` fails on origin/dev and passes on the branch"
+      - id: AC5
+        statement: "AC5: a regression test over the boot sequence of job 23837926 fails on the broken boot and passes on the fixed one -- falsifier: `uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit -q -k canary_incident_23837926`"
+evidence_requirements:
+  - kind: tests
+    description: The canary suite and the routing, receipt-lane and instance suites the new row touches.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_runtime_canary_omn26463.py scripts/deploy-agent/tests/unit/test_deploy_lane_routing_omn19506.py tests/ci/test_deploy_lane_verify_route_omn19507.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26463-ac1-isolation
+    description: The committed canary row, overlay and unit share no consumer group, broker, container name or port with dev, and the check fails on a dev group or broker.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_runtime_canary_omn26463.py -k canary_isolation -q
+        cwd: .
+  - id: dod-omn26463-ac2-wakes
+    description: One wake per dormant contract; an unwoken contract fails the run.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_runtime_canary_omn26463.py -k "canary_wakes_every_dormant or canary_ready_budget or canary_heartbeat" -q
+        cwd: .
+  - id: dod-omn26463-ac3-receipt
+    description: A FAIL receipt carries its first failing line and a FAIL without one is refused.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_runtime_canary_omn26463.py -k canary_receipt_first_failing_line -q
+        cwd: .
+  - id: dod-omn26463-ac4-roll-refuses
+    description: The dev roll refuses with no receipt, a FAIL receipt, another candidate's receipt and an unpinned candidate, and admits a PASS receipt; the agent job ends failed before git_pull.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_runtime_canary_omn26463.py -k "roll_refuses_without_canary_pass or roll_admits" -q
+        cwd: .
+  - id: dod-omn26463-ac5-incident
+    description: The reconstructed boot of job 23837926 fails with the TypeError line and the fixed boot passes.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_runtime_canary_omn26463.py -k canary_incident_23837926 -q
+        cwd: .
+  - id: dod-omn26463-gate-untouched
+    description: The boot guard handler gains only the receipt read (its diff against origin/dev removes no line) and the runtime health payload reader is untouched.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          test "$(git diff origin/dev -- src/omnibase_infra/handlers/handler_dev_boot_guard.py | grep -c '^-[^-]')" = 0 && git diff --quiet origin/dev -- scripts/runtime_build/health_payload.py
+        cwd: .
+  - id: dod-omn26463-deploy
+    description: Hosted-runner probe that the committed table declares the canary instance with its own consumer group and container.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import yaml; d = yaml.safe_load(open("config/deploy_lane_routing.yaml")); i = d["instances"]["canary-h051"]; assert i["consumer_group"] == "onex-deploy-agent-canary-h051" and i["lane"]["runtime_container"] == "omninode-canary-runtime"'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_runtime_canary_omn26463.py -k canary_isolation -q
+        cwd: .
+  - id: dod-omn26463-integration-proof
+    description: A canary run writes its receipt to disk and the roll's gate reads that file back, admitting PASS and refusing FAIL.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_runtime_canary_receipt_roundtrip_omn26463.py -q
+        cwd: .
+      - check_type: command
+        check_value: onex validate src/omnibase_infra/nodes/node_runtime_canary_effect
+        cwd: .
