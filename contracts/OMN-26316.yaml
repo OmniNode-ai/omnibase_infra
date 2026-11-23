@@ -143,3 +143,12 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: docker exec omninode-runtime python -c 'from omnibase_infra.runtime.entrypoint_preflight import KernelErrorCapture; assert KernelErrorCapture().cause == ""'
+  - id: dod-omn26316-integration-proof-boot-failure-cause
+    description: "A separate Python process whose kernel logs the dispatch engine's record and exits 1 publishes the boot-failed event, and the event's cause is the no-kernel-error wording; a kernel error logged first stays the cause."
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC10]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_boot_failure_cause_integration_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
