@@ -106,3 +106,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_recreate_audit_omn25912.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_dev_recreate_audit_omn25912.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
