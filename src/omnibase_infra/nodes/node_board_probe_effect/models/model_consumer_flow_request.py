@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.nodes.node_board_probe_effect.contract_topics import (
     consumer_flow_projection_api_base_url,
@@ -45,6 +45,22 @@ class ModelConsumerFlowRequest(BaseModel):
     scratch: Path = Path()
 
     record: Path | None = None
+    # OMN-19812: the SCRAM login the broker requires. The principal names it; the
+    # password is in a mode-600 dotenv file (one ``RPK_PASS=`` line) the workflow
+    # wrote from the dev secret store, handed to ``docker exec --env-file``. Both
+    # or neither: a principal with no file is refused, never run unauthenticated.
+    broker_principal: str | None = Field(
+        default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,62}$"
+    )
+    broker_password_env_file: Path | None = None
+
+    @model_validator(mode="after")
+    def _broker_login_is_whole(self) -> ModelConsumerFlowRequest:
+        if (self.broker_principal is None) != (self.broker_password_env_file is None):
+            raise ValueError(
+                "broker_principal and broker_password_env_file are given together or not at all"
+            )
+        return self
 
     @field_validator("compose_project")
     @classmethod
