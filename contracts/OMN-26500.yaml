@@ -43,7 +43,7 @@ dod_evidence:
         check_value: test -z "$(git diff --name-only origin/dev HEAD -- '*handler_ticket_contract_prerequisite.py' '*test_repository_prose_removed_omn17427.py')"
         cwd: .
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_release_notes_apply_effect/test_release_notes_no_changelog_omn25958.py tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py -q -p no:randomly
+        check_value: uv run pytest tests/unit/nodes/node_release_notes_apply_effect/test_release_notes_no_changelog_omn25958.py tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py tests/unit/nodes/node_release_notes_apply_effect/test_release_cut_changelog_omn26500.py -q -p no:randomly -k "not recorded_cut and not node_reports and not second_cut"
         cwd: .
   - id: dod-omn26500-ac3-before-merge
     description: 'AC3, before the merge: the cut of a gated repository carries CHANGELOG.md and stays inside the paths the gate admits (the recorded gate rule over the staged cut). The lint reading of the rebuilt release pull request is the post-merge entry below.'
