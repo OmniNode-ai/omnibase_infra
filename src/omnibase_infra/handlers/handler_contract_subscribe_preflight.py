@@ -299,6 +299,21 @@ def plan_offset_handover(
     return plan
 
 
+def unwrap_event_bus(event_bus: object) -> object:
+    """The bus a forwarding wrapper (one with a ``wrapped_event_bus`` property) fronts.
+
+    A capability check on the wrapper would read its own type and members, not
+    the bus's (OMN-21753). A bus that is not a wrapper is returned as it is.
+    """
+    # Read the member from the type: a ``__getattr__`` pass-through on the
+    # instance must not be mistaken for a wrapper.
+    while True:
+        member = getattr(type(event_bus), "wrapped_event_bus", None)
+        if not isinstance(member, property) or member.fget is None:
+            return event_bus
+        event_bus = member.fget(event_bus)
+
+
 def supports_offset_handover(event_bus: object) -> bool:
     """Whether a consumer-group handover can be honoured on ``event_bus``."""
     return isinstance(
@@ -696,6 +711,9 @@ class HandlerContractSubscribePreflight:
             TypeError: The bus cannot honour a declaration.
         """
         self._contract_name = contract_name
+        # OMN-21753: a recording wrapper of the lazy-start path forwards every
+        # call, but its capabilities are the wrapped bus's, so ask that bus.
+        event_bus = unwrap_event_bus(event_bus)
         self._event_bus = event_bus
         self._consumer_group = consumer_group
         self._concurrency = concurrency

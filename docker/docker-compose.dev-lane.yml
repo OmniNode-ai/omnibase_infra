@@ -831,6 +831,9 @@ services:
       # committed in the runner, not supplied here — this names a policy, it
       # does not carry migration ids.
       ONEX_MIGRATION_LANE: dev
+      # OMN-26121: the dev lane mounts the gateway on omninode_cloud; the runner creates and
+      # reads back the tenant identity schema only where this is set.
+      ONEX_MIGRATION_GATEWAY_LANE: dev
     labels:
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-15379"

@@ -31,6 +31,10 @@
 -- that holds SUPERUSER or BYPASSRLS, or an effective privilege set that differs
 -- from the nine items after the grants ran, FAILS the run.
 
+-- OMN-26121: the tenant identity schema (create where absent, expires_at, readback) runs first, on
+-- the lanes that carry ONEX_MIGRATION_GATEWAY_LANE; the entry file names a skip everywhere else.
+\ir tenant_identity_gateway_lane.sql
+
 SELECT
     EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'gateway_runtime') AS role_present,
     EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'omninode_cloud') AS db_present
