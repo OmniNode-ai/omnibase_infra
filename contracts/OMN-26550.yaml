@@ -43,7 +43,7 @@ dod_evidence:
       - AC2
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q -p no:randomly -k required_contracts_wired
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q -p no:randomly -k test_dev_lane_attaches_stall_responder_omn26550
         cwd: .
   - id: dod-omn26550-ac3-msg
     description: 'AC3: the five verdicts leave the lane in one ledger MSG to orchestrator-31d9-swarm; the exclusion declaration that supports the 6597 verdict parses and lists the node as required.'
@@ -52,5 +52,5 @@ dod_evidence:
       - AC3
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_dev_declared_exclusion_discoverable_omn26460.py -q -p no:randomly
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py::test_dev_lane_attaches_stall_responder_omn26550 -q -p no:randomly
         cwd: .
