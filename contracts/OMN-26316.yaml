@@ -74,7 +74,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_serving_read_omn26316.py tests/integration/runtime/test_lazy_start_serving_read_composed_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
-  - id: dod-omn26316-integration-proof-lazy-start-serving-read
+  - id: dod-omn26316-integration-proof-lazy-serving
     description: >-
       Post-deploy probe: the rebuilt dev runtime's /ready answer carries supplemental_readiness.contract_attach.lazy_start with a serving_count. It reads the live container, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
     source: manual

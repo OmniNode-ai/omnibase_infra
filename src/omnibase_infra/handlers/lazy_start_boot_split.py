@@ -22,10 +22,7 @@ import os
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from omnibase_infra.models.lazy_start import (
-    ModelLazyStartPolicy,
-    ModelLazyStartServingStatus,
-)
+from omnibase_infra.models.lazy_start import ModelLazyStartPolicy
 from omnibase_infra.models.model_contract_hotload_lane_overlay import (
     ModelContractHotloadLaneOverlay,
 )
@@ -109,18 +106,14 @@ class StoreLazyStartDormant:
         cls._front_door = front_door
 
     @classmethod
-    def serving_status(cls) -> ModelLazyStartServingStatus | None:
-        """The front door's serving set and wake failures, or None before it exists."""
-        if cls._policy is None or cls._front_door is None:
-            return None
-        return cls._front_door.serving_status()
-
-    @classmethod
     def serving_detail(cls) -> dict[str, object]:
-        """The ``lazy_start`` block of the ``/ready`` detail, or nothing (OMN-26316)."""
-        status = cls.serving_status()
-        if status is None:
+        """The ``lazy_start`` block of the ``/ready`` detail, or nothing (OMN-26316).
+
+        Nothing before the policy and the front door exist.
+        """
+        if cls._policy is None or cls._front_door is None:
             return {}
+        status = cls._front_door.serving_status()
         return {"lazy_start": status.model_dump(mode="json")}
 
     @classmethod
