@@ -31,7 +31,6 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
 from omnibase_infra.handlers.handler_release_notes_apply import (
     HandlerReleaseNotesApply,
     apply_release_notes,
-    release_cut_gate_needs_changelog,
 )
 from omnibase_infra.models.model_release_notes_apply_request import (
     ModelReleaseNotesApplyRequest,
@@ -231,7 +230,6 @@ class TestARepoWithoutAGateStillStagesNothing:
         gate.parent.mkdir(parents=True)
         gate.write_text(gate_source, encoding="utf-8")
 
-        assert release_cut_gate_needs_changelog(clone) is False
         target, staged = apply_release_notes(clone, recorded["rendered_entry"])
         assert (target, staged) == (_PR_BODY_TARGET, [])
 
