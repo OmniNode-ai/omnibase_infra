@@ -1,0 +1,53 @@
+schema_version: 1.0.0
+ticket_id: OMN-26550
+title: Five merged layer-0 changes on the dev roll gate (omnimarket 6615, 6610, 6620, 6586, 6597) are each read SEEN RUNNING or NOT RUNNING on the 10:55Z dev build, with one evidence line each
+summary: The dev runtime's lane node exclusion named node_stall_responder_compute, so the runtime-tick schedule that omnimarket 6597 gave it was never attached on dev (the 10:55Z dev runtime log reads 184 contracts left unattached and no subscription line for the node). The pull request removes the node from the dev exclusion and lists it as required, which the overlays boot set must then carry eager.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26550-stall-responder-attached-on-dev
+    statement: The dev lane attaches node_stall_responder_compute, so the runtime-tick schedule its contract declares can fire on the dev runtime.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: each of the five merges has one verdict, SEEN RUNNING or NOT RUNNING, with the evidence line (log line, row or command output) quoted beside it -- falsifier: grep the lane report for five verdict lines each followed by a non-empty evidence line returns fewer than five today'
+      - id: AC2
+        statement: 'AC2: every SEEN RUNNING verdict names the dev log, journal or database read that holds its line, and every NOT RUNNING verdict names the declared caller that was invoked or the missing trigger and its fix -- falsifier: the report''s verdict table read for a row with an empty source cell'
+      - id: AC3
+        statement: 'AC3: the five verdicts are sent to orchestrator-31d9-swarm by one ledger MSG -- falsifier: grep the rolling ledger for the MSG row to=orchestrator-31d9-swarm naming omnimarket 6615 and ticket this one returns zero rows today'
+evidence_requirements:
+  - kind: tests
+    description: The dev lane node exclusion tests, which fail when a required contract is also excluded.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26550-ac1-verdicts
+    description: 'AC1: the NOT RUNNING verdict for omnimarket 6597 (the stall responder is excluded on dev) carries the fix of this pull request; the exclusion test fails when node_stall_responder_compute is required and still excluded, and passes with it attached. The report read (five verdict lines) is the local completion check below.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q -p no:randomly
+        cwd: .
+  - id: dod-omn26550-ac2-sources
+    description: 'AC2: the NOT RUNNING verdict for omnimarket 6597 names the missing trigger attach and its fix (this contract file change plus the overlays boot-set entry); the exclusion test pins the attach.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q -p no:randomly -k required_contracts_wired
+        cwd: .
+  - id: dod-omn26550-ac3-msg
+    description: 'AC3: the five verdicts leave the lane in one ledger MSG to orchestrator-31d9-swarm; the exclusion declaration that supports the 6597 verdict parses and lists the node as required.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_dev_declared_exclusion_discoverable_omn26460.py -q -p no:randomly
+        cwd: .
