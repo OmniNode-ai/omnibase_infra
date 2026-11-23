@@ -73,6 +73,15 @@ fi
 # it under this root and raises at load when it is unset.
 : "${ONEX_WORKSPACE_CONFIG_ROOT:?set ONEX_WORKSPACE_CONFIG_ROOT to the private config root that holds config/lab/lane-census/lane-manifest.yaml}"
 
+# OMN-26593: the work-ledger reader node reads its overlay (the moved_readers
+# listing of this alarm's two reader names) under ONEX_SKILL_OVERLAY_ROOTS; the
+# agent would answer every ledger read as unreadable without it. Interim: the
+# append (onex-ledger append-rows -) still resolves the ledger of record from
+# the unit's environment until OMN-26592 lets the bus append run without a
+# path, so LAB_ALARM_LEDGER_RECORD is rendered into the plist for that append
+# only. The alarm never opens that file; drop the variable with OMN-26592.
+: "${ONEX_SKILL_OVERLAY_ROOTS:?set ONEX_SKILL_OVERLAY_ROOTS to the overlay roots that hold node_work_ledger_reader_effect/overlay.yaml}" "${LAB_ALARM_LEDGER_RECORD:?set LAB_ALARM_LEDGER_RECORD to the ledger of record the append resolves}"
+
 # The brew interpreter, by literal resolved path. launchd runs with a
 # restricted PATH and no login shell, so neither 'python3' nor a
 # $(brew --prefix) expansion resolves inside the agent (Operating Rule 11).
@@ -100,6 +109,8 @@ sed -e "s|@OMNI_HOME@|${OMNI_HOME}|g" \
     -e "s|@ONEX_INFRA_HOST@|${ONEX_INFRA_HOST}|g" \
     -e "s|@ONEX_RUNTIME_SSH_HOST@|${ONEX_RUNTIME_SSH_HOST}|g" \
     -e "s|@ONEX_WORKSPACE_CONFIG_ROOT@|${ONEX_WORKSPACE_CONFIG_ROOT}|g" \
+    -e "s|@ONEX_SKILL_OVERLAY_ROOTS@|${ONEX_SKILL_OVERLAY_ROOTS}|g" \
+    -e "s|@LAB_ALARM_LEDGER_RECORD@|${LAB_ALARM_LEDGER_RECORD}|g" \
     "${TEMPLATE}" > "${TARGET}"
 
 if [[ "${RENDER_ONLY}" == "1" ]]; then
@@ -124,16 +135,13 @@ launchctl list | grep -F "${LABEL}" || echo "     (not listed — the bootstrap 
 echo
 echo "  2. a FRESH entry in its own stdout log, after the first run:"
 echo "     ${OMNI_HOME}/.onex_state/lab-alarm/launchd.out.log"
-echo
 echo "Take that first run THROUGH LAUNCHD now, so there is something to read"
 echo "back -- StandardOutPath/StandardErrorPath only capture a run launchd"
 echo "itself executes; running the python invocation below directly from a"
 echo "shell writes to your terminal instead and leaves the log empty:"
 echo "  launchctl kickstart -k gui/\$(id -u)/${LABEL}"
-echo
 echo "To read the same run's output directly rather than through the log,"
 echo "invoke it exactly as launchd will (same interpreter, same env):"
 echo "  ${BREW_PYTHON} ${OMNI_HOME}/omnibase_infra/scripts/lab_alarm.py \\"
 echo "    --config ${OMNI_HOME}/omnibase_infra/config/lab_alarm.json \\"
-echo "    --state-dir ${OMNI_HOME}/.onex_state/lab-alarm \\"
-echo "    --ledger ${OMNI_HOME}/docs/tracking/ROLLING_WORK_LEDGER.md"
+echo "    --state-dir ${OMNI_HOME}/.onex_state/lab-alarm"
