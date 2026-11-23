@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26473"
+title: "omnibase_infra: the dev effects runtime carries the tenant identity database DSN and the policy maps tenant_identity.database.dsn"
+summary: >-
+  The infra half of the tenant provision effect's placement on the effects runtime profile. The dev-lane overlay's runtime-effects service merges the fail-closed TENANT_IDENTITY_DATABASE_DSN anchor that omninode-runtime already carried, and the dev profile of the runtime policy contract maps the logical secret tenant_identity.database.dsn to that env, so every dev runtime role's rendered resolver config resolves it. No value, host or password is written to the repository; the password stays listed in the dev-lane required env manifest.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26473-effects-tenant-identity-dsn"
+    statement: "The dev lane's effects runtime resolves the logical secret tenant_identity.database.dsn from a fail-closed DSN env declared in the dev overlay."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the dev-lane overlay's runtime-effects service carries TENANT_IDENTITY_DATABASE_DSN as tenant_identity_writer on omninode_cloud, fail-closed, and no base compose file names it -- falsifier: `uv run pytest tests/unit/infra/test_tenant_identity_effects_runtime_omn26473.py -q -k "carries_the_tenant_identity_dsn or declared_once"` fails
+      - id: "AC2"
+        statement: >-
+          AC2: the dev profile maps tenant_identity.database.dsn to TENANT_IDENTITY_DATABASE_DSN, on no other profile, and the committed policy env carries it for the dev effects and main roles -- falsifier: `uv run pytest tests/unit/infra/test_tenant_identity_effects_runtime_omn26473.py tests/ci/test_runtime_policy_contract.py -q` fails
+      - id: "AC3"
+        statement: >-
+          AC3: the failing test was red before the change -- falsifier: the focused test file passes at the commit that holds the test and no overlay or policy change
+evidence_requirements:
+  - kind: "tests"
+    description: "The overlay and policy pins, the committed policy env equal to a fresh render, and the required env manifest pin."
+    command: "uv run --frozen pytest tests/unit/infra/test_tenant_identity_effects_runtime_omn26473.py tests/ci/test_runtime_policy_contract.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn26473-ac1-effects-carries-dsn"
+    description: "runtime-effects resolves TENANT_IDENTITY_DATABASE_DSN through the merged anchor, fail-closed; the declaration is in the overlay once and in no base file."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_tenant_identity_effects_runtime_omn26473.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26473-ac2-policy-maps-secret"
+    description: "The dev profile maps the logical secret, no other profile does, and the committed env carries the mapping on the dev effects and main roles."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_tenant_identity_effects_runtime_omn26473.py tests/ci/test_runtime_policy_contract.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26473-ac3-red-then-green"
+    description: "The focused test file passes at the head; it failed 4 of 8 before the overlay and policy change."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_tenant_identity_effects_runtime_omn26473.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26473-ac2-hosted-deploy-probe"
+    description: "Deploy scope: the pushed head maps tenant_identity.database.dsn in the runtime policy contract, read from GitHub at the checked-out revision so the hosted runner can run it."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "command"
+        check_value: "bash -o pipefail -c 'gh api \"repos/OmniNode-ai/omnibase_infra/contents/contracts/services/runtime_policy.contract.yaml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F \"logical_name: tenant_identity.database.dsn\" >/dev/null'"
+        cwd: "."
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
