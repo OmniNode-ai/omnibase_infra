@@ -49,10 +49,10 @@ dod_evidence:
           grep -F 'BROKER_SASL_ONESHOTS' src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py?ref=omn-26121-stability-sasl-flip-roll' --jq .content | base64 -d | grep 'BROKER_SASL_ONESHOTS' > /dev/null
         cwd: .
   - id: dod-omn26121-integration-proof
-    description: The shipped converge_broker_sasl runs against a real docker executable on PATH; both one-shots run in order and wait to exit 0, a non-zero exit raises, and a lane declaring neither starts nothing.
+    description: The shipped converge_broker_sasl runs against a real docker executable on PATH; both one-shots run in order and wait to exit 0, a non-zero exit raises, and a lane declaring neither starts nothing. It binds no criterion; the hosted proof is dod-omn26121-ac5-flip-order and dod-omn26121-ac6-one-shot-failure.
     source: manual
     execution_scope: local_done_gate
-    binds_ac: [AC5, AC6]
+    binds_ac: []
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/docker/test_broker_sasl_converge_omn26121.py -q --no-cov -n 0
