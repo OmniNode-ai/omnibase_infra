@@ -67,7 +67,14 @@ def _containers(*, healthy: bool = True) -> list[dict]:
 
 @pytest.fixture
 def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
-    state = {"containers": _containers(), "logs": "", "commands": []}
+    state = {
+        "containers": _containers(),
+        "logs": "",
+        "commands": [],
+        "ledger": '{"status": "ok", "rows": []}',
+        "ledger_exit": 0,
+        "ledger_raises": None,
+    }
     project = executor_mod.lane_config_for(EnumRuntimeLane.DEV).compose_project
     state["compose"] = {
         "name": project,
@@ -96,6 +103,13 @@ def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
             output = json.dumps(state["containers"])
         elif argv[:2] == ["docker", "logs"]:
             output = state["logs"]
+        elif argv[0].endswith("/scripts/onex"):
+            # OMN-25942: the post-roll work-ledger proof.
+            if state["ledger_raises"] is not None:
+                raise state["ledger_raises"]
+            return subprocess.CompletedProcess(
+                argv, state["ledger_exit"], state["ledger"], ""
+            )
         elif "config" in argv:
             output = (
                 "\n".join(f"{s} hash-{s}" for s in SERVICES)
@@ -108,6 +122,8 @@ def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
         return subprocess.CompletedProcess(argv, 0, output, "")
 
     monkeypatch.setattr(executor_mod, "_run", run)
+    # OMN-25942: the post-roll proof reads its declaration from the deploy-source clone.
+    monkeypatch.setattr(executor_mod, "REPO_DIR", str(Path(__file__).parents[4]))
     state["deliver_reports"] = guard_mod.deliver_reports
     monkeypatch.setattr(guard_mod, "deliver_reports", Mock())
     return state

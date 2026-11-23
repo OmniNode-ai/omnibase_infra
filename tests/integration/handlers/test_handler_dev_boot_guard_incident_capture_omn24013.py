@@ -22,6 +22,7 @@ from enum import Enum
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
+from unittest import mock
 
 import pytest
 from deploy_agent import executor as executor_module
@@ -444,8 +445,11 @@ def _roll(
             with guard.protect("job-1", NEW_REVISION, lambda _: None):
                 raise RuntimeError(ROLL_FAILURE)
         return
-    with guard.protect("job-1", NEW_REVISION, lambda _: None):
-        pass
+    # The post-roll ledger proof (OMN-25942) has its own tests; this one is about
+    # the incident capture around a passing roll.
+    with mock.patch.object(guard_mod, "_prove_work_ledger_answers"):
+        with guard.protect("job-1", NEW_REVISION, lambda _: None):
+            pass
 
 
 def test_a_failed_roll_announces_manifest_then_start_then_incident(

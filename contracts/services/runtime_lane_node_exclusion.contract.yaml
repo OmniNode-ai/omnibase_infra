@@ -176,7 +176,6 @@ profiles:
       - node_semantic_antipattern_validator_orchestrator
       - node_shared_blocker_escalation_compute
       - node_shim_scanner
-      - node_stall_responder_compute
       - node_standup_draft_check_compute
       - node_standup_retrospective_compute
       - node_stop_only_on_withdrawal_compute
@@ -231,6 +230,9 @@ profiles:
       - node_dev_roll_request_compute
       - node_deploy_job_reading_effect
       - node_model_health_effect
+      # Declares a runtime-tick schedule (every 600 s) in its contract, so the dev lane runs it: a contract with a
+      # schedule is never listed above, and the overlays boot set carries it eager so its tick subscription attaches.
+      - node_stall_responder_compute
       - node_registry_effect
       - environment_health_scanner
     # The paths the lab's delegation checks, the gateway, the scm write nodes, the work ledger,

@@ -29,6 +29,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import NAMESPACE_URL, uuid5
 
+import yaml
 from pydantic import BaseModel, JsonValue, RootModel
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -63,6 +64,11 @@ SERVICE_INSTALLS_ENTRY: Final = (
     "src/omnibase_infra/nodes/node_dev_roll_events_effect/"
     "runtime_dev_service_installs.py"
 )
+# OMN-25942: the post-roll work-ledger proof, run by path from the deploy-source clone.
+WORK_LEDGER_CONTRACT: Final = (
+    "src/omnibase_infra/contracts/work_ledger_query_client.contract.yaml"
+)
+ONEX_ENTRY: Final = "scripts/onex"
 REPORT_SECONDS = 20
 # A full container log (json-file rotation holds up to 30 MB) is read before recovery.
 LOG_READ_SECONDS = 60
@@ -276,6 +282,53 @@ def _checked(
         if argv[:2] == ["docker", "logs"]
         else result.stdout
     )
+
+
+def _prove_work_ledger_answers(execution: ModuleType) -> None:
+    """After a dev runtime recreate verified, prove one ledger read answers (OMN-25942).
+
+    The command line and the bound are ``post_roll_proof`` in
+    ``work_ledger_query_client.contract.yaml`` of the checkout the agent runs from;
+    this module types neither. The read runs from the agent's own lab host and must
+    exit 0 inside the bound with one JSON object. Anything else fails the roll, which
+    ``protect`` turns into the previous image's restore.
+    """
+    contract = Path(execution.REPO_DIR) / WORK_LEDGER_CONTRACT
+    declared = yaml.safe_load(contract.read_text(encoding="utf-8"))["post_roll_proof"]
+    argv, bound = declared["argv"], declared["timeout_s"]
+    if not (
+        isinstance(argv, list)
+        and argv
+        and all(isinstance(part, str) for part in argv)
+        and isinstance(bound, int)
+        and bound > 0
+    ):
+        raise DevBootFailedError("work ledger proof declaration is malformed")
+    command = [
+        f"{execution.REPO_DIR}/{ONEX_ENTRY}",
+        *argv,
+        "--timeout",
+        str(bound),
+    ]
+    try:
+        done = execution._run(command, timeout=bound)
+    except execution.subprocess.TimeoutExpired as exc:
+        raise DevBootFailedError(f"work ledger: no answer within {bound}s") from exc
+    except OSError as exc:
+        raise DevBootFailedError(
+            f"work ledger: {argv[0]} could not start: {_safe(str(exc))}"
+        ) from exc
+    if done.returncode != 0:
+        raise DevBootFailedError(
+            f"work ledger: {argv[0]} exited {done.returncode}: "
+            f"{_safe(done.stderr or done.stdout)[:240]}"
+        )
+    try:
+        answer = json.loads(done.stdout)
+    except ValueError:
+        answer = None
+    if not isinstance(answer, dict):
+        raise DevBootFailedError("work ledger: the answer is not one JSON object")
 
 
 def _safe(text: str) -> str:
@@ -1270,6 +1323,7 @@ class HandlerDevBootGuard:
             raise DevBootFailedError("no last healthy dev revision")
         try:
             yield
+            _prove_work_ledger_answers(self.execution)
             _advance_point(self, job, commit)
             _announce_start(self, job, success=True)
         except Exception as exc:
