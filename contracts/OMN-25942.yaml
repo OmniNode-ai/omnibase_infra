@@ -13,10 +13,15 @@ requirements:
         statement: 'AC-V1: the failed dev job 20cf29c6 is traced to its cause from the recorded job record, container readings and log lines, and the fixture that holds them is replayed -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_compose_settings_match_omn25942.py -q -k "recorded or does_not_roll_back" exits non-zero on dev'
       - id: AC2
         statement: 'AC-V2: the dev boot guard keeps a verified, healthy roll when the compose config hash no longer matches, and the regression built from the recorded job 20cf29c6 readings fails on omnibase_infra dev and passes on the fix -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k compose_settings_match exits 0 on omnibase_infra dev or non-zero on the fix branch'
+  - id: req-omn25942-post-roll-ledger-proof
+    statement: A dev runtime recreate is verified only when one work-ledger query from the agent's lab host answers inside the bound the repository declares; otherwise the roll reports failed and the dev boot guard restores the previous image.
+    acceptance:
+      - id: AC-F2
+        statement: 'AC-F2: the dev boot guard of the deploy agent runs the post_roll_proof command of work_ledger_query_client.contract.yaml under its declared bound after every dev runtime recreate, fails the roll when it does not answer, and types neither value -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_post_roll_ledger_proof_omn25942.py -q fails at the merge base, where the dev boot guard runs no ledger read'
 evidence_requirements:
   - kind: tests
     description: Dev boot guard settings-drift tests.
-    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_compose_settings_match_omn25942.py scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q --no-cov -n 0 -p no:randomly
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_compose_settings_match_omn25942.py scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py scripts/deploy-agent/tests/unit/test_post_roll_ledger_proof_omn25942.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -62,4 +67,21 @@ dod_evidence:
       - check_type: command
         check_value: >-
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "class DevBootSettingsDriftError" in src; assert "def _advance_point" in src'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25942-acf2-post-roll-ledger-proof
+    description: The dev boot guard's post-roll ledger proof fails a dev roll whose ledger read does not answer inside the declared bound, passes one that does, runs the declared command, and is not asked for during recovery.
+    source: manual
+    binds_ac: [AC-F2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_post_roll_ledger_proof_omn25942.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn25942-acf2-deploy
+    description: Hosted-runner probe that reads the committed dev boot guard handler from GitHub at the checked-out commit and requires the post-roll ledger proof and the declaration it reads.
+    source: manual
+    binds_ac: [AC-F2]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "def _prove_work_ledger_answers" in src; assert "post_roll_proof" in src'
         cwd: ${OMNI_HOME}/omnibase_infra
