@@ -40,6 +40,7 @@ __all__: list[str] = [
     "StoreLazyStartDormant",
     "boot_manifest",
     "boot_universe_warm_enabled",
+    "dormant_unattached_topics",
     "lazy_start_policy_of_this_lane",
     "split_boot_manifest",
 ]
@@ -181,3 +182,27 @@ def boot_universe_warm_enabled(environ: Mapping[str, str] | None = None) -> bool
     if source.get("ONEX_BOOT_UNIVERSE_PROVISION", "1") == "0":
         return False
     return lazy_start_policy_of_this_lane(source) is None
+
+
+def dormant_unattached_topics(attached_topics: frozenset[str]) -> frozenset[str]:
+    """Topics of the contracts this boot holds dormant that no one subscribes yet (OMN-26316).
+
+    A dormant contract has no dispatcher and no subscription until a first request
+    wakes it, so a health reader that expects its topics on the live bus registry
+    reports a lane working as designed as unattached (dev lane, 2026-11-23:
+    ``projection_attachment`` DEGRADED at 73/98 projections). Like a topic watched
+    for its first record, these topics are deferred, not missing.
+
+    A topic on ``attached_topics`` is left out: a contract a first request has woken
+    has attached, so a subscription it later loses stays visible. Empty on a lane
+    with no ``lazy_start`` block, where nothing is dormant.
+    """
+    return (
+        frozenset(
+            topic
+            for contract in StoreLazyStartDormant.contracts().values()
+            if contract.event_bus is not None
+            for topic in contract.event_bus.subscribe_topics
+        )
+        - attached_topics
+    )

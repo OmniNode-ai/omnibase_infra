@@ -38,6 +38,7 @@ from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.handlers.kafka_idle_topic_watches import idle_watched_topics
+from omnibase_infra.handlers.lazy_start_boot_split import dormant_unattached_topics
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_consumer_sync_status import (
     ModelConsumerSyncStatus,
@@ -788,7 +789,15 @@ class ServiceRuntimeHealthMonitor:
             # is deferred to that record (OMN-18087), not unattached. Selecting
             # it made every boot read DEGRADED: 11 of 18 projections on the dev
             # effects runtime, 2026-10-31, each on a watched topic.
-            idle = idle_watched_topics()
+            # OMN-26316: a contract the lazy-start boot split holds dormant is
+            # deferred to its first request the way a watched topic is deferred
+            # to its first record, so its topics join the idle set. The live
+            # registry is read first so a woken contract (attached) does not.
+            live_expected_groups = _expected_consumer_groups_from_event_bus(
+                self._event_bus
+            )
+            attached_topics = frozenset(g.topic for g in live_expected_groups)
+            idle = idle_watched_topics() | dormant_unattached_topics(attached_topics)
             projections = tuple(
                 ref
                 for ref in select_projection_contracts(
@@ -805,18 +814,13 @@ class ServiceRuntimeHealthMonitor:
             nonprojection_group_infixes = select_nonprojection_group_infixes(
                 manifest, projection_group_suffixes
             )
-            live_expected_groups = _expected_consumer_groups_from_event_bus(
-                self._event_bus
-            )
-            # OMN-16994: capture the live registry BEFORE it overwrites
-            # ``expected_groups`` below. That override is what hid nineteen
-            # unattached projections for months — a contract that never
-            # subscribed is absent from the registry, so replacing the
-            # manifest-derived expectation set with it makes the missing
-            # consumer stop being expected instead of being reported.
-            attached_topics = frozenset(
-                expected.topic for expected in live_expected_groups
-            )
+            # OMN-16994: ``attached_topics`` (the live registry, read above) is
+            # captured BEFORE it overwrites ``expected_groups`` below. That
+            # override is what hid nineteen unattached projections for months
+            # — a contract that never subscribed is absent from the registry,
+            # so replacing the manifest-derived expectation set with it makes
+            # the missing consumer stop being expected instead of being
+            # reported.
             if live_expected_groups:
                 expected_groups = live_expected_groups
                 subscribe_topics = {expected.topic for expected in live_expected_groups}

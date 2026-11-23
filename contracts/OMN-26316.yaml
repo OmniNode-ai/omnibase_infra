@@ -7,6 +7,11 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn26316-monitor-drops-lazy-dormant
+    statement: The runtime health monitor does not expect a contract the lazy-start boot split holds dormant to be attached, so projection_attachment reads HEALTHY on a lazy-start lane whose dormant contracts are unattached by design.
+    acceptance:
+      - id: AC5
+        statement: "AC5: on a booted lazy-start lane, projection_attachment is HEALTHY with the dormant set present and DEGRADED for the same manifest without the dormant record -- falsifier: uv run pytest tests/unit/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q fails at origin/dev (select_projection_contracts has no lazy_dormant parameter and projection_attachment reads DEGRADED) and passes on the branch"
   - id: req-omn26316-health-answers-off-loop
     statement: The runtime answers /health within the probe timeout while its event loop is blocked, with a typed degraded reason, and no gate is weakened.
     acceptance:
@@ -25,6 +30,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn26316-monitor-drops-lazy-dormant
+    description: >-
+      A lazy-start lane is booted through boot_manifest and the monitor runs over the full manifest: projection_attachment is HEALTHY with the dormant projections unattached, DEGRADED without the dormant record (positive control), and a woken projection that lost a subscription is still reported. The test fails at origin/dev and passes on the branch.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-integration-proof-monitor-lazy-dormant
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime's /health answer no longer carries the projection_attachment finding that names declared projections with no attached consumer. It reads the live container, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: bash -c '! docker exec omninode-runtime curl -s -m 5 http://localhost:8085/health | grep -q "have no attached consumer"'
   - id: dod-omn26316-ac1-measured-startup-block
     description: "The recorded fixture holds the reproduction's main-thread stack excerpt, its UTC read time and the lab host; the PR body quotes it under Measured startup block."
     source: manual
