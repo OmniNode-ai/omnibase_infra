@@ -212,3 +212,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/scripts/test_omn_18083_lane_model_tracks_the_live_overlay.py -q --no-cov
         cwd: .
+  - id: dod-omn26121-integration-proof-readback-lanes
+    description: Overlay file to exported env for an authorized non-dev lane, and refusal for an unauthorized one, through both readback loaders.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: [AC10, AC11]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/chain_canary/test_stability_readback_lanes_omn26121.py -q --no-cov -n 0
+        cwd: .
