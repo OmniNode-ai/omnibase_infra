@@ -181,6 +181,39 @@ instances:
       effects_container: omninode-dev-202-runtime-effects
       postgres_container: omnibase-infra-dev-202-postgres
       broker_container: omnibase-infra-dev-202-redpanda
+  # OMN-26463: the runtime-only canary lane on h051 (hostname hp-gen8). One runtime
+  # container on its own Redpanda (its own topics and consumer groups) and its own
+  # Postgres, no dev, customer or prod credential. It boots a dev candidate alone, wakes
+  # every dormant contract once, holds the heartbeat and writes the PASS or FAIL receipt
+  # the dev roll reads when its lane flag `require_canary_receipt` is on
+  # (nodes/node_runtime_canary_effect). No route names it: a canary run is asked for by
+  # the canary node, never by a merge, so it proves no repository's merge and
+  # `proves` is empty.
+  canary-h051:
+    hostnames: [hp-gen8]
+    consumer_group: onex-deploy-agent-canary-h051
+    lane:
+      compose_overlay: docker/docker-compose.canary.yml
+      compose_project: omnibase-infra-canary
+      postgres_container: omnibase-infra-canary-postgres
+      runtime_container: omninode-canary-runtime
+      health_ports: {main: 62085, effects: 62086}
+      disabled_phases: [gateway-deploy, lab-overlay, onex-api-pin, infisical-seed]
+      disabled_services: [onex-api, cloud-migration-files, cloud-migration, keycloak, infisical]
+      receipt_lane: runtime-canary
+      proves: []
+    verify:
+      receipt_lane: runtime-canary
+      runner_labels: [self-hosted, omnibase-verify, host-h051]
+      deploy_agent_url: http://host.docker.internal:62098
+      main_url: http://host.docker.internal:62085
+      effects_url: http://host.docker.internal:62086
+      projection_url: http://host.docker.internal:62002
+      compose_project: omnibase-infra-canary
+      runtime_container: omninode-canary-runtime
+      effects_container: omninode-canary-runtime
+      postgres_container: omnibase-infra-canary-postgres
+      broker_container: omnibase-infra-canary-redpanda
 routes:
   - runtime_lane: dev
     requester_repository: omnimarket

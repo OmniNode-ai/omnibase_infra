@@ -535,9 +535,9 @@ class DeployAgent:
         self._idle_converge_started_at = datetime.now(UTC)
         self._idle_converge_last_check: float | None = None
         self._idle_converge_attempted: set[str] = set()
-        self._post_failure = load_dev_boot_guard(
-            "nodes.node_deploy_job_reading_effect.runtime_deploy_job_reading"
-        ).post_failure_converge(self, converge_command)
+        reading = load_dev_boot_guard(JOB_READING)
+        self._post_failure = reading.post_failure_converge(self, converge_command)
+        self._failed_head = reading.failed_head_gate(self)
         self._idle_converge_last_verdict: EnumIdleConvergeVerdict | None = None
         self._idle_converge_last_verdicts: dict[str, EnumIdleConvergeVerdict] = {}
         self._migration_converge_last_check: float | None = None
@@ -1337,9 +1337,8 @@ class DeployAgent:
         self._idle_converge_last_check = tick
 
         now = self._idle_converge_now()
-        # OMN-20864: a lane with no running runtime is restored, not followed.
-        # Evaluated first: the converge below reads the running revision out
-        # of that container and can only refuse while it is down.
+        # OMN-20864: a lane with no running runtime is restored, not followed; first,
+        # because the converge below reads that container's revision and can only refuse.
         lane_down = self._maybe_idle_restore(now)
         # OMN-19998: the heartbeat beats whatever the lane does next; a lane
         # that is down runs no revision, so it beats unread.
@@ -1349,10 +1348,8 @@ class DeployAgent:
             return
         decision: ModelIdleConvergeDecision | None = None
         web = _web_source()
-        for repository in (
-            *IDLE_CONVERGE_REPOSITORIES,
-            *((web.repository,) if web else ()),
-        ):
+        followed = (*IDLE_CONVERGE_REPOSITORIES, *((web.repository,) if web else ()))
+        for repository in followed:
             decision = self._decide_idle_converge(repository, now)
             last = self._idle_converge_last_verdicts.get(repository)
             if decision.verdict not in (last, EnumIdleConvergeVerdict.CONVERGE):
@@ -1365,27 +1362,30 @@ class DeployAgent:
         assert decision is not None  # FOLLOWED_REPOSITORIES is never empty
         self._idle_converge_last_verdict = decision.verdict
         if decision.verdict is not EnumIdleConvergeVerdict.CONVERGE:
-            # OMN-19998: the dev lane needs nothing, so the stability lane may
-            # take the tag dev runs.
+            # OMN-19998: dev needs nothing, so the stability lane may take dev's tag.
             self._maybe_stability_follow(now)
             return
         assert decision.head_ref is not None  # CONVERGE always names the head
         # OMN-19507: a converge waits for the load gate like any deploy; its head is
         # not marked attempted, so it runs once the gate opens (OMN-26431: row either way).
         cmd = converge_command()
+        if self._failed_head.refuses(cmd):
+            return  # OMN-26493: that head's last dev job failed; one ledger row per head
         if not self._idle_converge_gate_open(cmd.requested_by):
             self._job_reading("record_deferred", repository, decision.head_ref, now)
             return
         self._idle_converge_attempted.add(decision.head_ref)
-        logger.info(
-            "idle converge: running %s as %s: %s",
-            cmd.correlation_id,
-            cmd.requested_by,
-            decision.detail,
-        )
-        self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
+        self._accept_idle_job("idle converge", logging.INFO, cmd, decision.detail)
         self._job_reading("record_queued", repository, decision, cmd, now)
         self._execute_command(cmd)
+
+    def _accept_idle_job(
+        self, label: str, level: int, cmd: ModelRebuildRequested, detail: str
+    ) -> None:
+        # Log the idle build the agent starts, then record its job as accepted.
+        id_, by = cmd.correlation_id, cmd.requested_by
+        logger.log(level, "%s: running %s as %s: %s", label, id_, by, detail)
+        self.job_store.accept(id_, cmd.model_dump(mode="json"))
 
     def _maybe_stability_follow(
         self, now: datetime
@@ -1492,12 +1492,12 @@ class DeployAgent:
                 ).frozen_reason(now),
             )
         )
-        if decision.verdict is not self._idle_restore_last_verdict:
-            if decision.verdict is not EnumIdleRestoreVerdict.RESTORE:
-                logger.info(
-                    "idle restore: %s (%s)", decision.verdict.value, decision.detail
-                )
-            self._idle_restore_last_verdict = decision.verdict
+        last = self._idle_restore_last_verdict
+        if decision.verdict not in (last, EnumIdleRestoreVerdict.RESTORE):
+            logger.info(
+                "idle restore: %s (%s)", decision.verdict.value, decision.detail
+            )
+        self._idle_restore_last_verdict = decision.verdict
         if not presence.restorable:
             return False
         if decision.verdict is not EnumIdleRestoreVerdict.RESTORE:
@@ -1506,16 +1506,12 @@ class DeployAgent:
             logger.info("idle restore: leaves the recreate window to %s", waiting)
             return True
         cmd = restore_command()
-        if not self._idle_converge_gate_open(cmd.requested_by):
+        if self._failed_head.refuses(cmd) or not self._idle_converge_gate_open(
+            cmd.requested_by
+        ):
             return True
         self._idle_restore_last_attempt = now
-        logger.warning(
-            "idle restore: running %s as %s: %s",
-            cmd.correlation_id,
-            cmd.requested_by,
-            decision.detail,
-        )
-        self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
+        self._accept_idle_job("idle restore", logging.WARNING, cmd, decision.detail)
         self._execute_command(cmd)
         return True
 

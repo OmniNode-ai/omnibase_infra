@@ -27,6 +27,9 @@ from pathlib import Path
 
 import pytest
 
+from scripts.reconcile_verify_movement import FLOOR_SCHEMA
+from tests.scripts.onex_dispatch_fake import install_fake_core_cli
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -70,14 +73,11 @@ class _Workspace:
             + "\n",
             encoding="utf-8",
         )
-        entrypoint = self.venv_bin / "onex"
-        entrypoint.write_text(
-            "#!/usr/bin/env bash\n"
+        install_fake_core_cli(
+            self.venv_bin.parent,
             f'printf "%s\\n" "$*" >> {json.dumps(str(self.argv_log))}\n'
             f"exit {_SENTINEL_OK}\n",
-            encoding="utf-8",
         )
-        entrypoint.chmod(0o755)
 
     @property
     def floor(self) -> Path:
@@ -99,7 +99,7 @@ class _Workspace:
         payload = (
             json.dumps(
                 {
-                    "schema": "onex.workspace.floor.v1",
+                    "schema": FLOOR_SCHEMA,
                     "generated_at": "2026-09-29T00:00:00Z",
                     "host": "test",
                     "omni_home": str(self.root),
@@ -117,7 +117,6 @@ class _Workspace:
     def write_receipt(self) -> None:
         self.receipt.write_text(
             "{\n"
-            '  "schema": "onex.workspace.reconcile.v1",\n'
             '  "generated_at": "2026-09-29T21:00:00Z",\n'
             '  "mode": "repair",\n'
             '  "surfaces": [\n'

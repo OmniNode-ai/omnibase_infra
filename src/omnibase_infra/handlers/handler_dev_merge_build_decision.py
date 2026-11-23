@@ -19,6 +19,8 @@ host composition root (the handler imports no other handler); it declares no top
 * ``result=queued | job=<job id>``
 * ``result=deferred | reason=<gate> | earliest_start=<UTC stamp or unknown>``
 * ``result=refused | reason=<verdict>``
+* ``result=refused | job=<failed job> | reason=failed_head | verdict_class=<class>`` for an
+  idle build of a head whose last dev job failed (OMN-26493)
 * a ``NON_RUNTIME`` sha names no result, job, reason or earliest start: no build follows.
 
 A reader greps ``trigger_sha=<sha>`` and ``src=build-decision``. The request id of the
@@ -119,6 +121,8 @@ class HandlerDevMergeBuildDecision:
                 cells.append(f"job={_token(request.job)}")
             if request.reason:
                 cells.append(f"reason={_token(request.reason)}")
+            if request.verdict_class:
+                cells.append(f"verdict_class={_token(request.verdict_class)}")
             if request.result == "deferred":
                 earliest = (
                     _stamp(request.earliest_start)

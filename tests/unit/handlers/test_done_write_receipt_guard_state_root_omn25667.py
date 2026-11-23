@@ -90,7 +90,8 @@ def test_verifier_invocation_survives_a_cwd_it_cannot_write(
     asyncio.run(guard_module.run_dod_verify_command("OMN-24221", str(cwd), 30.0))
 
     assert len(argvs) == 1
-    result = CliRunner().invoke(run_skill_by_name, argvs[0][2:])
+    argv = argvs[0]
+    result = CliRunner().invoke(run_skill_by_name, argv[argv.index("skill") + 1 :])
     assert result.exit_code == 0, repr(result.exception)
     assert len(reached) == 1
 

@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.scripts.onex_dispatch_fake import install_fake_core_cli
+
 pytestmark = pytest.mark.unit
 
 _WRAPPER_SOURCE = Path(__file__).resolve().parents[2] / "scripts" / "onex"
@@ -48,15 +50,11 @@ class _Workspace:
             json.dumps({"vcs_info": {"vcs": "git", "commit_id": GOOD}}) + "\n",
             encoding="utf-8",
         )
-        entrypoint = root / ".onex-dispatch-venv" / "bin" / "onex"
-        entrypoint.parent.mkdir(parents=True)
-        entrypoint.write_text(
-            "#!/usr/bin/env bash\n"
+        install_fake_core_cli(
+            root / ".onex-dispatch-venv",
             f'printf "%s\\n" "$*" >> {json.dumps(str(self.argv_log))}\n'
             f"exit {_SENTINEL_OK}\n",
-            encoding="utf-8",
         )
-        entrypoint.chmod(0o755)
 
     @property
     def floor(self) -> Path:

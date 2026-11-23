@@ -12,6 +12,13 @@
 -- either direction. It only reads: a warm volume that drifted fails the run loudly and
 -- is never altered.
 --
+-- One rendering is folded before the comparison, on both sides: pg_get_constraintdef prints
+-- a check written as TRIM(BOTH FROM x) as `TRIM(BOTH FROM x)` and one written as btrim(x) as
+-- `btrim(x)`. They are the same function; the warm dev lane carries the first rendering and a
+-- volume created by tenant_identity_schema.sql carries the second, so a comparison that read
+-- either literally failed the other lane's run and left the gateway_runtime grants unapplied.
+-- Nothing else is folded: every other column, constraint and index line must match exactly.
+--
 -- The declared set below was read from the warm dev lane's omninode_cloud catalog
 -- (omni-201, 2026-11-22), in the form each line is rendered here:
 --   <table>|column|<name>|<data_type>|<is_nullable>|<column_default>
@@ -170,7 +177,10 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'omninode_cl
     missing text;
     extra text;
   BEGIN
-    SELECT array_agg(line) INTO actual FROM (
+    declared := ARRAY(SELECT regexp_replace(x, 'TRIM\(BOTH FROM ([a-z_]+)\)', 'btrim(\1)', 'g')
+                        FROM unnest(declared) x);
+    SELECT array_agg(regexp_replace(line, 'TRIM\(BOTH FROM ([a-z_]+)\)', 'btrim(\1)', 'g'))
+      INTO actual FROM (
       WITH t(name) AS (VALUES ('tenants'), ('plan_tiers'), ('plan_entitlements'), ('tenant_plans'),
                               ('tenant_api_keys'), ('tenant_event_outbox'), ('gateway_workflows'),
                               ('gateway_rate_limit_events'))
