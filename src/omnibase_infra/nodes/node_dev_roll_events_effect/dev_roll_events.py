@@ -150,6 +150,21 @@ class DevRollEventsPublisher:
             logger.exception("dev recreate announcement failed %s", FRICTION)
             return False
 
+    def recreate_violation(self, violation: BaseModel) -> bool:
+        """Publish one dev recreate violation; True only when the bus accepted it."""
+        try:
+            payload = violation.model_dump(mode="json")
+            return bool(
+                self._send(
+                    self._topics["dev_recreate_violation"],
+                    f"dev-recreate-violation/{payload['event_id']}",
+                    payload,
+                )
+            )
+        except Exception:
+            logger.exception("dev recreate violation failed %s", FRICTION)
+            return False
+
     def started(self, job_id: str, started_at: datetime, cause: str) -> None:
         self._publish(
             self._topics["dev_runtime_started"],

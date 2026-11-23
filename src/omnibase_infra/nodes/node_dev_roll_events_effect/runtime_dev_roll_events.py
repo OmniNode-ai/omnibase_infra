@@ -108,6 +108,18 @@ def log_byte_cap(execution: ModuleType) -> int:
     return cap
 
 
+def audit_settings_at(repo_root: Path) -> tuple[int, int]:
+    """The recreate reader's announcement lookback and start match tolerance (OMN-25912)."""
+    settings = declaration_at(repo_root)["settings"]
+    if not isinstance(settings, dict):
+        raise RuntimeError("the dev roll events contract declares no settings")
+    lookback = settings.get("audit_announcement_lookback_seconds")
+    tolerance = settings.get("audit_start_match_tolerance_seconds")
+    if not isinstance(lookback, int) or not isinstance(tolerance, int):
+        raise RuntimeError("the dev roll events contract declares no audit settings")
+    return lookback, tolerance
+
+
 def agent_send() -> Callable[[str, str, dict[str, JsonValue]], bool]:
     """The real sender of the running deploy agent: its own producer and topic rule."""
     try:

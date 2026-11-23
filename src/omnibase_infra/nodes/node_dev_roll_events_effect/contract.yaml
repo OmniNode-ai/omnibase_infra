@@ -26,10 +26,18 @@ topics:
   dev_roll_incident: onex.evt.omnimarket.dev-roll-incident.v1
   # OMN-25912: published before each dev recreate, naming the next recreate time and the reason.
   dev_recreate_announced: onex.evt.omnimarket.dev-recreate-announced.v1
+  # OMN-25912: the reader publishes one event per start that broke the one-recreate-a-window rule.
+  dev_recreate_violation: onex.evt.omnimarket.dev-recreate-violation.v1
 # One incident event carries each failing container's log tail, and a broker message must stay
 # under its size limit.
 settings:
   log_byte_cap: 262144
+  # OMN-25912: the reader (dev_recreate_audit.py) consumes dev_runtime_started, dev_roll_manifest
+  # and dev_recreate_announced. An announcement counts for a start when it was published no
+  # more than this long before it; a container start counts as a job's start when its
+  # StartedAt is within this many seconds of a dev_runtime_started event's.
+  audit_announcement_lookback_seconds: 1800
+  audit_start_match_tolerance_seconds: 120
   # OMN-26494: the deploy agent adopts a code ref only after its one-shot self-check exits 0, and
   # returns to the previous ref after this many restarts inside this many seconds. The agent
   # keeps its adoption record (current ref, previous ref, start times, refused refs) in its
@@ -56,7 +64,16 @@ handler_routing:
       event_model:
         name: ModelDevRecreateAnnouncement
         module: omnibase_infra.models.model_dev_recreate_announcement
+    - operation: dev_roll.audit_recreates
+      handler:
+        name: HandlerDevRecreateAudit
+        module: omnibase_infra.nodes.node_dev_roll_events_effect.dev_recreate_audit
+      event_model:
+        name: ModelDevRecreateAuditRequest
+        module: omnibase_infra.models.model_dev_recreate_audit_request
 capabilities:
+  - name: dev_roll.audit
+    description: Read the dev start, manifest and recreate announcement events with the container's own start readings and publish one violation event per start that broke the one-recreate-a-window rule.
   - name: dev_roll.announce
     description: Announce each dev runtime start, each accepted dev roll with its issuer, and each failed roll with its evidence.
 metadata:
