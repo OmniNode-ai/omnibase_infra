@@ -117,6 +117,12 @@ def test_overlay_names_no_host_address_and_no_dev_lane_dependency() -> None:
     assert ":?" in str(services[SERVICE]["image"])
 
 
+def test_active_runtime_packages_come_from_the_policy_file() -> None:
+    """The set is the runtime policy file's (OMN-26405), never a literal list here."""
+    value = _environment()["ONEX_ACTIVE_RUNTIME_PACKAGES"]
+    assert value.startswith("${ONEX_ACTIVE_RUNTIME_PACKAGES:?"), value
+
+
 def test_health_port_binds_loopback_only() -> None:
     services = _load(OVERLAY)["services"]
     assert isinstance(services, dict)

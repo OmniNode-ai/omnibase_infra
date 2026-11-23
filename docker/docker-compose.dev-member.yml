@@ -53,7 +53,8 @@
 #   DEV_MEMBER_KAFKA_BROKER_ALLOWLIST=<that listener's host:> \
 #   ONEX_RUNTIME_LANE=<the lane the dev runtime declares> \
 #   DEV_MEMBER_CONTRACTS_DIR=<infra checkout>/contracts \
-#   docker compose -p dev-member --env-file ~/.omnibase/standby-scm.env \
+#   docker compose -p dev-member --env-file docker/runtime-policy.env \
+#     --env-file ~/.omnibase/standby-scm.env \
 #     -f docker/docker-compose.dev-member.yml up -d
 #
 # Read the membership with the dev bus reader: each of the two groups lists a
@@ -89,7 +90,7 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN comes from the standby env file}
       GH_TOKEN: ${GH_TOKEN:?GH_TOKEN comes from the standby env file}
       KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
-      ONEX_ACTIVE_RUNTIME_PACKAGES: omnibase_infra,omnimarket
+      ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:?runtime policy contract must set ONEX_ACTIVE_RUNTIME_PACKAGES}
       ONEX_CONTRACTS_DIR: /app/contracts
       ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
       ONEX_STATE_ROOT: /app/data/.onex_state
