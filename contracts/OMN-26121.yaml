@@ -149,3 +149,11 @@ dod_evidence:
         check_value: >-
           grep -F 'etc/onex/workspace-config/config/lab' tests/ci/test_stability_lane_declaration_mount_omn26121.py > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/tests/ci/test_stability_lane_declaration_mount_omn26121.py?ref=omn-26121-stability-lane-declaration-mount' --jq .content | base64 -d | grep 'etc/onex/workspace-config/config/lab' > /dev/null
         cwd: .
+  - id: dod-omn26121-ac7-stability-declaration-render
+    description: The rendered stability runtime holds the real lane declaration folder read-only and the render refuses without the variable.
+    source: manual
+    binds_ac: [AC7]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -k declaration -q --no-cov -n 0
+        cwd: .
