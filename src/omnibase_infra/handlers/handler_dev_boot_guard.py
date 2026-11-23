@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import hashlib
+import importlib.util
 import json
 import logging
 import math
@@ -186,6 +187,43 @@ def _roll_events_module(execution: ModuleType) -> ModuleType:
     return execution.load_dev_boot_guard(
         "nodes.node_dev_roll_events_effect.runtime_dev_roll_events"
     )
+
+
+#: The canary gate's modules in import order, loaded from this checkout by path: the
+#: deploy agent's environment carries no ``omnibase_infra`` package (OMN-26463).
+_CANARY_MODULES: Final = (
+    "enums/enum_runtime_canary_verdict.py",
+    "models/model_runtime_canary_candidate.py",
+    "models/model_runtime_canary_gate_decision.py",
+    "models/model_runtime_canary_receipt.py",
+    "models/model_runtime_canary_request.py",
+    "protocols/protocol_runtime_canary_probe.py",
+    "handlers/handler_runtime_canary.py",
+)
+
+
+def _canary_gate() -> ModuleType:
+    root = Path(__file__).resolve().parents[1]
+    for relative in _CANARY_MODULES:
+        name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
+        if name in sys.modules:
+            continue
+        spec = importlib.util.spec_from_file_location(name, root / relative)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Cannot load the runtime canary module: {relative}")
+        sys.modules[name] = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sys.modules[name])
+    return sys.modules["omnibase_infra.handlers.handler_runtime_canary"]
+
+
+def _require_canary_receipt(command: Mapping[str, JsonValue], state_dir: Path) -> None:
+    """OMN-26463: refuse a roll whose candidate has no PASS canary receipt.
+
+    This reads a receipt file and nothing else; the health gate and this guard's boot
+    supervision are as they were. The gate is off until the agent's state directory
+    holds a ``canary-receipts`` directory.
+    """
+    _canary_gate().require_for_roll(command, state_dir)
 
 
 def _load_roll_events(execution: ModuleType) -> ProtocolDevRollEvents:
@@ -1101,6 +1139,7 @@ class HandlerDevBootGuard:
         behaves as it always did and announces nothing.
         """
         if command is not None:
+            _require_canary_receipt(command, self.root.parents[1])
             self._command = command
             if self.events is None:
                 try:

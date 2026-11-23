@@ -1,0 +1,17 @@
+{
+  "_provenance": {
+    "source": "the stability runtime's tenant ingress, POST /v1/workflows with an empty JSON body, read-only: the first capture presents no key and the second a made-up one, so nothing was created and no credential was used",
+    "captured_utc": "2026-11-23T07:43:00Z",
+    "ticket": "OMN-26122"
+  },
+  "response": {
+    "no_key": {
+      "status": 401,
+      "body": {"detail": "Unauthorized", "code": "auth.credential.absent"}
+    },
+    "made_up_key": {
+      "status": 401,
+      "body": {"detail": "Unauthorized", "code": "auth.credential.invalid"}
+    }
+  }
+}

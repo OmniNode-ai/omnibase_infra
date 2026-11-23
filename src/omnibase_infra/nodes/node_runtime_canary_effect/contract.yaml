@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_runtime_canary_effect
+contract_name: node_runtime_canary_effect
+node_name: node_runtime_canary_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Runtime-only canary. Boots one dev candidate alone on its own broker namespace and database, wakes every dormant contract once with a synthetic first request, holds the heartbeat, and writes a PASS or FAIL receipt with timings and the first failing line. The dev roll reads the receipt and refuses a candidate without a PASS.
+input_model:
+  name: ModelRuntimeCanaryRequest
+  module: omnibase_infra.models.model_runtime_canary_request
+  description: The candidate refs and the bounds of one canary run.
+output_model:
+  name: ModelRuntimeCanaryReceipt
+  module: omnibase_infra.models.model_runtime_canary_receipt
+  description: PASS or FAIL with timings and the first failing line.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: run
+      handler: {name: HandlerRuntimeCanary, module: omnibase_infra.handlers.handler_runtime_canary}
+    - operation: gate
+      handler: {name: HandlerRuntimeCanaryGate, module: omnibase_infra.handlers.handler_runtime_canary}
+capabilities:
+  - name: runtime_canary.judge
+    description: Judge a dev candidate on a runtime-only canary and write its receipt.
+  - name: runtime_canary.gate
+    description: Read a candidate's canary receipt for the dev roll.
+metadata:
+  ticket: OMN-26463
+  author: OmniNode Team
+  description: Host-local effect run by the deploy agent's canary instance. No runtime bus dependency and no dev, customer or prod credential.
+  tags: [effect, deployment, canary]

@@ -1,0 +1,160 @@
+{
+  "source": "Replay of the incident of OMN-26493: omnibase_infra dev head 7b25f0ffe92dbd8bf1284348a37f37351cc30b61 (git rev-parse 7b25f0ff in this repository) built three times between 2026-11-20T19:00Z and 23:05Z, twice by agent/idle-restore. The jobs-dev records of 5623655f, 8648de6f and a9ecbe18 were not readable from the lane's host, so these records are built from the checked-in rows of devwindow_recorded_rows_omn26300.json and the shape of recorded_job_ca1533c4_omn26429.json. Each record's provenance names what is recorded and what is synthesized. Nothing here holds a host name, token or path.",
+  "failed_head": "7b25f0ffe92dbd8bf1284348a37f37351cc30b61",
+  "newer_head": "3f614d4f477576a9575ff716016995eb630151e8",
+  "jobs": [
+    {
+      "provenance": "id prefix, requester and start time are from devwindow_recorded_rows_omn26300.json (idle_restore_jobs); the rest of the id, the end time and the error text are synthesized in the shape of recorded_job_ca1533c4_omn26429.json",
+      "job": {
+        "correlation_id": "5623655f-0000-4000-8000-000000000001",
+        "command": {
+          "correlation_id": "5623655f-0000-4000-8000-000000000001",
+          "requested_by": "agent/idle-restore",
+          "scope": "runtime",
+          "runtime_lane": "dev",
+          "build_source": "workspace",
+          "services": [],
+          "git_ref": "origin/dev",
+          "image_ref": null,
+          "image_digest": null,
+          "rollback": null,
+          "open_pr": "",
+          "sibling_tags": {},
+          "requested_at": null,
+          "overlay_ref": ""
+        },
+        "accepted_at": "2026-11-20T19:00:30Z",
+        "current_phase": "publish",
+        "phase_results": {
+          "preflight": "success",
+          "git": "success",
+          "compose_gen": "success",
+          "seed": "success",
+          "runtime": "failed",
+          "core": "skipped",
+          "verification": "skipped",
+          "publish": "success"
+        },
+        "status": "failed",
+        "errors": [
+          "commit=7b25f0ffe92dbd8bf1284348a37f37351cc30b61: RuntimeError: Runtime roll stopped at omninode-runtime: RuntimeError: omninode-runtime health=unhealthy streak=5 FAIL [runtime_degraded] runtime health DEGRADED"
+        ],
+        "not_started": null,
+        "result_publish_pending": false,
+        "completed_at": "2026-11-20T19:58:00Z",
+        "settling_stage": null,
+        "superseded_by_sha": null,
+        "superseded_by_correlation_id": null,
+        "superseded_count": 0,
+        "superseded_correlation_ids": [],
+        "onex_api_delivery": null,
+        "superseded_by_running_build": false,
+        "lineage": null,
+        "verify_recreate": [],
+        "oneshot_reruns": []
+      }
+    },
+    {
+      "provenance": "id prefix, requester and start time are from devwindow_recorded_rows_omn26300.json (idle_restore_jobs); the rest of the id, the end time and the error text are synthesized in the shape of recorded_job_ca1533c4_omn26429.json",
+      "job": {
+        "correlation_id": "8648de6f-0000-4000-8000-000000000002",
+        "command": {
+          "correlation_id": "8648de6f-0000-4000-8000-000000000002",
+          "requested_by": "agent/idle-restore",
+          "scope": "runtime",
+          "runtime_lane": "dev",
+          "build_source": "workspace",
+          "services": [],
+          "git_ref": "origin/dev",
+          "image_ref": null,
+          "image_digest": null,
+          "rollback": null,
+          "open_pr": "",
+          "sibling_tags": {},
+          "requested_at": null,
+          "overlay_ref": ""
+        },
+        "accepted_at": "2026-11-20T21:00:33Z",
+        "current_phase": "publish",
+        "phase_results": {
+          "preflight": "success",
+          "git": "success",
+          "compose_gen": "success",
+          "seed": "success",
+          "runtime": "failed",
+          "core": "skipped",
+          "verification": "skipped",
+          "publish": "success"
+        },
+        "status": "failed",
+        "errors": [
+          "commit=7b25f0ffe92dbd8bf1284348a37f37351cc30b61: RuntimeError: Runtime roll stopped at omninode-runtime: RuntimeError: omninode-runtime health=unhealthy streak=5 FAIL [runtime_degraded] runtime health DEGRADED"
+        ],
+        "not_started": null,
+        "result_publish_pending": false,
+        "completed_at": "2026-11-20T21:57:00Z",
+        "settling_stage": null,
+        "superseded_by_sha": null,
+        "superseded_by_correlation_id": null,
+        "superseded_count": 0,
+        "superseded_correlation_ids": [],
+        "onex_api_delivery": null,
+        "superseded_by_running_build": false,
+        "lineage": null,
+        "verify_recreate": [],
+        "oneshot_reruns": []
+      }
+    },
+    {
+      "provenance": "id, recreate time and the HTTP 503 runtime-health-gate failure are from devwindow_recorded_rows_omn26300.json (pinned_fix_jobs); the requester string, the end time and the error text shape are synthesized",
+      "job": {
+        "correlation_id": "a9ecbe18-db99-45a9-861d-2a7bfad3ae83",
+        "command": {
+          "correlation_id": "a9ecbe18-db99-45a9-861d-2a7bfad3ae83",
+          "requested_by": "operator/pinned-fix/devwindow2-2215",
+          "scope": "runtime",
+          "runtime_lane": "dev",
+          "build_source": "workspace",
+          "services": [],
+          "git_ref": "origin/dev",
+          "image_ref": null,
+          "image_digest": null,
+          "rollback": null,
+          "open_pr": "",
+          "sibling_tags": {},
+          "requested_at": null,
+          "overlay_ref": ""
+        },
+        "accepted_at": "2026-11-20T23:05:23Z",
+        "current_phase": "publish",
+        "phase_results": {
+          "preflight": "success",
+          "git": "success",
+          "compose_gen": "success",
+          "seed": "success",
+          "runtime": "failed",
+          "core": "skipped",
+          "verification": "skipped",
+          "publish": "success"
+        },
+        "status": "failed",
+        "errors": [
+          "commit=7b25f0ffe92dbd8bf1284348a37f37351cc30b61: RuntimeError: Runtime roll stopped at omninode-runtime: RuntimeError: omninode-runtime health=unhealthy FAIL [http_error] health endpoint returned HTTP 503"
+        ],
+        "not_started": null,
+        "result_publish_pending": false,
+        "completed_at": "2026-11-20T23:25:00Z",
+        "settling_stage": null,
+        "superseded_by_sha": null,
+        "superseded_by_correlation_id": null,
+        "superseded_count": 0,
+        "superseded_correlation_ids": [],
+        "onex_api_delivery": null,
+        "superseded_by_running_build": false,
+        "lineage": null,
+        "verify_recreate": [],
+        "oneshot_reruns": []
+      }
+    }
+  ]
+}
