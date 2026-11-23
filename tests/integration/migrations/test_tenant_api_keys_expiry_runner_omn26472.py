@@ -117,7 +117,10 @@ def scratch_postgres() -> Iterator[str]:
         deadline = time.monotonic() + 60.0
         while time.monotonic() < deadline:
             ready = subprocess.run(
-                ["docker", "exec", name, "psql", "-U", "postgres", "-Atc", "select 1"],
+                # TCP, not the socket: the image's init-phase server listens on the
+                # socket only and then shuts down, so a socket probe races it.
+                ["docker", "exec", name, "psql", "-h", "127.0.0.1"]
+                + ["-U", "postgres", "-Atc", "select 1"],
                 capture_output=True,
                 text=True,
                 check=False,
