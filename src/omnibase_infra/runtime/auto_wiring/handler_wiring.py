@@ -133,6 +133,11 @@ from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
 from omnibase_infra.handlers.projection_failure_classification import is_content_failure
+from omnibase_infra.handlers.projection_noop_classification import (
+    ROWS_REFUSED_KEY,
+    is_windowless_consumer_flow_heartbeat,
+    read_attested_noop_reason,
+)
 from omnibase_infra.handlers.topic_migration_dependencies import (
     TOPIC_MIGRATION_EXECUTOR_DEPS,
     required_handler_init_params,
@@ -4219,11 +4224,13 @@ def _bind_handler_owned_projection_database(
     bind(db_urls[binding_refs[0]])
 
 
-#: OMN-18992. The optional field a projection handler uses to say "I wrote
-#: nothing ON PURPOSE, and here is how many rows an ordering guard refused".
-#: Optional by construction: a handler omitting it is read exactly as it is
-#: today, which is what makes this consumer-first across the repo boundary.
-ROWS_REFUSED_KEY: Final[str] = "rows_refused_by_ordering_guard"
+# OMN-26520. The optional field a projection handler uses to say "my contract's
+# filter owes this event no row" (a work-ledger TERMINAL that is not done). An
+# event so reported is not counted as consumed, the way a runtime tick is not
+# (OMN-26419): the apply-divergence dimension grades events that owed a row, so a
+# filtering writer is not read as a silent one. A handler that omits the field,
+# or a writer that raises, is graded exactly as before.
+EVENTS_NOT_APPLICABLE_KEY: Final[str] = "events_not_applicable"
 
 
 #: OMN-18910. The optional field a projection writer uses to report its
@@ -4263,62 +4270,29 @@ def _extract_deltas_dropped_total(result: object) -> int | None:
     return None
 
 
+def _extract_count(result: object, key: str) -> int:
+    """A non-negative integer a handler reported under ``key``, else 0."""
+    value = result.get(key, 0) if isinstance(result, dict) else 0
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _extract_rows_refused(result: object) -> int:
-    """Rows a projection handler DECLINED to write, as its own count.
-
-    OMN-18992. A zero-row return has two causes the runtime cannot tell apart,
-    and it has been logging both as the same ERROR.
-
-    The first is a writer that silently wrote nothing -- a real defect, and the
-    one the error line exists to surface. The second is an ordering guard doing
-    its job: the consumer-flow writer's upsert carries
-    ``OR ingest_sequence <= EXCLUDED.ingest_sequence`` on its conflict arm and a
-    ``RETURNING`` clause, so an older same-node sequence is refused by SQL
-    and legitimately returns no rows. Equality is accepted by this predicate.
-    The guard is deliberate: read-compare-write would race under concurrent
-    consumers and let an older redelivery win.
-
-    The captured 33-minute window contains 26 zero-row ERROR lines, four
-    from the consumer-flow writer. Those bytes do not establish whether SQL
-    refused a row or the heartbeat carried no flow window (B23 correction).
-    Refusals must be established by the real upsert's RETURNING outcome.
-
-    A writer that does not report refusals returns 0 here and is treated
-    exactly as it is today, which is what lets this land in ``omnibase_infra``
-    before any writer in ``omnimarket`` sends the field. The consumer tolerates
-    the absence; the producer follows.
-    """
-    if isinstance(result, dict) and ROWS_REFUSED_KEY in result:
-        try:
-            refused = int(result[ROWS_REFUSED_KEY])
-        except (TypeError, ValueError):
-            return 0
-        return refused if refused > 0 else 0
-    return 0
-
-
-def _is_windowless_consumer_flow_heartbeat(
-    *, contract_name: str, event_type: str, payload: object, result: object
-) -> bool:
-    """Recognize the consumer-flow contract's deliberate empty heartbeat.
-
-    OMN-18992 / B23. This contract projects ``flow_window``, not node liveness.
-    Only its new, explicit zero/refusal result shape can attest the no-op;
-    legacy or malformed results keep the zero-write ERROR. Other heartbeat
-    projections may still owe rows, so event type alone cannot exempt them.
-    """
-    return (
-        contract_name == "projection_consumer_flow"
-        and event_type == "heartbeat"
-        and isinstance(payload, dict)
-        and payload.get("flow_window") is None
-        and isinstance(result, dict)
-        and type(result.get("rows_upserted")) is int
-        and result["rows_upserted"] == 0
-        and result.get("flow_rows") == []
-        and type(result.get(ROWS_REFUSED_KEY)) is int
-        and result[ROWS_REFUSED_KEY] == 0
-    )
+    """Rows a projection handler DECLINED to write, as its own count (OMN-18992)."""
+    # A zero-row return has two causes the runtime cannot tell apart: a writer
+    # that silently wrote nothing (a real defect, the one the error line exists
+    # to surface) and an ordering guard doing its job -- the consumer-flow
+    # writer's upsert carries ``OR ingest_sequence <= EXCLUDED.ingest_sequence``
+    # and a ``RETURNING`` clause, so an older same-node sequence is refused by
+    # SQL and legitimately returns no rows. The guard is deliberate:
+    # read-compare-write would race under concurrent consumers and let an older
+    # redelivery win. Refusals are established by the real upsert's RETURNING
+    # outcome (B23 correction). A writer that does not report refusals returns 0
+    # here and is treated exactly as it is today, which is what lets this land
+    # in ``omnibase_infra`` before any writer in ``omnimarket`` sends the field.
+    return _extract_count(result, ROWS_REFUSED_KEY)
 
 
 def _record_projection_apply(
@@ -4328,6 +4302,7 @@ def _record_projection_apply(
     rows_upserted: int,
     rows_refused: int,
     deltas_dropped_total: int | None = None,
+    not_applicable: int = 0,
 ) -> None:
     """Record one projection dispatch on the process apply accumulator.
 
@@ -4355,7 +4330,7 @@ def _record_projection_apply(
         counters.record_apply(
             projection,
             topic,
-            consumed=1,
+            consumed=0 if not_applicable else 1,
             upserted=max(rows_upserted, 0),
             refused_by_guard=max(rows_refused, 0),
         )
@@ -5223,6 +5198,7 @@ def _make_projection_dispatch_callback(
                 rows_upserted=rows_upserted,
                 rows_refused=_extract_rows_refused(result),
                 deltas_dropped_total=_extract_deltas_dropped_total(result),
+                not_applicable=_extract_count(result, EVENTS_NOT_APPLICABLE_KEY),
             )
             if projected:
                 logger.debug(
@@ -5249,7 +5225,16 @@ def _make_projection_dispatch_callback(
                         event_type,
                         rows_refused,
                     )
-                elif _is_windowless_consumer_flow_heartbeat(
+                elif _extract_count(result, EVENTS_NOT_APPLICABLE_KEY):
+                    logger.info(
+                        "Projection handler filtered the event, no row owed "
+                        "(expected): outcome=EVENT_NOT_APPLICABLE handler=%s "
+                        "topic=%s event_type=%s",
+                        type(handler_instance).__name__,
+                        topic or "unknown",
+                        event_type,
+                    )
+                elif is_windowless_consumer_flow_heartbeat(
                     contract_name=contract_name,
                     event_type=event_type,
                     payload=projection_payload,
@@ -5261,6 +5246,18 @@ def _make_projection_dispatch_callback(
                         "outcome=WINDOW_LESS_HEARTBEAT "
                         "handler=%s topic=%s event_type=%s",
                         handler_name,
+                        topic or "unknown",
+                        event_type,
+                    )
+                elif (
+                    noop := read_attested_noop_reason(result, topic=topic)
+                ) is not None:
+                    logger.info(
+                        "Projection handler wrote zero rows, attested no-op "
+                        "(expected, no terminal owed): outcome=NOOP_ATTESTED "
+                        "reason=%s handler=%s topic=%s event_type=%s",
+                        noop.value,
+                        type(handler_instance).__name__,
                         topic or "unknown",
                         event_type,
                     )

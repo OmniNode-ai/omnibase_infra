@@ -166,6 +166,7 @@ from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
 from omnibase_infra.models.network_binding import load_network_binding_settings
+from omnibase_infra.models.node_announce.model_boot_clock import ModelBootClock
 from omnibase_infra.models.node_announce.model_node_announcement_topic import (
     ModelNodeAnnouncementTopic,
 )
@@ -1824,7 +1825,7 @@ async def bootstrap() -> int:
     _dlq_replay_tracking: ServiceDlqTracking | None = None
     runtime_health_monitor = None  # ServiceRuntimeHealthMonitor | None
     correlation_id = generate_correlation_id()
-    bootstrap_start_time = time.time()
+    bootstrap_start_time = ModelBootClock.note_kernel_start()
 
     try:
         # 1. Determine contracts directory
@@ -2160,12 +2161,11 @@ async def bootstrap() -> int:
 
         # 3.5. Provision platform topics.
         # OMN-13237: the universe pass below is DEMOTED to a best-effort warm of
-        # cross-producer topics — it is no longer load-bearing for THIS runtime's
-        # consumers. The per-contract confirm in Phase B (provision -> ready ->
-        # attach) is the authority that gates consumer attach. The universe warm
-        # can be disabled (ONEX_BOOT_UNIVERSE_PROVISION=0) to prove the
-        # per-contract confirm carries all owned consumers (W2 evidence). The
-        # provisioner instance is reused by the Phase B interleave.
+        # cross-producer topics, no longer load-bearing for THIS runtime's consumers.
+        # The per-contract confirm in Phase B (provision -> ready -> attach) gates
+        # consumer attach and reuses this provisioner. The warm can be disabled
+        # (ONEX_BOOT_UNIVERSE_PROVISION=0) to prove the confirm carries all owned
+        # consumers (W2 evidence).
         topic_provisioner: object | None = None
         _universe_warm_enabled = lazy.boot_universe_warm_enabled()
         if use_kafka:
@@ -3620,7 +3620,7 @@ async def bootstrap() -> int:
             )
 
             # 1. Discover all contracts from installed packages
-            auto_wiring_start = time.time()
+            auto_wiring_start = ModelBootClock.begin("wiring_pass")
             manifest = prebuilt_manifest or discover_contracts(node_catalog_result)
             auto_wiring_manifest_discovered = manifest  # OMN-11198: introspection
             logger.info(
@@ -4045,11 +4045,10 @@ async def bootstrap() -> int:
                         if gateway_secret_resolver_config_path_raw
                         else None
                     ),
-                    # OMN-17510: §3.9 already built both, and it runs earlier in
-                    # this same bootstrap. Passing the application-database pool
-                    # (never registration_service.postgres_pool — that is
-                    # OMNIBASE_INFRA_DB_URL, the wrong database per OMN-16770)
-                    # is what lets the resolver satisfy HandlerSavingsCorrelation
+                    # OMN-17510: §3.9 already built both, earlier in this bootstrap.
+                    # Passing the application-database pool (never registration_service
+                    # .postgres_pool: that is OMNIBASE_INFRA_DB_URL, the wrong database
+                    # per OMN-16770) lets the resolver satisfy HandlerSavingsCorrelation
                     # at Step 2 instead of exhausting the chain and raising.
                     savings_correlation_pool=_savings_correlation_pool,
                     savings_correlation_publisher=_savings_correlation_publisher,
@@ -4071,6 +4070,7 @@ async def bootstrap() -> int:
                 )
 
                 auto_wiring_duration = time.time() - auto_wiring_start
+                ModelBootClock.end("wiring_pass", auto_wiring_start)
 
                 # OMN-9126: in strict mode wire_from_manifest raises, so
                 # total_failed == 0 is guaranteed. In non-strict mode failures
@@ -4971,8 +4971,7 @@ async def bootstrap() -> int:
                     correlation_id,
                     exc_info=True,
                 )
-                wiring_health_checker = None
-                wiring_health_task = None
+                wiring_health_checker = wiring_health_task = None
 
         # 9.5. Introspection event consumer is now started by domain plugins
         # during plugin activation (step 4.5). The ServiceRegistration.start_consumers()
@@ -5393,8 +5392,7 @@ async def bootstrap() -> int:
                         sanitize_error_message(unsub_error),
                         correlation_id,
                     )
-        contract_unsub_registered = None
-        contract_unsub_deregistered = None
+        contract_unsub_registered = contract_unsub_deregistered = None
         contract_unsub_heartbeat = None
 
         if build_loop_db_handler is not None:

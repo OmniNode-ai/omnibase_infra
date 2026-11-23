@@ -49,6 +49,7 @@ import pytest
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
+from tests.scripts.onex_dispatch_fake import install_fake_core_cli
 
 pytestmark = pytest.mark.unit
 
@@ -854,11 +855,7 @@ def _evidence_command_after_install(
         ),
         encoding="utf-8",
     )
-    entrypoint = ws.dispatch_venv / "bin" / "onex"
-    entrypoint.write_text(
-        f"#!/usr/bin/env bash\nexit {_WRAPPER_RAN}\n", encoding="utf-8"
-    )
-    entrypoint.chmod(0o755)
+    install_fake_core_cli(ws.dispatch_venv, f"exit {_WRAPPER_RAN}\n")
     wrapper = ws.infra / "scripts" / "onex"
     wrapper.write_bytes(_WRAPPER_SOURCE.read_bytes())
     wrapper.chmod(0o755)

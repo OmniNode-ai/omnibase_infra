@@ -33,6 +33,7 @@ from omnibase_core.models.events.contract_registration.model_node_announcement i
     ModelNodeAnnouncement,
 )
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.node_announce.model_boot_clock import ModelBootClock
 from omnibase_infra.models.node_announce.model_boot_node_catalog import (
     ModelBootNodeCatalog,
 )
@@ -202,8 +203,19 @@ async def run_boot_catalog(
 
     ``announce`` is boot step 0's announcer, called as ``announce(workload=...)``. A
     stale or unreadable file is logged with every stamp field that differed and the
-    boot takes the announce path it took before the file existed.
+    boot takes the announce path it took before the file existed. The boot summary
+    line (OMN-26561) reads the longest event-loop gap of this phase, measured from here.
     """
+    with ModelBootClock.phase("boot_step0"):
+        return await _run_boot_catalog(workload=workload, announce=announce, path=path)
+
+
+async def _run_boot_catalog(
+    *,
+    workload: str,
+    announce: Callable[..., Awaitable[ModelPackageAnnounceResult]],
+    path: Path | None,
+) -> ModelBootNodeCatalog:
     handler = HandlerPrebuiltManifest()
     result = await asyncio.to_thread(
         handler.handle,

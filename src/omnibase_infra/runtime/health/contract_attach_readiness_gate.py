@@ -67,6 +67,7 @@ from omnibase_infra.event_bus.enum_contract_attach_status import (
 from omnibase_infra.event_bus.model_contract_attach_exclusion import (
     ModelContractAttachExclusion,
 )
+from omnibase_infra.handlers.lazy_start_boot_split import StoreLazyStartDormant
 from omnibase_infra.runtime.enums.enum_contract_attach_gate_phase import (
     EnumContractAttachGatePhase,
 )
@@ -281,9 +282,7 @@ class ContractAttachReadinessGate:
             not_ready_contracts=tuple(not_ready),
             failed_contracts=tuple(failed),
             pending_contracts=tuple(pending),
-            excluded_contracts=tuple(
-                sorted(excluded, key=lambda item: item.contract_name)
-            ),
+            excluded_contracts=tuple(sorted(excluded, key=lambda e: e.contract_name)),
         )
 
     def probe(self) -> tuple[bool, dict[str, object]]:
@@ -306,6 +305,9 @@ class ContractAttachReadinessGate:
         # dropping it here keeps the merged supplemental block single-valued.
         detail.pop("ready", None)
         detail["summary"] = gate_status.summary_line()
+        # OMN-26316: the lazy-start front door's serving set and wake failures,
+        # reported only; ``ready`` is never changed by it.
+        detail.update(StoreLazyStartDormant.serving_detail())
         return gate_status.ready, detail
 
 
