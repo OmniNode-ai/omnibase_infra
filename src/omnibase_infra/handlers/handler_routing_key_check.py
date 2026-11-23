@@ -81,7 +81,7 @@ class HandlerRoutingKeyCheck:
 
     @property
     def handler_category(self) -> EnumHandlerTypeCategory:
-        return EnumHandlerTypeCategory.COMPUTE
+        return EnumHandlerTypeCategory.EFFECT
 
     @staticmethod
     def _refusal(
