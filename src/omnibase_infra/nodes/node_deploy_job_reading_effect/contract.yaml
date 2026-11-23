@@ -51,6 +51,8 @@ settings:
   alarm_owner: swarm-item-lane-OMN-24562
   alarm_job_owner_line: read the job's failing step on the deploy agent's host and open or hand the fix to the integrator lane that owns the pin
   alarm_pin_owner_line: the integrator lane that owns the pin lands or re-registers its unmerged fixes before expires_at; the orchestrator lands the open PRs
+  # OMN-26494: the alarm of an agent that restarted five times in ten minutes after adopting a code ref.
+  alarm_adoption_owner_line: the deploy-agent role reads the agent journal for the adopted ref's crash, fixes it on dev and lets the agent adopt the fix; the agent keeps refusing the adopted ref until dev moves on
   # OMN-26431: the build-decision rows. One STATUS row per dev merge sha decision; its key
   # (repository, sha, result, reason) is held in the agent's state directory, so a decision
   # that repeats on every idle tick writes one row.

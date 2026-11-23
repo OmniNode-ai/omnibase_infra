@@ -315,6 +315,45 @@ class HandlerDeployJobReading:
         ]
         return " | ".join(cells)
 
+    def build_adoption_revert_alarm_row(
+        self, *, adopted_ref: str, previous_ref: str, now: datetime
+    ) -> str:
+        """The alarm row of an agent that restarted in a storm after adopting ``adopted_ref``
+        and returned to ``previous_ref`` (OMN-26494); it names both refs."""
+        cells = _alarm_head(self._settings, "agent-adoption-reverted", now)
+        cells += [
+            f"adopted_ref={_token(adopted_ref)}",
+            f"previous_ref={_token(previous_ref)}",
+            f"owner={_text(self._settings, 'alarm_owner')}",
+            f"owner_line={_text(self._settings, 'alarm_adoption_owner_line')}",
+        ]
+        return " | ".join(cells)
+
+    def handle_adoption_revert(
+        self, *, adopted_ref: str, previous_ref: str, now: datetime
+    ) -> ModelDeployJobReadingResult:
+        """Append the revert's alarm row; the request id is fixed by the two refs, so a repeat
+        of the same storm's revert is a duplicate to the append and writes nothing twice."""
+        row = self.build_adoption_revert_alarm_row(
+            adopted_ref=adopted_ref, previous_ref=previous_ref, now=now
+        )
+        request_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"onex:deploy-adoption-revert:{adopted_ref}:{previous_ref}",
+            )
+        )
+        error = append_ledger_row(self._settings, self._environ, row, request_id)
+        outcome = "unappended" if error else "appended"
+        return ModelDeployJobReadingResult(
+            outcome=outcome,
+            row=row,
+            append_key=request_id,
+            detail=error,
+            alarm_row=row,
+            alarm_outcome=outcome,
+        )
+
     def pin_state_dir(self) -> Path | None:
         """The agent's state directory, from the variable the contract names; ``None`` when unset."""
         value = self._environ.get(
