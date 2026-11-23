@@ -47,9 +47,7 @@ from omnibase_infra.nodes.node_dev_roll_events_effect.dev_recreate_audit import 
 )
 from omnibase_infra.nodes.node_dev_roll_events_effect.dev_roll_events import (
     DevRollEventsPublisher,
-)
-from omnibase_infra.nodes.node_dev_roll_events_effect.runtime_dev_roll_events import (
-    audit_settings_at,
+    audit_settings,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -85,7 +83,7 @@ def _request(
     announcements: Any = (),
     observations: Any = (),
 ) -> ModelDevRecreateAuditRequest:
-    lookback, tolerance = audit_settings_at(REPO_ROOT)
+    lookback, tolerance = audit_settings(NODE / "contract.yaml")
     return ModelDevRecreateAuditRequest(
         policy=_declared_policy(),
         announcement_lookback_seconds=lookback,
@@ -385,7 +383,7 @@ def test_recreate_audit_topic_and_bounds_are_declared_in_the_contract_not_the_co
         "dev_roll_manifest",
         "dev_recreate_announced",
     } <= set(contract["topics"])
-    assert audit_settings_at(REPO_ROOT) == (1800, 120)
+    assert audit_settings(NODE / "contract.yaml") == (1800, 120)
     operations = [h["operation"] for h in contract["handler_routing"]["handlers"]]
     assert "dev_roll.audit_recreates" in operations
     source = AUDIT_SOURCE.read_text(encoding="utf-8")
