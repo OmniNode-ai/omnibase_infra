@@ -29,6 +29,9 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelDiscoveredContract,
 )
+from omnibase_infra.runtime.health.projection_liveness import (
+    select_projection_contracts,
+)
 
 __all__: list[str] = [
     "StoreLazyStartDormant",
@@ -100,8 +103,19 @@ def split_boot_manifest(
     manifest: ModelAutoWiringManifest,
     policy: ModelLazyStartPolicy,
 ) -> tuple[ModelAutoWiringManifest, tuple[ModelDiscoveredContract, ...]]:
-    """The manifest of the boot set, and the dormant contracts, in discovery order."""
-    boot_set = policy.boot_set
+    """The manifest of the boot set, and the dormant contracts, in discovery order.
+
+    A declared projection is always in the boot set (OMN-26520). It consumes its
+    topic continuously and the wake-on-publish gate fires only for a message this
+    process publishes, so a projection fed by another process is never woken: left
+    dormant it consumes nothing and the runtime health reads it as unattached. The
+    projections are the ones the ``projection_attachment`` health dimension
+    selects (``select_projection_contracts``), so the boot set and the health
+    surface cannot disagree about what a projection is.
+    """
+    boot_set = policy.boot_set | {
+        ref.name for ref in select_projection_contracts(manifest)
+    }
     boot = tuple(c for c in manifest.contracts if c.name in boot_set)
     dormant = tuple(c for c in manifest.contracts if c.name not in boot_set)
     return manifest.model_copy(update={"contracts": boot}), dormant
