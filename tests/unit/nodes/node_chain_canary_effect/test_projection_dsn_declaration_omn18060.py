@@ -130,6 +130,50 @@ def test_the_dev_lane_declaration_resolves_to_a_name(tmp_path: Path) -> None:
     assert not looks_like_a_dsn(declaration.dsn_env)
 
 
+def test_a_non_dev_lane_resolves_when_its_block_names_its_authorization(
+    tmp_path: Path,
+) -> None:
+    """OMN-26121: the overlay authorizes a lane the canary is graded on.
+
+    The lane ids live in the overlay, never in this repository, so the lane here
+    is synthetic.
+    """
+    body = f"""
+lanes:
+  lane-a:
+    broker: "broker.example.internal:39092"
+    security_protocol: SASL_PLAINTEXT
+    sasl_mechanism: SCRAM-SHA-256
+    projection_readback:
+      dsn_env: {_DSN_ENV}
+      authorized_by: OMN-26121
+"""
+    declaration = load_lane_projection_readback(_overlay(tmp_path, body), "lane-a")
+
+    assert declaration.lane == "lane-a"
+    assert declaration.dsn_env == _DSN_ENV
+    assert "lane-a" not in PROJECTION_READBACK_LANES
+
+
+@pytest.mark.parametrize(
+    "authorized_by", ["''", "'   '", "[OMN-26121]", "true"], ids=str
+)
+def test_a_non_dev_lane_whose_authorization_is_not_a_ticket_name_is_refused(
+    tmp_path: Path, authorized_by: str
+) -> None:
+    body = f"""
+lanes:
+  lane-a:
+    broker: "broker.example.internal:39092"
+    security_protocol: SASL_PLAINTEXT
+    projection_readback:
+      dsn_env: {_DSN_ENV}
+      authorized_by: {authorized_by}
+"""
+    with pytest.raises(ValueError, match="may not declare a projection readback"):
+        load_lane_projection_readback(_overlay(tmp_path, body), "lane-a")
+
+
 def test_only_the_name_is_exported_to_the_workflow(tmp_path: Path) -> None:
     """The exported env carries a NAME and nothing that could be a value.
 
