@@ -186,7 +186,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
-  - id: dod-omn19812-deploy-verify-runner-infisical-names-shipped
+  - id: dod-omn19812-deploy-runner-infisical-shipped
     description: The runners are rolled from the deployed copy of docker-compose.runners.yml, so the merged head's compose file carries the name on all three verify runners.
     source: manual
     checks:
