@@ -19,7 +19,9 @@ changes, so a red here always points at one clause.
 from __future__ import annotations
 
 import json
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -473,3 +475,77 @@ def test_a_scan_that_finds_the_terminal_returns_its_payload(
     mine = json.dumps({"payload": {"correlation_id": "cid-1", "provider": "local"}})
     seen = _scan(monkeypatch, [[mine.encode()]], end=1)
     assert seen.payload == {"correlation_id": "cid-1", "provider": "local"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("status", "body", "expected"),
+    [
+        (
+            503,
+            {"detail": "rate limiter temporarily unavailable"},
+            "submit answered 503: {'detail': 'rate limiter temporarily unavailable'}",
+        ),
+        (503, "upstream connect error", "submit answered 503: upstream connect error"),
+        (503, "", "submit answered 503: no body"),
+        (503, "x" * 500, "submit answered 503: " + "x" * 200),
+    ],
+)
+def test_a_refused_submission_records_the_gateway_detail_not_only_the_status(
+    monkeypatch: pytest.MonkeyPatch, status: int, body: Any, expected: str
+) -> None:
+    monkeypatch.setattr(probe, "_http", lambda *a, **k: (status, body, None))
+    submitted = probe._submit("http://lane", {"prompt": "p"}, api_key="k", timeout=1.0)
+    assert submitted.submit_status == status
+    assert submitted.error == expected
+
+
+@pytest.mark.unit
+def test_an_accepted_submission_carries_no_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        probe, "_http", lambda *a, **k: (202, {"workflow_id": "wf-1"}, None)
+    )
+    submitted = probe._submit("http://lane", {"prompt": "p"}, api_key="k", timeout=1.0)
+    assert (submitted.workflow_id, submitted.error) == ("wf-1", None)
+
+
+def _replay_once(status: int, body: Any) -> tuple[HTTPServer, str]:
+    """A loopback server that answers one request with the recorded bytes."""
+    raw = json.dumps(body).encode("utf-8")
+
+    class _Replay(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.send_response(status)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *args: Any) -> None:
+            return None
+
+    server = HTTPServer(("127.0.0.1", 0), _Replay)
+    threading.Thread(target=server.handle_request, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_port}"
+
+
+@pytest.mark.unit
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/ci_live_contact/c16_stability_gateway_refusal_omn26122.json"
+)
+@pytest.mark.parametrize("capture", ["no_key", "made_up_key"])
+def test_the_recorded_gateway_refusal_reaches_the_probe_record(
+    recorded_response: dict[str, Any], capture: str
+) -> None:
+    """The stability ingress's real refusal bodies (2026-11-23) are kept, not dropped."""
+    recorded = recorded_response["response"][capture]
+    server, url = _replay_once(recorded["status"], recorded["body"])
+    try:
+        submitted = probe._submit(url, {"prompt": "p"}, api_key="k", timeout=5.0)
+    finally:
+        server.server_close()
+    assert submitted.submit_status == recorded["status"]
+    assert submitted.error is not None
+    assert recorded["body"]["code"] in submitted.error
