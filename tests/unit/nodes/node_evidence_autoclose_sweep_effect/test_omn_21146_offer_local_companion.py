@@ -172,7 +172,8 @@ class _Gateway:
         self.calls.append(args)
         if self._error:
             return None, self._error
-        verb, target = args[2], args[3]
+        scm = args.index("scm")
+        verb, target = args[scm + 1], args[scm + 2]
         if verb == "pr-heads":
             return {
                 "outcome": "completed",
@@ -405,7 +406,7 @@ async def test_the_gateway_resolves_a_ticket_named_companion_the_clone_lacks(
     result = await handler.handle(_request())
 
     assert result.outcomes[0].companion_pr_number == 13821
-    verbs = [call[2] for call in gateway.calls]
+    verbs = [call[call.index("scm") + 1] for call in gateway.calls]
     assert verbs == ["pr-heads", "pr-view"], (
         "only the PR whose branch names the ticket is read, and 13822 is not"
     )
@@ -521,7 +522,7 @@ async def test_no_companion_and_no_product_contract_refuses_with_a_typed_reason(
     assert result.tickets_flipped == 0
     assert verified == []
     assert linear.reads == []
-    assert [call[2] for call in gateway.calls] == ["pr-heads"], (
+    assert [call[call.index("scm") + 1] for call in gateway.calls] == ["pr-heads"], (
         "the gateway was asked once and found nothing"
     )
 
