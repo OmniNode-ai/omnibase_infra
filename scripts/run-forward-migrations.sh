@@ -91,6 +91,16 @@
 #     which only the dev/lab project loads — deliberately NOT set in
 #     docker-compose.infra.yml, which every lane overlay merges. See the
 #     LANE-SCOPED FENCE RELEASE block below.
+#   ONEX_MIGRATION_GATEWAY_LANE (default: unset = the gateway identity schema is skipped, OMN-26121).
+#     Lane indicator for the tenant identity schema seams under docker/migrations/seams/.
+#     Recognised values are `dev` and `stability_test`, the two lanes that mount the gateway
+#     on omninode_cloud; unset or unknown skips them by name. It is read by
+#     tenant_identity_gateway_lane.sql (psql \getenv), which gateway_runtime_grants.sql
+#     includes first, so the create step, the expiry seam and the readback run before the
+#     grants, inside the slot-guarded grant seam and never under a slot. Set in
+#     docker-compose.dev-lane.yml and the stability lane overlay only, never in
+#     docker-compose.infra.yml, the catalog or the collaborator lane (its cloud one-shot
+#     runs after this runner).
 
 set -e
 
