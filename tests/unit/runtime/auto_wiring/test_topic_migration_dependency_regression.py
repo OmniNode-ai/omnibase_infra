@@ -79,5 +79,5 @@ def test_required_migration_services_are_still_materialized(
         container=None,
         ownership_query=None,
     )
-    build.assert_called_once_with()
+    build.assert_called_once_with(None)
     assert result == {"MigrationExecutor": services}

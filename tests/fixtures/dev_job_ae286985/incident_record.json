@@ -1,0 +1,12 @@
+{
+  "job_id": "ae286985-a0a0-41b1-96a8-da86f26d2e65",
+  "lane": "dev",
+  "at": "2026-11-22T13:42:29Z",
+  "commit": "127c7fb249cb1fcb3466e0ccac9331f18fe74956",
+  "sibling_commits": {
+    "omnimarket": "9d2b0129a7e5"
+  },
+  "error": "RuntimeError: Runtime roll stopped at omninode-runtime: compose up timed out; omninode-runtime health=starting streak=4 ... FAIL [runtime_degraded] runtime health DEGRADED - discovery_errors: 1 contract(s) failed to load: compliance_orchestrator",
+  "rolled_back_at": "2026-11-22T13:42:49Z",
+  "provenance": "The error, at, commit and rollback time are the incident record's own values as quoted in the OMN-26460 lane brief; the record file lives on the deploy agent host and was not readable from the lane host, so no other field is copied."
+}

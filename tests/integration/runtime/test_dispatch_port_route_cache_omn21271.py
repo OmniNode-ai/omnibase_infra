@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_infra.contracts.contract_read_cache import ContractReadCache
 from omnibase_infra.enums.enum_consumer_group_purpose import EnumConsumerGroupPurpose
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
@@ -69,16 +70,22 @@ class _FakeRuntimeBus:
 
 
 class _ContractReadCounter:
-    """Counts ``Path.read_text`` calls on files named ``contract.yaml``."""
+    """Counts real contract reads: ``Path.read_text`` calls on ``contract.yaml``
+    and the parses :class:`ContractReadCache` ran from disk (OMN-26359)."""
 
     def __init__(self) -> None:
         self.paths: list[str] = []
         self._lock = threading.Lock()
+        self._parse_runs_at_start = ContractReadCache.parse_runs()
 
     @property
     def count(self) -> int:
         with self._lock:
-            return len(self.paths)
+            return (
+                len(self.paths)
+                + ContractReadCache.parse_runs()
+                - self._parse_runs_at_start
+            )
 
     def record(self, path: Path) -> None:
         with self._lock:
@@ -87,6 +94,9 @@ class _ContractReadCounter:
 
 @pytest.fixture
 def read_counter(monkeypatch: pytest.MonkeyPatch) -> _ContractReadCounter:
+    # OMN-26359: contract YAML is memoised per process, so an earlier test's
+    # discovery would leave the first resolution with no file read to count.
+    ContractReadCache.clear()
     counter = _ContractReadCounter()
     original = pathlib.Path.read_text
 
@@ -134,6 +144,9 @@ async def test_second_resolution_reads_no_real_contract(
     first = await port._resolved_routes()
     reads_after_first = read_counter.count
     assert reads_after_first > 0
+    # The route cache, not the content memo, must be what spares the second
+    # resolution: empty the memo so any real re-read would register.
+    ContractReadCache.clear()
 
     second = await port._resolved_routes()
 
