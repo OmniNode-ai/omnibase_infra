@@ -109,6 +109,10 @@ async def test_ingress_wiring_installs_the_wake_on_the_runtime_bus(
     )
     monkeypatch.setenv("ONEX_SKILL_OVERLAY_ROOTS", str(tmp_path / "overlays"))
     monkeypatch.setenv("ONEX_RUNTIME_LANE", "dogfood")
+    # The lazy wake now judges the runtime bus itself (OMN-21753), so the version
+    # handover (OMN-19998) runs as it does for a contract wired at boot; this
+    # stand-in has no transport to list groups on.
+    monkeypatch.setenv("ONEX_RUNTIME_VERSION_HANDOVER", '{"enabled": false}')
     StoreLazyStartDormant.clear()
 
     discovered = discover_contracts_from_paths([NODE_CONTRACT, DORMANT_CONTRACT])
