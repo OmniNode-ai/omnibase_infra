@@ -68,12 +68,16 @@ where a name belongs is a red gate rather than a committed credential, and
 ``dsn_shaped_argv_flags`` refuses a DSN that reached the process through the
 command line whatever flag carried it.
 
-The declaration is dev-lane-only, enforced here rather than trusted: the
-chain canary publishes a live delegation and then reads a database, and
-``chain-canary.yml``'s own header scopes both halves to the dev lane. A
-projection DSN declared against ``stability``, ``judge`` or ``prod`` would
-point the probe at a lane it has no authorization to read, so it raises
-instead of resolving.
+The declaration is dev-lane-only unless the overlay's block names its
+authorization, enforced here rather than trusted: the chain canary publishes a
+live delegation and then reads a database, and ``chain-canary.yml`` grades the
+lane its overlay resolves (OMN-21485). A block on any other lane resolves only
+when it carries an ``authorized_by`` entry naming the ticket that authorizes
+that lane's read-only reader (OMN-26121); without one a projection DSN declared
+against ``stability``, ``judge`` or ``prod`` would point the probe at a lane it
+has no authorization to read, so it raises instead of resolving. The lane ids
+live in the overlay, never in this module: a public repository carries no lab
+lane id (the public-repo hygiene gate's ``lab-config`` class).
 """
 
 from __future__ import annotations
@@ -288,13 +292,20 @@ def lane_transport_env(transport: ModelLaneTransport) -> dict[str, str]:
 
 # --- Declared projection DSN, by NAME (OMN-18060) -----------------------------
 
-#: The only lane a projection readback may be declared on. The chain canary
-#: publishes a live delegation and then reads a database; ``chain-canary.yml``
-#: scopes both halves to the dev lane (compose project ``omnibase-infra``, the
-#: pre-authorized fully-mutable test platform). stability-test, judge and prod
-#: are read-only surfaces this probe has no ticket for, so a declaration
-#: against one of them is refused rather than honoured.
+#: The only lane a projection readback may be declared on with no further
+#: authorization. The chain canary publishes a live delegation and then reads a
+#: database; the dev lane (compose project ``omnibase-infra``) is the
+#: pre-authorized fully-mutable test platform. Any other lane is a read-only
+#: surface: a declaration against one is refused unless its block carries an
+#: ``authorized_by`` entry (OMN-26121), and is otherwise refused rather than
+#: honoured.
 PROJECTION_READBACK_LANES: frozenset[str] = frozenset({"dev"})
+
+#: The block entry that authorizes a non-dev lane's readback: the id of the
+#: ticket that put a least-privilege read-only reader on that lane. A NAME of a
+#: ticket, never a credential. Per block, so widening one leg is a deliberate
+#: edit to that leg's declaration and never a side effect of the other's.
+_AUTHORIZED_BY_KEY = "authorized_by"
 
 #: Env var the workflow exports the resolved NAME under. Deliberately distinct
 #: from the name it points at: this one carries a NAME and may be echoed, the
@@ -415,6 +426,20 @@ def dsn_shaped_argv_flags(argv: Sequence[str]) -> tuple[str, ...]:
     return tuple(offenders)
 
 
+def _block_is_authorized(lanes: object, lane_key: str, block_key: str) -> bool:
+    """Whether ``lane_key``'s ``block_key`` block names its authorizing ticket."""
+    if not isinstance(lanes, dict):
+        return False
+    declaration = lanes.get(lane_key)
+    if not isinstance(declaration, dict):
+        return False
+    block = declaration.get(block_key)
+    if not isinstance(block, dict):
+        return False
+    authorized_by = block.get(_AUTHORIZED_BY_KEY)
+    return isinstance(authorized_by, str) and bool(authorized_by.strip())
+
+
 def _load_lane_dsn_declaration(
     overlay_path: Path,
     lane: str,
@@ -446,17 +471,6 @@ def _load_lane_dsn_declaration(
         raise ValueError(message)
     lane_key = lane.strip()
 
-    if lane_key not in allowed_lanes:
-        message = (
-            f"lane {lane_key!r} may not declare a {noun}; only "
-            f"{sorted(allowed_lanes)} may. The chain canary "
-            "publishes a live delegation and then reads a database, and both "
-            "halves are dev-lane-only by the workflow's own declared scope. "
-            "stability-test, judge and prod are read-only surfaces this probe "
-            "has no authorization to read."
-        )
-        raise ValueError(message)
-
     try:
         raw: object = yaml.safe_load(overlay_path.read_text(encoding="utf-8"))
     except OSError as exc:
@@ -471,6 +485,19 @@ def _load_lane_dsn_declaration(
         raise ValueError(message)
 
     lanes = raw.get("lanes")
+    if lane_key not in allowed_lanes and not _block_is_authorized(
+        lanes, lane_key, block_key
+    ):
+        message = (
+            f"lane {lane_key!r} may not declare a {noun} without an "
+            f"{_AUTHORIZED_BY_KEY!r} entry naming the ticket that authorizes "
+            f"its read-only reader; only {sorted(allowed_lanes)} may declare "
+            "one bare. The chain canary publishes a live delegation and then "
+            "reads a database, and a lane it has no authorization to read "
+            "stays refused rather than honoured."
+        )
+        raise ValueError(message)
+
     if not isinstance(lanes, dict) or lane_key not in lanes:
         declared = sorted(lanes) if isinstance(lanes, dict) else []
         message = (
