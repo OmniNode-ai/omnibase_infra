@@ -47,11 +47,11 @@ dod_evidence:
         cwd: .
   - id: dod-omn26511-ac6-existing-tests-unchanged
     description: >-
-      The three existing resolver tests (OMN-19811, OMN-20410, OMN-26122) are not edited by this change and pass against the resolver with the line added, so no wait assertion is deleted or loosened.
+      The three existing resolver tests (OMN-19811, OMN-20410, OMN-26122) are not edited by this change and pass against the resolver with the line added, so no wait assertion is deleted or loosened. The same command also runs the test that holds the line's idle and queued readings to the busy test's verdict, so the command fails at the merge base (where the resolver has no wait-set line) and passes at the head; the three existing files alone pass at both.
     source: manual
     binds_ac:
       - AC6
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_resolve_lab_lane_deploy_wait_omn19811.py tests/ci/test_resolve_lab_lane_wait_while_busy_omn20410.py tests/ci/test_resolve_lab_lane_other_lane_job_omn26122.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/ci/test_resolve_lab_lane_deploy_wait_omn19811.py tests/ci/test_resolve_lab_lane_wait_while_busy_omn20410.py tests/ci/test_resolve_lab_lane_other_lane_job_omn26122.py tests/ci/test_resolve_lab_lane_wait_set_line_omn26511.py::test_an_idle_agent_and_a_queued_command_read_as_the_busy_test_does -q --no-cov -n 0 -p no:randomly
         cwd: .
