@@ -55,6 +55,9 @@ from omnibase_infra.validation.models.model_application_database_relation_state 
 from omnibase_infra.validation.models.model_application_database_tenant_isolation_evidence import (
     ModelApplicationDatabaseTenantIsolationEvidence,
 )
+from omnibase_infra.validation.validator_database_object_schemas import (
+    database_object_schemas,
+)
 
 CANONICAL_TENANT_PREDICATE = "tenant_id = current_setting('app.tenant_id', true)::uuid"
 
@@ -2226,28 +2229,18 @@ def load_application_database_ownership_identities(
                 source_path=path,
             )
         for database_object in manifest.database_objects:
-            if database_object.database_ref is None or database_object.schema is None:
-                continue
-            if database_object.owner_declaration != authority:
-                raise ValueError(
-                    f"{path}: catalog object {database_object.name!r} owner "
-                    f"{database_object.owner_declaration!r} conflicts with manifest "
-                    f"authority {authority!r}"
-                )
             kind = EnumApplicationInventoryObjectKind(database_object.kind.value)
-            if kind in routine_kinds and database_object.function_signature is None:
-                raise ValueError(
-                    f"{path}: routine object {database_object.name!r} requires an "
-                    "exact function_signature"
+            for schema in database_object_schemas(
+                database_object, manifest, authority=authority, path=path
+            ):
+                record(
+                    schema=schema,
+                    name=database_object.name,
+                    kind=kind,
+                    function_signature=database_object.function_signature,
+                    owner=database_object.owner_declaration,
+                    source_path=path,
                 )
-            record(
-                schema=database_object.schema,
-                name=database_object.name,
-                kind=kind,
-                function_signature=database_object.function_signature,
-                owner=database_object.owner_declaration,
-                source_path=path,
-            )
 
     duplicate_declarations = {
         identity: owners
