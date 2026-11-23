@@ -118,14 +118,28 @@ class TestIntrospectionCallersAreNotBearerOnly:
 #: An exact allowlist, like KNOWN_PUBLIC_CLIENT_IDS above and for the same
 #: reason: a second exception must be a deliberate, reviewed edit to THIS list
 #: rather than a field someone adds to a roster entry and nobody notices.
-CLIENTS_ALLOWED_AN_ENVIRONMENT_OVERRIDE = frozenset({"onex-api"})
+#: OMN-23298 adds the three browser clients, whose staging realm serves only
+#: the staging hosts.
+CLIENTS_ALLOWED_AN_ENVIRONMENT_OVERRIDE = frozenset(
+    {"onex-api", "omniweb", "omnidash-spa", "onex-customer"}
+)
 
-#: Every field an override block may carry. Two change the client and two
-#: document it. Anything else is refused rather than silently ignored --
+#: Every field an override block may carry. Two document it and the rest
+#: change the client: the onex-api secret shape (OMN-18582) and the staging
+#: hosts (OMN-23298). Anything else is refused rather than silently ignored --
 #: a typo'd key would otherwise read as "no override" and ship the base shape
 #: to production, which is the outcome the override exists to prevent.
 _ALLOWED_OVERRIDE_KEYS = frozenset(
-    {"bearerOnly", "serviceAccountsEnabled", "consumerSecretEnv", "reason", "ticket"}
+    {
+        "bearerOnly",
+        "serviceAccountsEnabled",
+        "consumerSecretEnv",
+        "redirectUris",
+        "webOrigins",
+        "attributes",
+        "reason",
+        "ticket",
+    }
 )
 
 

@@ -114,12 +114,21 @@ class TestTheRosterDeclaresTheException:
         assert prod.get("ticket") == "OMN-18582"
         assert isinstance(prod.get("reason"), str) and prod["reason"].strip()
 
-    def test_onex_api_is_the_only_client_carrying_an_override(self) -> None:
-        """One declared exception. A second needs its own deliberate change."""
-        carriers = [
-            c["clientId"] for c in _roster_clients() if "environmentOverrides" in c
-        ]
-        assert carriers == ["onex-api"]
+    def test_the_declared_overrides_are_exactly_these(self) -> None:
+        """Each exception is deliberate: onex-api on prod (OMN-18582) and the
+        three browser clients on staging (OMN-23298). Another one needs its
+        own change here."""
+        declared = {
+            c["clientId"]: sorted(c["environmentOverrides"])
+            for c in _roster_clients()
+            if "environmentOverrides" in c
+        }
+        assert declared == {
+            "onex-api": ["prod"],
+            "omniweb": ["staging"],
+            "omnidash-spa": ["staging"],
+            "onex-customer": ["staging"],
+        }
 
 
 @pytest.mark.unit
@@ -147,7 +156,7 @@ class TestApplyingAnOverride:
 
     def test_untouched_clients_are_unchanged_in_both_environments(self) -> None:
         base = {c["clientId"]: c for c in _roster_clients()}
-        for environment in ("dev", "prod"):
+        for environment in ("dev", "prod", "staging"):
             resolved = {
                 c["clientId"]: c
                 for c in _mod().apply_environment_overrides(
@@ -155,9 +164,14 @@ class TestApplyingAnOverride:
                 )
             }
             for client_id, spec in resolved.items():
-                if client_id == "onex-api":
+                if environment in base[client_id].get("environmentOverrides", {}):
                     continue
-                assert spec == base[client_id], (
+                expected = {
+                    key: value
+                    for key, value in base[client_id].items()
+                    if key != "environmentOverrides"
+                }
+                assert spec == expected, (
                     f"{client_id} changed under environment {environment!r}; "
                     "only a client declaring an override may differ"
                 )
@@ -195,7 +209,7 @@ class TestItFailsClosedWithoutAnEnvironment:
         no environment named, so this change cannot break a caller that has
         nothing to resolve.
         """
-        plain = [c for c in _roster_clients() if c["clientId"] != "onex-api"]
+        plain = [c for c in _roster_clients() if "environmentOverrides" not in c]
         assert _mod().apply_environment_overrides(plain, None) == plain
 
 
