@@ -1,0 +1,31 @@
+schema_version: 1.0.0
+ticket_id: OMN-26336
+title: 'Composed-runtime boot test under dev limits: the endpoint-health config no longer loads the adapter chain'
+summary: 'Building the LLM endpoint health config imported omnibase_infra.adapters.llm.coding_plan_endpoint from its validator. That import ran the package __init__, which imported every adapter and, through the similarity adapter, the Qdrant client, on the event loop during kernel bootstrap. The package now re-exports nothing, so importing a submodule loads only that submodule.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26336-health-config-import-weight
+    statement: Constructing the LLM endpoint health config on the running loop imports no adapter module and no Qdrant module, and the adapters.llm package re-exports no adapter.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a fresh interpreter that builds ModelLlmEndpointHealthConfig has no omnibase_infra.adapters.llm.adapter_* module and no qdrant_client module in sys.modules, and omnibase_infra.adapters.llm re-exports no adapter -- falsifier: uv run pytest tests/unit/models/health/test_model_llm_endpoint_health_config_import_weight.py -q -n 0 --no-cov -p no:cacheprovider fails at origin/dev and passes with the fix'
+evidence_requirements:
+  - kind: tests
+    description: The import-weight test and the Coding Plan predicate test pass at the pushed head.
+    command: uv run pytest tests/unit/models/health/test_model_llm_endpoint_health_config_import_weight.py tests/unit/adapters/llm/test_coding_plan_endpoint.py -q -n 0 --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26336-ac1
+    description: 'AC1: the import-weight test reads sys.modules of a fresh interpreter after the config is built; it fails at origin/dev, where 96 adapter and qdrant modules are loaded, and passes with the package that re-exports nothing.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/models/health/test_model_llm_endpoint_health_config_import_weight.py tests/unit/adapters/llm/test_coding_plan_endpoint.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
