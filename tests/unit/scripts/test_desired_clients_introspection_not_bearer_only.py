@@ -118,14 +118,42 @@ class TestIntrospectionCallersAreNotBearerOnly:
 #: An exact allowlist, like KNOWN_PUBLIC_CLIENT_IDS above and for the same
 #: reason: a second exception must be a deliberate, reviewed edit to THIS list
 #: rather than a field someone adds to a roster entry and nobody notices.
-CLIENTS_ALLOWED_AN_ENVIRONMENT_OVERRIDE = frozenset({"onex-api"})
+#: OMN-23298 adds the three browser clients, whose staging realm serves only
+#: the staging hosts.
+#: The browser login client's Keycloak id is also a private repository name,
+#: so it is read from the roster: it is the one client whose staging override
+#: declares ``attributes``. A second such client fails this read, not silently
+#: widens the allowlist.
+def _staging_attributes_client_id() -> str:
+    ids = [
+        c["clientId"]
+        for c in _clients()
+        if "attributes" in c.get("environmentOverrides", {}).get("staging", {})
+    ]
+    assert len(ids) == 1, f"expected exactly one staging attributes override: {ids}"
+    return ids[0]
 
-#: Every field an override block may carry. Two change the client and two
-#: document it. Anything else is refused rather than silently ignored --
+
+CLIENTS_ALLOWED_AN_ENVIRONMENT_OVERRIDE = frozenset(
+    {"onex-api", "omnidash-spa", "onex-customer", _staging_attributes_client_id()}
+)
+
+#: Every field an override block may carry. Two document it and the rest
+#: change the client: the onex-api secret shape (OMN-18582) and the staging
+#: hosts (OMN-23298). Anything else is refused rather than silently ignored --
 #: a typo'd key would otherwise read as "no override" and ship the base shape
 #: to production, which is the outcome the override exists to prevent.
 _ALLOWED_OVERRIDE_KEYS = frozenset(
-    {"bearerOnly", "serviceAccountsEnabled", "consumerSecretEnv", "reason", "ticket"}
+    {
+        "bearerOnly",
+        "serviceAccountsEnabled",
+        "consumerSecretEnv",
+        "redirectUris",
+        "webOrigins",
+        "attributes",
+        "reason",
+        "ticket",
+    }
 )
 
 
