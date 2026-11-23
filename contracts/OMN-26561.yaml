@@ -45,12 +45,12 @@ dod_evidence:
         cwd: .
   - id: dod-omn26561-ac6-no-growth-in-baselined-files
     description: >-
-      The three baselined files this change touches (service_kernel.py, runtime_host_process.py, health_checker.py) are each at or under their line count at origin/dev (5988, 7778 and 1784); the compose files are not in the diff, which the local Done gate item below reads from git. Fails when any of the three grows.
+      The three baselined files this change touches (service_kernel.py, runtime_host_process.py, health_checker.py) are each at or under their line count at origin/dev (5988, 7778 and 1784), and the handler this change adds is present, so the check reads the change in place rather than an unchanged tree; the compose files are not in the diff, which the local Done gate item below reads from git. Fails at the merge base, where handlers/handler_boot_summary.py does not exist, and fails when any of the three grows.
     source: manual
     binds_ac: [AC6]
     checks:
       - check_type: command
-        check_value: bash -c 'test "$(wc -l < src/omnibase_infra/runtime/service_kernel.py)" -le 5988 && test "$(wc -l < src/omnibase_infra/runtime/runtime_host_process.py)" -le 7778 && test "$(wc -l < src/omnibase_infra/services/health_checker.py)" -le 1784'
+        check_value: bash -c 'test -f src/omnibase_infra/handlers/handler_boot_summary.py && test "$(wc -l < src/omnibase_infra/runtime/service_kernel.py)" -le 5988 && test "$(wc -l < src/omnibase_infra/runtime/runtime_host_process.py)" -le 7778 && test "$(wc -l < src/omnibase_infra/services/health_checker.py)" -le 1784'
         cwd: .
   - id: dod-omn26561-ac4-real-health-request-integration
     description: >-
