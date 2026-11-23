@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
@@ -119,6 +120,27 @@ async def test_one_reading_per_window_with_contiguous_windows_on_the_contracted_
     ]
     assert len(readings) >= 4
     assert topics == {_TOPIC}
+    for earlier, later in pairwise(readings):
+        assert later.window_start == earlier.window_end
+
+
+async def test_loop_blocked_for_4_seconds_still_publishes_a_reading_carrying_the_gap(
+    sampler: RuntimeLoopLagSampler,
+) -> None:
+    bus = _PlainBus()
+    publisher = await _started(bus, window_seconds=1.0)
+    try:
+        await asyncio.sleep(0.2)
+        time.sleep(4.0)  # a stalled handler: the loop runs nothing for 4 s
+        await asyncio.sleep(0.3)
+    finally:
+        await publisher.stop()
+    readings = [
+        ModelRuntimeLoopReading.model_validate(call.args[0])
+        for call in bus.publish_envelope.await_args_list
+    ]
+    assert readings, "no reading was published for the window the stall fell in"
+    assert max(r.max_loop_gap_ms for r in readings) >= 3200.0
     for earlier, later in pairwise(readings):
         assert later.window_start == earlier.window_end
 

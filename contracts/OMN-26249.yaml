@@ -35,6 +35,16 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_loop_lag_sampler.py -k "block or idle" -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
+  - id: dod-omn26249-ac1-four-second-block-published
+    description: >-
+      The scheduled publisher (1 s window) on a loop stalled by time.sleep(4.0) still publishes a reading for the stalled window, the maximum gap across the readings is at least 3200 ms, and the windows stay contiguous. With the sampler's gap recording removed the test fails on the gap assertion.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_runtime_loop_reading_wiring_omn26249.py -k blocked_for_4 -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
   - id: dod-omn26249-ac2-reading-fields-required
     description: >-
       The reading model refuses a reading missing any one of its ten fields (parametrized over every field), refuses both or neither of tick lag and its not-applicable reason, and refuses a tick lag on a member that does not subscribe. The sampler reports a non-subscriber as not applicable with the reason, and a subscriber that consumed no tick with a different reason.
