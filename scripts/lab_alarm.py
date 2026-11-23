@@ -47,7 +47,7 @@ not wait on Slack. A row that could not be written is kept in the state file
 and retried every tick, and the run exits as an alarm meanwhile. The alarm
 opens no ledger file (OMN-26593).
 
-Design history of the sections moved out: ``docs/lab_alarm_design_notes.md``.
+Design history of the sections moved out: ``git log -p -- scripts/lab_alarm.py``.
 """
 
 from __future__ import annotations
