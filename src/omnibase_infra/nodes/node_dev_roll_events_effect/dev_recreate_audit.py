@@ -47,6 +47,8 @@ from omnibase_infra.models.model_dev_recreate_audit_result import (
 from omnibase_infra.models.model_dev_recreate_policy import ModelDevRecreatePolicy
 from omnibase_infra.models.model_dev_recreate_violation import (
     ModelDevRecreateViolation,
+)
+from omnibase_infra.models.model_dev_recreate_violation_row import (
     ModelDevRecreateViolationRow,
 )
 from omnibase_infra.protocols.protocol_dev_roll_events import ProtocolDevRollEvents

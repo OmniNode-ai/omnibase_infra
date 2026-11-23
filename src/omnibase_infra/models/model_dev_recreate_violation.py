@@ -11,18 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_infra.enums.enum_dev_recreate_violation_kind import (
     EnumDevRecreateViolationKind,
 )
-from omnibase_infra.models.model_dev_runtime_started import JobId
-
-
-class ModelDevRecreateViolationRow(BaseModel):
-    """One start that shows the violation."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    job_id: JobId
-    at: datetime
-    requested_by: str
-    announced: bool
+from omnibase_infra.models.model_dev_recreate_violation_row import (
+    ModelDevRecreateViolationRow,
+)
 
 
 class ModelDevRecreateViolation(BaseModel):
