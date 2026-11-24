@@ -16,7 +16,7 @@ import pytest
 import yaml
 
 from omnibase_infra.enums.enum_dev_recreate_cause import EnumDevRecreateCause
-from omnibase_infra.handlers.handler_dev_container_recreate import (
+from omnibase_infra.handlers.dev_container_recreate.handler_dev_container_recreate import (
     HandlerDevContainerRecreate,
 )
 from omnibase_infra.models.model_dev_container_reading import ModelDevContainerReading

@@ -530,7 +530,7 @@ _OBSERVER_MODULES = (
     "models/model_dev_recreate_audit_result.py",
     "models/model_dev_recreate_audit_request.py",
     "protocols/protocol_dev_roll_events.py",
-    "handlers/handler_dev_container_recreate.py",
+    "handlers/dev_container_recreate/handler_dev_container_recreate.py",
 )
 _WINDOW_MODULES = (
     "enums/enum_dev_recreate_verdict.py",
@@ -738,7 +738,9 @@ def observe_dev_container(
     observation_module = _module("models/model_dev_container_observation.py")
     audit_request_module = _module("models/model_dev_recreate_audit_request.py")
     policy_module = _module("models/model_dev_recreate_policy.py")
-    handler_module = _module("handlers/handler_dev_container_recreate.py")
+    handler_module = _module(
+        "handlers/dev_container_recreate/handler_dev_container_recreate.py"
+    )
     audit_module = _module(_AUDIT_MODULE)
 
     try:

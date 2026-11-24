@@ -97,7 +97,7 @@ handler_routing:
     - operation: dev_roll.observe_container
       handler:
         name: HandlerDevContainerRecreate
-        module: omnibase_infra.handlers.handler_dev_container_recreate
+        module: omnibase_infra.handlers.dev_container_recreate.handler_dev_container_recreate
       event_model:
         name: ModelDevContainerRecreateRequest
         module: omnibase_infra.models.model_dev_container_recreate_request

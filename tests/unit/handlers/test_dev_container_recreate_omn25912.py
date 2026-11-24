@@ -23,7 +23,7 @@ from omnibase_infra.enums.enum_dev_recreate_cause import EnumDevRecreateCause as
 from omnibase_infra.enums.enum_dev_recreate_violation_kind import (
     EnumDevRecreateViolationKind as Kind,
 )
-from omnibase_infra.handlers.handler_dev_container_recreate import (
+from omnibase_infra.handlers.dev_container_recreate.handler_dev_container_recreate import (
     HandlerDevContainerRecreate,
 )
 from omnibase_infra.models.model_dev_container_observation import (
