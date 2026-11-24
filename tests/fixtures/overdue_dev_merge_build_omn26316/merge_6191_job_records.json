@@ -1,0 +1,17 @@
+{
+  "source": "the deploy agent's job records under /data/omninode/deploy-agent/state/jobs-dev on omni-201 (fields id, runtime lane, accepted_at, status, command git_ref), read 2026-11-23T20:32Z; the merge time is the PR watcher's record of omnibase_infra#6191",
+  "merge": {
+    "repository": "omnibase_infra",
+    "pr": 6191,
+    "merge_sha": "a27c0c218555c93421803e9f6dc4dd95c28b3da5",
+    "merged_at": "2026-11-23T17:46:52Z",
+    "runtime_class": "RUNTIME"
+  },
+  "jobs": [
+    {"job_id": "61df2c2c-512a-493f-ab76-35e0af2c3e9d", "runtime_lane": "dev", "accepted_at": "2026-11-23T15:53:33.934697Z", "completed_at": "2026-11-23T16:06:40.593844Z", "status": "success", "git_ref": "origin/dev"},
+    {"job_id": "dd757818-3098-4eb5-b020-0156552b1308", "runtime_lane": "dev", "accepted_at": "2026-11-23T16:32:48.110306Z", "completed_at": "2026-11-23T16:47:23.717193Z", "status": "success", "git_ref": "origin/dev"},
+    {"job_id": "f59d4cdf-04f1-456f-a592-1cb1c109956e", "runtime_lane": "dev", "accepted_at": "2026-11-23T17:00:00.113388Z", "completed_at": "2026-11-23T17:12:55.609757Z", "status": "success", "git_ref": "origin/dev"},
+    {"job_id": "82d5fd01-0542-4b60-bd4a-192c46d849c5", "runtime_lane": "dev", "accepted_at": "2026-11-23T17:39:09.512919Z", "completed_at": "2026-11-23T17:53:13.575177Z", "status": "success", "git_ref": "origin/dev"},
+    {"job_id": "2098b18c-b02e-4721-97ec-43d744ab1120", "runtime_lane": "dev", "accepted_at": "2026-11-23T19:00:23.619848Z", "completed_at": "2026-11-23T19:13:49.719399Z", "status": "success", "git_ref": "origin/dev"}
+  ]
+}
