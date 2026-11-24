@@ -26,6 +26,7 @@ from collections.abc import (
     Awaitable,
     Callable,
     Iterable,
+    Mapping,
     MutableMapping,
 )
 from pathlib import Path
@@ -44,11 +45,16 @@ from omnibase_infra.handlers.http_mount.bounded_body import (
     decoded_chunks,
     replay,
 )
+from omnibase_infra.handlers.lazy_start_boot_split import (
+    StoreLazyStartDormant,
+    StoreLazyStartWaker,
+)
 from omnibase_infra.models.model_http_mount import ModelHttpMount
 from omnibase_infra.runtime.auto_wiring.discovery import read_contract_yaml
 from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import (
     ModelDiscoveredContract,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +160,11 @@ class AsgiMounts:
         self._mounts: list[tuple[ModelHttpMount, _AsgiApp, LifespanDriver]] = []
         self._started = False
         self._attached = False
+        self._reserved: list[str] = []
+        self._dormant: dict[str, ModelHttpMount] = {}
+        """Dormant contract name to the mount it declares, served once it wakes (OMN-26316)."""
+        self._dormant_locks: dict[str, asyncio.Lock] = {}
+        self._dormant_index_task: asyncio.Task[None] | None = None
         self.failure = ""
         """Why the mounts failed to start; empty while none has failed."""
 
@@ -229,6 +240,7 @@ class AsgiMounts:
                 ),
             ) from exc
         reserved = [resource.canonical for resource in router.resources()]
+        self._reserved = reserved
         for index, mount in enumerate(declared):
             for other in declared[index + 1 :]:
                 if mount.covers(other.path_prefix) or other.covers(mount.path_prefix):
@@ -255,9 +267,124 @@ class AsgiMounts:
             return None
         declared = self.prepare(contracts, router)
         self._attached = True
-        return (
-            asyncio.get_running_loop().create_task(self.start()) if declared else None
+        dormant = StoreLazyStartDormant.contracts()
+        if dormant:
+            self._dormant_index_task = asyncio.get_running_loop().create_task(
+                asyncio.to_thread(self.index_dormant, dormant),
+                name="asgi-mounts-index-dormant",
+            )
+        if not declared:
+            # Nothing of the boot set to start; a dormant mount may still wake.
+            self._started = True
+            return None
+        return asyncio.get_running_loop().create_task(self.start())
+
+    def index_dormant(self, contracts: Mapping[str, ModelDiscoveredContract]) -> None:
+        """Remember the mounts that dormant contracts declare (OMN-26316).
+
+        A lazy-start lane leaves a contract out of the boot manifest, so its
+        ``http_mount`` is not served and a request under its prefix would answer
+        404 without ever reaching the front door. The request that names such a
+        prefix wakes the contract and mounts it (`_wake_and_mount`). A
+        declaration that is malformed, or whose prefix overlaps a mount of the
+        boot set, another dormant mount or a runtime route, is dropped and
+        logged: it can never be served, and one contract's bad block never
+        takes a boot down.
+        """
+        indexed: dict[str, ModelHttpMount] = {}
+        for name, contract in contracts.items():
+            try:
+                if not _names_http_mount(contract.contract_path):
+                    continue
+                block = ModelHttpMount.from_contract_block(
+                    cast(
+                        "dict[str, object]", read_contract_yaml(contract.contract_path)
+                    ).get("http_mount")
+                )
+            except (OSError, ValueError):
+                logger.exception(
+                    "Dormant contract '%s' declares an http_mount that cannot be "
+                    "read; it will not wake on a request (OMN-26316)",
+                    name,
+                )
+                continue
+            if block is None:
+                continue
+            taken = [m for m, _, _ in self._mounts] + list(indexed.values())
+            if any(
+                block.covers(m.path_prefix) or m.covers(block.path_prefix)
+                for m in taken
+            ) or any(block.covers(path) for path in self._reserved):
+                logger.error(
+                    "Dormant contract '%s' http_mount %s overlaps a mount or a "
+                    "runtime route; it will not wake on a request (OMN-26316)",
+                    name,
+                    block.path_prefix,
+                )
+                continue
+            indexed[name] = block
+        self._dormant = indexed
+        logger.info(
+            "HTTP mounts: %d dormant contract(s) declare a mount that wakes on its "
+            "first request (OMN-26316)",
+            len(indexed),
         )
+
+    async def _wake_and_mount(self, name: str, mount: ModelHttpMount) -> _AsgiApp:
+        """Wake the dormant contract that declares ``mount``, then serve its app.
+
+        One wake and one lifespan start per mount: concurrent requests wait on
+        the first. A failure leaves the mount dormant and unmounted, so the next
+        request wakes it again; it never sets `failure`, which takes the whole
+        server out of service.
+        """
+        async with self._dormant_locks.setdefault(name, asyncio.Lock()):
+            for live, app, _ in self._mounts:
+                if live.path_prefix == mount.path_prefix:
+                    return app
+            waker = StoreLazyStartWaker.waker()
+            if waker is None:
+                raise self._failure(mount, "the lazy-start ingress is not wired")
+            await waker(name)
+            app = self._build(mount)
+            lifespan = LifespanDriver(app)
+            try:
+                await lifespan.startup()
+            except Exception as exc:
+                await lifespan.shutdown()
+                raise self._failure(mount, f"lifespan startup: {exc}") from exc
+            self._mounts.append((mount, app, lifespan))
+            logger.info(
+                "HTTP mount started on its first request: %s -> %s (contract %s) "
+                "(OMN-26316)",
+                mount.path_prefix,
+                mount.factory,
+                name,
+            )
+            return app
+
+    async def _serve_dormant(
+        self, name: str, mount: ModelHttpMount, request: web.Request
+    ) -> web.StreamResponse:
+        """Answer a request under a dormant contract's mount: wake, mount, serve."""
+        try:
+            app = await self._wake_and_mount(name, mount)
+        except TimeoutError:
+            return web.json_response(
+                {"status": "starting", "detail": f"contract {name} is starting"},
+                status=503,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Dormant contract '%s' did not wake for a request on %s (OMN-26316)",
+                name,
+                mount.path_prefix,
+            )
+            return web.json_response(
+                {"status": "unavailable", "detail": sanitize_error_message(exc)},
+                status=503,
+            )
+        return await self._serve(app, request, mount.max_body_bytes)
 
     async def start(self) -> None:
         """Run every prepared mount's lifespan startup, or none.
@@ -305,6 +432,10 @@ class AsgiMounts:
                 if not self._started:
                     return web.json_response({"status": "starting"}, status=503)
                 return await self._serve(app, request, mount.max_body_bytes)
+        if self._started:
+            for name, mount in self._dormant.items():
+                if mount.covers(request.path):
+                    return await self._serve_dormant(name, mount, request)
         try:
             coding = content_coding(request.headers.get(hdrs.CONTENT_ENCODING))
         except UnsupportedCodingError as exc:

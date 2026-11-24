@@ -20,7 +20,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The C13 producer's offline grading tests, including the NOT_MEASURED cases.
-    command: uv run --frozen pytest tests/ci/test_c13_not_measured_omn26534.py tests/ci/test_c13_customer_local_probe_omn19179.py -q --no-cov -n 0 -p no:randomly
+    command: uv run --frozen pytest tests/ci/test_c13_metrics_unavailable_omn26534.py tests/ci/test_c13_not_measured_omn26534.py tests/ci/test_c13_customer_local_probe_omn19179.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -41,4 +41,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_c13_not_measured_omn26534.py -k "not_measured_has_its_own_exit or pass_has_no_cause or not_a_local_lab_failure or hide_a_product_defect or cloud_rung_answering" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26534-ac2-metrics-503
+    description: "A model server answering 503 on /metrics (run 45237853027, step 6, HTTPError from tokens_predicted) is a COULD_NOT_RUN record naming the server, not a traceback with no record."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c13_metrics_unavailable_omn26534.py -q --no-cov -n 0 -p no:randomly
         cwd: .

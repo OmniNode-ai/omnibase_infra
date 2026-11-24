@@ -434,3 +434,12 @@ def test_dev_delegation_path_not_excluded_fails_when_a_chained_contract_is_exclu
     caught = _excluded_but_used(_mutated_contracts_dir(tmp_path, chained[0]))
 
     assert caught == {chained[0]}
+
+
+def test_dev_lane_attaches_stall_responder_omn26550() -> None:
+    """OMN-26550: the stall responder declares a runtime-tick schedule, so dev wires it."""
+    name = "node_stall_responder_compute"
+
+    assert name not in _excluded()
+    assert name in _required()
+    assert name in _wired(_manifest((name,), (UNRELATED,)), _dev_environ())
