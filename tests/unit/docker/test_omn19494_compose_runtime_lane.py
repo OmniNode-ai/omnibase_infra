@@ -153,6 +153,16 @@ STACKS: dict[str, _Stack] = {
     ),
 }
 
+#: The OMN-26326 standby member of the dev runtime's SCM consumer groups. It
+#: declares the dev stack's own lane, and the render supplies the value its
+#: required interpolation names.
+STACKS["dev-member"] = _Stack(
+    files=("docker-compose.dev-member.yml",),
+    lane=STACKS["dev"].lane,
+    lane_naming_services=frozenset({"omninode-runtime"}),
+    env={LANE_VARIABLE: STACKS["dev"].lane},
+)
+
 #: Compose files that are not a deployed lane stack of their own. A file in
 #: this set must define no service whose profile owns lane-scoped contracts.
 #: The value records why it needs no lane.
@@ -174,6 +184,14 @@ NOT_A_LANE_STACK: dict[str, str] = {
     "docker-compose.gateway-attach-test-lane.yml": (
         "runs an attach proof script, not the kernel"
     ),
+}
+
+
+#: The only lane files whose lane line interpolates, and the one form each may
+#: take: the prepr slot token, and the standby's required (no default) lane.
+INTERPOLATED_LANE_FILES: dict[str, str] = {
+    "docker-compose.prepr.yml": r"prepr-\$\{ONEX_PREPR_SLOT\}",
+    "docker-compose.dev-member.yml": r"\$\{ONEX_RUNTIME_LANE:\?[^}]+\}",
 }
 
 
@@ -306,7 +324,7 @@ def test_the_rendered_lane_is_a_registered_lane(stack_id: str) -> None:
 def test_a_lane_file_declares_its_lane_as_a_literal_not_a_shell_value(
     stack_id: str,
 ) -> None:
-    """Only the prepr slot id interpolates, and only the slot token it names."""
+    """Only the prepr slot id and the standby's required lane interpolate."""
     stack = STACKS[stack_id]
     own_file = stack.files[-1]
     services = _load(own_file).get("services") or {}
@@ -318,11 +336,11 @@ def test_a_lane_file_declares_its_lane_as_a_literal_not_a_shell_value(
         if raw is None:
             continue
         if "${" in raw:
-            assert own_file == "docker-compose.prepr.yml", (
+            assert own_file in INTERPOLATED_LANE_FILES, (
                 f"{own_file} service {name} declares {LANE_VARIABLE}={raw!r}; an "
                 "exported shell value must not be able to rename a lane."
             )
-            assert re.fullmatch(r"prepr-\$\{ONEX_PREPR_SLOT\}", raw), raw
+            assert re.fullmatch(INTERPOLATED_LANE_FILES[own_file], raw), raw
 
 
 def test_the_base_file_names_no_lane() -> None:
