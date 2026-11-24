@@ -31,10 +31,10 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/ci/test_disk_gc_units_ledger_name_omn26330.py tests/ci/test_ledger_file_census_hook_omn24480.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn26330-census-row
-    description: The ratchet row reads 17 and the per-file table holds one row per counted file, with no row raised or added.
+    description: No disk-gc unit comment spells the ledger file's name, so the census holds no hit on a unit comment; the check fails against the pre-change unit files.
     source: manual
     binds_ac: [AC1]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_ledger_file_census_hook_omn24480.py -q --no-cov
+        check_value: uv run --frozen pytest tests/ci/test_disk_gc_units_ledger_name_omn26330.py -k test_the_disk_gc_unit_comments_do_not_spell_the_ledger_file_name -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
