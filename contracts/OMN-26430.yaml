@@ -37,7 +37,7 @@ dod_evidence:
     binds_ac: [AC4]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn26430_db_owning_projection_serial_dispatch.py -k keeps_its_parallelism -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/runtime/test_omn26430_owned_database_gate_scope.py -k passes_the_gate_in_parallel -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26430-deploy-serial-dispatch-live
     description: >-
