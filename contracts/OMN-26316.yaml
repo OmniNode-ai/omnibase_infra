@@ -38,6 +38,13 @@ requirements:
     acceptance:
       - id: AC9
         statement: "AC9: the lazy-start front door wakes every dormant consumer of a published topic at once and holds the message for at most one budget -- falsifier: uv run pytest tests/unit/handlers/test_lazy_start_heartbeat_wake_omn26316.py fails at origin/dev (7.2 s against a 2.5 s window for 20 dormant heartbeat consumers, 4 of which never wake) and passes on the PR branch"
+  - id: req-omn26316-ledger-proof-answers-as-deployed
+    statement: The post-roll ledger proof of a dev roll builds its transport from the lane declaration and answers inside a bound that covers the recorded latency, so a verified dev roll is not failed and restored by its own proof.
+    acceptance:
+      - id: AC12
+        statement: "AC12: the ledger read's transport is built from the lane declaration and the stored identity when the process holds KAFKA_SASL_MECHANISM and KAFKA_SECURITY_PROTOCOL without a generic principal -- falsifier: uv run pytest tests/unit/cli/test_work_ledger_proof_omn26316.py -k half_set_env fails at origin/dev with ProtocolConfigurationError and passes on the PR branch"
+      - id: AC13
+        statement: "AC13: the declared post-roll proof bound is at least 1.5 times the slowest recorded answer in tests/fixtures/omn26316/ledger_proof_latency.json -- falsifier: uv run pytest tests/unit/cli/test_work_ledger_proof_omn26316.py -k measured_answer_latency fails at origin/dev (bound 10 s against 19.5 s) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -183,3 +190,28 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/runtime/test_boot_failure_cause_integration_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26316-ledger-proof-transport
+    description: "With the deploy agent's KAFKA_SASL_MECHANISM and KAFKA_SECURITY_PROTOCOL set and no generic principal, the ledger read's transport is built from the lane declaration and the stored identity, and other KAFKA overrides still apply; the test fails at origin/dev with the ProtocolConfigurationError the agent journal recorded for jobs ae9ceb3d and 43b9fb72."
+    source: manual
+    binds_ac: [AC12]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli/test_work_ledger_proof_omn26316.py -k "half_set_env or other_environment_overrides" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-ledger-proof-bound
+    description: "The declared post-roll proof bound covers 1.5 times the slowest recorded answer (19.5 s, five reads on the dev runtime, one timed out at the old 10 s bound)."
+    source: manual
+    binds_ac: [AC13]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli/test_work_ledger_proof_omn26316.py -k measured_answer_latency -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-integration-proof-ledger-proof-roll
+    description: >-
+      Post-deploy probe on the dev runtime host: the dev runtime answers ready after the deploy agent applied this change. The job record under jobs-dev for that roll reads status success with no ledger refusal; the report quotes it. It reads the live container, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: bash -c 'curl -s -m 10 http://localhost:8085/ready | python3 -c "import json,sys; assert json.load(sys.stdin)[\"details\"][\"ready\"] is True"'
