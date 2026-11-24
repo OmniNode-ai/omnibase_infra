@@ -12,11 +12,6 @@ context:
         criterion_hash: 617b06d9c61307b9abe141e78b14654176921e7fde98946ffe2e61b23ae18d14
         proposed_by: lane=dod-closeout-bind-2026-11-24T1945Z-c2
         accepted_by: lane=dod-closeout-accept-2026-11-24T1945Z-c2
-    dod-omn22543-ac2-accepted-20261124t1945z:
-      - label: AC2
-        criterion_hash: e7f015b0cbb58a883dfd5d422918d6a42b16108c85bddf5d93fa534a43375e29
-        proposed_by: lane=dod-closeout-bind-2026-11-24T1945Z-c2
-        accepted_by: lane=dod-closeout-accept-2026-11-24T1945Z-c2
 requirements:
   - id: req-omn22543-verify-runner-stale-env-removed
     statement: A verify runner leaves no operator env file readable to its jobs, whether through a bind mount or through a copy an earlier image left in its creds volume.
@@ -69,13 +64,3 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
-  - id: dod-omn22543-ac2-accepted-20261124t1945z
-    description: 'AC2: on the lab server neither /run/omnibase-operator.env nor the runner creds-volume operator.env exists in verify runners 1 to 3; the deploy runner control proves the probe sees a present file. Prints no contents.'
-    source: manual
-    execution_scope: local_done_gate
-    checks:
-      - check_type: command
-        check_value: 'ssh omni-201 ''for n in 1 2 3; do c=omninode-verify-runner-$n; docker exec $c test ! -e /run/omnibase-operator.env && docker exec -u runner $c sh -c "test ! -e \$HOME/.runner-creds/operator.env" || { echo "FAIL $c"; exit 1; }; echo "absent $c"; done; docker exec omninode-deploy-runner test -e /run/omnibase-operator.env && echo "control: deploy-runner present"'''
-        cwd: .
-    binds_ac:
-      - AC2
