@@ -1,0 +1,120 @@
+# OMN-26326 dev-member standby: a second runtime that answers the dev lane's SCM
+# command topics while the dev runtime is down or restarting.
+#
+# WHAT THIS IS. The ONEX runtime kernel, the same image the dev runtime runs,
+# booted under the existing `effects` role over a manifest of exactly two
+# contracts: `ONEX_RUNTIME_NODE_SELECTION` names them. That is the mechanism the
+# claude hook-events writer carrier (`projection-claude-hook-events-writer` in
+# docker-compose.infra.yml) already uses; no profile name and no node is added.
+#
+#   node_github_repo_write_effect    command onex.cmd.omnimarket.github-repo-write-requested.v1
+#                                    (`onex scm pr-create` and every other PR write)
+#   node_github_repo_gateway_effect  command onex.cmd.omnimarket.github-repo-gateway-read-requested.v1
+#                                    (`onex scm job-log`, run-view and the typed reads)
+#
+# SAME CONSUMER GROUPS, SO A MEMBER, NOT A SECOND OWNER. Both contracts declare
+# `placement: mode: any`: every runtime that loads them joins the one consumer
+# group the runtime derives from the node identity and the process's
+# KAFKA_INSTANCE_ID. This service sets KAFKA_INSTANCE_ID to `runtime-main`, the
+# dev runtime's value, so its groups are the dev runtime's groups
+# (`local.omnimarket.<node>.consume.<version>.__i.runtime-main.__t.<topic>`) and
+# the broker splits partitions between the two members. When the dev runtime is
+# down this member holds every partition; when it is back they share them.
+#
+# THE ONE RUNTIME SERVICE. The service carries the runtime's own service name, so the
+# stack-shape gate judges this file as a one-runtime stack with nothing beside it.
+#
+# NO OVERLAY ROOT, SO NO HOT-LOAD LISTENER. The service declares the dev lane, and a
+# lane's `runtime_contract_hotload` overlay row (read from ONEX_SKILL_OVERLAY_ROOTS)
+# turns the node-registration listener on. The member principal has no READ on
+# onex.evt.platform.node-registration.v1, so that subscribe is refused on every
+# 30 s retry, start() never reaches is_running and /health answers 503 with
+# startup_in_progress while both SCM consumers answer (read live 2026-11-21, 16:19Z:
+# 224 failing healthchecks over 2 h). The standby loads its two contracts at boot
+# and hot-loads nothing, so the file names no overlay root and mounts no overlay.
+#
+# NOT THE DEV LANE. The service has no Postgres, Valkey, Keycloak, Infisical or
+# model-server dependency: the contracts need only the broker and the GitHub
+# credential. It joins no compose network of the dev lane and publishes its
+# health port on the loopback address only.
+#
+# CREDENTIALS. This file carries no secret value and no principal name.
+# KAFKA_SASL_USERNAME, KAFKA_SASL_PASSWORD, GITHUB_TOKEN and GH_TOKEN come from the
+# env file the host holds (`--env-file ~/.omnibase/standby-scm.env`, mode 600). The
+# broker principal is the standby member principal the lab broker ACL declaration
+# grants 14 rows: the two command topics READ, the three terminal topics WRITE and
+# the two group prefixes READ.
+#
+# BRING-UP (the standby host; every variable named here is required, none has a
+# host default):
+#
+#   DEV_MEMBER_RUNTIME_IMAGE=<the image `docker inspect omninode-runtime` names on the dev host> \
+#   KAFKA_BOOTSTRAP_SERVERS=<the dev broker external listener, host:port> \
+#   DEV_MEMBER_KAFKA_BROKER_ALLOWLIST=<that listener's host:> \
+#   ONEX_RUNTIME_LANE=<the lane the dev runtime declares> \
+#   DEV_MEMBER_CONTRACTS_DIR=<infra checkout>/contracts \
+#   docker compose -p dev-member --env-file docker/runtime-policy.env \
+#     --env-file ~/.omnibase/standby-scm.env \
+#     -f docker/docker-compose.dev-member.yml up -d
+#
+# Read the membership with the dev bus reader: each of the two groups lists a
+# member whose client id carries this container's hostname.
+name: dev-member
+services:
+  omninode-runtime:
+    image: ${DEV_MEMBER_RUNTIME_IMAGE:?set DEV_MEMBER_RUNTIME_IMAGE to the image the dev runtime runs}
+    container_name: omninode-dev-member-runtime
+    restart: unless-stopped
+    stop_grace_period: 90s
+    ports:
+      - "127.0.0.1:${DEV_MEMBER_HEALTH_PORT:-48085}:8085"
+    environment:
+      RUNTIME_PROFILE: effects
+      ONEX_RUNTIME_NODE_SELECTION: node_github_repo_write_effect,node_github_repo_gateway_effect
+      ONEX_RUNTIME_CAPABILITIES: github.repo-write,github.repo-gateway-read
+      ONEX_RUNTIME_LANE: ${ONEX_RUNTIME_LANE:?set ONEX_RUNTIME_LANE to the lane the dev runtime declares}
+      ONEX_RUNTIME_LANE_HEALTH_SPEAKER: "false"
+      OTEL_SERVICE_NAME: omninode-dev-member-runtime
+      # The dev runtime's instance discriminator: the consumer groups are shared.
+      KAFKA_INSTANCE_ID: runtime-main
+      # The kernel's own consumers (registry, plugins) stay off the dev runtime's
+      # groups; only the two nodes' groups are shared.
+      ONEX_GROUP_ID: onex-runtime-dev-member
+      BUS_ID: local
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS to the dev broker external listener}
+      KAFKA_BROKER_ALLOWLIST: ${DEV_MEMBER_KAFKA_BROKER_ALLOWLIST:?set DEV_MEMBER_KAFKA_BROKER_ALLOWLIST to the listener host prefix}
+      KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_SASL_MECHANISM: SCRAM-SHA-256
+      KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME:?KAFKA_SASL_USERNAME comes from the standby env file}
+      KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD:?KAFKA_SASL_PASSWORD comes from the standby env file}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN comes from the standby env file}
+      GH_TOKEN: ${GH_TOKEN:?GH_TOKEN comes from the standby env file}
+      KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
+      ONEX_ACTIVE_RUNTIME_PACKAGES: ${ONEX_ACTIVE_RUNTIME_PACKAGES:?runtime policy contract must set ONEX_ACTIVE_RUNTIME_PACKAGES}
+      ONEX_CONTRACTS_DIR: /app/contracts
+      ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
+      ONEX_STATE_ROOT: /app/data/.onex_state
+      ONEX_STATE_DIR: /app/data/.onex_state
+      ONEX_WIRING_STRICT_MODE: "1"
+      ONEX_ENVIRONMENT: local
+      USE_EVENT_ROUTING: "true"
+    volumes:
+      - ${DEV_MEMBER_CONTRACTS_DIR:?set DEV_MEMBER_CONTRACTS_DIR to the omnibase_infra contracts directory}:/app/contracts:ro
+      - dev_member_runtime_data:/app/data
+      - dev_member_runtime_logs:/app/logs
+    tmpfs:
+      - /run/onex-runtime:uid=1000,gid=1000,mode=0770
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 600s
+    labels:
+      - "com.omninode.service=dev-member-runtime"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.ticket=OMN-26326"
+      - "com.omninode.lane=dev-member"
+volumes:
+  dev_member_runtime_data:
+  dev_member_runtime_logs:
