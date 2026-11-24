@@ -228,6 +228,7 @@ def check_pin(*, force: bool = False) -> BaseModel | None:
     check_routing(force=force)
     check_routed_commands(force=force)
     check_overdue_dev_merges(force=force)
+    check_dev_container(force=force)
     try:
         tick = time.monotonic()
         interval = (
@@ -455,6 +456,29 @@ def _job_records(state_dir: Path) -> list[object]:
         except (ValidationError, OSError):
             continue
     return records
+
+
+def check_dev_container(*, force: bool = False) -> None:
+    """Run the dev container observer of ``node_dev_roll_events_effect`` once (OMN-25912).
+
+    Called from the idle tick (through ``check_pin``), the trigger that node's contract
+    declares as ``audit_trigger: agent_tick``: it publishes one event for each new start of
+    the dev runtime container and runs the recreate reader. The observer throttles itself to
+    ``container_observation_interval_seconds`` and never raises; neither does this call.
+    """
+    try:
+        roll = _load("nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py")
+        executor = importlib.import_module("deploy_agent.executor")
+        roll.observe_if_due(
+            Path(_agent().STATE_DIR),
+            executor.lane_config_for(executor.EnumRuntimeLane.DEV).compose_project,
+            force=force,
+        )
+    except Exception:
+        logger.exception(
+            "dev container observation could not run "
+            "friction_type=dev_event_publish_failed"
+        )
 
 
 def check_routed_commands(*, force: bool = False) -> BaseModel | None:

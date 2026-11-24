@@ -165,6 +165,21 @@ class DevRollEventsPublisher:
             logger.exception("dev recreate announcement failed %s", FRICTION)
             return False
 
+    def container_recreated(self, event: BaseModel) -> bool:
+        """Publish one dev container start; True only when the bus accepted it."""
+        try:
+            payload = event.model_dump(mode="json")
+            return bool(
+                self._send(
+                    self._topics["dev_container_recreated"],
+                    f"dev-container-recreated/{payload['event_id']}",
+                    payload,
+                )
+            )
+        except Exception:
+            logger.exception("dev container recreate event failed %s", FRICTION)
+            return False
+
     def recreate_violation(self, violation: BaseModel) -> bool:
         """Publish one dev recreate violation; True only when the bus accepted it."""
         try:
