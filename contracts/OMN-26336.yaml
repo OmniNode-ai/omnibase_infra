@@ -11,10 +11,23 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: a fresh interpreter that builds ModelLlmEndpointHealthConfig has no omnibase_infra.adapters.llm.adapter_* module and no qdrant_client module in sys.modules, and omnibase_infra.adapters.llm re-exports no adapter -- falsifier: uv run pytest tests/unit/models/health/test_model_llm_endpoint_health_config_import_weight.py -q -n 0 --no-cov -p no:cacheprovider fails at origin/dev and passes with the fix'
+  - id: req-omn26336-owner-scope-index
+    statement: Proving a contract's dispatcher scope on the bootstrap coroutine does not iterate every registered dispatcher once per contract.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: MessageDispatchEngine.validate_contract_dispatcher_scope answers from the owner scopes kept at registration and never walks the dispatcher table while proving 1500 contracts of four dispatchers each -- falsifier: uv run pytest tests/unit/runtime/test_message_dispatch_engine_owner_scope_omn26336.py -q -n 0 --no-cov -p no:cacheprovider fails at origin/dev (3000 walks of the table, two per contract) and passes with the fix'
+  - id: req-omn26336-boot-heap-freeze
+    statement: The kernel takes the wired handler graph out of garbage collection after the engine freezes and before consumers attach, so no later full collection walks it on the event loop.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: the bootstrap coroutine freezes the engine once with dispatch_engine.freeze(freeze_gc_heap=True), before the first subscribe_wired_contract_topics call, and the engine moves the GC heap to the permanent generation only when asked -- falsifier: uv run pytest tests/unit/runtime/test_service_kernel_boot_gc_freeze_omn26336.py -q -n 0 --no-cov -p no:cacheprovider fails at origin/dev (the freeze takes no flag) and passes with the fix'
 evidence_requirements:
   - kind: tests
     description: The import-weight test and the Coding Plan predicate test pass at the pushed head.
     command: uv run pytest tests/unit/models/health/test_model_llm_endpoint_health_config_import_weight.py tests/unit/adapters/llm/test_coding_plan_endpoint.py -q -n 0 --no-cov -p no:cacheprovider
+  - kind: tests
+    description: The engine owner-scope test and the engine suites pass at the pushed head.
+    command: uv run pytest tests/unit/runtime/test_message_dispatch_engine_owner_scope_omn26336.py tests/unit/runtime/test_service_kernel_boot_gc_freeze_omn26336.py tests/unit/runtime/test_message_dispatch_engine.py -q -n 0 --no-cov -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ''
@@ -29,3 +42,30 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/models/health/test_model_llm_endpoint_health_config_import_weight.py tests/unit/adapters/llm/test_coding_plan_endpoint.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
+  - id: dod-omn26336-ac2
+    description: 'AC2: the owner-scope test counts walks of the dispatcher table while proving 1500 contract scopes; it reads 3000 at origin/dev and 0 with the owner scopes kept at registration, and the scope proof still rejects a foreign dispatcher, a gap and an unknown id.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_message_dispatch_engine_owner_scope_omn26336.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26336-ac3
+    description: 'AC3: the kernel test reads the bootstrap coroutine source and the engine test reads gc.get_freeze_count(); both fail at origin/dev. Measured on the full dev contract set (1460 contracts, 832 wired) pinned to one core, a full collection after wiring took 0.955 s on 1552008 objects and 0.000 s after gc.freeze.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_service_kernel_boot_gc_freeze_omn26336.py tests/unit/runtime/test_message_dispatch_engine_owner_scope_omn26336.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26336-deploy-engine-freeze-live
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime container's MessageDispatchEngine.freeze takes the freeze_gc_heap flag. It reads the live container, which carries the flag only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime python -c 'import inspect; from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine as E; assert "freeze_gc_heap" in inspect.signature(E.freeze).parameters'

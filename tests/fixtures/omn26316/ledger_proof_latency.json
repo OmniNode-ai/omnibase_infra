@@ -1,0 +1,9 @@
+{
+  "description": "The dev roll's post-roll ledger proof (onex ledger query --query rows --limit 1), run on omni-201 with the dev deploy agent's own process environment and the SASL half-state removed, against the running dev runtime.",
+  "host": "omni-201",
+  "read_at_utc": "2026-11-24T00:49:36Z..2026-11-24T00:50:50Z",
+  "declared_bound_seconds": 10,
+  "answered_seconds": [8.7, 4.9, 19.5, 16.8],
+  "timed_out_at_bound": 1,
+  "refusal_before_the_change": "ProtocolConfigurationError: sasl_mechanism='SCRAM-SHA-256' requires non-empty credential fields: sasl_plain_username, sasl_plain_password"
+}

@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import importlib.resources
 import logging
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Final
@@ -64,6 +64,16 @@ logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION: Final = 1
 
+_VERBATIM_FIELD_LIMIT: Final = 20
+_COUNTED_KINDS: Final = frozenset(
+    {
+        "distribution_added",
+        "distribution_removed",
+        "distribution_version",
+        "contract_hash",
+    }
+)
+
 InstalledFileReader = Callable[
     [ModelNodeAnnouncement], tuple[bytes | None, Path | None]
 ]
@@ -78,6 +88,29 @@ def prebuilt_manifest_path() -> Path:
             )
         )
     )
+
+
+def describe_differing_fields(fields: Sequence[str]) -> str:
+    """Name the stamp fields that differed, whatever their number (OMN-26338).
+
+    Up to twenty fields are listed as they are. Past that, a field of a repeated kind
+    (a distribution or contract that moved) is counted per kind and package, and every
+    other field (``active_packages``, ``gateway_cloud_mirroring``, ``workload``) is
+    still named, so one changed setting is never hidden behind a thousand added entry points.
+    """
+    if len(fields) <= _VERBATIM_FIELD_LIMIT:
+        return ", ".join(fields) or "none"
+    counted: dict[str, int] = {}
+    single: list[str] = []
+    for field in fields:
+        kind, _, rest = field.partition(":")
+        if kind in _COUNTED_KINDS:
+            key = kind if kind == "contract_hash" else f"{kind}:{rest.split(':', 1)[0]}"
+            counted[key] = counted.get(key, 0) + 1
+        else:
+            single.append(field)
+    parts = [*single, *(f"{key} x{count}" for key, count in counted.items())]
+    return f"{len(fields)} fields: {', '.join(parts)}"
 
 
 def installed_fingerprint() -> tuple[tuple[str, str, str], ...]:
@@ -235,7 +268,7 @@ async def _run_boot_catalog(
         logger.warning(
             "Prebuilt node manifest not used (%s); differing stamp fields: %s",
             result.reason,
-            ", ".join(result.differing_fields[:20]) or "none",
+            describe_differing_fields(result.differing_fields),
         )
     return ModelBootNodeCatalog(announced=await announce(workload=workload))
 
@@ -243,6 +276,7 @@ async def _run_boot_catalog(
 __all__ = [
     "SCHEMA_VERSION",
     "HandlerPrebuiltManifest",
+    "describe_differing_fields",
     "InstalledFileReader",
     "installed_fingerprint",
     "merge_runtime_announcements",
