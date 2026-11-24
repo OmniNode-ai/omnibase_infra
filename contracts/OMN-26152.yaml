@@ -71,3 +71,12 @@ dod_evidence:
         check_value: |-
           ssh omni-201 '! docker logs --since 15m omninode-runtime 2>&1 | grep -q "\[INFO\] omnibase_infra.runtime.[a-z_]*: Dispatch started"'
         cwd: .
+  - id: dod-omn26152-integration-proof-rendered-stream
+    description: 'AC26152001: a real frozen engine writing to a real INFO stream handler renders no success dispatch line and keeps the failed-dispatch ERROR line; the test file is absent at the merge base so the check fails there (must-fail control).'
+    source: manual
+    binds_ac:
+      - AC26152001
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_message_dispatch_engine_log_volume_integration_omn26152.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
