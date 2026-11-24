@@ -221,6 +221,21 @@ class EnumNonRetryableErrorCategory(str, Enum):
         flattening the exception into text.
     """
 
+    UNSEQUENCED_LIVE_ROW_ERROR = "UnsequencedLiveRowError"
+    """A live work-ledger row that holds no ledger_seq (OMN-23488, OMN-26609).
+
+    Raised by omnimarket's work-ledger projection writer for a row of a source that
+    must be sequenced (``onex-ledger``) when the row carries no ``ledger_seq``.
+
+    Why non-retryable:
+        The refusal is a function of the row's own bytes. A dead-letter replay
+        returns the identical row to the same topic and it is refused again. Measured
+        on the lab dev lane 2026-11-24 from 16:08Z: 206 such rows, each refused 6 times
+        per pass and replayed up to 5 times, held the one-partition consumer at about
+        7 s per record. Named by class name, as ``GITHUB_TRANSPORT_ERROR`` is:
+        omnibase_infra may not import the omnimarket class.
+    """
+
     VALIDATION_ERROR = "ValidationError"
     """Input/schema validation errors from Pydantic or custom validators.
 
@@ -338,6 +353,11 @@ class EnumNonRetryableErrorCategory(str, Enum):
                 "Oversize publish - the producer refused the record for its "
                 "size, which does not change on retry. Requires a narrower "
                 "request or a different limit."
+            ),
+            cls.UNSEQUENCED_LIVE_ROW_ERROR: (
+                "Unsequenced live ledger row - the row holds no ledger_seq, so "
+                "the projection refuses it on every attempt. Requires the "
+                "writer to append through the sequenced ledger of record."
             ),
             cls.JSON_DECODE_ERROR: (
                 "JSON decode failure - the message body is not JSON (an empty "
