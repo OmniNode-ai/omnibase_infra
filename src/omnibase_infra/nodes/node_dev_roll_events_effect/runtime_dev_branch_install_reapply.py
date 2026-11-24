@@ -104,14 +104,14 @@ def announce_reapply_start(
     stdout: str,
     *,
     repo_root: Path,
-    build: Callable[[Path], ProtocolDevRollEvents] = build_events_at,
+    build: Callable[[Path, Path], ProtocolDevRollEvents] = build_events_at,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> bool:
     """Publish the reapply start event when the handler restarted containers."""
     if restart_count(stdout) <= 0:
         return False
     try:
-        publisher = build(repo_root)
+        publisher = build(repo_root, state_dir)
         job_id = active_job_id(state_dir) or f"branch-install-reapply/{uuid4()}"
         publisher.started(job_id, now(), EnumDevStartCause.BRANCH_INSTALL_REAPPLY)
     except Exception:
@@ -136,7 +136,9 @@ def window_holds_apply(
         announced_for = datetime.fromisoformat(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         announced_for = None
-    gate = build(repo_root, newest_dev_recreate(state_dir), announced_for)
+    gate = build(
+        repo_root, newest_dev_recreate(state_dir), announced_for, state_dir=state_dir
+    )
     permitted = bool(gate.allow(REAPPLY_REQUESTER, None))
     after = getattr(gate, "announced_for", None)
     if after is not None and after != announced_for:

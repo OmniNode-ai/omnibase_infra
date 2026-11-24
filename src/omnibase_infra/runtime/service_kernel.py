@@ -1014,7 +1014,8 @@ def _build_runtime_handler_dependencies(
 
     if not dependencies:
         return None
-    return dependencies
+    # OMN-26594: a dormant contract wires its handler with this same map.
+    return lazy.boot_handler_dependencies(dependencies)
 
 
 # The logical secret name the lane's rendered resolver config maps to the GitHub

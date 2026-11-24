@@ -19,6 +19,7 @@ class ProtocolPostFailureHost(Protocol):
     _router: object | None
     _allowed_lanes: Collection[str]
     _idle_converge_now: Callable[[], datetime]
+    _idle_read_running_ref: Callable[[str], str | None]
     _idle_read_head_ref: Callable[[str], str | None]
     _idle_read_dev_tags: Callable[[str], Sequence[ProtocolDevTag] | None]
     _idle_probe_blocker: Callable[[datetime], str | None]

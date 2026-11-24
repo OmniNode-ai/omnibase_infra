@@ -43,6 +43,7 @@ from omnibase_infra.event_bus.model_topic_readiness_config import (
 )
 from omnibase_infra.handlers.lazy_start_boot_split import (
     StoreLazyStartDormant,
+    StoreLazyStartHandlerDependencies,
     StoreLazyStartWaker,
 )
 from omnibase_infra.handlers.lazy_start_dormant_topic_watch import (
@@ -117,6 +118,7 @@ class HandlerLazyStartIngress:
                     self._container,
                     ModelTopicReadinessConfig(),
                     topology=StoreLazyStartDormant.topology(),
+                    handler_dependencies=StoreLazyStartHandlerDependencies.dependencies(),
                 ),
                 contracts,
                 policy,
