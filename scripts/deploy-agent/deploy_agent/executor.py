@@ -3481,9 +3481,9 @@ class DeployExecutor:
         # signed command and _compose_build exports it to the staging script.
         self.sibling_tags: dict[str, str] = {}
         # OMN-19220: ONE BUILD_DATE per rebuild, shared by every compose build
-        # in it. Dockerfile.runtime declares ARG BUILD_DATE at the top of both
-        # stages, so every RUN after it takes the value as build environment
-        # and a new timestamp misses the cache for the whole image. The
+        # in it. Dockerfile.runtime declares ARG BUILD_DATE late in both stages
+        # (OMN-26316), so every RUN after it takes the value as build
+        # environment and a new timestamp misses the cache for those layers. The
         # dev-lane-only build (OMN-18108) is a second `compose build` of the
         # same Dockerfile and args; stamping it with its own clock re-ran the
         # full build from scratch (2% cached, 46 min at load 163 on .201,
