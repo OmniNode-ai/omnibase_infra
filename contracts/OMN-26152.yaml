@@ -53,6 +53,15 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/runtime/test_message_dispatch_engine_log_volume_omn26152.py tests/unit/runtime/test_message_dispatch_engine.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
+  - id: dod-omn26152-ac26152004
+    description: 'AC26152004: the test that fails at origin/dev pins that a successful dispatch writes no INFO line; the dev log read below is the deploy-time check.'
+    source: manual
+    binds_ac:
+      - AC26152004
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_message_dispatch_engine_log_volume_omn26152.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
   - id: dod-omn26152-ac26152004-deploy-probe
     description: 'AC26152004: read on the dev runtime on omni-201 only after the deploy agent applies the merged change; hosted CI cannot reach it, so only the local Done gate runs this unbound check.'
     source: manual
