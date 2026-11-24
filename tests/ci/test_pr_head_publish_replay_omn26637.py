@@ -24,7 +24,6 @@ from scripts import trigger_rebuild_on_merge as trigger
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
-RECORDING = "tests/ci/fixtures/omn26637_pull_request_events_dev_publish.json"
 
 
 def _publish(source_sha: str, merged: str, head_sha: str) -> Any:
@@ -50,7 +49,9 @@ def _publish(source_sha: str, merged: str, head_sha: str) -> Any:
     )
 
 
-@pytest.mark.live_contact(RECORDING)
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/omn26637_pull_request_events_dev_publish.json"
+)
 def test_the_recorded_open_pull_request_head_is_refused_for_dev(
     recorded_response: dict[str, Any],
 ) -> None:
@@ -65,7 +66,9 @@ def test_the_recorded_open_pull_request_head_is_refused_for_dev(
     assert "not merged" in result.output
 
 
-@pytest.mark.live_contact(RECORDING)
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/omn26637_pull_request_events_dev_publish.json"
+)
 def test_the_recorded_merge_commit_is_not_refused_for_dev(
     recorded_response: dict[str, Any],
 ) -> None:
