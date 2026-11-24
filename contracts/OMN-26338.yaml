@@ -104,3 +104,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_stale_summary_omn26338.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_prebuilt_manifest_stale_summary_integration_omn26338.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
