@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock
 from uuid import uuid4
@@ -600,7 +601,8 @@ def test_reporting_outage_keeps_status_and_exception_pending_for_retry(
         "project": "omnibase-infra",
         "restored_revision": GOOD_COMMIT,
         "recovery_verified": True,
-        "at": "2026-10-25T15:46:43Z",
+        # Inside the abandon bound: an incident older than it is not retried (OMN-26316).
+        "at": (datetime.now(UTC) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "ledger_pending": True,
         "exception_pending": True,
     }
@@ -634,6 +636,12 @@ def test_reporting_outage_keeps_status_and_exception_pending_for_retry(
         )
 
     monkeypatch.setattr(executor_mod, "_run", routed)
+    # The row's stamp is read per delivery; a delivery pair that straddles a second
+    # boundary would otherwise differ in the stamp alone, so the retry-sends-the-same-row
+    # assertion below would fail by timing rather than by content.
+    monkeypatch.setattr(
+        executor_mod, "_dev_boot_timestamp", lambda: "2026-11-24T14:28:05Z"
+    )
     executor_mod.deliver_dev_boot_reports(root)
     assert json.loads(path.read_text())["ledger_pending"] is True
     assert json.loads(path.read_text())["exception_pending"] is True

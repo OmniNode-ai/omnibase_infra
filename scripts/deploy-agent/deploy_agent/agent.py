@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Main orchestrator. Single-job concurrency. Runs consumer + health + publisher concurrently."""
+# Main orchestrator. Single-job concurrency. Runs consumer + health + publisher concurrently.
 
 from __future__ import annotations
 
@@ -149,6 +149,8 @@ from deploy_agent.lane_lock_client import (
     lane_lock,
 )
 from deploy_agent.lane_policy import (
+    MERGED_REF_LANES,
+    SUPERSEDING_LANES,
     follows_stability,
     is_lab_dev_fence,
     load_allowed_lanes_from_env,
@@ -650,6 +652,10 @@ class DeployAgent:
             max_workers=LAG_POOL_MAX_WORKERS,
             thread_name_prefix="deploy-agent-lag",
         )
+        # OMN-26316. The dev boot incident report pass gets a thread of its OWN,
+        # for the reason the lag pool above has one: on the job thread it queues
+        # the consumer's poll behind it.
+        self._report_pass = load_dev_boot_guard().BackgroundPass("deploy-agent-reports")
         # OMN-19501. See SETTLE_POOL_MAX_WORKERS. ``_settle_future`` is the most
         # recently submitted settle; the pool is FIFO with one worker, so that
         # one finishing means every earlier one has.
@@ -820,7 +826,10 @@ class DeployAgent:
 
         # Step 3: Retry pending publishes. Called directly rather than through
         # _offload: nothing is listening yet (the site starts at step 4), so
-        # there is no HTTP surface for a blocking call to deny here.
+        # there is no HTTP surface for a blocking call to deny here. The dev boot
+        # incident reports it starts run on their own thread (OMN-26316): 394
+        # refused incidents held this step, and with it /health and the
+        # consumer, for about twenty minutes after every re-exec.
         self._retry_pending_publishes()
 
         # Step 4: Start health endpoint
@@ -900,6 +909,11 @@ class DeployAgent:
             running_build=DockerProvenanceReader(_runtime_container_for_lane),
             ref_resolver=GitRefResolver(REPO_DIR),
             tracking_ref=load_tracking_remote_ref_from_env(),
+            # OMN-26637. Operator ruling 2026-11-24: a newer build request
+            # cancels every older queued one, and the dev lane builds only
+            # merged refs. Both lane sets are declared in lane_policy.
+            supersede_lanes=SUPERSEDING_LANES,
+            merged_ref_lanes=MERGED_REF_LANES,
             router=self._router,
             # OMN-19544 AC1: refuse, as busy, while a prover holds the host.
             host_slot=self._host_slot,
@@ -2505,36 +2519,35 @@ class DeployAgent:
     def _deliver_onex_api_pin(
         self, cmd: ModelRebuildRequested, *, sha: str, manifest_sha: str | None
     ) -> ModelOnexApiDelivery | None:
-        """Advance ``ONEX_API_IMAGE`` to the image the settle just built (OMN-18572).
-
-        The build makes a correct onex-api image EXIST on this host; this is the
-        step that makes the lane RUN it. ``manifest_sha`` is the overlay SOURCE
-        commit the image was built from (its tags are ``<sha8>-<stamp>``), not
-        the merged omnibase_infra sha the fence answered: passing the fence's
-        sha searched for a lineage no image ever carried, and thirty deliveries
-        refused on that between 2026-09-17 and 2026-09-19.
-
-        A MISSING LINEAGE IS A NAMED NON-DELIVERY, NEVER A FALLBACK. The repoint
-        script will happily take the newest resident image of any lineage when
-        ``--sha`` is omitted, and reaching for that here would deliver some
-        other merge's image and record it as this one's. ``NOT_ATTEMPTED`` says
-        what happened instead.
-
-        STILL DOES NOT RAISE, AND NO LONGER STAYS QUIET. The delivery runs after
-        the compose lane's verdict is written; converting its failure into a
-        failed deploy would report a lane that converged as broken, and an
-        escape here would skip the terminal publish that sits after this
-        method's caller. Both of those remain true. What changes is that every
-        outcome is now a typed record on the job and on the terminal event, and
-        a failing one is logged at ``ERROR``: the refusal above was emitted at
-        ``INFO`` thirty times and read exactly like a successful no-op.
-
-        OMN-19501: runs on the settle worker, and RE-ACQUIRES the dev lane lock
-        for the recreate, because the recreate is a mutation of the compose
-        project and the next compose job may hold it. ``sha`` is the fence's
-        answer from the job thread; it is not re-derived here, because the
-        agent's per-job sha now belongs to whichever job runs next.
-        """
+        # Advance ``ONEX_API_IMAGE`` to the image the settle just built (OMN-18572).
+        #
+        # The build makes a correct onex-api image EXIST on this host; this is the
+        # step that makes the lane RUN it. ``manifest_sha`` is the overlay SOURCE
+        # commit the image was built from (its tags are ``<sha8>-<stamp>``), not
+        # the merged omnibase_infra sha the fence answered: passing the fence's
+        # sha searched for a lineage no image ever carried, and thirty deliveries
+        # refused on that between 2026-09-17 and 2026-09-19.
+        #
+        # A MISSING LINEAGE IS A NAMED NON-DELIVERY, NEVER A FALLBACK. The repoint
+        # script will happily take the newest resident image of any lineage when
+        # ``--sha`` is omitted, and reaching for that here would deliver some
+        # other merge's image and record it as this one's. ``NOT_ATTEMPTED`` says
+        # what happened instead.
+        #
+        # STILL DOES NOT RAISE, AND NO LONGER STAYS QUIET. The delivery runs after
+        # the compose lane's verdict is written; converting its failure into a
+        # failed deploy would report a lane that converged as broken, and an
+        # escape here would skip the terminal publish that sits after this
+        # method's caller. Both of those remain true. What changes is that every
+        # outcome is now a typed record on the job and on the terminal event, and
+        # a failing one is logged at ``ERROR``: the refusal above was emitted at
+        # ``INFO`` thirty times and read exactly like a successful no-op.
+        #
+        # OMN-19501: runs on the settle worker, and RE-ACQUIRES the dev lane lock
+        # for the recreate, because the recreate is a mutation of the compose
+        # project and the next compose job may hold it. ``sha`` is the fence's
+        # answer from the job thread; it is not re-derived here, because the
+        # agent's per-job sha now belongs to whichever job runs next.
         if not lane_runs_phase(cmd.runtime_lane, EnumInstancePhase.ONEX_API_PIN):
             # OMN-19522: no onex-api runs on this instance (its overlay
             # disables the service), so there is no pin to deliver.
@@ -2951,16 +2964,14 @@ class DeployAgent:
     def _retry_pending_publishes(self) -> None:
         """Replay any result still owed to the bus. BLOCKING — see ``_offload``."""
         # Failure reports use their own durable outbox and survive a runtime
-        # bus outage. Retry only on a dev-capable instance.
+        # bus outage. Retry only on a dev-capable instance, off this thread.
         if EnumRuntimeLane.DEV in self._allowed_lanes:
-            try:
-                deliver_reports(
-                    STATE_DIR
-                    / "dev-boot-guard"
-                    / lane_config_for(EnumRuntimeLane.DEV).compose_project
-                )
-            except (OSError, ValueError, RuntimeError):
-                logger.exception("Dev boot failure reports remain pending")
+            self._report_pass.start(
+                deliver_reports,
+                STATE_DIR
+                / "dev-boot-guard"
+                / lane_config_for(EnumRuntimeLane.DEV).compose_project,
+            )
         pending = self.job_store.get_pending_publish()
         for job in pending:
             cid_str = str(job.correlation_id)

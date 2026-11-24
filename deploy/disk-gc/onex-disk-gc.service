@@ -44,7 +44,7 @@ ExecStartPre=/bin/mkdir -p %h/.local/log/onex
 #
 # This line used to run worktree-gc.sh, which drives omniclaude's
 # prune-worktrees.sh: that predicate removes a clean, pushed, merged worktree
-# with `git worktree remove --force` and reads docs/tracking/ROLLING_WORK_LEDGER.md
+# with `git worktree remove --force` and reads the rolling work ledger
 # nowhere. Clean-and-pushed-and-merged is exactly the state a LIVE lane occupies
 # between its push and its post-merge verification, which is the hazard OMN-15551
 # measured. The replacement additionally requires no open ledger CLAIM row and
