@@ -7,7 +7,7 @@ summary: "The omnibase_infra package declares each onex command's one-line help 
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - "entry-point group onex.cli.help (entry name = command name, value = its one-line help)"
+  - public_api
 requirements:
   - id: req-omn26615-infra-help-lines
     statement: "Every visible onex command this package provides has an onex.cli.help entry that prints exactly what the command prints at any terminal width; hidden, deprecated or explicit-short-help commands have none."
