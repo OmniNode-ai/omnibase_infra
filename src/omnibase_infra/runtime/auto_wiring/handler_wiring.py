@@ -132,6 +132,10 @@ from omnibase_infra.handlers.handler_projection_derived_write import (
 from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
+from omnibase_infra.handlers.projection_database_ownership import (
+    owned_database_gate,
+    serves_its_own_database,
+)
 from omnibase_infra.handlers.projection_failure_classification import is_content_failure
 from omnibase_infra.handlers.projection_noop_classification import (
     ROWS_REFUSED_KEY,
@@ -4110,23 +4114,6 @@ PROJECTION_INPROCESS_DISPATCH_ATTR = "onex_runtime_inprocess_dispatch"
 PROJECTION_OWNED_DATABASE_BIND_ATTR = "bind_projection_database_url"
 
 
-def _serves_its_own_database(handler_instance: object) -> bool:
-    """Whether the handler carries a DB adapter it opened itself.
-
-    A handler on the DB-injection arm receives its adapter from the runtime as
-    ``input_data["_db"]`` and holds none of its own. A runner-shaped handler
-    constructs an async pool adapter in ``__init__`` and reaches it through
-    ``self.db`` — the runtime never sees that adapter's construction and cannot
-    scope its lifetime.
-    """
-    db = getattr(handler_instance, "db", None)
-    if db is None:
-        return False
-    return callable(getattr(db, "connect", None)) and callable(
-        getattr(db, "close", None)
-    )
-
-
 def _is_standalone_projection_runner(handler_instance: object) -> bool:
     """Whether this handler_routing entry is a standalone runner, not a target.
 
@@ -4151,7 +4138,7 @@ def _is_standalone_projection_runner(handler_instance: object) -> bool:
         callable(getattr(handler_instance, "project_event", None))
         and callable(getattr(handler_instance, "run", None))
         and hasattr(handler_instance, "topics")
-        and _serves_its_own_database(handler_instance)
+        and serves_its_own_database(handler_instance)
     )
     if not runner_shaped:
         return False
@@ -4198,7 +4185,7 @@ def _bind_handler_owned_projection_database(
     Standalone runners never reach here — the runtime does not dispatch them,
     so it does not own their configuration either.
     """
-    if not _serves_its_own_database(handler_instance):
+    if not serves_its_own_database(handler_instance):
         return
     handler_name = type(handler_instance).__name__
     binding_refs = sorted({binding.binding_ref for binding in target.bindings})
@@ -5170,7 +5157,12 @@ def _make_projection_dispatch_callback(
             # budget above. Held only across the blocking call, so it caps
             # concurrent materialisation without serialising the async work
             # on either side of it.
-            async with _projection_inflight_gate():
+            # OMN-26430: an adapter owner is admitted one message at a time,
+            # ahead of the shared gate so its wait holds no inflight slot.
+            async with (
+                owned_database_gate(handler_instance),
+                _projection_inflight_gate(),
+            ):
                 result = await asyncio.to_thread(_invoke_projection_handler)
             if asyncio.iscoroutine(result):
                 result = await cast("Awaitable[object]", result)
