@@ -764,8 +764,7 @@ def runtime_unchanged(repository: str, head: str, running: str) -> bool:
 
 
 def lag_refs_reader(
-    read_running_ref: Callable[[str], str | None],
-    read_head_ref: Callable[[str], str | None],
+    host: ProtocolPostFailureHost,
 ) -> Callable[[str, bool], tuple[str | None, str | None]]:
     """The running and head revisions an idle converge judges the lane on (OMN-26316).
 
@@ -776,8 +775,8 @@ def lag_refs_reader(
     """
 
     def read(repository: str, routed_elsewhere: bool) -> tuple[str | None, str | None]:
-        running = read_running_ref(repository)
-        head = read_head_ref(repository)
+        running = host._idle_read_running_ref(repository)
+        head = host._idle_read_head_ref(repository)
         if routed_elsewhere or head is None or running is None or head == running:
             return running, head
         try:
