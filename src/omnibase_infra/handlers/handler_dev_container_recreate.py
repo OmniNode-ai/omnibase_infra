@@ -101,7 +101,7 @@ class HandlerDevContainerRecreate:
                 same_build=bool(reading.image_digest)
                 and reading.image_digest == previous.image_digest,
                 cause=cause,
-                job_id=job_id,
+                deploy_job=job_id,
                 requested_by=requested_by,
             )
         )

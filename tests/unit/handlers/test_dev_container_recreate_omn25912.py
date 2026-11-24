@@ -185,7 +185,7 @@ def test_container_recreate_cause_is_the_job_the_restart_policy_or_unknown() -> 
         _reading(container_digest="c1", started_at=started, restart_count=3), previous
     )
     assert policy.cause is Cause.RESTART_POLICY
-    assert (policy.job_id, policy.requested_by) == ("", "")
+    assert (policy.deploy_job, policy.requested_by) == ("", "")
 
     # The same container started again and RestartCount did not move: no proof, no guess.
     hand = _handle(
@@ -216,7 +216,7 @@ def test_container_recreate_cause_is_the_job_the_restart_policy_or_unknown() -> 
         ),
     )
     assert job.cause is Cause.DEPLOY_AGENT_JOB
-    assert job.job_id == "job-7"
+    assert job.deploy_job == "job-7"
     # No manifest names the issuer, so the requester stays empty rather than guessed.
     assert job.requested_by == ""
 
@@ -337,7 +337,7 @@ def test_container_recreate_tick_names_the_deploy_agent_job_that_made_the_start(
         _docker("c3", started, image=NEW_BUILD, restarts=0),
     )
     events = [p for t, _, p in sent if t == topics["dev_container_recreated"]]
-    assert [(e["cause"], e["job_id"], e["requested_by"]) for e in events] == [
+    assert [(e["cause"], e["deploy_job"], e["requested_by"]) for e in events] == [
         ("deploy_agent_job", "job-9", "agent/idle-converge")
     ]
     assert events[0]["same_build"] is False
