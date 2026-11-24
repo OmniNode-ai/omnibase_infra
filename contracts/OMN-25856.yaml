@@ -38,3 +38,11 @@ dod_evidence:
         check_value: >-
           bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_dlq_replay_effect/engine_dlq_replay.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "Publisher-malformed command: failure_class=" >/dev/null'
         cwd: .
+  - id: dod-omn25856-integration-coverage
+    description: The real consumer, replay producer, quarantine producer and handler quarantine a publisher_malformed dead letter and still replay a transient one.
+    source: manual
+    binds_ac: [AC25856001]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/dlq/test_dlq_replay_publisher_malformed_omn25856.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
