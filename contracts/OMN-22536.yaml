@@ -27,3 +27,20 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/contracts/test_omn17427_contract_unique_ids.py -q --no-cov
+  - id: dod-omn22536-ac1-accepted-20261124t1745z
+    description: AC1 binding (accepted 2026-11-24T1745Z, proposed by lane=dod-closeout-bind-2026-11-24T1745Z-c2, accepted by lane=dod-closeout-accept-2026-11-24T1745Z-c2). No requirement or dod_evidence id of contracts/OMN-17427.yaml repeats, AC109 and AC151 remain under the prepr-pool requirements, and both statements hash to their text at the merge parent of 6f22ba7a5a. Re-run on h051 at origin/dev d91c4be661 PASSED (3 passed, statements unchanged); at the merge parent 5263b3d7a9 the contract holds req-omn17427-prepr-pool-local-transport twice.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: sh -c 'uv run pytest tests/unit/contracts/test_omn17427_contract_unique_ids.py -q --no-cov -p no:cacheprovider && uv run python -c "import hashlib,yaml; c=yaml.safe_load(open(\"contracts/OMN-17427.yaml\")); s={a[\"id\"]:hashlib.sha256(a[\"statement\"].encode()).hexdigest() for r in c[\"requirements\"] for a in r.get(\"acceptance\",[]) if a[\"id\"] in (\"AC109\",\"AC151\")}; assert s=={\"AC109\":\"6810f884dba71ce039196fff7c74e6979ff8fe0c6bd2c7a459c0ace6b6188d33\",\"AC151\":\"63eb3d6f2888c840f5d1569111adb3f239837c81c5119c94e528eed3efc59823\"}, s; print(\"AC109 AC151 statements unchanged\")"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+context:
+  ac_binding_provenance:
+    dod-omn22536-ac1-accepted-20261124t1745z:
+      - label: AC1
+        criterion_hash: f2dc1c2921140ef9b00c4f155c30a43226788a6f6c9ebfc849572fb64111570d
+        proposed_by: lane=dod-closeout-bind-2026-11-24T1745Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-24T1745Z-c2
+        accepted_at: '2026-11-24T18:14:33Z'
