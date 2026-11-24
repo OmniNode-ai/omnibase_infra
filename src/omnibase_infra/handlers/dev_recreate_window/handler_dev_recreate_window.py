@@ -44,7 +44,7 @@ class RecreateNotAnnouncedError(RuntimeError):
     """A recreate was asked for and its announcement was not accepted by the bus."""
 
 
-def _window_start(policy: ModelDevRecreatePolicy, now: datetime) -> datetime:
+def window_start(policy: ModelDevRecreatePolicy, now: datetime) -> datetime:
     """The start of the window ``now`` falls in: the policy's offset plus whole windows."""
     elapsed = int(now.timestamp()) - policy.offset_seconds
     return datetime.fromtimestamp(
@@ -76,7 +76,7 @@ class HandlerDevRecreateWindow:
                 reason=EnumDevRecreateReason.PINNED_FIX,
                 next_recreate_at=now,
             )
-        start = _window_start(policy, now)
+        start = window_start(policy, now)
         following = start + timedelta(seconds=policy.window_seconds)
         if request.last_recreate_at is not None and request.last_recreate_at >= start:
             return ModelDevRecreateDecision(
