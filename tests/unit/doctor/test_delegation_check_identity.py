@@ -15,6 +15,12 @@ from omnibase_infra.doctor.checks.check_delegation_identity import (
 from omnibase_infra.doctor.enum_delegation_doctor_fault import EnumDelegationDoctorFault
 
 
+@pytest.fixture(autouse=True)
+def _no_local_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep these gateway-block tests independent of any identity on the host."""
+    monkeypatch.setattr(module, "read_install_identity", lambda: None)
+
+
 @pytest.mark.parametrize(
     "config",
     [
@@ -39,9 +45,7 @@ def test_missing_identity_has_login_remediation(
     result = check.run()
 
     assert diagnosis.fault is EnumDelegationDoctorFault.NO_IDENTITY
-    assert diagnosis.fix == (
-"onex local init"
-    )
+    assert diagnosis.fix == "onex local init"
     assert result.status is EnumHealthStatusValue.UNHEALTHY
     assert "[no_identity]" in result.message
     assert diagnosis.fix in result.message

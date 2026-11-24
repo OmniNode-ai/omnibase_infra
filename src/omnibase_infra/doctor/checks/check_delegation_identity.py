@@ -5,15 +5,14 @@
 from pathlib import Path
 from typing import ClassVar
 
-from omnibase_infra.cli.cli_delegate import (
-    DelegateTenantRefusedError,
-    read_install_identity,
-)
-
 from omnibase_core.doctor.doctor_check_base import DoctorCheckBase
 from omnibase_core.enums.enum_doctor_category import EnumDoctorCategory
 from omnibase_core.models.doctor.model_doctor_check_result import (
     ModelDoctorCheckResult,
+)
+from omnibase_infra.cli.cli_delegate import (
+    DelegateTenantRefusedError,
+    read_install_identity,
 )
 from omnibase_infra.doctor.delegation_doctor_support import (
     GATEWAY_BLOCK_INVALID,
@@ -50,20 +49,17 @@ class CheckDelegationIdentity(DoctorCheckBase):
         try:
             local_identity = read_install_identity()
         except DelegateTenantRefusedError as exc:
-            exc_text = str(exc)
             # The seam raises a refusal both for an unreadable recorded
-            # identity and when omnimarket itself is not resolvable. A missing
-            # omnimarket/module is a deployment detail rather than a refusal of
-            # a recorded identity, so collapse only that case to "not
-            # configured" below instead of failing the check.
-            if "not resolvable" not in exc_text:
-                # A recorded-but-corrupt identity is a refusal, not
-                # "not configured": keep it a refusal and do not collapse it
-                # into no_identity.
+            # identity and when omnimarket itself cannot be imported. A missing
+            # module is a deployment detail, not a refusal of a recorded
+            # identity, so only that case collapses to "not configured".
+            if not isinstance(exc.__cause__, (ImportError, AttributeError)):
+                # A recorded-but-corrupt identity stays a refusal; it is not
+                # collapsed into no_identity.
                 return (
                     ModelDelegationDiagnosis(
                         fault=None,
-                        detail=exc_text,
+                        detail=str(exc),
                         fix="",
                     ),
                     False,
