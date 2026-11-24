@@ -1,7 +1,7 @@
 # The shrink-only count of files in this repository that read or write the ledger file.
 # A repository whose count rises above its row fails the hook; a row is only ever lowered.
 ratchet:
-  omnibase_infra: 21
+  omnibase_infra: 18
 # The `files` table holds the files that hold such a reader or writer, with their line counts (run the
 # census node with --per-file): a file with no row, or with more lines than its row, fails the census.
 # A row is only ever lowered, and a file is only ever dropped.
@@ -15,8 +15,6 @@ files:
     deploy/disk-gc/install-worktree-prune.sh: 1
     deploy/disk-gc/onex-disk-gc.service: 1
     deploy/disk-gc/onex-worktree-prune.service: 2
-    scripts/deploy-agent/deploy/deploy-agent-launch.sh: 1
-    scripts/runtime_build/prepr_runtime_pool.py: 2
     tests/ci/test_dev_lane_pack_builder_settings_omn21099.py: 1
     tests/conftest.py: 1
     tests/incident_replays/registry.yaml: 1
@@ -27,4 +25,3 @@ files:
     tests/scripts/test_runner_job_started_tmp_reaper_omn17427.py: 1
     tests/scripts/test_worktree_prune_timer.py: 2
     tests/unit/scripts/test_ledger_watermark_omn17023.py: 1
-    tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py: 1

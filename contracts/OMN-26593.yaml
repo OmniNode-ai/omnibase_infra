@@ -15,6 +15,11 @@ requirements:
         statement: 'AC2: a reader node that does not answer leaves lab_alarm.py raising the same alarm an unreadable ledger raises today -- falsifier: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k unanswered -q'
       - id: AC3
         statement: 'AC3: the census node over an omnibase_infra worktree lists none of install-lab-alarm.sh, the plist template and lab_alarm.py as a runtime hit, and the ratchet row of omnibase_infra is lowered, never raised -- falsifier: the census command over the worktree, run first on origin/dev as the positive control'
+  - id: req-omn26593-census-run-line
+    statement: A lane census run line names the collector revision the installed unit records.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: the lane census start line carries revision=<LANE_CENSUS_REVISION>, and revision=unrecorded when the unit records none -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_dry_run.py -k start_line -q, failing on the merge base'
 evidence_requirements:
   - kind: tests
     description: The lab alarm tests pass at the head.
@@ -56,4 +61,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -o addopts='' -n 0 -k hands_no_ledger_file
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26593-ac4-census-run-line-revision
+    description: The census start line names the installed collector revision, and says unrecorded when none is installed; both tests fail at the merge base, where the start line carries no revision.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_dry_run.py -q --no-cov -o addopts='' -n 0 -k start_line
         cwd: ${OMNI_HOME}/omnibase_infra

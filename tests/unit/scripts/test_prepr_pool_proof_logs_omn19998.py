@@ -28,6 +28,7 @@ from typing import Any
 
 import pytest
 
+from omnibase_infra.handlers.handler_ledger_rows import bus_row_appender
 from omnibase_infra.models.lab_proof.model_proof_ledger import ModelProofLedger
 from omnibase_infra.models.lab_proof.model_proof_log_bundle import ModelProofLogBundle
 from tests.helpers.prepr_pool_overlay import pool_overlay_env
@@ -355,20 +356,24 @@ def test_the_live_hold_reader_moved_out_of_the_driver_still_answers() -> None:
     assert held == {"202-runtime": ("h1", "a", "2026-11-15T21:00:00Z")}
 
 
-def test_the_appender_passes_the_row_as_one_argument(tmp_path: Path) -> None:
-    ledger = tmp_path / "ledger.md"
-    fake = tmp_path / "fake-ledger.py"
+def test_the_appender_passes_the_row_on_stdin_to_the_bus_command(
+    tmp_path: Path,
+) -> None:
+    sink = tmp_path / "rows.txt"
+    fake = tmp_path / "fake-append.py"
     fake.write_text(
         "import sys, pathlib\n"
         "argv = sys.argv[1:]\n"
-        "assert argv[1:3] == ['--timeout', '60s'] and argv[3] == '--append', argv\n"
-        "pathlib.Path(argv[0]).open('a').write(argv[4] + '\\n')\n",
+        "assert argv[argv.index('--rows-file') + 1] == '-', argv\n"
+        f"pathlib.Path({str(sink)!r}).open('a').write(sys.stdin.read())\n",
         encoding="utf-8",
     )
-    append = ModelProofLedger.appender(f"{sys.executable} {fake}", str(ledger))
+    environ = {
+        "ONEX_LEDGER_BUS_APPEND_COMMAND": f"{sys.executable} {fake}",
+        "ONEX_LEDGER_HOST_NAME": "h-test",
+    }
+    append = bus_row_appender(environ)
     append("2026-11-15T20:00:00Z | STATUS | lane=x | a row; with 'quotes' and $vars")
-    assert (
-        ledger.read_text(encoding="utf-8").strip().endswith("with 'quotes' and $vars")
-    )
-    assert ModelProofLedger.appender("", str(ledger)) is ModelProofLedger.no_append
-    assert ModelProofLedger.appender("x", None) is ModelProofLedger.no_append
+    assert " | req=" in sink.read_text(encoding="utf-8")
+    assert "with 'quotes' and $vars | req=" in sink.read_text(encoding="utf-8")
+    assert bus_row_appender({}) is ModelProofLedger.no_append
