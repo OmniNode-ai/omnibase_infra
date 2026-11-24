@@ -45,6 +45,10 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_deploy_job_reading_effect.runtime_post_failure_converge import (
         PostFailureConverge,
     )
+    from omnibase_infra.nodes.node_deploy_job_reading_effect.runtime_untagged_head_gate import (
+        IdleBuildGate,
+        UntaggedHeadGate,
+    )
     from omnibase_infra.protocols.protocol_command import ProtocolCommand
     from omnibase_infra.protocols.protocol_post_failure_host import (
         ProtocolPostFailureHost,
@@ -95,6 +99,7 @@ _POST_FAILURE_MODULES = (
     "models/model_post_failure_inputs.py",
     "models/model_post_failure_decision.py",
     "protocols/protocol_command.py",
+    "protocols/protocol_dev_tag.py",
     "protocols/protocol_job_store.py",
     "protocols/protocol_lane_flags.py",
     "protocols/protocol_post_failure_host.py",
@@ -216,12 +221,14 @@ def check_pin(*, force: bool = False) -> BaseModel | None:
     unreadable record.
 
     It is the one entry the idle tick calls for this node, so it also runs the callers the
-    contract's ``operation_callers`` declares (OMN-26524): ``check_routing`` and
-    ``check_routed_commands``. Each is throttled on its own interval, never raises and
-    leaves this function's result as it was.
+    contract's ``operation_callers`` declares (OMN-26524, OMN-26316): ``check_routing``,
+    ``check_routed_commands`` and ``check_overdue_dev_merges``. Each is throttled on its own
+    interval, never raises and leaves this function's result as it was.
     """
     check_routing(force=force)
     check_routed_commands(force=force)
+    check_overdue_dev_merges(force=force)
+    check_dev_container(force=force)
     try:
         tick = time.monotonic()
         interval = (
@@ -451,6 +458,29 @@ def _job_records(state_dir: Path) -> list[object]:
     return records
 
 
+def check_dev_container(*, force: bool = False) -> None:
+    """Run the dev container observer of ``node_dev_roll_events_effect`` once (OMN-25912).
+
+    Called from the idle tick (through ``check_pin``), the trigger that node's contract
+    declares as ``audit_trigger: agent_tick``: it publishes one event for each new start of
+    the dev runtime container and runs the recreate reader. The observer throttles itself to
+    ``container_observation_interval_seconds`` and never raises; neither does this call.
+    """
+    try:
+        roll = _load("nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py")
+        executor = importlib.import_module("deploy_agent.executor")
+        roll.observe_if_due(
+            Path(_agent().STATE_DIR),
+            executor.lane_config_for(executor.EnumRuntimeLane.DEV).compose_project,
+            force=force,
+        )
+    except Exception:
+        logger.exception(
+            "dev container observation could not run "
+            "friction_type=dev_event_publish_failed"
+        )
+
+
 def check_routed_commands(*, force: bool = False) -> BaseModel | None:
     """Run ``alarm_routed_commands_without_job_record`` once over this instance's job records.
 
@@ -514,6 +544,185 @@ def check_routed_commands(*, force: bool = False) -> BaseModel | None:
     ):
         logger.exception(
             "routed command alarm skipped: the commands or contract were unread"
+        )
+        return None
+
+
+# --- OMN-26316: the caller of the overdue dev merge build decision ------------------------
+
+_OVERDUE_MODULES = (
+    "models/model_overdue_dev_merge_job.py",
+    "models/model_overdue_dev_merge_build_request.py",
+    "models/model_overdue_dev_merge_build_decision.py",
+    "handlers/handler_dev_merge_build_overdue.py",
+)
+_overdue_last: list[float] = []
+#: The branch the agent's checkout tracks; no branch name is spelled here.
+_TRACKED_HEAD = "@{upstream}"
+
+
+def _seconds(settings: dict[str, JsonValue], key: str) -> int:
+    value = settings[key]
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise RuntimeError(f"the deploy job reading contract's {key} is not a bound")
+    return value
+
+
+def _overdue_jobs(state_dir: Path) -> list[object]:
+    """The agent's job records as the overdue decision reads them; a file that is none is skipped."""
+    job_mod = sys.modules["omnibase_infra.models.model_overdue_dev_merge_job"]
+    jobs: list[object] = []
+    for path in sorted(state_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            jobs.append(
+                job_mod.ModelOverdueDevMergeJob(
+                    job_id=data["correlation_id"],
+                    runtime_lane=data["command"]["runtime_lane"],
+                    accepted_at=data["accepted_at"],
+                    status=data["status"],
+                    git_ref=data["command"]["git_ref"],
+                )
+            )
+        except (OSError, ValueError, KeyError, TypeError, ValidationError):
+            continue
+    return jobs
+
+
+def _dev_merges(
+    execution: ModuleType, now: datetime, lookback_seconds: int, timeout: float
+) -> list[tuple[str, datetime, str]]:
+    """The checkout's recent first-parent dev commits as (sha, commit time, ``RUNTIME`` or ``NON_RUNTIME``).
+
+    The commit time of a merge-queue squash is its queue entry, which can precede the merge
+    by the queue's wait; a job accepted inside that wait reads as carrying a sha it could not
+    have. An unread log is no merge and an unread diff is a runtime merge, never a guess.
+    """
+    clone = str(execution.REPO_DIR)
+    since = (now - timedelta(seconds=lookback_seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    log = subprocess.run(
+        [
+            "git",
+            "-C",
+            clone,
+            "log",
+            _TRACKED_HEAD,
+            "--first-parent",
+            f"--since={since}",
+            "--max-count=100",
+            "--format=%H %ct",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+    )
+    if log.returncode != 0:
+        raise RuntimeError(f"the checkout's dev log was unread: {log.stderr.strip()}")
+    predicate = _not_runtime(execution)
+    merges: list[tuple[str, datetime, str]] = []
+    for line in log.stdout.splitlines():
+        sha, stamp = line.split()
+        diff = subprocess.run(
+            ["git", "-C", clone, "diff", "--name-only", f"{sha}^", sha],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+        not_runtime = diff.returncode == 0 and all(
+            predicate(path, "omnibase_infra") for path in diff.stdout.split()
+        )
+        merges.append(
+            (
+                sha,
+                datetime.fromtimestamp(int(stamp), tz=UTC),
+                "NON_RUNTIME" if not_runtime else "RUNTIME",
+            )
+        )
+    return merges
+
+
+def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | None:
+    """Run ``request_overdue_dev_merge_build`` once over the checkout's recent dev merges (OMN-26316).
+
+    Called from the idle tick (through ``check_pin``), so it runs with no job. The merges are
+    the tracked dev head's recent first-parent commits and the jobs are the agent's own
+    records. It publishes nothing: one run line per run (``overdue dev merge builds ...``)
+    and one warning per merge judged REQUEST, naming its request id, which is what the
+    publish that follows will carry. Throttled to ``dev_merge_build_check_interval_seconds``
+    (``force`` skips the throttle); never raises; returns the decisions, or ``None`` when
+    throttled or not runnable.
+    """
+    try:
+        settings = _idle_settings()
+        if not _due(
+            _overdue_last, settings, "dev_merge_build_check_interval_seconds", force
+        ):
+            return None
+        for relative in _OVERDUE_MODULES:
+            _load(relative)
+        handler_mod = sys.modules[
+            "omnibase_infra.handlers.handler_dev_merge_build_overdue"
+        ]
+        request_mod = sys.modules[
+            "omnibase_infra.models.model_overdue_dev_merge_build_request"
+        ]
+        execution = _agent()
+        now = datetime.now(UTC)
+        window = _seconds(settings, "dev_merge_build_window_seconds")
+        jobs = tuple(_overdue_jobs(Path(execution.STATE_DIR)))
+        handler = handler_mod.HandlerDevMergeBuildOverdue()
+        decisions: list[BaseModel] = []
+        for sha, merged_at, runtime_class in _dev_merges(
+            execution,
+            now,
+            _seconds(settings, "dev_merge_build_lookback_seconds"),
+            float(_seconds(settings, "build_decision_git_diff_timeout_seconds")),
+        ):
+            decisions.append(
+                handler.handle(
+                    request_mod.ModelOverdueDevMergeBuildRequest(
+                        repository="omnibase_infra",
+                        merge_sha=sha,
+                        merged_at=merged_at,
+                        runtime_class=runtime_class,
+                        now=now,
+                        window_seconds=window,
+                        jobs=jobs,
+                    )
+                )
+            )
+        overdue = [d for d in decisions if getattr(d, "outcome", "") == "REQUEST"]
+        logger.log(
+            logging.WARNING if overdue else logging.INFO,
+            "overdue dev merge builds merges=%d satisfied=%d waiting=%d requests=%d",
+            len(decisions),
+            sum(getattr(d, "outcome", "") == "SATISFIED" for d in decisions),
+            sum(getattr(d, "outcome", "") == "WAIT" for d in decisions),
+            len(overdue),
+        )
+        for decision in overdue:
+            logger.warning(
+                "overdue dev merge build sha=%s due_at=%s request_id=%s",
+                getattr(decision, "merge_sha", ""),
+                getattr(decision, "due_at", ""),
+                getattr(decision, "request_id", ""),
+            )
+        return tuple(decisions)
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        ValidationError,
+        RuntimeError,
+        OSError,
+        ImportError,
+        subprocess.SubprocessError,
+        yaml.YAMLError,
+    ):
+        logger.exception(
+            "overdue dev merge builds skipped: the merges, jobs or contract were unread"
         )
         return None
 
@@ -678,6 +887,32 @@ def _probe_earliest(
                 + idle.PROBE_MARGIN
             )
     return None
+
+
+_UNTAGGED_HEAD_MODULES = (
+    *_FAILED_HEAD_MODULES,
+    "nodes/node_deploy_job_reading_effect/runtime_untagged_head_gate.py",
+)
+
+
+def untagged_head_gate(host: ProtocolPostFailureHost) -> UntaggedHeadGate:
+    """The agent's untagged-head rule for its idle builds (OMN-25942), loaded from this checkout once.
+
+    It reads origin's dev tags through the host's idle seam and writes its one row per head
+    through this module's build decision entry.
+    """
+    *_, rule = (_load(relative) for relative in _UNTAGGED_HEAD_MODULES)
+    gate: UntaggedHeadGate = rule.UntaggedHeadGate(host, record_untagged_head)
+    return gate
+
+
+def idle_build_gate(host: ProtocolPostFailureHost) -> IdleBuildGate:
+    """The agent's refusals for its two idle builds: failed head (OMN-26493), then untagged head (OMN-25942)."""
+    *_, rule = (_load(relative) for relative in _UNTAGGED_HEAD_MODULES)
+    gate: IdleBuildGate = rule.IdleBuildGate(
+        failed_head_gate(host), untagged_head_gate(host)
+    )
+    return gate
 
 
 def _emit(
@@ -851,6 +1086,22 @@ def record_failed_head(refusal: object, now: datetime) -> BaseModel | None:
         reason="failed_head",
         job=_field(refusal, "failed_job"),
         verdict_class=_field(refusal, "verdict_class"),
+    )
+
+
+def record_untagged_head(head: str, now: datetime) -> BaseModel | None:
+    """An idle build refused because no dev tag names the dev head yet (OMN-25942); never raises.
+
+    One row per head: the key (repository, head, ``refused``, ``untagged_head``) is marked in
+    the agent's state directory, so the next refusal of the head writes nothing.
+    """
+    return _emit(
+        "omnibase_infra",
+        head,
+        _DETECTED,
+        now,
+        result="refused",
+        reason="untagged_head",
     )
 
 

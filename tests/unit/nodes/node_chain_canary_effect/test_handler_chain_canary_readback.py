@@ -73,6 +73,7 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readb
 
 _PROBE_URL = "http://runtime.invalid:8085"
 _BOOTSTRAP = "broker.invalid:19092"
+_TENANT = "820272f9-4aaf-5add-a2df-0af942852ab2"
 # Read off the generated topic enum rather than typed as literals — the same
 # values the request model defaults to, so a topic rename cannot leave these
 # fixtures asserting a topic nothing publishes to.
@@ -158,6 +159,7 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         "correlation_id": uuid4(),
         "probe_url": _PROBE_URL,
         "budget_ms": 5_000,
+        "tenant_id": _TENANT,
         "terminal_bootstrap_servers": _BOOTSTRAP,
         "quarantine_bootstrap_servers": _BOOTSTRAP,
         # OMN-16963: link 2 is now a claim too, so a run with no projection
@@ -175,7 +177,9 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
     return ModelChainCanaryRequest(**fields)  # type: ignore[arg-type]
 
 
-class _Ingress:
+class _Publisher:
+    """Injected bus publish (OMN-23566). ``response`` is the broker ACK."""
+
     def __init__(
         self,
         response: dict[str, object] | None = None,
@@ -185,12 +189,18 @@ class _Ingress:
         self.response = response
         self.error = error
         self.elapsed_ms = elapsed_ms
-        self.calls: list[tuple[str, dict[str, object], float]] = []
+        self.calls: list[tuple[str, str, dict[str, object], float]] = []
 
     async def __call__(
-        self, url: str, body: dict[str, object], timeout_s: float
+        self,
+        bootstrap: str,
+        topic: str,
+        envelope: dict[str, object],
+        timeout_s: float,
     ) -> tuple[dict[str, object] | None, str, int]:
-        self.calls.append((url, body, timeout_s))
+        self.calls.append((bootstrap, topic, envelope, timeout_s))
+        if self.error:
+            return None, self.error, self.elapsed_ms
         return self.response, self.error, self.elapsed_ms
 
 
@@ -240,12 +250,12 @@ class _TerminalReadback:
 
 
 def _handler(
-    ingress: _Ingress,
+    publisher: _Publisher,
     terminal_readback: _TerminalReadback | None = None,
     quarantine: _Quarantine | None = None,
 ) -> HandlerChainCanary:
     return HandlerChainCanary(
-        ingress=ingress,
+        bus_publish=publisher,
         quarantine_scan=quarantine or _Quarantine(found=False),
         terminal_readback=terminal_readback or _TerminalReadback(found=_SUCCESS_TOPIC),
         projection_readback=_ProjectionReadback(),
@@ -276,7 +286,7 @@ async def test_ingress_error_with_terminal_on_the_bus_is_not_terminal_missing() 
     """
     readback = _TerminalReadback(found=_SUCCESS_TOPIC)
     handler = _handler(
-        _Ingress(
+        _Publisher(
             response={
                 "ok": False,
                 "error": {
@@ -307,14 +317,14 @@ async def test_ingress_error_with_terminal_on_the_bus_is_not_terminal_missing() 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_link_four_passes_when_the_ingress_flag_is_absent_entirely() -> None:
-    """A response with no ``ok`` and no ``terminal_event`` at all.
+async def test_link_four_passes_when_the_ack_flag_is_absent_entirely() -> None:
+    """An ACK with no ``ok`` and no ``terminal_event`` at all.
 
     AC1's falsification test: the verdict for link 4 must not move when only
-    the ingress body changes. The bus is the evidence.
+    the publish ACK's body changes. The bus is the evidence.
     """
     handler = _handler(
-        _Ingress(response={"accepted": True}),
+        _Publisher(response={"accepted": True}),
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
@@ -330,13 +340,18 @@ async def test_link_four_passes_when_the_ingress_flag_is_absent_entirely() -> No
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_ingress_claimed_terminal_never_published_is_red() -> None:
-    """OMN-15468's shape: ok=true + a terminal_event the bus never saw.
+    """OMN-15468's shape: a submission answer naming a terminal the bus never saw.
 
     RED-first for OMN-16931 AC3. Under the old code this was GREEN — the
     single most dangerous outcome, because it is the one that closes a gate.
+
+    The publish ACK carries ``ok`` and never a terminal-event key, so a
+    well-behaved transport can no longer produce this body; the fixture hands
+    the handler a misbehaving one precisely to pin that the claim is recorded
+    as a claim and the bus decides regardless.
     """
     handler = _handler(
-        _Ingress(
+        _Publisher(
             response={
                 "ok": True,
                 "terminal_event": "omnimarket.delegate-skill-completed",
@@ -363,9 +378,10 @@ async def test_ingress_claimed_terminal_never_published_is_red() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_green_requires_both_a_clean_ingress_and_a_readback_terminal() -> None:
+async def test_green_requires_both_a_clean_submission_and_a_readback_terminal() -> None:
+    """A clean publish ACK is necessary but never sufficient for GREEN."""
     handler = _handler(
-        _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
+        _Publisher(response={"ok": True}),
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
@@ -380,7 +396,7 @@ async def test_green_requires_both_a_clean_ingress_and_a_readback_terminal() -> 
 @pytest.mark.asyncio
 async def test_ingress_error_and_no_terminal_is_terminal_missing() -> None:
     handler = _handler(
-        _Ingress(response={"ok": False, "error": {"code": "dispatch_timeout"}}),
+        _Publisher(response={"ok": False, "error": {"code": "dispatch_timeout"}}),
         terminal_readback=_TerminalReadback(found=""),
     )
 
@@ -396,7 +412,7 @@ async def test_ingress_error_and_no_terminal_is_terminal_missing() -> None:
 async def test_unrunnable_readback_fails_closed() -> None:
     """A configured-but-broken readback is RED, never a silent pass."""
     handler = _handler(
-        _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
+        _Publisher(response={"ok": True}),
         terminal_readback=_TerminalReadback(found=None, error="broker unreachable"),
     )
 
@@ -410,24 +426,25 @@ async def test_unrunnable_readback_fails_closed() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_unconfigured_readback_is_red_not_a_fallback_to_the_ingress() -> None:
-    """No broker configured means NO claim about link 4 — so no green.
+async def test_no_broker_publishes_nothing_and_makes_no_terminal_claim() -> None:
+    """No broker configured means nothing is published and NO claim about link 4.
 
     Deliberately asymmetric with the quarantine leg, which may be skipped
     without blocking a green: quarantine is a corroborating negative check,
-    the terminal readback IS the claim. Falling back to the ingress response
-    here would restore the whole defect.
+    the terminal readback IS the claim. OMN-23566 moved the empty-broker
+    refusal to the front of the probe — the publish needs the broker too — so
+    the run is RED (``SUBMISSION_ROUTE_NOT_CONFIGURED``) before any leg runs,
+    and there is still no fallback to a claim the probe cannot back.
     """
+    publisher = _Publisher(response={"ok": True})
     readback = _TerminalReadback(found=_SUCCESS_TOPIC)
-    handler = _handler(
-        _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
-        terminal_readback=readback,
-    )
+    handler = _handler(publisher, terminal_readback=readback)
 
     result = await handler.handle(_request(terminal_bootstrap_servers=""))
 
-    assert result.verdict is EnumChainCanaryVerdict.TERMINAL_READBACK_NOT_CONFIGURED
+    assert result.verdict is EnumChainCanaryVerdict.SUBMISSION_ROUTE_NOT_CONFIGURED
     assert result.success is False
+    assert publisher.calls == []
     assert readback.calls == []
     assert (
         result.terminal_readback_status
@@ -435,7 +452,7 @@ async def test_unconfigured_readback_is_red_not_a_fallback_to_the_ingress() -> N
     )
     assert (
         _link(result, EnumChainLink.TERMINAL_ON_BUS)
-        is EnumChainLinkStatus.NOT_CONFIGURED
+        is EnumChainLinkStatus.NOT_EVALUATED
     )
 
 
@@ -444,7 +461,7 @@ async def test_unconfigured_readback_is_red_not_a_fallback_to_the_ingress() -> N
 async def test_quarantined_still_outranks_everything() -> None:
     """OMN-16773's ranking survives: the quarantine hit names the defect."""
     handler = _handler(
-        _Ingress(response={"ok": False, "error": {"code": "dispatch_timeout"}}),
+        _Publisher(response={"ok": False, "error": {"code": "dispatch_timeout"}}),
         terminal_readback=_TerminalReadback(found=""),
         quarantine=_Quarantine(found=True),
     )
@@ -466,7 +483,7 @@ async def test_failure_topic_terminal_discharges_link_four_but_fails_link_three(
     whether the delegated execution completed; it did not.
     """
     handler = _handler(
-        _Ingress(response={"ok": False, "error": {"code": "dispatch_error"}}),
+        _Publisher(response={"ok": False, "error": {"code": "dispatch_error"}}),
         terminal_readback=_TerminalReadback(found=_FAILURE_TOPIC),
     )
 
@@ -484,7 +501,7 @@ async def test_failure_topic_terminal_discharges_link_four_but_fails_link_three(
 @pytest.mark.asyncio
 async def test_receipt_carries_a_verdict_for_all_five_links() -> None:
     handler = _handler(
-        _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
+        _Publisher(response={"ok": True}),
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
@@ -515,7 +532,7 @@ async def test_a_fully_configured_run_is_now_a_five_link_proof() -> None:
     below is the other half: it must stay False the moment any leg is unset.
     """
     handler = _handler(
-        _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
+        _Publisher(response={"ok": True}),
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
@@ -541,7 +558,7 @@ async def test_a_partially_configured_run_is_never_a_proof(unset: str) -> None:
     otherwise the probe shrinks silently and the receipt keeps saying five.
     """
     handler = _handler(
-        _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
+        _Publisher(response={"ok": True}),
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
@@ -578,7 +595,7 @@ async def test_every_link_now_has_a_leg_and_owes_no_ticket() -> None:
     so it says so.
     """
     handler = _handler(
-        _Ingress(response={"ok": True, "terminal_event": "delegate-skill-completed"}),
+        _Publisher(response={"ok": True}),
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
@@ -605,7 +622,7 @@ async def test_every_link_now_has_a_leg_and_owes_no_ticket() -> None:
 @pytest.mark.asyncio
 async def test_unreachable_ingress_does_not_claim_links_it_never_evaluated() -> None:
     handler = _handler(
-        _Ingress(response=None, error="connection refused"),
+        _Publisher(response=None, error="connection refused"),
         terminal_readback=_TerminalReadback(found=_SUCCESS_TOPIC),
     )
 
@@ -623,10 +640,10 @@ async def test_unreachable_ingress_does_not_claim_links_it_never_evaluated() -> 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_kill_switch_reports_every_link_unevaluated() -> None:
-    ingress = _Ingress(response={"ok": True, "terminal_event": "x"})
+    publisher = _Publisher(response={"ok": True})
     readback = _TerminalReadback(found=_SUCCESS_TOPIC)
     handler = HandlerChainCanary(
-        ingress=ingress,
+        bus_publish=publisher,
         quarantine_scan=_Quarantine(),
         terminal_readback=readback,
         kill_switch_disabled=True,
@@ -635,7 +652,7 @@ async def test_kill_switch_reports_every_link_unevaluated() -> None:
     result = await handler.handle(_request())
 
     assert result.verdict is EnumChainCanaryVerdict.SKIPPED_DISABLED
-    assert ingress.calls == [] and readback.calls == []
+    assert publisher.calls == [] and readback.calls == []
     assert result.links_proven == 0
     assert all(
         v.status is EnumChainLinkStatus.NOT_EVALUATED for v in result.link_verdicts
@@ -655,7 +672,7 @@ async def test_readback_window_covers_the_rest_of_the_budget() -> None:
     """
     readback = _TerminalReadback(found=_SUCCESS_TOPIC)
     handler = _handler(
-        _Ingress(response={"ok": False, "error": {"code": "x"}}, elapsed_ms=4_369),
+        _Publisher(response={"ok": False, "error": {"code": "x"}}, elapsed_ms=4_369),
         terminal_readback=readback,
     )
 

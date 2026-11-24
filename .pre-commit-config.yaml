@@ -64,6 +64,16 @@ repos:
         files: ^(contracts/[^/]+\.yaml|tests/ci/test_contracts_strict_load_omn20945\.py|\.pre-commit-config\.yaml)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-26418: a dod_evidence id over the core limit passed every commit hook
+      # and failed contract-validation, repo-evidence and CI Split 1/15 on the
+      # pushed head. The same test runs in the CI test splits (OMN-17427).
+      - id: contracts-dod-id-length
+        name: Ticket contract dod_evidence ids fit the core limit (OMN-17427)
+        entry: uv run --frozen pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q --no-cov -n 0 -p no:randomly
+        language: system
+        files: ^(contracts/[^/]+\.yaml|tests/ci/test_contract_dod_evidence_id_length_omn17427\.py|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: imperative-contract-guard-caller
         name: Caller-owned imperative guard regression (OMN-21004)
         entry: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0

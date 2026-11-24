@@ -5,6 +5,13 @@ summary: The decision is KEEP. onex-gateway-forwarder needs a second bus connect
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn22393-ac1-accepted-20261124t0345z:
+      - label: AC1
+        criterion_hash: 58da7f4242ebef9bcb88ee3e617a12dd35b60f3445ff619bde67c99a72a009a5
+        proposed_by: lane=dod-closeout-bind-2026-11-24T0345Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-24T0345Z-c2
 requirements:
   - id: req-omn22393-decision-recorded
     statement: The keep decision is recorded in the allowlist entry with a reason that names the second bus connection or failure domain it rests on, and an empty reason fails the check.
@@ -43,3 +50,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn22393-ac1-accepted-20261124t0345z
+    description: 'AC1: the real stack-shape data holds a kept_outside_runtime entry for gateway-forwarder with ticket OMN-22393, its compose file and a non-empty reason naming the second bus connection or failure domain. Fails with the stack_shape.yaml change of 06cec4d1 reverted (the entry is absent).'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest "tests/unit/validation/test_checker_stack_shape.py::test_forwarder_decision_is_recorded_with_its_reason" -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

@@ -102,6 +102,10 @@ from typing import Any, Protocol
 
 import yaml
 
+from omnibase_infra.handlers.handler_ledger_rows import (
+    bus_row_appender,
+    rows_from_environment,
+)
 from omnibase_infra.models.lab_proof.model_proof_ledger import ModelProofLedger
 from omnibase_infra.models.lab_proof.model_proof_log_bundle import (
     ARCHIVE_KEY,
@@ -2704,10 +2708,11 @@ def _verify_steps(
 # --------------------------------------------------------------------------- cli
 
 
-def _ledger_lines(path: str | None) -> list[str]:
-    if not path:
-        return []
-    return Path(path).read_text(encoding="utf-8").splitlines()
+def _ledger_lines() -> list[str]:
+    """HOLD and RELEASE rows from the ledger reader node; a refusal is an unread ledger (OSError)."""
+    return rows_from_environment(
+        os.environ, "prepr-runtime-pool", 720, ("HOLD", "RELEASE")
+    )
 
 
 def _status_table(states: Sequence[HostState]) -> str:
@@ -2757,11 +2762,6 @@ def build_parser() -> argparse.ArgumentParser:
             "workspace config root: $ONEX_WORKSPACE_CONFIG_ROOT, else the "
             "workspace config owner of $OMNI_HOME)"
         ),
-    )
-    parser.add_argument(
-        "--ledger",
-        default=os.environ.get("ONEX_LEDGER_PATH"),
-        help="rolling work ledger, read only, for live surface HOLDs (default $ONEX_LEDGER_PATH)",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
     st = sub.add_parser("status", help="probe every pool host, read only")
@@ -2899,7 +2899,7 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
     tp = transport or HostRoutingTransport()
     now = _utcnow()
     if args.cmd in ("status", "pick"):
-        holds = live_surface_holds(_ledger_lines(args.ledger), now)
+        holds = live_surface_holds(_ledger_lines(), now)
         states = survey(cfg, tp, holds, now, me=args.holder)
         if args.cmd == "pick":
             chosen = pick(states)
@@ -2940,7 +2940,7 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
             return resolve_ref_in_clone(clone_root / repo, ref)
 
         try:
-            ledger_lines = _ledger_lines(args.ledger)
+            ledger_lines = _ledger_lines()
         except OSError as exc:
             # a ledger that cannot be read cannot show a peer's HOLD: refuse, and say so in the file
             print(f"ledger error: {exc}", file=sys.stderr)
@@ -2999,7 +2999,7 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
         args.holder,
         args.ttl_minutes,
         args.host,
-        _ledger_lines(args.ledger),
+        _ledger_lines(),
         base_probe=args.base_probe.read_text(encoding="utf-8")
         if args.base_probe
         else None,
@@ -3008,9 +3008,7 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
         verifier_identity=args.verifier_identity,
         publish=publisher,
         overlay=args.overlay,
-        ledger_append=ModelProofLedger.appender(
-            os.environ.get("ONEX_LEDGER_APPEND_COMMAND", ""), args.ledger
-        ),
+        ledger_append=bus_row_appender(os.environ),
         post_up_command=args.post_up_command,
     )
     print(text)

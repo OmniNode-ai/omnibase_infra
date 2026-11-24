@@ -211,7 +211,7 @@ def test_main_constructs_routing_transport(
         return transport
 
     monkeypatch.setattr(pool, "HostRoutingTransport", routing)
-    monkeypatch.delenv("ONEX_LEDGER_PATH", raising=False)
+    monkeypatch.delenv("ONEX_LEDGER_READER_COMMAND", raising=False)
     assert pool.main(["--config", str(config), "status"]) == pool.EXIT_PASS
     assert len(constructed) == 1
     assert len(constructed[0].calls) == 1

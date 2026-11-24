@@ -32,11 +32,13 @@ Command line: ``python -m omnibase_infra.nodes.node_ledger_open_claims_effect.ru
 from __future__ import annotations
 
 import re
-import shlex
-import subprocess
 from collections.abc import Sequence
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.handlers.ledger_bus_calls import (
+    LedgerReadRefusedError,
+    call_reader,
+)
 from omnibase_infra.models.model_ledger_open_claim import ModelLedgerOpenClaim
 from omnibase_infra.models.model_ledger_open_claims_request import (
     ModelLedgerOpenClaimsRequest,
@@ -44,7 +46,6 @@ from omnibase_infra.models.model_ledger_open_claims_request import (
 from omnibase_infra.models.model_ledger_open_claims_result import (
     ModelLedgerOpenClaimsResult,
 )
-from omnibase_infra.models.operational_timeouts import TIMEOUTS
 
 _CLAIM_ROW = re.compile(r"^(?P<stamp>\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) \| CLAIM \|")
 _OPEN_CLAIM = re.compile(r"^OPEN-CLAIM lane=(?P<lane>\S+) claim=(?P<stamp>\S+) ")
@@ -52,40 +53,12 @@ _LANE = re.compile(r"(?<![\w-])lane=([^\s|]+)")
 _TOKEN_EDGE = "[A-Za-z0-9_.-]"
 
 
-class LedgerReadRefusedError(Exception):
-    """The ledger was not read; the message names why."""
-
-
 def _call_reader(
     request: ModelLedgerOpenClaimsRequest, query: str, extra: tuple[str, ...]
 ) -> list[str]:
-    """One reader call; the rows it printed, or a refusal."""
-    argv = [
-        *shlex.split(request.reader_command),
-        "--reader",
-        request.reader,
-        "--query",
-        query,
-        "--window-hours",
-        str(request.window_hours),
-        *extra,
-    ]
-    try:
-        proc = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=TIMEOUTS.ledger_reader_seconds,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise LedgerReadRefusedError(f"ledger reader {query} not run: {exc}") from exc
-    if proc.returncode != 0:
-        summary = (proc.stderr or "").strip().splitlines()[-1:] or ["no output"]
-        raise LedgerReadRefusedError(
-            f"ledger reader exit {proc.returncode} ({query}): {summary[0]}"
-        )
-    return (proc.stdout or "").splitlines()
+    return call_reader(
+        request.reader_command, request.reader, query, request.window_hours, extra
+    )
 
 
 def read_open_claims(
