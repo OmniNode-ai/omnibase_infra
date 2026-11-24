@@ -62,18 +62,18 @@ def _contract() -> dict[str, Any]:
 
 def _reading(
     *,
-    container_id: str,
+    container_digest: str,
     started_at: datetime,
     restart_count: int = 0,
-    image_id: str = SAME_BUILD,
+    image_digest: str = SAME_BUILD,
 ) -> ModelDevContainerReading:
     return ModelDevContainerReading(
         container="omninode-runtime",
-        container_id=container_id,
+        container_digest=container_digest,
         started_at=started_at,
         restart_count=restart_count,
         exit_code=0,
-        image_id=image_id,
+        image_digest=image_digest,
         image_ref="omninode-runtime:dev",
     )
 
@@ -115,10 +115,10 @@ def test_container_recreate_on_the_same_build_is_published_with_its_cause_and_fl
 ):
     """The proof case: a recreate on the previous build, no job event, no restart policy."""
     previous = _reading(
-        container_id="c1", started_at=datetime(2026, 11, 23, 21, 14, 35, tzinfo=UTC)
+        container_digest="c1", started_at=datetime(2026, 11, 23, 21, 14, 35, tzinfo=UTC)
     )
     now = _reading(
-        container_id="c2",
+        container_digest="c2",
         started_at=datetime(2026, 11, 23, 22, 53, 58, tzinfo=UTC),
     )
     event = _handle(now, previous)
@@ -126,7 +126,7 @@ def test_container_recreate_on_the_same_build_is_published_with_its_cause_and_fl
     assert event is not None
     assert event.cause is Cause.UNKNOWN
     assert event.same_build is True
-    assert (event.image_id, event.image_ref) == (SAME_BUILD, "omninode-runtime:dev")
+    assert (event.image_digest, event.image_ref) == (SAME_BUILD, "omninode-runtime:dev")
     assert event.started_at == now.started_at
 
     sent: list[tuple[str, str, dict[str, Any]]] = []
@@ -169,7 +169,7 @@ def test_container_recreate_first_reading_and_an_unchanged_container_name_no_sta
     None
 ):
     started = datetime(2026, 11, 23, 21, 14, 35, tzinfo=UTC)
-    reading = _reading(container_id="c1", started_at=started)
+    reading = _reading(container_digest="c1", started_at=started)
     assert _handle(reading, None) is None
     assert _handle(reading, reading) is None
 
@@ -177,32 +177,33 @@ def test_container_recreate_first_reading_and_an_unchanged_container_name_no_sta
 def test_container_recreate_cause_is_the_job_the_restart_policy_or_unknown() -> None:
     started = datetime(2026, 11, 23, 22, 53, 58, tzinfo=UTC)
     previous = _reading(
-        container_id="c1", started_at=started - timedelta(hours=1), restart_count=2
+        container_digest="c1", started_at=started - timedelta(hours=1), restart_count=2
     )
 
     # The same container started again with a higher RestartCount and no job event.
     policy = _handle(
-        _reading(container_id="c1", started_at=started, restart_count=3), previous
+        _reading(container_digest="c1", started_at=started, restart_count=3), previous
     )
     assert policy.cause is Cause.RESTART_POLICY
-    assert (policy.job_id, policy.requested_by) == ("", "")
+    assert (policy.job_name, policy.requested_by) == ("", "")
 
     # The same container started again and RestartCount did not move: no proof, no guess.
     hand = _handle(
-        _reading(container_id="c1", started_at=started, restart_count=2), previous
+        _reading(container_digest="c1", started_at=started, restart_count=2), previous
     )
     assert hand.cause is Cause.UNKNOWN
 
     # A new image: not the same build.
     changed = _handle(
-        _reading(container_id="c2", started_at=started, image_id=NEW_BUILD), previous
+        _reading(container_digest="c2", started_at=started, image_digest=NEW_BUILD),
+        previous,
     )
     assert changed.same_build is False
-    assert changed.previous_image_id == SAME_BUILD
+    assert changed.previous_image_digest == SAME_BUILD
 
     # A start event of a deploy job within the contract tolerance names the job.
     job = _handle(
-        _reading(container_id="c2", started_at=started),
+        _reading(container_digest="c2", started_at=started),
         previous,
         starts=(
             ModelDevRuntimeStarted(
@@ -215,17 +216,17 @@ def test_container_recreate_cause_is_the_job_the_restart_policy_or_unknown() -> 
         ),
     )
     assert job.cause is Cause.DEPLOY_AGENT_JOB
-    assert job.job_id == "job-7"
+    assert job.job_name == "job-7"
     # No manifest names the issuer, so the requester stays empty rather than guessed.
     assert job.requested_by == ""
 
 
 def _docker(
-    container_id: str, started_at: datetime, *, image: str, restarts: int
+    container_digest: str, started_at: datetime, *, image: str, restarts: int
 ) -> Any:
     inspected = [
         {
-            "Id": container_id,
+            "Id": container_digest,
             "Name": "/omninode-runtime",
             "Image": image,
             "RestartCount": restarts,
@@ -238,7 +239,7 @@ def _docker(
     ]
 
     def run(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
-        stdout = container_id if argv[1] == "ps" else json.dumps(inspected)
+        stdout = container_digest if argv[1] == "ps" else json.dumps(inspected)
         return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
 
     return run
@@ -287,7 +288,7 @@ def test_container_recreate_tick_publishes_the_event_and_calls_the_reader(
     assert len(events) == 1
     assert events[0]["cause"] == "unknown"
     assert events[0]["same_build"] is True
-    assert events[0]["container_id"] == "c2"
+    assert events[0]["container_digest"] == "c2"
     violations = [p for t, _, p in sent if t == topics["dev_recreate_violation"]]
     assert [v["kind"] for v in violations] == ["start_without_job_record"]
     assert "cause unknown, on the same build" in violations[0]["detail"]
@@ -336,7 +337,7 @@ def test_container_recreate_tick_names_the_deploy_agent_job_that_made_the_start(
         _docker("c3", started, image=NEW_BUILD, restarts=0),
     )
     events = [p for t, _, p in sent if t == topics["dev_container_recreated"]]
-    assert [(e["cause"], e["job_id"], e["requested_by"]) for e in events] == [
+    assert [(e["cause"], e["job_name"], e["requested_by"]) for e in events] == [
         ("deploy_agent_job", "job-9", "agent/idle-converge")
     ]
     assert events[0]["same_build"] is False

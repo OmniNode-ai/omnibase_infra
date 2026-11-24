@@ -10,19 +10,19 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class ModelDevContainerReading(BaseModel):
     """The container as ``docker inspect`` reports it at one tick.
 
-    ``container_id`` changes when compose recreates the container; ``started_at`` and
-    ``restart_count`` change when the same container starts again. ``image_id`` is the
+    ``container_digest`` changes when compose recreates the container; ``started_at`` and
+    ``restart_count`` change when the same container starts again. ``image_digest`` is the
     image the container came up on and ``image_ref`` the reference its config names.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     container: str = Field(min_length=1)
-    container_id: str = Field(min_length=1)
+    container_digest: str = Field(min_length=1)
     started_at: datetime
     restart_count: int = Field(ge=0)
     exit_code: int | None = None
-    image_id: str = ""
+    image_digest: str = ""
     image_ref: str = ""
 
     @field_validator("started_at")

@@ -626,11 +626,11 @@ def read_container(
         reading = sys.modules["omnibase_infra.models.model_dev_container_reading"]
         return reading.ModelDevContainerReading(
             container=str(raw["Name"]).lstrip("/"),
-            container_id=str(raw["Id"]),
+            container_digest=str(raw["Id"]),
             started_at=started,
             restart_count=int(raw.get("RestartCount", 0)),
             exit_code=exit_code if isinstance(exit_code, int) else None,
-            image_id=str(raw.get("Image", "")),
+            image_digest=str(raw.get("Image", "")),
             image_ref=str(raw.get("Config", {}).get("Image", "")),
         )
     except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError):
@@ -686,7 +686,7 @@ def _atomic_write(path: Path, data: dict[str, JsonValue]) -> None:
     tmp.replace(path)
 
 
-class _NewViolationsOnly:
+class NewViolationsOnly:
     """The reader's publish seam: a violation already published is not published again."""
 
     def __init__(self, publisher: ProtocolDevRollEvents, seen: set[str]) -> None:
@@ -831,7 +831,7 @@ def observe_dev_container(
             ),
         )
         seen = {str(v) for v in state.get("published_violations", [])}
-        seam = _NewViolationsOnly(publisher, seen)
+        seam = NewViolationsOnly(publisher, seen)
         audited = audit_module.audit_and_publish(
             audit_module.DevRecreateAuditReader(), request, seam
         )

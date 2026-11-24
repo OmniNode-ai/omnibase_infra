@@ -14,7 +14,7 @@ from omnibase_infra.enums.enum_dev_recreate_cause import EnumDevRecreateCause
 class ModelDevContainerRecreated(BaseModel):
     """Published by the deploy agent's tick for each start it sees on the container.
 
-    Topic ``dev_container_recreated`` of node_dev_roll_events_effect. ``job_id`` and
+    Topic ``dev_container_recreated`` of node_dev_roll_events_effect. ``job_name`` and
     ``requested_by`` are set only for ``deploy_agent_job`` (and ``requested_by`` only when a
     manifest names the job's issuer); every other cause leaves them empty.
     ``same_build`` is true when the container came up on the image the previous reading
@@ -26,16 +26,16 @@ class ModelDevContainerRecreated(BaseModel):
     event_id: UUID
     runtime_lane: Literal["dev"]
     container: str = Field(min_length=1)
-    container_id: str = Field(min_length=1)
+    container_digest: str = Field(min_length=1)
     started_at: datetime
     restart_count: int = Field(ge=0)
     exit_code: int | None = None
-    image_id: str = ""
+    image_digest: str = ""
     image_ref: str = ""
-    previous_image_id: str = ""
+    previous_image_digest: str = ""
     same_build: bool
     cause: EnumDevRecreateCause
-    job_id: str = ""
+    job_name: str = ""
     requested_by: str = ""
 
     @field_validator("started_at")

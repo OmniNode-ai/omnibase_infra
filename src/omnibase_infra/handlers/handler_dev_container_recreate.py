@@ -56,7 +56,7 @@ class HandlerDevContainerRecreate:
     ) -> ModelDevContainerRecreateResult:
         reading, previous = request.reading, request.previous
         if previous is None or (
-            previous.container_id == reading.container_id
+            previous.container_digest == reading.container_digest
             and previous.started_at == reading.started_at
         ):
             return ModelDevContainerRecreateResult()
@@ -69,15 +69,15 @@ class HandlerDevContainerRecreate:
             ),
             key=lambda start: abs(start.started_at - reading.started_at),
         )
-        job_id = requested_by = ""
+        job_name = requested_by = ""
         if matched:
             cause = EnumDevRecreateCause.DEPLOY_AGENT_JOB
-            job_id = matched[0].job_id
+            job_name = matched[0].job_id
             requested_by = next(
-                (m.issuer for m in request.manifests if m.job_id == job_id), ""
+                (m.issuer for m in request.manifests if m.job_id == job_name), ""
             )
         elif (
-            previous.container_id == reading.container_id
+            previous.container_digest == reading.container_digest
             and reading.restart_count > previous.restart_count
         ):
             cause = EnumDevRecreateCause.RESTART_POLICY
@@ -87,21 +87,21 @@ class HandlerDevContainerRecreate:
             event=ModelDevContainerRecreated(
                 event_id=uuid5(
                     NAMESPACE_URL,
-                    f"{_KEY_NAMESPACE}:{reading.container_id}:{reading.started_at.isoformat()}",
+                    f"{_KEY_NAMESPACE}:{reading.container_digest}:{reading.started_at.isoformat()}",
                 ),
                 runtime_lane="dev",
                 container=reading.container,
-                container_id=reading.container_id,
+                container_digest=reading.container_digest,
                 started_at=reading.started_at,
                 restart_count=reading.restart_count,
                 exit_code=reading.exit_code,
-                image_id=reading.image_id,
+                image_digest=reading.image_digest,
                 image_ref=reading.image_ref,
-                previous_image_id=previous.image_id,
-                same_build=bool(reading.image_id)
-                and reading.image_id == previous.image_id,
+                previous_image_digest=previous.image_digest,
+                same_build=bool(reading.image_digest)
+                and reading.image_digest == previous.image_digest,
                 cause=cause,
-                job_id=job_id,
+                job_name=job_name,
                 requested_by=requested_by,
             )
         )

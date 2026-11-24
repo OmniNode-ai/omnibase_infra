@@ -77,6 +77,14 @@ def _stamp(at: datetime) -> str:
     return at.isoformat()
 
 
+def _observed(seen: ModelDevContainerObservation) -> str:
+    """The cause and build the observer read for the start, when it read them."""
+    if seen.cause is None:
+        return ""
+    build = "the same build as the previous start" if seen.same_build else "a new build"
+    return f"; cause {seen.cause.value}, on {build}"
+
+
 class DevRecreateAuditReader:
     """Read one window of dev recreate events and name each rule a start broke (pure)."""
 
@@ -236,16 +244,6 @@ class DevRecreateAuditReader:
         ]
 
     @staticmethod
-    def _observed(seen: ModelDevContainerObservation) -> str:
-        """The cause and build the observer read for the start, when it read them."""
-        if seen.cause is None:
-            return ""
-        build = (
-            "the same build as the previous start" if seen.same_build else "a new build"
-        )
-        return f"; cause {seen.cause.value}, on {build}"
-
-    @staticmethod
     def _without_job(
         request: ModelDevRecreateAuditRequest,
     ) -> list[ModelDevRecreateViolation]:
@@ -271,8 +269,7 @@ class DevRecreateAuditReader:
                     detail=(
                         f"container {seen.container} started {_stamp(seen.started_at)} "
                         f"(RestartCount {seen.restart_count}, exit code {seen.exit_code}) "
-                        "with no dev_runtime_started event"
-                        + DevRecreateAuditReader._observed(seen)
+                        "with no dev_runtime_started event" + _observed(seen)
                     ),
                 )
             )
