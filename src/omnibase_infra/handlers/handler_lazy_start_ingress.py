@@ -117,6 +117,7 @@ class HandlerLazyStartIngress:
                     self._container,
                     ModelTopicReadinessConfig(),
                     topology=StoreLazyStartDormant.topology(),
+                    handler_dependencies=StoreLazyStartDormant.handler_dependencies(),
                 ),
                 contracts,
                 policy,
