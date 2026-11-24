@@ -59,3 +59,18 @@ def test_non_object_answer_fails_the_roll(tmp_path: Path) -> None:
     execution = _checkout(tmp_path, "echo not-json\n")
     with pytest.raises(guard.DevBootFailedError, match="not one JSON object"):
         guard._prove_work_ledger_answers(execution)
+
+
+def test_failing_ledger_message_names_the_exception_last_on_stderr(
+    tmp_path: Path,
+) -> None:
+    """A real process whose stderr opens with a long warning still has its exception named (OMN-26316)."""
+    warning = "w" * 600
+    execution = _checkout(
+        tmp_path,
+        f"echo 'RuntimeWarning: {warning}' >&2\n"
+        "echo 'ProtocolConfigurationError: kafka config invalid' >&2\n"
+        "exit 1\n",
+    )
+    with pytest.raises(guard.DevBootFailedError, match="ProtocolConfigurationError"):
+        guard._prove_work_ledger_answers(execution)

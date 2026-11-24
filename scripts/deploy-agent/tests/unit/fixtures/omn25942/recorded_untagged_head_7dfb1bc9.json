@@ -1,0 +1,36 @@
+{
+  "source": "ssh read of the dev deploy agent job record on h201 and `onex scm run-list OmniNode-ai/omnibase_infra --workflow dev-merge-tag.yml`, 2026-11-24T03:00Z",
+  "job": {
+    "correlation_id": "7dfb1bc9-567d-4252-a276-7e1e90b742b6",
+    "requested_by": "agent/idle-restore",
+    "git_ref": "origin/dev",
+    "build_source": "workspace",
+    "accepted_at": "2026-11-24T02:46:16.359206Z",
+    "completed_at": "2026-11-24T02:54:57.787782Z",
+    "status": "failed",
+    "phase_results": {"runtime": "failed", "verification": "skipped"},
+    "audit_lines": [
+      "ok   omnibase-core: dev-merge-tag (dev-20261123164724-a141890ba93e)",
+      "ok   omnibase-spi: dev-merge-tag (dev-20261121152632-7291f76b0d89)",
+      "ok   omninode-intelligence: dev-merge-tag (dev-20261121152639-c4880008c373)",
+      "FAIL omnibase-infra: branch (5cafc841f7de) staged from branch dev",
+      "1 first-party package(s) not resolved from a dev-merge tag (build context dev-lane)"
+    ]
+  },
+  "head": "5cafc841f7de2f4367a0d63e2ca5c946fcf1350f",
+  "head_pushed_at": "2026-11-24T02:45:32Z",
+  "dev_merge_tag_run": {
+    "id": 45314704581,
+    "run_number": 914,
+    "created_at": "2026-11-24T02:45:32Z",
+    "updated_at": "2026-11-24T02:48:12Z",
+    "conclusion": "success",
+    "median_duration_seconds_of_100_runs": 15.5
+  },
+  "tag_for_head": "dev-20261124022139-5cafc841f7de",
+  "tag_seen_in_h201_clone_at": "2026-11-24T02:49:11Z",
+  "previous_head": {
+    "sha": "294cf27c9679d3dc0fa0a30cb21f7d4a7120191c",
+    "tag": "dev-20261124021633-294cf27c9679"
+  }
+}

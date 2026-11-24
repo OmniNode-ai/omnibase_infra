@@ -10,6 +10,7 @@ import logging
 import re
 import shlex
 import stat
+import time
 from pathlib import Path
 from typing import cast
 
@@ -250,20 +251,44 @@ class HandlerRunnerImageRoll:
             timeout=timeout,
         )
 
-    async def _registry(self, org: str, name: str) -> tuple[str, bool | None]:
-        rc, response = await self._command(
-            "gh",
-            "api",
-            "--paginate",
-            "--slurp",
-            "-H",
-            "Cache-Control: no-cache",
-            f"/orgs/{org}/actions/runners?per_page=100",
-        )
-        if rc:
-            raise RunnerRollError(
-                f"Could not read the organization runner registry (gh exit {rc})."
+    @staticmethod
+    def _read_snapshot(request: ModelRunnerImageRollRequest) -> str:
+        """OMN-24139: the registry the orchestrator supplied; unreadable, symlinked or stale refuses."""
+        path = Path(request.registry_snapshot)
+        try:
+            if path.is_symlink() or not path.is_file():
+                raise RunnerRollError(
+                    "The registry snapshot must be a regular file that exists."
+                )
+            age = time.time() - path.stat().st_mtime
+            if age > request.registry_snapshot_max_age_seconds:
+                raise RunnerRollError(
+                    f"The registry snapshot is {int(age)}s old; refresh it (limit "
+                    f"{request.registry_snapshot_max_age_seconds}s)."
+                )
+            return path.read_text()
+        except OSError as exc:
+            raise RunnerRollError("Could not read the registry snapshot.") from exc
+
+    async def _registry(
+        self, org: str, name: str, request: ModelRunnerImageRollRequest
+    ) -> tuple[str, bool | None]:
+        if request.registry_snapshot:
+            response = self._read_snapshot(request)
+        else:
+            rc, response = await self._command(
+                "gh",
+                "api",
+                "--paginate",
+                "--slurp",
+                "-H",
+                "Cache-Control: no-cache",
+                f"/orgs/{org}/actions/runners?per_page=100",
             )
+            if rc:
+                raise RunnerRollError(
+                    f"Could not read the organization runner registry (gh exit {rc})."
+                )
         try:
             rows = [
                 row
@@ -278,7 +303,12 @@ class HandlerRunnerImageRoll:
                 ) else None
         except (KeyError, TypeError, ValueError) as exc:
             raise RunnerRollError(
-                "Could not decode the organization runner registry."
+                "Could not decode the "
+                + (
+                    "registry snapshot."
+                    if request.registry_snapshot
+                    else "organization runner registry."
+                )
             ) from exc
         return "unknown", None
 
@@ -296,7 +326,7 @@ class HandlerRunnerImageRoll:
         token: bytes,
     ) -> ModelRunnerImageRollResult:
         # Prove registry access before creating lock directories or building an image.
-        await self._registry(org, targets[0])
+        await self._registry(org, targets[0], request)
         lock = f"{_DOCKER_DIR}/.image-roll-{request.prefix}.lock"
         rc, _ = await self._remote(request.host, f"mkdir -- {lock}")
         if rc:
@@ -482,7 +512,10 @@ class HandlerRunnerImageRoll:
         self, request: ModelRunnerImageRollRequest, name: str, org: str
     ) -> tuple[str, str] | None:
         container = await self._container(request, name)
-        if container is None or await self._registry(org, name) != ("online", False):
+        if container is None or await self._registry(org, name, request) != (
+            "online",
+            False,
+        ):
             return None
         return container
 
@@ -587,7 +620,11 @@ printf '%s\n' {shlex.quote(override)} |
                     request.host,
                     f"set -o pipefail; docker logs --tail 80 {shlex.quote(container[0])} 2>&1 | grep -F 'Listening for Jobs'",
                 )
-                if rc == 0 and (await self._registry(org, name))[0] == "online":
+                # A snapshot predates the recreate: the new container's listener line is the readback then.
+                if rc == 0 and (
+                    request.registry_snapshot
+                    or (await self._registry(org, name, request))[0] == "online"
+                ):
                     return True
             await asyncio.sleep(_POLL_INTERVAL_SECONDS)
         return False
