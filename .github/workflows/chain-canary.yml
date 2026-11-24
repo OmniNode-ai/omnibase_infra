@@ -61,9 +61,9 @@
 #   PUBLISHES a real delegation command, which is a lane mutation; this
 #   ticket is the one that authorises it on the stability lane. The lane's
 #   addresses and its bus_lane come from vars.LAB_PROOF_LANES_JSON, and its
-#   credentials from the stability environment's secrets.
-#   Configure all four credential names there before enabling the proof;
-#   GitHub otherwise falls back to a same-named repository secret.
+#   credentials from the stability Infisical (OMN-26121, fetched at run time
+#   through the runner's machine identity; no repository secret).
+#   Store all four credential names there before enabling the proof.
 #   It makes no claim about the dev lane, judge or prod.
 #
 # WHAT OMN-16931 CHANGED
@@ -402,6 +402,20 @@ jobs:
       - name: Mark when the delegation began
         run: echo "CHAIN_RECEIPT_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_ENV}"
 
+      # OMN-26121 (operator ruling 2026-11-23T23:06:19Z): C15 grades the stability lane.
+      # Stability reads its credentials from the stability Infisical through the
+      # runner's own machine identity, never from repository or environment
+      # secrets. Each value is masked and exported to the job environment; a
+      # missing one fails here naming the variable, the Infisical name and the
+      # store path. See .github/actions/fetch-stability-secrets.
+      - name: Fetch the stability probe credentials from the stability Infisical
+        uses: ./.github/actions/fetch-stability-secrets
+        with:
+          secrets: |
+            KAFKA_SASL_USERNAME=STABILITY_TEST_KAFKA_SASL_USERNAME_STABILITY_CHAIN_CANARY
+            KAFKA_SASL_PASSWORD=STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_CHAIN_CANARY
+            CHAIN_CANARY_PROJECTION_DSN=STABILITY_TEST_CHAIN_CANARY_PROJECTION_DSN
+
       - name: Fire one live delegation through the stability-lane ingress
         env:
           # The resolved lane's declared addresses (LANE_INGRESS_URL, exported by the resolve step) unless a dispatch
@@ -436,14 +450,12 @@ jobs:
           TERMINAL_BOOTSTRAP_OVERRIDE: ${{ github.event.inputs.terminal_bootstrap_servers }}
           # OMN-17926: the lane declares its transport in the CI bus lane
           # table. OMN-21485: the credentials are the STABILITY lane's own
-          # SCRAM login (stability environment secrets KAFKA_SASL_*), injected
+          # SCRAM login (stability Infisical, KAFKA_SASL_*), injected
           # as ENVIRONMENT
           # so that no credential reaches argv, the process list, or this log.
           # build_aiokafka_auth_kwargs_from_env reads them together with the
           # KAFKA_SECURITY_PROTOCOL / KAFKA_SASL_MECHANISM the resolve step
           # exported.
-          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
-          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
           # OMN-18060: link 2's Postgres DSN, injected as ENVIRONMENT under the
           # literal name the lane declares in the CI overlay's
           # config/ci_bus_lanes.yaml (`projection_readback.dsn_env`). GitHub
@@ -459,8 +471,7 @@ jobs:
           # argv is world-readable through /proc, and the dispatch step echoes
           # its own broker values into this log.
           # OMN-21485: the value is the stability lane's reader, never the dev
-          # lane's (stability environment secret CHAIN_CANARY_PROJECTION_DSN).
-          CHAIN_CANARY_PROJECTION_DSN: ${{ secrets.CHAIN_CANARY_PROJECTION_DSN }}
+          # lane's (stability Infisical, CHAIN_CANARY_PROJECTION_DSN, exported by the fetch step).
           # OMN-16964: what a COMPLETE chain must carry, end to end. Declared
           # here rather than inferred from whatever the ledger returned,
           # because the scope's own wording is "no gaps tolerated silently" --

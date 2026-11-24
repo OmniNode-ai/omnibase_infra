@@ -202,10 +202,13 @@ def test_sasl_credentials_reach_the_client_as_env_never_argv(
 ) -> None:
     """A credential on a command line lands in the process list and the log."""
     probe = _step(canary_job, "Fire one live delegation")
-    env = probe["env"]
-    assert isinstance(env, dict)
-    assert "KAFKA_SASL_USERNAME" in env
-    assert "KAFKA_SASL_PASSWORD" in env
+    # OMN-26121: the SASL pair is read from the stability Infisical by the
+    # fetch step and exported masked to the job environment, so the probe step
+    # declares neither name (a step-level entry would override the export).
+    fetch = _step(canary_job, "Fetch the stability probe credentials")
+    assert fetch["uses"] == "./.github/actions/fetch-stability-secrets"
+    assert "KAFKA_SASL_USERNAME=" in str(fetch["with"]["secrets"])
+    assert "KAFKA_SASL_PASSWORD=" in str(fetch["with"]["secrets"])
 
     body = str(probe["run"])
     for flag in ("--sasl-username", "--sasl-password", "--kafka-password"):
@@ -330,12 +333,15 @@ def test_the_projection_dsn_is_declared_by_name_and_injected_as_env(
     probe = _step(canary_job, "Fire one live delegation")
     env = probe["env"]
     assert isinstance(env, dict)
-    assert "CHAIN_CANARY_PROJECTION_DSN" in env, (
-        "the DSN must be injected as a job secret under the literal name the "
-        "lane declares"
+    # OMN-26121: the value is read from the stability Infisical by the fetch
+    # step and exported under the literal name the lane declares; the probe
+    # step holds no literal and no repository-secret reference.
+    fetch = _step(canary_job, "Fetch the stability probe credentials")
+    assert "CHAIN_CANARY_PROJECTION_DSN=" in str(fetch["with"]["secrets"]), (
+        "the DSN must be fetched under the literal name the lane declares"
     )
-    assert str(env["CHAIN_CANARY_PROJECTION_DSN"]).startswith("${{ secrets."), (
-        "the DSN must come from a secret, never from a literal in the workflow"
+    assert "CHAIN_CANARY_PROJECTION_DSN" not in env, (
+        "a step-level entry would override the masked export"
     )
 
 
