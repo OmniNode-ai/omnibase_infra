@@ -74,8 +74,8 @@ class ModelChainCanaryRequest(BaseModel):
             "The caller names the lane; this node never guesses it."
         ),
     )
-    tenant_id: str = Field(
-        default="",
+    tenant_id: UUID | None = Field(
+        default=None,
         description=(
             "The lane's tenant id (a UUID), stamped on the delegate request "
             "this probe publishes on the bus (OMN-23566).\n\n"
@@ -450,20 +450,13 @@ class ModelChainCanaryRequest(BaseModel):
             )
         return stripped
 
-    @field_validator("tenant_id")
+    @field_validator("tenant_id", mode="before")
     @classmethod
-    def _validate_tenant_id(cls, value: str) -> str:
-        """Empty means not configured (the handler goes RED); else a UUID."""
-        stripped = value.strip()
-        if not stripped:
-            return ""
-        try:
-            return str(UUID(stripped))
-        except ValueError:
-            raise ValueError(
-                "tenant_id must be the lane's tenant UUID or empty, got a "
-                "value that is not a UUID"
-            ) from None
+    def _blank_tenant_id_is_unset(cls, value: object) -> object:
+        """A blank string means not configured (the handler goes RED)."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 __all__ = ["ModelChainCanaryRequest"]

@@ -1601,18 +1601,18 @@ class HandlerChainCanary:
                 # synthetic rather than unclassified.
                 "provenance": _CANARY_DELEGATION_PROVENANCE.model_dump(mode="json"),
                 "correlation_id": probe_correlation_id,
-                "tenant_id": request.tenant_id,
+                "tenant_id": str(request.tenant_id),
             },
             "envelope_id": str(uuid4()),
             "envelope_timestamp": emitted_at,
             "correlation_id": probe_correlation_id,
-            "tenant_id": request.tenant_id,
+            "tenant_id": str(request.tenant_id),
             "source_tool": _CANARY_SOURCE_TOOL,
             "metadata": {
                 "headers": {},
                 "tags": {
                     "workflow_type": _CANARY_WORKFLOW_TYPE,
-                    "source_tenant_id": request.tenant_id,
+                    "source_tenant_id": str(request.tenant_id),
                     "source_gateway_instance": _CANARY_SOURCE_TOOL,
                 },
             },

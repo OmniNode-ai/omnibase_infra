@@ -6,7 +6,7 @@ summary: >-
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - node_chain_canary_effect request (gateway_url, gateway_api_key_env, gateway_workflow_type removed; tenant_id added)
+  - public_api
 requirements:
   - id: req-omn23566-canary-over-bus
     statement: The chain canary publishes its delegate request on the bus with the lane tenant and has no HTTP submission path.
