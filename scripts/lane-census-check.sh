@@ -237,7 +237,7 @@ command -v docker >/dev/null 2>&1 || { echo "ERROR: docker not found" >&2; exit 
 "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_plan.py" --check-config || exit 3
 
 HOST="${LANE_CENSUS_HOST:-$(hostname)}"
-log "Starting (lane=${LANE:-ALL}, host=$HOST, $( [[ "$DRY_RUN" == true ]] && echo DRY-RUN || echo LIVE ))"
+log "Starting (lane=${LANE:-ALL}, host=$HOST, revision=${LANE_CENSUS_REVISION:-unrecorded}, $( [[ "$DRY_RUN" == true ]] && echo DRY-RUN || echo LIVE ))"
 
 # ---------------------------------------------------------------------------
 # Gather actual state via the fail-loud collector (scripts/lane_census_inventory.py):
