@@ -747,6 +747,10 @@ io_operations:
       - linear_retry_base_delay_seconds
       - apply
       - max_companions
+      # OMN-26650. With clone_root set, dispatch_cwd is the sparse contracts-only
+      # clone a contract was read from. The verifier is handed the full clone
+      # of the same repository under OMNI_HOME as CONTRACT_REPO_DIR, so a
+      # relative check cwd runs where the repository's own code is.
       - dispatch_cwd
       # OMN-21146. Where --offer reads an offered ticket's companion from, in
       # place of GitHub search: the canonical clones, the PR watcher's state,
