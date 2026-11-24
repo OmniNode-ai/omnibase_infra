@@ -86,6 +86,9 @@ evidence_requirements:
   - kind: tests
     description: The dev boot report retry pass bound, the abandon state and the agent's own report thread.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -q -p no:cacheprovider
+  - kind: tests
+    description: The same pass against a real subprocess standing in for the bus append command with the ledger's clock guard.
+    command: uv run --frozen pytest tests/integration/handlers/test_dev_boot_report_pass_bound_omn26316.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -290,6 +293,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k "bounded or never_holds" -q -p no:cacheprovider
         cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_dev_boot_report_pass_bound_omn26316.py -k "backlog_pass_is_bounded or background_pass" -q --no-cov -n 0 -p no:randomly
+        cwd: .
   - id: dod-omn26316-boot-report-abandoned
     description: "An incident dated 2026-10-27 moves to delivered-abandoned with one log line and no append; an incident three days old is retried with a row stamped at the delivery time and its own time in incident_at."
     source: manual
@@ -297,4 +303,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k "abandoned or delivery_stamp" -q -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_dev_boot_report_pass_bound_omn26316.py -k "abandon_bound or clock_guard" -q --no-cov -n 0 -p no:randomly
         cwd: .
