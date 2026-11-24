@@ -38,6 +38,9 @@ from typing import TYPE_CHECKING
 import yaml
 from pydantic import BaseModel, JsonValue, ValidationError
 
+from omnibase_core.container import ModelONEXContainer
+from omnibase_core.utils.util_run_coro_sync import run_coro_sync
+
 if TYPE_CHECKING:
     from omnibase_infra.nodes.node_deploy_job_reading_effect.runtime_failed_head_gate import (
         FailedHeadGate,
@@ -526,6 +529,12 @@ _OVERDUE_MODULES = (
     "models/model_overdue_dev_merge_build_request.py",
     "models/model_overdue_dev_merge_build_decision.py",
     "handlers/handler_dev_merge_build_overdue.py",
+    "models/model_dev_merge_build_command.py",
+    "models/model_dev_merge_build_overdue_event.py",
+    "models/model_dev_merge_build_publish_request.py",
+    "models/model_dev_merge_build_publish_result.py",
+    "protocols/protocol_dev_merge_build_sender.py",
+    "handlers/handler_dev_merge_build_publish.py",
 )
 _overdue_last: list[float] = []
 #: The branch the agent's checkout tracks; no branch name is spelled here.
@@ -537,6 +546,46 @@ def _seconds(settings: dict[str, JsonValue], key: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise RuntimeError(f"the deploy job reading contract's {key} is not a bound")
     return value
+
+
+_FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+#: The agent's once-per-sha record of the dev builds this node requested (one request id per line).
+_REQUESTED_KEYS = "dev_merge_build_requested.keys"
+
+
+def _built_sha(data: dict[str, JsonValue]) -> str:
+    """The sha a job built: the lineage's resolved ref, else its build ref; empty when unread."""
+    lineage = data.get("lineage")
+    if not isinstance(lineage, dict):
+        return ""
+    for key in ("resolved_ref", "build_ref"):
+        value = lineage.get(key)
+        if isinstance(value, str) and _FULL_SHA.fullmatch(value):
+            return value
+    return ""
+
+
+def built_shas_carrying(
+    clone: str, merge_sha: str, built_shas: set[str], timeout: float
+) -> set[str]:
+    """The built shas that are the merge or descend from it, read with ``git merge-base --is-ancestor``.
+
+    A sha the clone does not hold, or an unread one, is not in the answer (fail closed).
+    """
+    carried: set[str] = set()
+    for built in built_shas:
+        if not _FULL_SHA.fullmatch(built):
+            continue
+        done = subprocess.run(
+            ["git", "-C", clone, "merge-base", "--is-ancestor", merge_sha, built],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+        if done.returncode == 0:
+            carried.add(built)
+    return carried
 
 
 def _overdue_jobs(state_dir: Path) -> list[object]:
@@ -553,6 +602,8 @@ def _overdue_jobs(state_dir: Path) -> list[object]:
                     accepted_at=data["accepted_at"],
                     status=data["status"],
                     git_ref=data["command"]["git_ref"],
+                    requested_by=data["command"].get("requested_by", ""),
+                    built_sha=_built_sha(data),
                 )
             )
         except (OSError, ValueError, KeyError, TypeError, ValidationError):
@@ -562,8 +613,8 @@ def _overdue_jobs(state_dir: Path) -> list[object]:
 
 def _dev_merges(
     execution: ModuleType, now: datetime, lookback_seconds: int, timeout: float
-) -> list[tuple[str, datetime, str]]:
-    """The checkout's recent first-parent dev commits as (sha, commit time, ``RUNTIME`` or ``NON_RUNTIME``).
+) -> list[tuple[str, datetime, str, str]]:
+    """The checkout's recent first-parent dev commits as (sha, commit time, ``RUNTIME`` or ``NON_RUNTIME``, subject).
 
     The commit time of a merge-queue squash is its queue entry, which can precede the merge
     by the queue's wait; a job accepted inside that wait reads as carrying a sha it could not
@@ -581,7 +632,7 @@ def _dev_merges(
             "--first-parent",
             f"--since={since}",
             "--max-count=100",
-            "--format=%H %ct",
+            "--format=%H %ct %s",
         ],
         capture_output=True,
         text=True,
@@ -591,9 +642,9 @@ def _dev_merges(
     if log.returncode != 0:
         raise RuntimeError(f"the checkout's dev log was unread: {log.stderr.strip()}")
     predicate = _not_runtime(execution)
-    merges: list[tuple[str, datetime, str]] = []
+    merges: list[tuple[str, datetime, str, str]] = []
     for line in log.stdout.splitlines():
-        sha, stamp = line.split()
+        sha, stamp, *subject = line.split(maxsplit=2)
         diff = subprocess.run(
             ["git", "-C", clone, "diff", "--name-only", f"{sha}^", sha],
             capture_output=True,
@@ -609,9 +660,115 @@ def _dev_merges(
                 sha,
                 datetime.fromtimestamp(int(stamp), tz=UTC),
                 "NON_RUNTIME" if not_runtime else "RUNTIME",
+                subject[0] if subject else "",
             )
         )
     return merges
+
+
+class _AgentDevMergeSender:
+    """The overdue dev merge's two sends, made from the deploy agent's own process (OMN-26316).
+
+    Both go out on the agent's control-bus producer, so a wedged dev runtime cannot hold them.
+    The build request is the typed request of ``node_branch_deploy_command_effect`` published to
+    that node's command topic (the one signed build request path: the node signs the deploy
+    agent's command and publishes it); this process holds no signing key and signs nothing.
+    """
+
+    def __init__(self, event_topic: str, command_topic: str) -> None:
+        self._publisher = importlib.import_module("deploy_agent.publisher")
+        kafka = importlib.import_module("deploy_agent.kafka_config")
+        self._config = kafka.load_deploy_agent_kafka_config_from_env()
+        self._event_topic = event_topic
+        self._command_topic = command_topic
+
+    def publish_event(self, event: BaseModel) -> None:
+        payload = event.model_dump(mode="json")
+        key = f"dev-merge-build-overdue/{payload['request_id']}"
+        self._publisher._produce(self._event_topic, key, payload, self._config)
+
+    def send_command(self, command: BaseModel) -> str:
+        payload = command.model_dump(mode="json")
+        key = f"dev-merge-build/{payload['correlation_id']}"
+        taken = self._publisher._produce(
+            self._command_topic, key, payload, self._config
+        )
+        return "published" if taken else "failed"
+
+
+def _request_overdue_builds(
+    execution: ModuleType,
+    settings: dict[str, JsonValue],
+    overdue: list[BaseModel],
+    subjects: dict[str, str],
+    clone: str,
+    timeout: float,
+) -> None:
+    """Publish the event and request the dev build of each overdue merge, once per sha (OMN-26316).
+
+    The lane, the event topic and the requester come from this node's contract settings, the
+    store the node already reads. A merge is recorded as requested only after the send was
+    taken, so a refused or failed send is tried again on the next interval.
+    """
+    lane = settings["dev_merge_build_runtime_lane"]
+    topic = settings["dev_merge_build_overdue_topic"]
+    command_topic = settings["dev_merge_build_command_topic"]
+    if (
+        not isinstance(lane, str)
+        or not isinstance(topic, str)
+        or not isinstance(command_topic, str)
+    ):
+        raise RuntimeError(
+            "the deploy job reading contract's publish settings are not strings"
+        )
+    head = subprocess.run(
+        ["git", "-C", clone, "rev-parse", _TRACKED_HEAD],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+    ).stdout.strip()
+    if not _FULL_SHA.fullmatch(head):
+        logger.warning("overdue dev merge build not requested: the dev head was unread")
+        return
+    handler_mod = sys.modules["omnibase_infra.handlers.handler_dev_merge_build_publish"]
+    request_mod = sys.modules[
+        "omnibase_infra.models.model_dev_merge_build_publish_request"
+    ]
+    container = ModelONEXContainer()
+    sender_key: type[object] = sys.modules[
+        "omnibase_infra.protocols.protocol_dev_merge_build_sender"
+    ].ProtocolDevMergeBuildSender
+    run_coro_sync(
+        container.service_registry.register_instance(
+            sender_key, _AgentDevMergeSender(topic, command_topic)
+        )
+    )
+    handler = handler_mod.HandlerDevMergeBuildPublish(container)
+    store = Path(execution.STATE_DIR) / _REQUESTED_KEYS
+    for decision in overdue:
+        request_id = str(getattr(decision, "request_id", ""))
+        merge_sha = str(getattr(decision, "merge_sha", ""))
+        pull = re.search(r"\(#(\d+)\)\s*$", subjects.get(merge_sha, ""))
+        result = handler.handle(
+            request_mod.ModelDevMergeBuildPublishRequest(
+                decision=decision,
+                repository="omnibase_infra",
+                pr_number=int(pull.group(1)) if pull else None,
+                head_sha=head,
+                runtime_lane=lane,
+                already_requested=request_id in _decision_keys(store),
+            )
+        )
+        if result.status == "requested":
+            _mark(store, request_id)
+        logger.warning(
+            "overdue dev merge build request sha=%s request_id=%s status=%s reason=%s",
+            merge_sha,
+            request_id,
+            result.status,
+            result.reason,
+        )
 
 
 def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | None:
@@ -619,9 +776,10 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
 
     Called from the idle tick (through ``check_pin``), so it runs with no job. The merges are
     the tracked dev head's recent first-parent commits and the jobs are the agent's own
-    records. It publishes nothing: one run line per run (``overdue dev merge builds ...``)
-    and one warning per merge judged REQUEST, naming its request id, which is what the
-    publish that follows will carry. Throttled to ``dev_merge_build_check_interval_seconds``
+    records. One run line per run (``overdue dev merge builds ...``) and one warning per merge
+    judged REQUEST; each of those merges then gets the overdue event and one signed dev build
+    request, once per sha, sent from the agent's own process (``_request_overdue_builds``).
+    Throttled to ``dev_merge_build_check_interval_seconds``
     (``force`` skips the throttle); never raises; returns the decisions, or ``None`` when
     throttled or not runnable.
     """
@@ -645,12 +803,20 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
         jobs = tuple(_overdue_jobs(Path(execution.STATE_DIR)))
         handler = handler_mod.HandlerDevMergeBuildOverdue()
         decisions: list[BaseModel] = []
-        for sha, merged_at, runtime_class in _dev_merges(
+        merges = _dev_merges(
             execution,
             now,
             _seconds(settings, "dev_merge_build_lookback_seconds"),
             float(_seconds(settings, "build_decision_git_diff_timeout_seconds")),
-        ):
+        )
+        clone = str(execution.REPO_DIR)
+        git_timeout = float(
+            _seconds(settings, "build_decision_git_diff_timeout_seconds")
+        )
+        built = {sha for job in jobs if (sha := getattr(job, "built_sha", ""))}
+        subjects: dict[str, str] = {}
+        for sha, merged_at, runtime_class, subject in merges:
+            subjects[sha] = subject
             decisions.append(
                 handler.handle(
                     request_mod.ModelOverdueDevMergeBuildRequest(
@@ -661,6 +827,9 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
                         now=now,
                         window_seconds=window,
                         jobs=jobs,
+                        descendant_shas=tuple(
+                            sorted(built_shas_carrying(clone, sha, built, git_timeout))
+                        ),
                     )
                 )
             )
@@ -680,6 +849,13 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
                 getattr(decision, "due_at", ""),
                 getattr(decision, "request_id", ""),
             )
+        if overdue:
+            try:
+                _request_overdue_builds(
+                    execution, settings, overdue, subjects, clone, git_timeout
+                )
+            except Exception:  # the publish never costs the tick its decisions
+                logger.exception("overdue dev merge build request was not made")
         return tuple(decisions)
     except (
         KeyError,
