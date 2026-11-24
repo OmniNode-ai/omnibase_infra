@@ -22,6 +22,11 @@ requirements:
         statement: "AC5: a regression test built from the recorded hold data (fixture path named in the STATUS row) fails on the broken code and passes on the fix -- falsifier: uv run pytest tests -q -k startup_loop_hold_under_one_second"
       - id: AC6
         statement: "AC6: the lane STATUS row names the pushed branch stacked on omnibase_infra#6134, the holds before and after, and the path of its ready PR body -- falsifier: grep of the rolling work ledger for lane=holds2-1410 shows no STATUS row with the branch name and the holds before and after"
+  - id: req-omn26338-prebuilt-stale-summary
+    statement: The boot warning for a stale prebuilt node manifest names every kind of stamp difference, so a changed active package set is never hidden behind many added entry points.
+    acceptance:
+      - id: AC7
+        statement: "AC7: with 1267 distribution_added fields and one active_packages field, as read on omni-201 on 2026-11-24, the stale-manifest boot warning names the active_packages change, the total of 1268 and the added count by package -- falsifier: uv run pytest tests/unit/runtime/test_prebuilt_manifest_stale_summary_omn26338.py -q fails at origin/dev and passes on the branch"
 evidence_requirements:
   - kind: tests
     description: The startup_loop_hold_under_one_second and startup_wiring_error_fails_startup regressions built from the recorded one-CPU reproduction.
@@ -91,3 +96,14 @@ dod_evidence:
         check_value: docker exec omninode-runtime python -c 'from omnibase_infra.handlers.topic_migration_dependencies import warm_topic_migration_scan'
       - check_type: command
         check_value: bash -c 'docker exec omninode-runtime curl -s -m 5 http://localhost:8085/health | grep -q "\"status\""'
+  - id: dod-omn26338-ac7-prebuilt-stale-summary
+    description: The stale-manifest boot warning is rendered from the 1268 differing fields recorded on omni-201 (fixture tests/fixtures/omn26338/prebuilt_manifest_stale_dev_201.json) and names the active_packages change, the total and the added count by package; a warning with few differences still lists each field.
+    source: manual
+    binds_ac: [AC7]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_prebuilt_manifest_stale_summary_omn26338.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_prebuilt_manifest_stale_summary_integration_omn26338.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
