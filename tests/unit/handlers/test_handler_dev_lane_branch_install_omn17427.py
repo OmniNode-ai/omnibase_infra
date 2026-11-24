@@ -844,7 +844,10 @@ def _reapply_argv(tmp_path: Path) -> list[str]:
 def _run_reapply_entry(tmp_path: Path, lane: _Lane, starts: _Starts) -> int:
     def announce(state_dir: Path, stdout: str, *, repo_root: Path) -> bool:
         return reapply.announce_reapply_start(
-            state_dir, stdout, repo_root=repo_root, build=lambda _root: starts
+            state_dir,
+            stdout,
+            repo_root=repo_root,
+            build=lambda _root, _state_dir: starts,
         )
 
     return reapply.main(

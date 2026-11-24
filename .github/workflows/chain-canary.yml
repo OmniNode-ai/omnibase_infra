@@ -724,6 +724,12 @@ jobs:
           CHAIN_RECEIPT_DIR: ${{ runner.temp }}/chain-verdict-receipt
         run: |
           set -uo pipefail
+          # A step with no `shell:` key runs as `bash -e {0}`, and the line
+          # above cannot clear it. `lane-revision` exits 1 for a lane that
+          # reports no code sha, and `emit` exits 1 for a failed delegation, so
+          # errexit would end this step red and change the run's conclusion:
+          # exactly what this step exists never to do (OMN-26122).
+          set +e
           mkdir -p "${CHAIN_RECEIPT_DIR}"
           SHA=$(uv run python scripts/ci/lab_pass_receipt.py lane-revision \
             --agent-url "${DEPLOY_AGENT_URL:-}")

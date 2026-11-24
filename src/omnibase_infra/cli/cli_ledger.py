@@ -46,6 +46,7 @@ from omnibase_infra.handlers.handler_work_ledger_query import (
     HandlerWorkLedgerQuery,
     load_work_ledger_query_client_config,
 )
+from omnibase_infra.handlers.lane_kafka_event_bus_config import lane_event_bus_config
 from omnibase_infra.models.model_work_ledger_query_cli_options import (
     ModelWorkLedgerQueryCliOptions,
 )
@@ -82,16 +83,7 @@ def resolve_work_ledger_query_transport(lane: str) -> ModelKafkaEventBusConfig:
     """Select dev's declared address/protocol and the machine's stored identity."""
     if lane != "dev":
         raise ValueError("Work-ledger queries are enabled for the dev lane only")
-    selection, transport = resolve_lane_binding(lane)
-    config = ModelKafkaEventBusConfig.default()
-    overrides = {
-        "bootstrap_servers": selection.bootstrap_servers,
-        "security_protocol": selection.security_protocol,
-        "sasl_mechanism": selection.sasl_mechanism,
-    }
-    if transport is not None:
-        overrides.update(transport.as_client_config_overrides())
-    return config.model_copy(update=overrides)
+    return lane_event_bus_config(*resolve_lane_binding(lane))
 
 
 async def run_work_ledger_read(

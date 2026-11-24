@@ -69,6 +69,7 @@ class StoreLazyStartDormant:
         wired: tuple[ModelDiscoveredContract, ...] = (),
     ) -> None:
         cls._topology = None
+        StoreLazyStartHandlerDependencies.record(None)
         cls._policy = policy
         cls._contracts = {contract.name: contract for contract in dormant}
         cls._wired = {contract.name: contract for contract in wired}
@@ -126,7 +127,26 @@ class StoreLazyStartDormant:
         cls._wired = {}
         cls._provisioner = None
         cls._topology = None
+        StoreLazyStartHandlerDependencies.record(None)
         StoreLazyStartWaker.record(None)
+
+
+class StoreLazyStartHandlerDependencies:
+    """The constructor dependencies the kernel built for its runtime-owned handlers (OMN-26594).
+
+    A dormant contract's handler takes the same pool, producers and tracking the boot
+    hands a handler of the boot set, so a lazy start wires with them.
+    """
+
+    _dependencies: dict[str, dict[str, object]] | None = None
+
+    @classmethod
+    def record(cls, dependencies: dict[str, dict[str, object]] | None) -> None:
+        cls._dependencies = dependencies
+
+    @classmethod
+    def dependencies(cls) -> dict[str, dict[str, object]] | None:
+        return cls._dependencies
 
 
 class StoreLazyStartWaker:
@@ -182,6 +202,14 @@ def split_boot_manifest(
     boot = tuple(c for c in manifest.contracts if c.name in boot_set)
     dormant = tuple(c for c in manifest.contracts if c.name not in boot_set)
     return manifest.model_copy(update={"contracts": boot}), dormant
+
+
+def boot_handler_dependencies(
+    dependencies: dict[str, dict[str, object]] | None,
+) -> dict[str, dict[str, object]] | None:
+    """Keep the runtime handler dependencies the kernel wires the boot set with, and return them (OMN-26594)."""
+    StoreLazyStartHandlerDependencies.record(dependencies)
+    return dependencies
 
 
 def boot_manifest(

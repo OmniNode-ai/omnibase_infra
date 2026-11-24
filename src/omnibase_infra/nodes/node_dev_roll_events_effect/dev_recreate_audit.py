@@ -35,6 +35,9 @@ from omnibase_infra.enums.enum_dev_recreate_violation_kind import (
 from omnibase_infra.handlers.dev_recreate_window.handler_dev_recreate_window import (
     window_start,
 )
+from omnibase_infra.models.model_dev_container_observation import (
+    ModelDevContainerObservation,
+)
 from omnibase_infra.models.model_dev_recreate_announcement import (
     ModelDevRecreateAnnouncement,
 )
@@ -72,6 +75,14 @@ def _violation_id(kind: EnumDevRecreateViolationKind, key: str) -> UUID:
 
 def _stamp(at: datetime) -> str:
     return at.isoformat()
+
+
+def _observed(seen: ModelDevContainerObservation) -> str:
+    """The cause and build the observer read for the start, when it read them."""
+    if seen.cause is None:
+        return ""
+    build = "the same build as the previous start" if seen.same_build else "a new build"
+    return f"; cause {seen.cause.value}, on {build}"
 
 
 class DevRecreateAuditReader:
@@ -258,7 +269,7 @@ class DevRecreateAuditReader:
                     detail=(
                         f"container {seen.container} started {_stamp(seen.started_at)} "
                         f"(RestartCount {seen.restart_count}, exit code {seen.exit_code}) "
-                        "with no dev_runtime_started event"
+                        "with no dev_runtime_started event" + _observed(seen)
                     ),
                 )
             )
