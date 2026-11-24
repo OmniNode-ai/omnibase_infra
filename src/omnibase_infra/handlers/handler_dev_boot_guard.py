@@ -17,6 +17,7 @@ import importlib.util
 import json
 import logging
 import math
+import os
 import re
 import subprocess
 import sys
@@ -1612,6 +1613,18 @@ _APPEND_STATUS_SCRIPT: Final = (
 )
 
 
+# The agent's own consumer transport declaration (the unit's ``KAFKA_SASL_MECHANISM``,
+# ``KAFKA_SECURITY_PROTOCOL`` and ``KAFKA_SASL_ENV_PREFIX``, OMN-18012). The agent's lane login
+# lives only under that prefix, so the unprefixed pair the append command's client config reads
+# is absent, and ``ModelKafkaEventBusConfig.default()`` rejects a SASL mechanism with no
+# credentials before the lane's stored identity is bound (OMN-26316). The append command takes
+# its broker, protocol, mechanism and login from the ``dev`` lane declaration and the machine's
+# lane store, so none of these three reaches it.
+_APPEND_COMMAND_UNINHERITED_ENV: Final = frozenset(
+    {"KAFKA_SASL_MECHANISM", "KAFKA_SECURITY_PROTOCOL", "KAFKA_SASL_ENV_PREFIX"}
+)
+
+
 def _append_status_over_bus(
     execution: ModuleType, row: str, *, lane: str, request_id: str
 ) -> bool:
@@ -1634,12 +1647,21 @@ def _append_status_over_bus(
                 request_id,
             ],
             timeout=REPORT_SECONDS,
+            env={
+                name: value
+                for name, value in os.environ.items()
+                if name not in _APPEND_COMMAND_UNINHERITED_ENV
+            },
         )
     except (OSError, execution.subprocess.SubprocessError):
         logger.warning("Dev boot STATUS delivery still pending: append command failed")
         return False
     if done.returncode != 0:
-        logger.warning("Dev boot STATUS delivery still pending: append command refused")
+        answer = done.stderr.strip().splitlines()[-1:]
+        logger.warning(
+            "Dev boot STATUS delivery still pending: append command refused: %s",
+            _safe(answer[0]) if answer else f"exit {done.returncode}, no stderr",
+        )
         return False
     try:
         receipt = json.loads(done.stdout.strip().splitlines()[-1])
