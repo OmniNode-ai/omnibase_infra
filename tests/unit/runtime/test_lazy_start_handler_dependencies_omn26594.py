@@ -31,7 +31,10 @@ from omnibase_infra.event_bus.model_topic_readiness_config import (
 )
 from omnibase_infra.handlers import handler_lazy_start_ingress as ingress_module
 from omnibase_infra.handlers.handler_lazy_start_ingress import HandlerLazyStartIngress
-from omnibase_infra.handlers.lazy_start_boot_split import StoreLazyStartDormant
+from omnibase_infra.handlers.lazy_start_boot_split import (
+    StoreLazyStartDormant,
+    StoreLazyStartHandlerDependencies,
+)
 from omnibase_infra.handlers.lazy_start_runtime_transaction import (
     LazyStartRuntimeTransaction,
 )
@@ -104,18 +107,18 @@ def test_the_kernels_dependency_builder_records_its_map_for_the_dormant_contract
     built = _build_runtime_handler_dependencies(MagicMock(name="postgres_pool"))
 
     assert built is not None
-    assert StoreLazyStartDormant.handler_dependencies() is built
+    assert StoreLazyStartHandlerDependencies.dependencies() is built
     assert "HandlerPostgresRuntimeManifestInsert" in built
 
 
 def test_the_dormant_store_keeps_the_map_the_kernel_recorded_and_clears_it() -> None:
     dependencies: dict[str, dict[str, object]] = {"HandlerX": {"pool": object()}}
 
-    StoreLazyStartDormant.record_handler_dependencies(dependencies)
+    StoreLazyStartHandlerDependencies.record(dependencies)
 
-    assert StoreLazyStartDormant.handler_dependencies() is dependencies
+    assert StoreLazyStartHandlerDependencies.dependencies() is dependencies
     StoreLazyStartDormant.clear()
-    assert StoreLazyStartDormant.handler_dependencies() is None
+    assert StoreLazyStartHandlerDependencies.dependencies() is None
 
 
 @pytest.mark.asyncio
@@ -126,7 +129,7 @@ async def test_the_ingress_builds_its_transaction_with_the_recorded_dependencies
     StoreLazyStartDormant.record(
         ModelLazyStartPolicy(ingress_contract="node_ingress_fixture"), (), None, ()
     )
-    StoreLazyStartDormant.record_handler_dependencies(dependencies)
+    StoreLazyStartHandlerDependencies.record(dependencies)
     built: dict[str, Any] = {}
 
     class _Capturing:
