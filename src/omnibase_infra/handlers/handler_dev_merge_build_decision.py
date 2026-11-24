@@ -21,6 +21,8 @@ host composition root (the handler imports no other handler); it declares no top
 * ``result=refused | reason=<verdict>``
 * ``result=refused | job=<failed job> | reason=failed_head | verdict_class=<class>`` for an
   idle build of a head whose last dev job failed (OMN-26493)
+* ``result=refused | reason=untagged_head`` for an idle build of a head that no dev tag on
+  origin names yet (OMN-25942); the build waits for the tag
 * a ``NON_RUNTIME`` sha names no result, job, reason or earliest start: no build follows.
 
 A reader greps ``trigger_sha=<sha>`` and ``src=build-decision``. The request id of the

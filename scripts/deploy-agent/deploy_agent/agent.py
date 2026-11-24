@@ -537,7 +537,7 @@ class DeployAgent:
         self._idle_converge_attempted: set[str] = set()
         reading = load_dev_boot_guard(JOB_READING)
         self._post_failure = reading.post_failure_converge(self, converge_command)
-        self._failed_head = reading.failed_head_gate(self)
+        self._idle_build_gate = reading.idle_build_gate(self)
         self._idle_converge_last_verdict: EnumIdleConvergeVerdict | None = None
         self._idle_converge_last_verdicts: dict[str, EnumIdleConvergeVerdict] = {}
         self._migration_converge_last_check: float | None = None
@@ -1369,7 +1369,7 @@ class DeployAgent:
         # OMN-19507: a converge waits for the load gate like any deploy; its head is
         # not marked attempted, so it runs once the gate opens (OMN-26431: row either way).
         cmd = converge_command()
-        if self._failed_head.refuses(cmd):
+        if self._idle_build_gate.refuses(cmd):
             return  # OMN-26493: that head's last dev job failed; one ledger row per head
         if not self._idle_converge_gate_open(cmd.requested_by):
             self._job_reading("record_deferred", repository, decision.head_ref, now)
@@ -1506,7 +1506,7 @@ class DeployAgent:
             logger.info("idle restore: leaves the recreate window to %s", waiting)
             return True
         cmd = restore_command()
-        if self._failed_head.refuses(cmd) or not self._idle_converge_gate_open(
+        if self._idle_build_gate.refuses(cmd) or not self._idle_converge_gate_open(
             cmd.requested_by
         ):
             return True

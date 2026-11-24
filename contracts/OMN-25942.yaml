@@ -23,6 +23,11 @@ requirements:
     acceptance:
       - id: AC4
         statement: 'AC4: the three stability lane jobs recorded on 2026-11-19 (1f7f39c6, 6ff2c3f5, 914b6b79) replay from their fixture; verification of one lane probes only that lane''s own ports and postgres and waits out a runtime that resets the connection while it starts -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k verification_probe exits non-zero on the fix branch'
+  - id: req-omn25942-untagged-head-idle-build
+    statement: The deploy agent's idle restore and idle converge build the omnibase_infra dev head only once a dev-merge tag on origin names it, so the dev-lane first-party audit accepts the staged tree.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: job 7dfb1bc9 (agent/idle-restore, 2026-11-24T02:46:16Z, head 5cafc841f7de, tag cut by run 45314704581 at 02:48:12Z) replays from its fixture; the idle restore and idle converge start no job for a head no dev tag names, write one build-decision ledger row per head (reason=untagged_head), start the job on the first check after the tag exists, and leave signed requests and the audit untouched -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_untagged_head_idle_build_omn25942.py -q exits non-zero on the fix branch, or exits zero at the merge base'
 evidence_requirements:
   - kind: tests
     description: Dev boot guard settings-drift tests.
@@ -98,3 +103,20 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit -q --no-cov -n 0 -p no:randomly -k verification_probe
         cwd: .
+  - id: dod-omn25942-ac5-untagged-head-idle-build
+    description: The recorded job 7dfb1bc9 replays; an idle restore and an idle converge wait for the dev head's tag, write one row per head, build on the first check after the tag exists, and a signed request still runs.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_untagged_head_idle_build_omn25942.py -q --no-header -p no:cacheprovider
+        cwd: .
+  - id: dod-omn25942-ac5-deploy
+    description: Hosted-runner probe that reads the committed untagged-head gate from GitHub at the checked-out commit and requires the rule, its ledger reason and the agent wiring.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_deploy_job_reading_effect/runtime_untagged_head_gate.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "class UntaggedHeadGate" in src; assert "_idle_read_dev_tags" in src'
+        cwd: ${OMNI_HOME}/omnibase_infra

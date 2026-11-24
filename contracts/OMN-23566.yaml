@@ -1,0 +1,74 @@
+schema_version: 1.0.0
+ticket_id: OMN-23566
+title: The chain canary submits its delegation over the bus, not through the separate HTTP API
+summary: >-
+  The chain canary (node_chain_canary_effect and .github/workflows/chain-canary.yml) no longer submits through the separate HTTP API (POST /v1/workflows with a gateway credential) or through the tenant-less /skill route. The probe publishes the delegate-skill command envelope on the lane's broker, stamped with the lane's tenant id; a missing tenant is RED (SUBMISSION_ROUTE_NOT_CONFIGURED) and nothing is published, with no fallback to a tenant-less submission. _post_workflow_via_gateway, _post_skill_via_httpx and the gateway_url, gateway_api_key_env and gateway_workflow_type request fields are removed; the workflow resolves the lane's tenant_id and no longer requires gateway_url or injects the gateway credential. The lane declaration that carries tenant_id (the omnimarket lab proof lanes model and the deployment overlay) is a separate change; until it lands the chain-canary lane resolution names the missing tenant_id.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn23566-canary-over-bus
+    statement: The chain canary publishes its delegate request on the bus with the lane tenant and has no HTTP submission path.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the canary publishes the delegate request on the delegate-skill command topic on the lane broker with the lane tenant on the envelope and in the payload -- falsifier: pytest tests/unit/nodes/node_chain_canary_effect/test_handler_chain_canary_bus_submission_omn23566.py -q fails on the merge base"
+      - id: AC2
+        statement: "AC2: a missing tenant is RED with nothing published and no fallback to the old path -- falsifier: the same test file shows a publish call with an empty tenant, or the handler module still defines _post_workflow_via_gateway or _post_skill_via_httpx"
+      - id: AC3
+        statement: "AC3: chain-canary.yml no longer requires gateway_url or injects the gateway credential, and resolves the lane tenant_id -- falsifier: pytest tests/ci/test_chain_canary_workflow.py tests/ci/test_stability_proof_lane_declaration_omn24191.py -q fails on the merge base"
+evidence_requirements:
+  - kind: tests
+    description: The bus submission tests and the workflow shape tests.
+    command: uv run --frozen pytest tests/unit/nodes/node_chain_canary_effect/test_handler_chain_canary_bus_submission_omn23566.py tests/ci/test_chain_canary_workflow.py tests/ci/test_stability_proof_lane_declaration_omn24191.py -q --no-cov -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn23566-ac1-publishes-on-bus
+    description: >-
+      The delegate request is published once on the delegate-skill command topic on the lane broker, stamped with the lane tenant. The new test fails at the merge base, where the handler takes no bus publisher.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_chain_canary_effect/test_handler_chain_canary_bus_submission_omn23566.py -q --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn23566-ac2-red-without-tenant
+    description: >-
+      A missing tenant is SUBMISSION_ROUTE_NOT_CONFIGURED with zero publish calls, and the HTTP submission functions and request fields are gone.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_chain_canary_effect/test_handler_chain_canary_bus_submission_omn23566.py -q --no-cov -p no:cacheprovider -k "MissingTenant or NoHttp"
+        cwd: .
+      - check_type: command
+        check_value: bash -c '! grep -q "_post_workflow_via_gateway" src/omnibase_infra/nodes/node_chain_canary_effect/handlers/handler_chain_canary.py'
+        cwd: .
+  - id: dod-omn23566-ac3-workflow-shape
+    description: >-
+      The workflow resolves the lane tenant_id and declares no gateway_url, no gateway credential and no --gateway-url flag. The runtime read of a stability-lane chain-canary run (the receipt naming the bus publish) is posted as a pull request comment naming the head; it is not claimed by this check.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_chain_canary_workflow.py tests/ci/test_stability_proof_lane_declaration_omn24191.py -q --no-cov -p no:cacheprovider
+        cwd: .
+      - check_type: command
+        check_value: bash -c '! grep -q "GATEWAY_URL" .github/workflows/chain-canary.yml'
+        cwd: .
+  - id: dod-omn23566-ac1-deployed-source-publishes-on-bus
+    description: >-
+      Deploy check the hosted runner can run: the handler on the landing branch defines the bus publisher the canary submits through and no longer defines the gateway post. The runtime read of a stability-lane chain-canary run (receipt naming the bus publish) is posted as a pull request comment naming the head; it is not claimed by this check.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: bash -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_chain_canary_effect/handlers/handler_chain_canary.py?ref=omn-23566-canary-submits-over-bus" --jq .content | base64 -d | grep -q "_publish_to_bus_via_aiokafka" && grep -q "_publish_to_bus_via_aiokafka" src/omnibase_infra/nodes/node_chain_canary_effect/handlers/handler_chain_canary.py'
+        cwd: .
