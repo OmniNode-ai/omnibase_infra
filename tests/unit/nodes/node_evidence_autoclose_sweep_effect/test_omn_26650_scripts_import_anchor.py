@@ -146,6 +146,36 @@ async def test_scripts_import_sweep_verifier_loads_the_product_clone_conftest(
     assert result == {"anchor": str(full.resolve()), "error": ""}
 
 
+async def test_scripts_import_injected_registry_root_anchors_without_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The registry root is a constructor dependency, not a handler env read.
+
+    ``OMNI_HOME`` is unset, so only the injected root can name the product
+    clone: a handler that still read the process environment would anchor at
+    the sparse tree and meet the recorded ``No module named 'scripts'``.
+    """
+    sparse, home, full = _layout(tmp_path)
+
+    def argv(
+        ticket_id: str, *, contract_path: str = "", state_root: str = ""
+    ) -> list[str]:
+        return [sys.executable, "-c", _VERIFIER, contract_path]
+
+    monkeypatch.setattr(guard, "dod_verify_argv", argv)
+    monkeypatch.delenv("OMNI_HOME", raising=False)
+    handler = HandlerEvidenceAutocloseSweep(
+        autoclose_disabled=False, registry_root=str(home)
+    )
+
+    result, code, error = await handler._run_dod_verify_command_real(
+        "OMN-26106", str(sparse), 30
+    )
+
+    assert (code, error) == (0, "")
+    assert result == {"anchor": str(full.resolve()), "error": ""}
+
+
 async def test_scripts_import_without_a_materialised_clone_keeps_the_contract_anchor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
