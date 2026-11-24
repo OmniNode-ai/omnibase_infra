@@ -86,6 +86,9 @@
 #   --token-file before SSH or registry access. --dry-run plans locally.
 #   --limit counts verified recreates. --skip-build requires the bound image
 #   to exist on the host. Unreadable and busy runners stay untouched.
+#   RUNNER_REGISTRY_SNAPSHOT=<file> (OMN-24139): read the org runner registry from that
+#   file (gh api --paginate --slurp /orgs/<org>/actions/runners?per_page=100) instead of
+#   gh, for a lab host whose GitHub shim refuses the raw read. A stale file refuses.
 #
 # --add=<service>[,...] mode (additive stand-up of declared NON-pool services):
 #   1. Rsync runner artifacts to host (the compose file must reach the host
@@ -2563,7 +2566,7 @@ main() {
     if "${SECONDARY_HOST}" && "${ROLLING_DEPLOY}"; then
         if "${RELABEL_ROLL}" || "${SOFT_DEPLOY}" || "${RETIRE_SURPLUS}" || "${ARTIFACTS_ONLY}" || [[ -n "${ADD_SERVICES}" ]]; then err "Secondary --rolling is mutually exclusive with every other deploy mode."; fi
         [[ -n "${TOKEN_FILE}" ]] || err "Secondary --rolling requires --token-file, including for --dry-run."
-        jq -n --arg host "${RUNNER_HOST}" --arg prefix "${RUNNER_NAME_PREFIX}" --arg repo_root "${REPO_ROOT}" --arg fleet_config "${RUNNER_FLEET_CONFIG}" --arg token_path "${TOKEN_FILE}" --arg only "${ROLL_ONLY}" --arg limit "${ROLL_LIMIT}" --arg lab_host_table_projection "${RUNNER_LAB_HOST_TABLE_PROJECTION:-}" --argjson dry_run "${DRY_RUN}" --argjson skip_build "${SKIP_BUILD}" '$ARGS.named | .limit |= tonumber' |
+        jq -n --arg host "${RUNNER_HOST}" --arg prefix "${RUNNER_NAME_PREFIX}" --arg repo_root "${REPO_ROOT}" --arg fleet_config "${RUNNER_FLEET_CONFIG}" --arg token_path "${TOKEN_FILE}" --arg only "${ROLL_ONLY}" --arg limit "${ROLL_LIMIT}" --arg lab_host_table_projection "${RUNNER_LAB_HOST_TABLE_PROJECTION:-}" --arg registry_snapshot "${RUNNER_REGISTRY_SNAPSHOT:-}" --argjson dry_run "${DRY_RUN}" --argjson skip_build "${SKIP_BUILD}" '$ARGS.named | .limit |= tonumber' |
             uv run --frozen --project "${REPO_ROOT}" python -c 'from omnibase_infra.cli.cli_node import run_node_by_name; run_node_by_name()' node_runner_image_roll --contract "${REPO_ROOT}/src/omnibase_infra/nodes/node_runner_image_roll/contract.yaml" --input /dev/stdin --backend event_bus=inmemory --timeout 9600 --state-root "${ONEX_STATE_DIR:-${REPO_ROOT}/.onex_state}/runner-image-roll"
         return
     fi
