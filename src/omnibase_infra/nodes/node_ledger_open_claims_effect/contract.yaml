@@ -24,9 +24,13 @@ handler_routing:
   handlers:
     - operation: ledger_open_claims.read
       handler: {name: HandlerLedgerOpenClaims, module: omnibase_infra.handlers.handler_ledger_open_claims}
+    - operation: ledger_rows.read
+      handler: {name: HandlerLedgerRows, module: omnibase_infra.handlers.handler_ledger_rows}
 capabilities:
   - name: ledger.open_claims
     description: Open CLAIMs of a window from the ledger reader node, joined to their CLAIM rows.
+  - name: ledger.rows
+    description: The rows of named kinds of a window from the ledger reader node (OMN-26507, the pre-PR pool driver's HOLD and RELEASE read); its input is ModelLedgerRowsRequest and its output ModelLedgerRowsResult.
 metadata:
   ticket: OMN-20547
   author: OmniNode Team

@@ -37,6 +37,7 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
 )
 from tests.helpers.lane_census_fixtures import NEUTRAL_MANIFEST
 from tests.helpers.prepr_pool_overlay import pool_overlay_env
+from tests.scripts.ledger_reader_stub import LedgerReaderStub
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 POOL_PY = REPO_ROOT / "scripts" / "runtime_build" / "prepr_runtime_pool.py"
@@ -2670,13 +2671,9 @@ def _canonical_clone(root: Path) -> str:
 
 
 def _verify_argv(tmp_path: Path, out: Path, ref: str) -> list[str]:
-    ledger = tmp_path / "ledger.md"
-    ledger.write_text("", encoding="utf-8")
     return [
         "--config",
         str(POOL_FIXTURE),
-        "--ledger",
-        str(ledger),
         "verify",
         "--repo",
         "omnibase_infra",
@@ -2716,11 +2713,15 @@ def test_verify_result_exit_code_equals_the_process_exit_code(
 
 
 def test_verify_result_for_an_unreadable_ledger_is_still_written(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # the ledger reader node refuses (exit 69, unreadable): the HOLDs of a peer cannot be seen
+    stub = LedgerReaderStub(tmp_path / "ledger-reader")
+    stub.refuse_with(69)
+    for name, value in stub.env().items():
+        monkeypatch.setenv(name, value)
     out = tmp_path / "result.json"
     argv = _verify_argv(tmp_path, out, "x")
-    argv[argv.index("--ledger") + 1] = str(tmp_path / "absent.md")
     assert pool.main(argv, transport=NoHostTransport()) == pool.EXIT_USAGE
     assert json.loads(out.read_text(encoding="utf-8"))["exit_code"] == pool.EXIT_USAGE
 

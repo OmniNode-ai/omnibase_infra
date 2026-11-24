@@ -594,31 +594,64 @@ def test_reporting_outage_keeps_status_and_exception_pending_for_retry(
         "exception_pending": True,
     }
     executor_mod._atomic_write_private_json(path, incident)
+    # The bus append command is a real child process (the guard runs it through one shell);
+    # it records what it was given and answers with the receipt status in `status.txt`.
+    append = tmp_path / "append.py"
+    seen = tmp_path / "seen.jsonl"
+    status = tmp_path / "status.txt"
+    status.write_text("spooled", encoding="utf-8")
+    append.write_text(
+        "import json, sys\n"
+        f"open({str(seen)!r}, 'a').write(json.dumps({{'argv': sys.argv[1:], 'stdin': sys.stdin.read()}}) + '\\n')\n"
+        f"print(json.dumps({{'status': open({str(status)!r}).read(), 'exit_code': 0}}))\n",
+        encoding="utf-8",
+    )
     monkeypatch.setenv("ONEX_LEDGER_WRITE_VIA", "bus")
+    monkeypatch.setenv(
+        "ONEX_LEDGER_BUS_APPEND_COMMAND", f"{sys.executable} {append} --bus-lane dev"
+    )
+    monkeypatch.setenv("ONEX_LEDGER_HOST_NAME", "h-test")
     monkeypatch.setenv("DEPLOY_AGENT_REPORT_PLUGIN_DIR", str(tmp_path / "plugin"))
     run = Mock(return_value=subprocess.CompletedProcess([], 75, "", "bus unavailable"))
-    monkeypatch.setattr(executor_mod, "_run", run)
+
+    def routed(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if argv[0] != "bash":
+            return run(argv, **kwargs)
+        return subprocess.run(
+            argv, capture_output=True, text=True, timeout=20, check=False
+        )
+
+    monkeypatch.setattr(executor_mod, "_run", routed)
     executor_mod.deliver_dev_boot_reports(root)
     assert json.loads(path.read_text())["ledger_pending"] is True
     assert json.loads(path.read_text())["exception_pending"] is True
     run.side_effect = [
-        subprocess.CompletedProcess([], 0, "OK line=42 via=bus status=accepted", ""),
         subprocess.CompletedProcess(
             [], 0, "EXCEPTION-QUEUE appended id=boot-failed", ""
         ),
     ]
+    status.write_text("accepted", encoding="utf-8")
     executor_mod.deliver_dev_boot_reports(root)
     stored = json.loads(path.read_text())
     assert stored["ledger_pending"] is False and stored["exception_pending"] is False
     assert BAD_COMMIT in str(run.call_args_list)
     assert "BIFROST_BASE_CONTRACT_PATH" in str(run.call_args_list)
-    status_rows = [
-        call.args[0][-1] for call in run.call_args_list if "--append" in call.args[0]
-    ]
-    assert len(status_rows) == 2 and status_rows[0] == status_rows[1]
+    # The STATUS row went to the bus append command on stdin (lane, host, request id, rows
+    # from stdin); the first delivery was spooled and kept it pending, the second took it.
+    sent = [json.loads(line) for line in seen.read_text().splitlines()]
+    assert len(sent) == 2 and sent[0] == sent[1]
+    assert BAD_COMMIT in sent[0]["stdin"] and "| STATUS |" in sent[0]["stdin"]
+    assert sent[0]["stdin"].count("\n") == 1
+    argv = sent[0]["argv"]
+    assert argv[:2] == ["--bus-lane", "dev"]
+    assert argv[argv.index("--lane") + 1] == "deploy-agent-omnibase-infra"
+    assert argv[argv.index("--host") + 1] == "h-test"
+    assert argv[argv.index("--rows-file") + 1] == "-"
+    assert not any("--append" in call.args[0] for call in run.call_args_list)
     calls = run.call_count
     executor_mod.deliver_dev_boot_reports(root)
     assert run.call_count == calls
+    assert len(seen.read_text().splitlines()) == 2
 
 
 def test_second_failed_job_leaves_a_family_the_first_recovery_restored_running(

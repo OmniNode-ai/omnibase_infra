@@ -11,16 +11,15 @@ Two reads of the same rows live here, apart from the driver script:
   writes as ``LAB PROOF <PASS|FAIL|INCONCLUSIVE> ... <repo>#<pr> ...``, which
   decides the alarm after two INCONCLUSIVE proofs in a row for one repo.
 
-Nothing here writes: the driver hands :meth:`alarm_on_streak` the ledger's own
-append, and a failed append is reported in the proof text, never swallowed.
+Nothing here writes: the driver hands :meth:`alarm_on_streak` the bus append
+(``handler_ledger_rows.bus_row_appender``), and a failed append is reported in the proof text,
+never swallowed.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import re
-import shlex
-import subprocess
 from collections.abc import Callable, Sequence
 
 from pydantic import BaseModel, ConfigDict
@@ -111,30 +110,6 @@ class ModelProofLedger(BaseModel):
     def no_append(_row: str) -> None:
         """The append of a run with no ledger tool configured: it refuses, so the proof says so."""
         raise RuntimeError("no ledger append configured")
-
-    @staticmethod
-    def appender(command: str, ledger: str | None) -> Callable[[str], None]:
-        """Bind the ledger tool's own append (``<command> <ledger> --timeout 60s --append <row>``).
-
-        The row is one argv element, never a shell string. :meth:`no_append` when
-        either the command or the ledger path is unset, so the proof says so.
-        """
-        argv = shlex.split(command)
-        if not argv or not ledger:
-            return ModelProofLedger.no_append
-
-        def append(row: str) -> None:
-            done = subprocess.run(
-                [*argv, ledger, "--timeout", "60s", "--append", row],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if done.returncode != 0:
-                why = (done.stderr or done.stdout).strip()[:200]
-                raise RuntimeError(f"onex-ledger exited {done.returncode}: {why}")
-
-        return append
 
     @staticmethod
     def streak_row(repo: str, earlier: str, current: str, stamp: str) -> str:
