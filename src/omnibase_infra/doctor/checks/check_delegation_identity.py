@@ -5,6 +5,11 @@
 from pathlib import Path
 from typing import ClassVar
 
+from omnibase_infra.cli.cli_delegate import (
+    DelegateTenantRefusedError,
+    read_install_identity,
+)
+
 from omnibase_core.doctor.doctor_check_base import DoctorCheckBase
 from omnibase_core.enums.enum_doctor_category import EnumDoctorCategory
 from omnibase_core.models.doctor.model_doctor_check_result import (
@@ -26,9 +31,9 @@ from omnibase_infra.doctor.model_delegation_diagnosis import (
     ModelDelegationDiagnosis,
 )
 
-_NO_IDENTITY_FIX = (
-    "pbpaste | onex auth login --tenant-slug <slug> --base-url <origin> --api-key-stdin"
-)
+_LOCAL_IDENTITY_FIX = "onex local init"
+
+_NO_IDENTITY_FIX = _LOCAL_IDENTITY_FIX
 
 
 class CheckDelegationIdentity(DoctorCheckBase):
@@ -42,6 +47,41 @@ class CheckDelegationIdentity(DoctorCheckBase):
         self._onex_home = onex_home if onex_home is not None else default_onex_home()
 
     def _evaluate(self) -> tuple[ModelDelegationDiagnosis, bool]:
+        try:
+            local_identity = read_install_identity()
+        except DelegateTenantRefusedError as exc:
+            exc_text = str(exc)
+            # The seam raises a refusal both for an unreadable recorded
+            # identity and when omnimarket itself is not resolvable. A missing
+            # omnimarket/module is a deployment detail rather than a refusal of
+            # a recorded identity, so collapse only that case to "not
+            # configured" below instead of failing the check.
+            if "not resolvable" not in exc_text:
+                # A recorded-but-corrupt identity is a refusal, not
+                # "not configured": keep it a refusal and do not collapse it
+                # into no_identity.
+                return (
+                    ModelDelegationDiagnosis(
+                        fault=None,
+                        detail=exc_text,
+                        fix="",
+                    ),
+                    False,
+                )
+            local_identity = None
+
+        if local_identity is not None:
+            return (
+                ModelDelegationDiagnosis(
+                    fault=None,
+                    detail=f"Delegation identity '{local_identity}' is configured.",
+                    fix="",
+                ),
+                True,
+            )
+
+        # No local identity: keep the gateway identity check available for
+        # cloud setups (D3). Fall through to the legacy gateway block handling.
         state, block = read_gateway_block(self._onex_home)
         if state == GATEWAY_BLOCK_INVALID:
             return (
@@ -57,7 +97,7 @@ class CheckDelegationIdentity(DoctorCheckBase):
                 ModelDelegationDiagnosis(
                     fault=EnumDelegationDoctorFault.NO_IDENTITY,
                     detail="No delegation tenant identity is configured on this machine.",
-                    fix=_NO_IDENTITY_FIX,
+                    fix=_LOCAL_IDENTITY_FIX,
                 ),
                 True,
             )
@@ -68,7 +108,7 @@ class CheckDelegationIdentity(DoctorCheckBase):
                 ModelDelegationDiagnosis(
                     fault=EnumDelegationDoctorFault.NO_IDENTITY,
                     detail="The gateway block does not declare both tenant_slug and base_url.",
-                    fix=_NO_IDENTITY_FIX,
+                    fix=_LOCAL_IDENTITY_FIX,
                 ),
                 True,
             )

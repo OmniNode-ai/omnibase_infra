@@ -40,7 +40,7 @@ def test_missing_identity_has_login_remediation(
 
     assert diagnosis.fault is EnumDelegationDoctorFault.NO_IDENTITY
     assert diagnosis.fix == (
-        "pbpaste | onex auth login --tenant-slug <slug> --base-url <origin> --api-key-stdin"
+"onex local init"
     )
     assert result.status is EnumHealthStatusValue.UNHEALTHY
     assert "[no_identity]" in result.message
