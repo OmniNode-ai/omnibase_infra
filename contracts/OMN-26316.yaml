@@ -65,6 +65,11 @@ requirements:
     acceptance:
       - id: AC16
         statement: "AC16: with two queued refs that are each an ancestor of a newer queued ref but not of each other, the accept runs the newer ref once and records both older commands superseded by it, and a passed-over command the newer ref does not contain, one that is unproven, one for another lane or scope, or a redelivered copy stops the fold -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q -k 'unrelated or newest_command_that or jump' fails at origin/dev (the accept runs the oldest ref and records nothing superseded) and passes on the PR branch"
+  - id: req-omn26316-boot-report-pass-bound
+    statement: A dev boot report the bus refuses never holds the deploy agent's boot or its single job worker for longer than one report command bound, so a self-update re-exec binds the agent's health port and takes the next command within seconds.
+    acceptance:
+      - id: AC17
+        statement: "AC17: with twelve recorded dev boot incidents each owing a STATUS row and an exception and a bus append command that refuses every row, one delivery pass stops once REPORT_SECONDS have passed with nothing delivered, tries the newest incident first, and a later pass over an accepting bus delivers all twelve -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -q fails at origin/dev (twelve attempts) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -84,6 +89,9 @@ evidence_requirements:
   - kind: tests
     description: The accept coalesces to the newest queued command that contains every older one, including older refs unrelated to each other.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q
+  - kind: tests
+    description: A refused dev boot report stops a delivery pass after one report command bound, built from the 394 incidents the dev agent walked for 19 minutes 20 seconds after its 2026-11-24 self-update.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -287,4 +295,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q
+        cwd: .
+  - id: dod-omn26316-boot-report-pass-bound
+    description: "Twelve recorded incidents and an append command that refuses each row: one pass stops after REPORT_SECONDS without a delivery, newest first, where origin/dev attempts all twelve; the pass after the bus accepts delivers every incident."
+    source: manual
+    binds_ac: [AC17]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -q
         cwd: .

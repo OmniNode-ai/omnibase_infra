@@ -75,6 +75,11 @@ ONEX_ENTRY: Final = "scripts/onex"
 PROOF_FAILURE_READ_CHARS: Final = 1500
 PROOF_FAILURE_TAIL_CHARS: Final = 240
 REPORT_SECONDS = 20
+# OMN-26316: one delivery pass gives up once REPORT_SECONDS (the bound of one report command)
+# have passed with nothing delivered. The pass runs at the agent's start, before its health
+# port binds, and again every 30 s on the agent's single job worker; walking every recorded
+# incident while the bus refused them held the agent's boot for 19 minutes 20 seconds (394
+# incidents at about 2.9 s each).
 # A full container log (json-file rotation holds up to 30 MB) is read before recovery.
 LOG_READ_SECONDS = 60
 
@@ -1663,12 +1668,27 @@ def deliver_reports(
         return
     plugin = config.plugin_dir
     interpreter = str(config.registry_root / ".onex-dispatch-venv" / "bin" / "python")
-    for path in root.glob("incident-*.json"):
-        incident = (
-            RootModel[dict[str, JsonValue]]
-            .model_validate_json(execution._read_private_text(path))
-            .root
-        )
+    recorded = {
+        path: RootModel[dict[str, JsonValue]]
+        .model_validate_json(execution._read_private_text(path))
+        .root
+        for path in root.glob("incident-*.json")
+    }
+    last_delivery = time.monotonic()
+    # Newest first: the recent incident is the one someone can still act on, and a pass that
+    # stops early leaves the oldest for a later pass.
+    for path, incident in sorted(
+        recorded.items(), key=lambda item: str(item[1]["at"]), reverse=True
+    ):
+        if not (incident["ledger_pending"] or incident["exception_pending"]):
+            continue
+        if time.monotonic() - last_delivery >= REPORT_SECONDS:
+            logger.warning(
+                "Dev boot report delivery pass stopped: nothing delivered for %d s",
+                REPORT_SECONDS,
+            )
+            return
+        owed = (incident["ledger_pending"], incident["exception_pending"])
         evidence = (
             f"commit={incident['commit']} job={incident['job']} error={incident['error']} "
             f"restored_revision={incident['restored_revision']} recovery_verified={incident['recovery_verified']}"
@@ -1737,6 +1757,8 @@ def deliver_reports(
                     incident["job"],
                     pending,
                 )
+        if (incident["ledger_pending"], incident["exception_pending"]) != owed:
+            last_delivery = time.monotonic()
 
 
 def _dev_containers(guard: HandlerDevBootGuard) -> list[ModelDevBootContainer]:
