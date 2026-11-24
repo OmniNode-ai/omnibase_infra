@@ -86,7 +86,7 @@ def _layout(tmp_path: Path) -> tuple[Path, Path, Path]:
     full = home / "omnibase_infra"
     hooks = full / "scripts" / "hooks"
     hooks.mkdir(parents=True)
-    (full / "scripts" / "__init__.py").write_text("")
+    (full / "scripts/__init__.py").write_text("")
     (hooks / "__init__.py").write_text("")
     (hooks / "pytest_full_suite_host_guard.py").write_text(
         "def enforce(config, target):\n    return None\n"

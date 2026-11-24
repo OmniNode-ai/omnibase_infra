@@ -179,7 +179,8 @@ from omnibase_infra.gate_binding import (
     resolve_gate_binding,
 )
 from omnibase_infra.handlers.done_write_receipt_guard import (
-    materialised_product_clone,
+    process_registry_root,
+    product_clone_verifier_env,
     resolve_done_write_receipt_gate,
     run_dod_verify_command,
 )
@@ -2942,7 +2943,15 @@ class HandlerEvidenceAutocloseSweep:
         run_gateway_command: offer_companion_sources.TypeRunGateway | None = None,
         *,
         gate: ProtocolDoneWriteReceiptGate | None = None,
+        registry_root: str | None = None,
     ) -> None:
+        # OMN-26650. ``registry_root`` is the directory holding the materialised
+        # product clones (the caller's ``OMNI_HOME``); injected, with the
+        # process's own reader as the default so zero-arg contract-driven
+        # construction still anchors a relative check cwd in the product clone.
+        self._registry_root = (
+            registry_root if registry_root is not None else process_registry_root()
+        )
         # ``autoclose_disabled`` mirrors GitHubTransport's env-fallback-in-
         # __init__ precedent: read at construction time, override injectable
         # for tests. Re-checked defensively at the top of handle() too so a
@@ -3067,16 +3076,12 @@ class HandlerEvidenceAutocloseSweep:
             # clone; a relative check cwd must mean the materialised product
             # clone, not that tree (see `materialised_product_clone`). The
             # verifier takes it as its explicit `CONTRACT_REPO_DIR` anchor.
-            registry_root = os.environ.get("OMNI_HOME", "")
-            product_clone = materialised_product_clone(cwd, registry_root)
             return await run_dod_verify_command(
                 ticket_id,
                 cwd,
                 timeout,
                 contract_path=str(contract),
-                env={**os.environ, "CONTRACT_REPO_DIR": product_clone}
-                if product_clone
-                else None,
+                env=product_clone_verifier_env(cwd, self._registry_root),
             )
         return await run_dod_verify_command(ticket_id, cwd, timeout)
 

@@ -76,7 +76,7 @@ def _build_remote(tmp_path: Path) -> Path:
     (remote / "scripts" / "hooks").mkdir(parents=True)
     (remote / "contracts").mkdir()
     (remote / "tests").mkdir()
-    (remote / "scripts" / "__init__.py").write_text("")
+    (remote / "scripts/__init__.py").write_text("")
     (remote / "scripts" / "hooks" / "__init__.py").write_text("")
     (remote / "scripts" / "hooks" / "guard.py").write_text(
         "def enforce(config, target):\n    return None\n"
@@ -124,10 +124,11 @@ async def test_scripts_import_sparse_contract_clone_integration(
         return [sys.executable, "-c", _VERIFIER, contract_path]
 
     monkeypatch.setattr(guard, "dod_verify_argv", argv)
-    handler = HandlerEvidenceAutocloseSweep(autoclose_disabled=False)
 
     # Recorded failure: no product clone to anchor at, the check runs in the sparse tree.
-    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "no-registry"))
+    handler = HandlerEvidenceAutocloseSweep(
+        autoclose_disabled=False, registry_root=str(tmp_path / "no-registry")
+    )
     broken, code, error = await handler._run_dod_verify_command_real(
         "OMN-26106", str(sparse), 120
     )
@@ -139,7 +140,9 @@ async def test_scripts_import_sparse_contract_clone_integration(
     }
 
     # The fix: the sweep's real runner hands the verifier the full clone.
-    monkeypatch.setenv("OMNI_HOME", str(registry))
+    handler = HandlerEvidenceAutocloseSweep(
+        autoclose_disabled=False, registry_root=str(registry)
+    )
     fixed, code, error = await handler._run_dod_verify_command_real(
         "OMN-26106", str(sparse), 120
     )

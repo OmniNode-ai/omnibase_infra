@@ -31,6 +31,7 @@ import importlib
 import importlib.resources
 import json
 import logging
+import os
 import sys
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping
@@ -310,6 +311,35 @@ def materialised_product_clone(contract_root: str, registry_root: str) -> str:
     return str(clone)
 
 
+def process_registry_root(environ: Mapping[str, str] | None = None) -> str:
+    """The registry root (``OMNI_HOME``) of the process, or ``""`` when it names none.
+
+    OMN-26650. The one place the product-clone anchor reads the environment:
+    handlers take the registry root as an injected value and fall back to this
+    reader only when none was injected, so a handler file never touches
+    ``os.environ`` itself. ``environ`` is injectable for the same reason.
+    """
+    source = os.environ if environ is None else environ
+    return source.get("OMNI_HOME", "")
+
+
+def product_clone_verifier_env(
+    contract_root: str,
+    registry_root: str,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, str] | None:
+    """The verifier's environment with ``CONTRACT_REPO_DIR`` at the product clone.
+
+    ``None`` (the subprocess inherits the process environment unchanged) when
+    ``materialised_product_clone`` finds no clone to anchor at.
+    """
+    clone = materialised_product_clone(contract_root, registry_root)
+    if not clone:
+        return None
+    source = os.environ if environ is None else environ
+    return {**source, "CONTRACT_REPO_DIR": clone}
+
+
 async def run_dod_verify_command(
     ticket_id: str,
     cwd: str,
@@ -495,6 +525,9 @@ __all__ = [
     "TypeRunDodVerifyCommand",
     "dod_verify_argv",
     "is_done_state",
+    "materialised_product_clone",
+    "process_registry_root",
+    "product_clone_verifier_env",
     "reap_timed_out_process",
     "run_dod_verify_command",
 ]
