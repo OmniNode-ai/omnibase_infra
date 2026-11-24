@@ -276,6 +276,38 @@ def test_agent_adopts_a_ref_whose_self_check_passes(
     assert (state.current_ref, state.previous_ref) == (NEW, OLD)
 
 
+def test_agent_adoption_journals_a_passing_self_check(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A passing self-check leaves one journal line naming both refs, so a reader finds it running."""
+    caplog.set_level("INFO", logger=_adoption().logger.name)
+
+    adopted = _adoption().adopts(
+        AGENT_DIR, tmp_path, (OLD, NEW), _Git(self_check_code=0), lambda d: None
+    )
+
+    assert adopted is True
+    lines = [r.getMessage() for r in caplog.records if "self-check" in r.getMessage()]
+    assert lines == [
+        f"self_update: self-check of {NEW[:12]} exited 0, adopting it over {OLD[:12]}"
+    ]
+
+
+def test_agent_adoption_journals_no_adopting_line_for_a_failed_self_check(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Control: a refused ref logs its refusal only, never the adopting line."""
+    caplog.set_level("INFO", logger=_adoption().logger.name)
+
+    _adoption().adopts(
+        AGENT_DIR, tmp_path, (OLD, NEW), _Git(self_check_code=1), lambda d: None
+    )
+
+    lines = [r.getMessage() for r in caplog.records if "self-check" in r.getMessage()]
+    assert len(lines) == 1 and "exited 1, staying on" in lines[0]
+    assert not any("adopting it over" in line for line in lines)
+
+
 # --- AC3 ----------------------------------------------------------------------------------
 
 

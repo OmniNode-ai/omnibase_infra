@@ -69,6 +69,11 @@ WORK_LEDGER_CONTRACT: Final = (
     "src/omnibase_infra/contracts/work_ledger_query_client.contract.yaml"
 )
 ONEX_ENTRY: Final = "scripts/onex"
+# A failed proof reports the end of its stderr: a Python stderr opens with warnings and
+# ends with the exception that stopped the command. The read window sits under the
+# sanitizer's own bound so that bound never cuts the end off.
+PROOF_FAILURE_READ_CHARS: Final = 1500
+PROOF_FAILURE_TAIL_CHARS: Final = 240
 REPORT_SECONDS = 20
 # A full container log (json-file rotation holds up to 30 MB) is read before recovery.
 LOG_READ_SECONDS = 60
@@ -321,7 +326,7 @@ def _prove_work_ledger_answers(execution: ModuleType) -> None:
     if done.returncode != 0:
         raise DevBootFailedError(
             f"work ledger: {argv[0]} exited {done.returncode}: "
-            f"{_safe(done.stderr or done.stdout)[:240]}"
+            f"{_safe((done.stderr or done.stdout)[-PROOF_FAILURE_READ_CHARS:])[-PROOF_FAILURE_TAIL_CHARS:]}"
         )
     try:
         answer = json.loads(done.stdout)
@@ -1593,6 +1598,56 @@ def causes_from_logs(logs: str) -> str:
     )
 
 
+# The receipt statuses of the bus append command that mean the ledger holds the row. A
+# ``spooled`` receipt (the durable bus was down, the row waits in the local outbox) is not one.
+_LEDGER_ACCEPTED: Final = frozenset({"accepted", "duplicate", "already-present"})
+
+# One shell, so the environment the launcher gave the agent (the bus append command with its own
+# quoting, and the host name) is read by the shell and never by this handler. The row, the lane
+# and the request id arrive as positional parameters, never inside the script text.
+_APPEND_STATUS_SCRIPT: Final = (
+    'eval "append=(${ONEX_LEDGER_BUS_APPEND_COMMAND:?})"; '
+    'printf "%s\\n" "$1" | "${append[@]}" --lane "$2" --host "${ONEX_LEDGER_HOST_NAME:?}" '
+    '--request-id "$3" --rows-file -'
+)
+
+
+def _append_status_over_bus(
+    execution: ModuleType, row: str, *, lane: str, request_id: str
+) -> bool:
+    """Append one STATUS row through the bus append command (OMN-26507).
+
+    The row goes on the stdin of the command the launcher exports, with ``--lane``, ``--host``,
+    ``--request-id`` and ``--rows-file -``; no ledger file path is passed or read. True only when
+    the command exited 0 and its receipt says the ledger took the row, so a spooled or refused
+    row stays pending for the next delivery.
+    """
+    try:
+        done = execution._run(
+            [
+                "bash",
+                "-c",
+                _APPEND_STATUS_SCRIPT,
+                "ledger-append",
+                row,
+                lane,
+                request_id,
+            ],
+            timeout=REPORT_SECONDS,
+        )
+    except (OSError, execution.subprocess.SubprocessError):
+        logger.warning("Dev boot STATUS delivery still pending: append command failed")
+        return False
+    if done.returncode != 0:
+        logger.warning("Dev boot STATUS delivery still pending: append command refused")
+        return False
+    try:
+        receipt = json.loads(done.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return False
+    return isinstance(receipt, dict) and receipt.get("status") in _LEDGER_ACCEPTED
+
+
 def deliver_reports(
     root: Path, *, execution: ModuleType, config: ModelDevBootReportConfig
 ) -> None:
@@ -1624,12 +1679,6 @@ def deliver_reports(
             f"| actor=script:deploy-agent | model=none | req={request_id} | {evidence}"
         )
         commands = {
-            "ledger_pending": [
-                interpreter,
-                str(plugin / "scripts" / "onex_ledger.py"),
-                "--append",
-                status_row,
-            ],
             "exception_pending": [
                 interpreter,
                 str(plugin / "skills" / "queue-status" / "scripts" / "queue_status.py"),
@@ -1652,23 +1701,26 @@ def deliver_reports(
                 "--no-dispatch",
             ],
         }
-        for pending, argv in commands.items():
-            if not incident[pending]:
-                continue
-            if pending == "ledger_pending" and not config.ledger_via_bus:
+        if incident["ledger_pending"]:
+            if not config.ledger_via_bus:
                 logger.warning(
                     "Dev boot STATUS pending: declare ONEX_LEDGER_WRITE_VIA=bus"
                 )
+            elif _append_status_over_bus(
+                execution,
+                status_row,
+                lane=f"deploy-agent-{incident['project']}",
+                request_id=str(request_id),
+            ):
+                incident["ledger_pending"] = False
+                execution._atomic_write_private_json(path, incident)
+        for pending, argv in commands.items():
+            if not incident[pending]:
                 continue
             try:
                 result = execution._run(argv, timeout=REPORT_SECONDS)
-                # A ledger relay being queued is NOT an acknowledgement from
-                # the ledger. Keep the source incident until it is accepted.
                 acknowledged = result.returncode == 0 and bool(
-                    re.search(r"(?m)^OK\b", result.stdout)
-                    and "queued" not in result.stdout.lower()
-                    if pending == "ledger_pending"
-                    else re.search(
+                    re.search(
                         r"(?m)^EXCEPTION-QUEUE (appended|repeat)\b", result.stdout
                     )
                 )

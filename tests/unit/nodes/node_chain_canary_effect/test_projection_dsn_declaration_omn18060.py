@@ -87,6 +87,7 @@ pytestmark = pytest.mark.unit
 
 _PROBE_URL = "http://runtime.invalid:8085"
 _BOOTSTRAP = "broker.invalid:19092"
+_TENANT = "820272f9-4aaf-5add-a2df-0af942852ab2"
 _SUCCESS_TOPIC = "onex.evt.omnimarket.delegate-skill-completed.v1"
 _DSN_ENV = "CHAIN_CANARY_PROJECTION_DSN"
 # `.invalid` is RFC 2606 reserved, so a fixture that accidentally escaped its
@@ -564,9 +565,15 @@ async def test_an_unresolvable_identity_is_refused_not_assumed(
 # ---------------------------------------------------------------------------
 
 
-class _Ingress:
+class _Publisher:
+    """Injected bus publish (OMN-23566). ``response`` is the broker ACK."""
+
     async def __call__(
-        self, url: str, body: dict[str, object], timeout_s: float
+        self,
+        bootstrap: str,
+        topic: str,
+        envelope: dict[str, object],
+        timeout_s: float,
     ) -> tuple[dict[str, object] | None, str, int]:
         return {"ok": True}, "", 42
 
@@ -642,7 +649,7 @@ class _AnswersEverything(_ProjectionStore):
 
 def _handler(projection: _ProjectionStore) -> HandlerChainCanary:
     return HandlerChainCanary(
-        ingress=_Ingress(),
+        bus_publish=_Publisher(),
         quarantine_scan=_Quarantine(),
         terminal_readback=_TerminalReadback(),
         projection_readback=projection,
@@ -655,6 +662,7 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         "correlation_id": uuid4(),
         "probe_url": _PROBE_URL,
         "budget_ms": 5_000,
+        "tenant_id": _TENANT,
         "terminal_bootstrap_servers": _BOOTSTRAP,
         "quarantine_bootstrap_servers": _BOOTSTRAP,
         "projection_dsn_env": _DSN_ENV,

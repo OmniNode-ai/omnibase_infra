@@ -290,7 +290,7 @@ def _delegation_request_from_skill_body(
 
 
 class _RuntimeIngress:
-    """POST /skill plus the delegation chain behind it, persisting to Postgres."""
+    """The delegate-skill bus publish plus the chain behind it, persisting to Postgres."""
 
     def __init__(self, adapter: StateStoreAdapter) -> None:
         self.bodies: list[dict[str, object]] = []
@@ -307,7 +307,11 @@ class _RuntimeIngress:
             )
 
     async def __call__(
-        self, url: str, body: dict[str, object], timeout_s: float
+        self,
+        bootstrap: str,
+        topic: str,
+        body: dict[str, object],
+        timeout_s: float,
     ) -> tuple[dict[str, object], str, int]:
         self.bodies.append(body)
         request = _delegation_request_from_skill_body(body)
@@ -322,16 +326,7 @@ class _RuntimeIngress:
                     payload=leg_payload,
                 )
             )
-        return (
-            {
-                "ok": True,
-                "command_name": "node_delegate_skill_orchestrator",
-                "terminal_event": "omnimarket.delegate-skill-completed",
-                "output_payloads": [{"status": "completed"}],
-            },
-            "",
-            42,
-        )
+        return {"ok": True}, "", 42
 
 
 async def _quarantine_clean(
@@ -363,7 +358,7 @@ async def _run_canary(
     created_correlation_ids: list[UUID],
 ) -> ModelChainCanaryResult:
     handler = HandlerChainCanary(
-        ingress=ingress,
+        bus_publish=ingress,
         quarantine_scan=_quarantine_clean,
         terminal_readback=_terminal_present,
         projection_dsn_lookup=lambda name: (
@@ -376,6 +371,7 @@ async def _run_canary(
     request = ModelChainCanaryRequest(
         correlation_id=run_correlation_id,
         probe_url="http://runtime.invalid:8085",
+        tenant_id="820272f9-4aaf-5add-a2df-0af942852ab2",
         budget_ms=5_000,
         terminal_bootstrap_servers="broker.invalid:19092",
         projection_dsn_env=_PROJECTION_DSN_ENV,
@@ -585,7 +581,7 @@ async def test_request_without_provenance_stores_unclassified_never_synthetic(
     """Negative control: the same path with provenance omitted from the body."""
     reader_dsn, reader_password = canary_reader_dsn
     run_cid = uuid4()
-    build_body = HandlerChainCanary._build_body
+    build_body = HandlerChainCanary._build_delegate_envelope
 
     def _build_body_without_provenance(
         request: ModelChainCanaryRequest, probe_correlation_id: str
@@ -597,7 +593,7 @@ async def test_request_without_provenance_stores_unclassified_never_synthetic(
 
     monkeypatch.setattr(
         HandlerChainCanary,
-        "_build_body",
+        "_build_delegate_envelope",
         staticmethod(_build_body_without_provenance),
     )
     ingress = _RuntimeIngress(state_adapter)

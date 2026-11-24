@@ -510,11 +510,11 @@ class TestSignedRequestBypassesFailedHead:
         agent = _agent(tmp_path, monkeypatch, now=SECOND_RESTORE)
 
         refused = [
-            agent._failed_head.refuses(_signed(requester))
+            agent._idle_build_gate.refuses(_signed(requester))
             for requester in (IDLE_RESTORE_REQUESTER, IDLE_CONVERGE_REQUESTER)
         ]
         accepted = [
-            agent._failed_head.refuses(_signed(requester))
+            agent._idle_build_gate.refuses(_signed(requester))
             for requester in ("operator/pinned-fix/devwindow2-2215", "lane/x")
         ]
 
@@ -526,7 +526,9 @@ class TestSignedRequestBypassesFailedHead:
     ) -> None:
         """The gate's two spellings are the agent's own, so a rename cannot unguard a path."""
         agent = _agent(tmp_path, monkeypatch, now=SECOND_RESTORE)
-        rule = sys.modules[type(agent._failed_head).__module__]
+        rule = sys.modules[
+            "omnibase_infra.nodes.node_deploy_job_reading_effect.runtime_failed_head_gate"
+        ]
 
         assert {IDLE_RESTORE_REQUESTER, IDLE_CONVERGE_REQUESTER} == rule.IDLE_REQUESTERS
         assert rule.INFRA_REPOSITORY == "omnibase_infra"

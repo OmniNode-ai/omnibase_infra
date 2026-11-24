@@ -181,6 +181,9 @@ LANE_UNCARRIED_PROFILE_RATCHET: dict[str, int] = {
     "lakshman": 1,
     # The original dogfood scope intentionally leaves tenant-projection uncarried.
     "dogfood": 1,
+    # The standby loads two SCM effect nodes by node selection (OMN-26326) and
+    # carries no projection profile, so every carrier profile is uncarried by design.
+    "dev-member": 1,
 }
 
 _OMNIMARKET_ABSENT_REASON = (

@@ -192,16 +192,19 @@ def test_dsn_without_userinfo_is_echoed_unchanged() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_preflight_marks_primary_required_and_secondary_optional() -> None:
-    assert entrypoint_preflight.__file__ is not None
-    source = Path(entrypoint_preflight.__file__).read_text()
-    assert (
-        'manifest_name="omnibase_infra", db_url=infra_db_url, required=True' in source
-    )
-    assert (
-        'manifest_name="omniintelligence", db_url=intel_db_url, required=False'
-        in source
-    )
+def test_preflight_marks_primary_required_and_secondary_optional(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, bool] = {}
+
+    def _record(*, manifest_name: str, db_url: str, required: bool) -> int:
+        seen[manifest_name] = required
+        return 0
+
+    monkeypatch.setattr(entrypoint_preflight, "stamp_fingerprint", _record)
+
+    assert entrypoint_preflight.stamp_all_fingerprints(_env()) == 0
+    assert seen == {"omnibase_infra": True, "omniintelligence": False}
 
 
 def test_shellcheck_clean_if_available() -> None:

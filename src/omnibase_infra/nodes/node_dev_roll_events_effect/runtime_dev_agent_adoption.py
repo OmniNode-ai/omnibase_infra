@@ -240,6 +240,11 @@ def adopts(
     except (OSError, subprocess.SubprocessError) as exc:
         code, tail = -1, f"{type(exc).__name__}: {exc}"
     if code == 0:
+        logger.info(
+            "self_update: self-check of %s exited 0, adopting it over %s",
+            candidate_ref[:12],
+            loaded_ref[:12],
+        )
         if state_dir is not None:
             known = read_state(state_dir, settings) or _EMPTY
             write_state(
