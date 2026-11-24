@@ -20,6 +20,7 @@ import math
 import re
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
@@ -1652,10 +1653,57 @@ def _append_status_over_bus(
     return isinstance(receipt, dict) and receipt.get("status") in _LEDGER_ACCEPTED
 
 
+class BackgroundPass:
+    """Runs one pass at a time on its own daemon thread; a start while one runs starts none."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+
+    def start(self, work: Callable[..., None], *args: object) -> bool:
+        """Start ``work`` on the pass thread and return at once; False when a pass is running."""
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return False
+            self._thread = threading.Thread(
+                target=self._run, args=(work, args), name=self._name, daemon=True
+            )
+            self._thread.start()
+            return True
+
+    def join(self, timeout: float | None = None) -> None:
+        with self._lock:
+            thread = self._thread
+        if thread is not None:
+            thread.join(timeout)
+
+    def _run(self, work: Callable[..., None], args: tuple[object, ...]) -> None:
+        try:
+            work(*args)
+        except (OSError, ValueError, RuntimeError):
+            logger.exception("Dev boot failure reports remain pending")
+
+
+def _incident_age_seconds(at: object, now: datetime) -> float | None:
+    """Seconds since the incident's own stamp, None when the stamp cannot be read."""
+    try:
+        stamped = datetime.strptime(str(at), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+    return (now - stamped).total_seconds()
+
+
 def deliver_reports(
     root: Path, *, execution: ModuleType, config: ModelDevBootReportConfig
 ) -> None:
-    """Retry durable STATUS and exception deliveries independently of the bus."""
+    """Retry durable STATUS and exception deliveries independently of the bus.
+
+    One pass is bounded (OMN-26316): it starts no new incident once ``config.pass_seconds``
+    have passed, oldest first, so a backlog of refused incidents costs one bound per pass and
+    never an unbounded run. An incident older than ``config.abandon_after_seconds`` moves to
+    the delivered-abandoned state with one log line and is not retried again.
+    """
     if config.plugin_dir is None:
         logger.warning(
             "Dev boot reports pending: configure DEPLOY_AGENT_REPORT_PLUGIN_DIR"
@@ -1663,12 +1711,38 @@ def deliver_reports(
         return
     plugin = config.plugin_dir
     interpreter = str(config.registry_root / ".onex-dispatch-venv" / "bin" / "python")
-    for path in root.glob("incident-*.json"):
+    deadline = execution._dev_boot_clock() + config.pass_seconds
+    stamp = execution._dev_boot_timestamp()
+    now = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    paths = sorted(root.glob("incident-*.json"))
+    for index, path in enumerate(paths):
         incident = (
             RootModel[dict[str, JsonValue]]
             .model_validate_json(execution._read_private_text(path))
             .root
         )
+        if not (incident["ledger_pending"] or incident["exception_pending"]):
+            continue
+        age = _incident_age_seconds(incident["at"], now)
+        if age is None or age > config.abandon_after_seconds:
+            incident["ledger_pending"] = False
+            incident["exception_pending"] = False
+            incident["delivered_abandoned_at"] = stamp
+            execution._atomic_write_private_json(path, incident)
+            logger.warning(
+                "Dev boot incident %s delivered-abandoned: stamp %s older than the bound of %d seconds",
+                incident["job"],
+                incident["at"],
+                int(config.abandon_after_seconds),
+            )
+            continue
+        if execution._dev_boot_clock() >= deadline:
+            logger.warning(
+                "Dev boot report pass bound of %d seconds reached: %d incident files left for the next pass",
+                int(config.pass_seconds),
+                len(paths) - index,
+            )
+            return
         evidence = (
             f"commit={incident['commit']} job={incident['job']} error={incident['error']} "
             f"restored_revision={incident['restored_revision']} recovery_verified={incident['recovery_verified']}"
@@ -1678,9 +1752,14 @@ def deliver_reports(
         request_id = uuid5(
             NAMESPACE_URL, f"deploy-boot:{incident['project']}:{incident['job']}"
         )
+        # The row is stamped with the delivery time, never the incident's: the ledger refuses a
+        # row stamped more than a day behind its own clock, so a retried row carrying the
+        # incident's stamp could never land once the incident was a day old (OMN-26316). The
+        # incident's own time rides in the evidence cell.
         status_row = (
-            f"{incident['at']} | STATUS | lane=deploy-agent-{incident['project']} "
-            f"| actor=script:deploy-agent | model=none | req={request_id} | {evidence}"
+            f"{stamp} | STATUS | lane=deploy-agent-{incident['project']} "
+            f"| actor=script:deploy-agent | model=none | req={request_id} "
+            f"| incident_at={incident['at']} {evidence}"
         )
         commands = {
             "exception_pending": [

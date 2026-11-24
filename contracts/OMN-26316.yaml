@@ -45,11 +45,23 @@ requirements:
     statement: A dev runtime merge that has gone its window with no dev build is judged REQUEST with one request id per sha, and a merge a dev job carries, a job in flight, a failed head or a non-runtime merge never is.
   - id: req-omn26316-roll-proof-failure-names-exception
     statement: A failed post-roll ledger proof records the exception that ended it, so the deploy job record names the cause of a restored roll and no lane has to reproduce the proof by hand.
+  - id: req-omn26316-image-build-cache-and-start-to-health
+    statement: A dev build reuses the image layers that do not depend on the commit, so the per-deploy build arguments no longer rebuild the apt, node and venv layers.
+    acceptance:
+      - id: AC31
+        statement: "AC31: Dockerfile.runtime declares BUILD_DATE, VCS_REF and RUNTIME_VERSION after every cache-mounted RUN, apt-get layer and builder-venv COPY that precedes the stage's COPY src, in both stages -- falsifier: uv run --frozen pytest tests/unit/docker/test_runtime_build_arg_cache_order_omn26316.py -q fails at origin/dev (13 violations) and passes on the PR branch"
   - id: req-omn26316-coalesce-newest-containing
     statement: The deploy agent's accept runs the newest queued command that contains every older command it passes over, including older refs that are not ancestors of one another, and records each passed-over command superseded by it with its own terminal record.
     acceptance:
       - id: AC16
         statement: "AC16: with two queued refs that are each an ancestor of a newer queued ref but not of each other, the accept runs the newer ref once and records both older commands superseded by it, and a passed-over command the newer ref does not contain, one that is unproven, one for another lane or scope, or a redelivered copy stops the fold -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q -k 'unrelated or newest_command_that or jump' fails at origin/dev (the accept runs the oldest ref and records nothing superseded) and passes on the PR branch"
+  - id: req-omn26316-boot-report-retry-bounded
+    statement: A pass that retries the dev boot incident reports starts no incident after its declared bound, runs on its own thread so it never holds the deploy agent's consumer, its health port or its startup, and moves an incident older than the declared abandon bound to delivered-abandoned with one log line.
+    acceptance:
+      - id: AC17
+        statement: "AC17: a delivery pass over 394 incidents that the bus append command refuses ends within the pass bound plus one append, the agent's startup and retry tick return at once while that pass runs, and a second tick starts no second pass -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k 'bounded or never_holds' -q fails at origin/dev (25.9 s for the 394 incidents against a 0.5 s bound)"
+      - id: AC18
+        statement: "AC18: an incident older than the declared abandon bound is marked delivered-abandoned with one log line and is not retried, and an incident inside it is retried with a row stamped at the delivery time so the ledger's clock guard does not refuse it -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k 'abandoned or delivery_stamp' -q fails at origin/dev"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -67,8 +79,17 @@ evidence_requirements:
     description: The overdue dev merge build decision driven by the real job records of omnibase_infra#6191.
     command: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_omn26316.py -q --no-cov -n 0 -p no:randomly
   - kind: tests
+    description: The runtime image build-argument order.
+    command: uv run --frozen pytest tests/unit/docker/test_runtime_build_arg_cache_order_omn26316.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
     description: The accept coalesces to the newest queued command that contains every older one, including older refs unrelated to each other.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q
+  - kind: tests
+    description: The dev boot report retry pass bound, the abandon state and the agent's own report thread.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -q -p no:cacheprovider
+  - kind: tests
+    description: The same pass against a real subprocess standing in for the bus append command with the ledger's clock guard.
+    command: uv run --frozen pytest tests/integration/handlers/test_dev_boot_report_pass_bound_omn26316.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -326,6 +347,14 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_proof_failure_tail_omn26316.py tests/integration/handlers/test_dev_boot_guard_ledger_proof_omn25942.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26316-image-build-arg-order
+    description: "Dockerfile.runtime declares the per-deploy build arguments after every cacheable layer of both stages; the checker reports 13 violations on the origin/dev file and none on this branch, and flags the pre-fix layout in its own negative control."
+    source: manual
+    binds_ac: [AC31]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_runtime_build_arg_cache_order_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
   - id: dod-omn26316-coalesce-newest-containing
     description: "Two stale queued refs on different branches and one newer ref that contains both: the accept runs the newer ref once and writes both older records superseded by it; a passed-over command the newer ref does not contain, an unproven containment, a command for another lane and a redelivered copy each stop the fold. Two of the file's new tests fail at origin/dev, where the group ends at the first unrelated pair."
     source: manual
@@ -333,4 +362,26 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q
+        cwd: .
+  - id: dod-omn26316-boot-report-pass-bound
+    description: "394 refused incidents: one pass ends within the bound plus one append, the agent's startup and retry tick return at once, a second tick starts no second pass; five of the file's tests fail at origin/dev (25.9 s for the 394 incidents)."
+    source: manual
+    binds_ac: [AC17]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k "bounded or never_holds" -q -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_dev_boot_report_pass_bound_omn26316.py -k "backlog_pass_is_bounded or background_pass" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-boot-report-abandoned
+    description: "An incident dated 2026-10-27 moves to delivered-abandoned with one log line and no append; an incident three days old is retried with a row stamped at the delivery time and its own time in incident_at."
+    source: manual
+    binds_ac: [AC18]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k "abandoned or delivery_stamp" -q -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_dev_boot_report_pass_bound_omn26316.py -k "abandon_bound or clock_guard" -q --no-cov -n 0 -p no:randomly
         cwd: .

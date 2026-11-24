@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-19513: raise only the dev lane's main runtime CPU cap."""
+"""OMN-19513 / OMN-26360: raise only the dev lane's main runtime CPU cap."""
 
 from pathlib import Path
 from typing import Any
@@ -28,7 +28,7 @@ def test_dev_lane_raises_omninode_runtime_cpu_cap() -> None:
         overlay["services"]["omninode-runtime"]["deploy"]["resources"]["limits"]
     )
 
-    assert float(limits["cpus"]) == 2.0
+    assert float(limits["cpus"]) == 3.0
     # OMN-18087: main's memory limit is declared in the runtime policy contract.
     assert limits["memory"].startswith("${DEV_RUNTIME_MAIN_MEMORY:?")
 
