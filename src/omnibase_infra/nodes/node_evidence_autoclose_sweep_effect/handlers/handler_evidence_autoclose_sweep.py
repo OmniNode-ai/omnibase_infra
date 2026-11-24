@@ -179,11 +179,12 @@ from omnibase_infra.gate_binding import (
     resolve_gate_binding,
 )
 from omnibase_infra.handlers.done_write_receipt_guard import (
-    reap_timed_out_process as _reap_timed_out_process,
-)
-from omnibase_infra.handlers.done_write_receipt_guard import (
+    materialised_product_clone,
     resolve_done_write_receipt_gate,
     run_dod_verify_command,
+)
+from omnibase_infra.handlers.done_write_receipt_guard import (
+    reap_timed_out_process as _reap_timed_out_process,
 )
 from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect import (
@@ -3062,8 +3063,20 @@ class HandlerEvidenceAutocloseSweep:
             contract = Path(cwd).resolve() / "contracts" / f"{ticket_id}.yaml"
             if not contract.is_file():
                 return None, -1, f"Product contract is unreadable: {contract}"
+            # OMN-26650: the contract was read from a sparse contracts-only
+            # clone; a relative check cwd must mean the materialised product
+            # clone, not that tree (see `materialised_product_clone`). The
+            # verifier takes it as its explicit `CONTRACT_REPO_DIR` anchor.
+            registry_root = os.environ.get("OMNI_HOME", "")
+            product_clone = materialised_product_clone(cwd, registry_root)
             return await run_dod_verify_command(
-                ticket_id, cwd, timeout, contract_path=str(contract)
+                ticket_id,
+                cwd,
+                timeout,
+                contract_path=str(contract),
+                env={**os.environ, "CONTRACT_REPO_DIR": product_clone}
+                if product_clone
+                else None,
             )
         return await run_dod_verify_command(ticket_id, cwd, timeout)
 
