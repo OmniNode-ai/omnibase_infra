@@ -167,6 +167,15 @@ GOVERNED_LANES: dict[str, LaneSpec] = {
         mutable_here=True,
         owner_note="isolated mutable delegation dogfood lane (OMN-18693)",
     ),
+    "dev-member": LaneSpec(
+        overlay="docker-compose.dev-member.yml",
+        mutable_here=True,
+        owner_note=(
+            "standby runtime for the SCM write and gateway-read effects (OMN-26326); "
+            "node selection holds those two nodes only, so it runs no projection "
+            "writer and its count is the whole registry"
+        ),
+    ),
 }
 
 
@@ -385,6 +394,8 @@ LANE_UNCOVERED_RATCHET: dict[str, int] = {
     "lakshman": 14,
     # Original measured dogfood scope does not start optional writers.
     "dogfood": 16,
+    # Measured: the overlay declares no writer service (OMN-26326).
+    "dev-member": 16,
 }
 
 # Writers the mutable dev lane has that the PROOF lane does not. The proof lane

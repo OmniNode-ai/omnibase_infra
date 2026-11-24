@@ -1,0 +1,79 @@
+schema_version: 1.0.0
+ticket_id: OMN-26507
+title: The omnibase_infra disk-gc, deploy-agent, lab-alarm and prepr runtime pool scripts read the ledger only through the bus and carry no ledger file path variable or file name in runtime code
+summary: >-
+  The ledger-file census counted 6 runtime files in omnibase_infra. Two of them are moved here. The prepr runtime pool driver (scripts/runtime_build/prepr_runtime_pool.py) took --ledger (default the ledger path variable) for the HOLD rows that lease a lab host surface and the RELEASE rows that decide the INCONCLUSIVE streak alarm, and wrote the alarm row through onex-ledger with the file as its target. It now asks the ledger reader node (reader prepr-runtime-pool, query rows, kinds HOLD and RELEASE, through the command ONEX_LEDGER_READER_COMMAND names) and appends the alarm row through the bus append command (ONEX_LEDGER_BUS_APPEND_COMMAND, the row on stdin); the shared handler is src/omnibase_infra/handlers/handler_ledger_rows.py. The deploy agent launcher (scripts/deploy-agent/deploy/deploy-agent-launch.sh) exported the ledger path variable only for the dev boot guard's STATUS delivery, which ran onex-ledger with the file as its target; the guard (src/omnibase_infra/handlers/handler_dev_boot_guard.py) now puts the row on stdin of the bus append command the launcher already exports, acknowledges only a receipt whose status is accepted, duplicate or already-present, and the launcher exports no ledger path. The census count of this repository falls from 21 files to 18 and from 5 runtime files to 3 (the driver, a test that unset the variable, the launcher). The three disk-gc files stay: they hand the ledger file to scripts/worktree_auto_prune.py of omniclaude, which reads the file itself (its own census row), so they move when that program reads the bus.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26507-prepr-pool-ledger-on-the-bus
+    statement: The prepr runtime pool driver reads HOLD and RELEASE rows through the ledger reader node and writes its alarm row through the bus append command; it carries no ledger file path variable, no --ledger argument and no ledger file name.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the census node, run over the omnibase_infra worktree, lists none of the 6 runtime files as a hit, or each remaining one is classified guard or plumbing with the reason on the pull request -- falsifier: ONEX_LEDGER_CENSUS_ROOT set and uv run python -m omnimarket.nodes.node_work_ledger_file_census_effect --packaged-overlay --register omnibase_infra --directory omnibase_infra=<worktree> --verbose, grep of the 6 paths, run first on origin/dev as the positive control"
+      - id: AC2
+        statement: "AC2: a test run with the ledger path variable unset (the ticket names it) and no ledger file on disk shows each moved reader calling the bus-backed work-ledger client and never opening the file -- falsifier: uv run pytest tests/unit/scripts -k ledger_bus -q, failing on the merge base"
+      - id: AC3
+        statement: "AC3: no moved script, unit or installer carries the ledger path variable or the ledger file name as a path to read or write -- falsifier: uv run pytest tests/unit/scripts -k no_ledger_file_path -q, failing on the merge base"
+evidence_requirements:
+  - kind: tests
+    description: The pool driver's bus read and write, the handler and the neighbouring pool and open-claims tests.
+    command: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_ledger_bus_omn26507.py tests/unit/handlers/test_handler_ledger_rows_omn26507.py tests/unit/handlers/test_handler_ledger_open_claims_omn20547.py tests/unit/scripts/test_prepr_pool_proof_logs_omn19998.py tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/integration/handlers/test_ledger_rows_bus_round_trip_omn26507.py -q --no-cov
+  - kind: tests
+    description: The deploy agent's dev boot guard delivers its STATUS row through the bus append command.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26507-ac1-census-row
+    description: The census table of this repository holds no row for the moved driver (the census hook keeps that table equal to the census node's own count); the row exists on the merge base, so the command exits non-zero before this change.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: "! grep -F 'scripts/runtime_build/prepr_runtime_pool.py' config/ledger_file_census_ratchet.yaml"
+        cwd: .
+  - id: dod-omn26507-ac1-census-row-launch
+    description: The census table holds no row for the deploy agent launcher; the row exists on the merge base, so the command exits non-zero before this change.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: "! grep -F 'scripts/deploy-agent/deploy/deploy-agent-launch.sh' config/ledger_file_census_ratchet.yaml"
+        cwd: .
+  - id: dod-omn26507-ac2-boot-guard-append
+    description: The dev boot guard's pending STATUS row is sent on stdin of the bus append command, stays pending on a spooled receipt, and no ledger file path is passed; it fails on the merge base, where the guard runs onex-ledger with the file.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -k reporting_outage -q -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26507-ac2-ledger-bus
+    description: The driver's status read calls the reader node once, a refusal is an unread ledger, and the alarm row goes on stdin of the bus append command; the ledger path variable points at no file.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts tests/unit/handlers/test_handler_ledger_rows_omn26507.py -k ledger_bus -q --no-cov
+        cwd: .
+  - id: dod-omn26507-ac3-no-ledger-file-path
+    description: A moved file has no row in the census table of files that hold a ledger file path or name.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts -k no_ledger_file_path -q --no-cov
+        cwd: .
+  - id: dod-omn26507-deploy
+    description: Hermetic probe of the landing branch, run by the hosted runner. It reads the driver from the checked-out tree and the PR branch and requires the bus read of the ledger rows; the merge base's driver reads the file, so the command exits non-zero before this change.
+    source: manual
+    binds_ac: [AC2, AC3]
+    checks:
+      - check_type: command
+        check_value: >-
+          grep -F 'rows_from_environment' scripts/runtime_build/prepr_runtime_pool.py > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/prepr_runtime_pool.py?ref=omn-26507-infra-runtime-ledger-to-bus' --jq .content | base64 -d | grep -F 'rows_from_environment' > /dev/null
+        cwd: .

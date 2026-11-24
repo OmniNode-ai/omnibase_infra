@@ -1,0 +1,142 @@
+name: 'Fetch the stability probe credentials from the stability Infisical'
+description: >-
+  OMN-26121 (operator ruling 2026-11-23T23:06:19Z: stability reads its secrets from Infisical, not from a secrets file or per-repository Actions secrets). Logs in to the stability Infisical with the runner's own machine identity (the four INFISICAL_* names in the runner environment, the pattern chain-canary-c28-consumer-flow.yml uses), reads each named secret from one store path, masks every value, and exports it to the job environment under the probe's own variable name. A missing identity name, a refused login, a refused or absent secret, or a value that is not one line fails the step and names the variable, the Infisical secret name and the store path; a failed step exports nothing. No value is ever printed outside the runner's mask command.
+author: 'OmniNode'
+inputs:
+  secrets:
+    description: >-
+      One mapping per line, <ENV_VAR>=<INFISICAL_SECRET_NAME>. Each secret is read by name from the store path and exported as ENV_VAR.
+    required: true
+  store-environment:
+    description: 'The Infisical environment slug of the store.'
+    required: false
+    default: 'dev'
+  store-path:
+    description: 'The Infisical secret path the names live under.'
+    required: false
+    default: '/shared/env/'
+runs:
+  using: 'composite'
+  steps:
+    - name: Read the named secrets from the stability Infisical
+      shell: bash
+      env:
+        STABILITY_SECRET_MAP: ${{ inputs.secrets }}
+        STABILITY_STORE_ENVIRONMENT: ${{ inputs.store-environment }}
+        STABILITY_STORE_PATH: ${{ inputs.store-path }}
+      run: |
+        set -euo pipefail
+        umask 077
+        python3 -I - <<'PYCODE'
+        import json
+        import os
+        import sys
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+
+        environment = os.environ["STABILITY_STORE_ENVIRONMENT"]
+        store_path = os.environ["STABILITY_STORE_PATH"]
+        where = f"{environment}{store_path}"
+        pairs = []
+        for line in os.environ["STABILITY_SECRET_MAP"].splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            env_name, _, store_name = line.partition("=")
+            pairs.append((env_name.strip(), store_name.strip()))
+        if not pairs or any(not env_name or not store_name for env_name, store_name in pairs):
+            print("::error::fetch-stability-secrets: the secrets input holds no <ENV_VAR>=<INFISICAL_SECRET_NAME> line, or a malformed one")
+            sys.exit(1)
+
+
+        def die(problems: list[str]) -> None:
+            for problem in problems:
+                print(f"::error::{problem}")
+            sys.exit(1)
+
+
+        needed = ("INFISICAL_ADDR", "INFISICAL_PROJECT_ID", "INFISICAL_CLIENT_ID", "INFISICAL_CLIENT_SECRET")
+        missing = [name for name in needed if not os.environ.get(name)]
+        if missing:
+            die([
+                f"{', '.join(missing)} not set in the runner environment, so this runner has no stability Infisical identity "
+                f"to read {', '.join(f'{e} ({s} at {where})' for e, s in pairs)} with"
+            ])
+        base = os.environ["INFISICAL_ADDR"].rstrip("/")
+        if "://" not in base:
+            base = "http://" + base
+
+
+        def call(request: urllib.request.Request, what: str) -> dict:
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    body = json.load(response)
+            except urllib.error.HTTPError as exc:
+                die([f"{what} answered HTTP {exc.code}"])
+            except (urllib.error.URLError, OSError, ValueError) as exc:
+                die([f"{what} failed: {type(exc).__name__}"])
+            if not isinstance(body, dict):
+                die([f"{what} answered with a body that is not an object"])
+            return body
+
+
+        login = call(
+            urllib.request.Request(
+                base + "/api/v1/auth/universal-auth/login",
+                data=json.dumps(
+                    {
+                        "clientId": os.environ["INFISICAL_CLIENT_ID"],
+                        "clientSecret": os.environ["INFISICAL_CLIENT_SECRET"],
+                    }
+                ).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            ),
+            "the stability Infisical login",
+        )
+        token = login.get("accessToken")
+        if not isinstance(token, str) or not token:
+            die(["the stability Infisical login returned no access token"])
+        query = urllib.parse.urlencode(
+            {
+                "workspaceId": os.environ["INFISICAL_PROJECT_ID"],
+                "environment": environment,
+                "secretPath": store_path,
+            }
+        )
+        values: dict[str, str] = {}
+        problems: list[str] = []
+        for env_name, store_name in pairs:
+            request = urllib.request.Request(
+                f"{base}/api/v3/secrets/raw/{urllib.parse.quote(store_name)}?{query}",
+                headers={"Authorization": f"Bearer {token}"},
+                method="GET",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    found = json.load(response)
+            except urllib.error.HTTPError as exc:
+                problems.append(
+                    f"{env_name}: {store_name} is not readable from {where} (HTTP {exc.code}); "
+                    f"store it there and grant the runner identity read of that name"
+                )
+                continue
+            except (urllib.error.URLError, OSError, ValueError) as exc:
+                problems.append(f"{env_name}: reading {store_name} from {where} failed: {type(exc).__name__}")
+                continue
+            value = (found.get("secret") or {}).get("secretValue") if isinstance(found, dict) else None
+            if not isinstance(value, str) or not value or "\n" in value or "\r" in value:
+                problems.append(f"{env_name}: {store_name} at {where} is empty or not a single-line value")
+                continue
+            values[env_name] = value
+        if problems:
+            die(problems)
+        # Mask first, then export: no later step can print an unmasked value.
+        for value in values.values():
+            print(f"::add-mask::{value}")
+        with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+            for env_name, value in values.items():
+                handle.write(f"{env_name}={value}\n")
+        print(f"fetch-stability-secrets: {', '.join(values)} read by name from {where}")
+        PYCODE
