@@ -1,0 +1,19 @@
+{
+  "source": "ssh read-only: docker logs --since 1h --timestamps omninode-runtime on the dev host, container started 2026-11-24T06:15:25Z",
+  "window_start": "2026-11-24T06:15:25Z",
+  "window_end": "2026-11-24T07:07:03Z",
+  "window_seconds": 3098,
+  "total_lines": 404208,
+  "total_bytes": 72275128,
+  "dispatch_started_lines": 161151,
+  "dispatch_completed_successfully_lines": 158541,
+  "dispatch_completed_with_errors_lines": 2584,
+  "dispatch_lines_bytes": 39297357,
+  "runtime_tick_dispatch_failures": 2470,
+  "log_gaps_4s_or_more": {
+    "boot": ["2026-11-24T06:16:08Z 34.5 s", "2026-11-24T06:16:27Z 12.6 s", "2026-11-24T06:16:32Z 5.0 s"],
+    "steady_state": ["2026-11-24T06:45:10Z 7.0 s", "2026-11-24T07:00:10Z 5.3 s", "2026-11-24T07:06:31Z 6.3 s"]
+  },
+  "loop_thread_cpu_percent_of_a_core": 45,
+  "process_cpu_percent_of_a_core": 72
+}
