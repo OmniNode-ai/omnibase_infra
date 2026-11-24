@@ -109,9 +109,15 @@ def test_no_pull_request_trigger(workflow: dict[str, object]) -> None:
 def test_probes_the_lane_the_overlay_resolved(workflow_text: str) -> None:
     """OMN-19894: the addresses are the resolved lane's own declarations."""
     assert "./.github/actions/resolve-lab-lane" in workflow_text
-    assert "require: ingress_url gateway_url" in workflow_text
+    assert "require: ingress_url tenant_id" in workflow_text
     assert "${PROBE_URL_OVERRIDE:-${LANE_INGRESS_URL:-}}" in workflow_text
-    assert "${GATEWAY_URL_OVERRIDE:-${LANE_GATEWAY_URL:-}}" in workflow_text
+    assert "${TENANT_ID_OVERRIDE:-${LANE_TENANT_ID:-}}" in workflow_text
+    # OMN-23566: the submission is a bus publish; no HTTP gateway is declared
+    # or read, and no gateway credential is injected.
+    assert "LANE_GATEWAY_URL" not in workflow_text
+    assert "GATEWAY_URL" not in workflow_text
+    assert "CHAIN_CANARY_GATEWAY_API_KEY" not in workflow_text
+    assert "--gateway-url" not in workflow_text
     # A localhost probe from inside the runner container hits the container
     # itself and reports a false RED (OMN-14958); a gateway alias reaches a
     # different machine from every runner (OMN-19894).
