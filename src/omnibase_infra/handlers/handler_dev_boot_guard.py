@@ -238,11 +238,13 @@ def _require_canary_receipt(command: Mapping[str, JsonValue], state_dir: Path) -
     _canary_gate().require_for_roll(command, state_dir)
 
 
-def _load_roll_events(execution: ModuleType) -> ProtocolDevRollEvents:
-    """The real events object of the running deploy agent."""
+def _load_roll_events(
+    execution: ModuleType, state_dir: Path | None = None
+) -> ProtocolDevRollEvents:
+    """The real events object of the running deploy agent (journaling under ``state_dir``)."""
     return cast(
         "ProtocolDevRollEvents",
-        _roll_events_module(execution).build_events(execution),
+        _roll_events_module(execution).build_events(execution, state_dir),
     )
 
 
@@ -1224,7 +1226,9 @@ class HandlerDevBootGuard:
             self._command = command
             if self.events is None:
                 try:
-                    self.events = _load_roll_events(self.execution)
+                    self.events = _load_roll_events(
+                        self.execution, self.root.parents[1]
+                    )
                 except Exception:
                     # The events are evidence; a sender that cannot be built (no
                     # broker settings) never fails or delays a roll.

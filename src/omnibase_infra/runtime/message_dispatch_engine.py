@@ -1192,6 +1192,13 @@ class MessageDispatchEngine:
         ctx = ModelDispatchLogContext.model_validate(kwargs)
         return ctx.to_dict()
 
+    def _log_debug(
+        self, message: str, *args: object, **context: Unpack[ModelLogContextKwargs]
+    ) -> None:
+        """Write a DEBUG line, building its log context only when DEBUG is enabled (OMN-26152)."""
+        if self._logger.isEnabledFor(logging.DEBUG):
+            self._logger.debug(message, *args, extra=self._build_log_context(**context))
+
     @traced_dispatch
     async def dispatch(
         self,
@@ -1348,15 +1355,14 @@ class MessageDispatchEngine:
                 output_events=[],
             )
 
-        # Log dispatch start at INFO level
-        self._logger.info(
+        # Log dispatch start at DEBUG level (OMN-26152): at INFO this line and its
+        # completion pair were 79.1% of the dev runtime log at 52 dispatches/s.
+        self._log_debug(
             "Dispatch started",
-            extra=self._build_log_context(
-                topic=topic,
-                category=topic_category,
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-            ),
+            topic=topic,
+            category=topic_category,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
         )
 
         # Step 2: Validate envelope category matches topic category
@@ -1423,20 +1429,17 @@ class MessageDispatchEngine:
         )
 
         # Log routing decision at DEBUG level
-        routing_source = "event_type" if normalized_event_type else "payload_class"
-        self._logger.debug(
+        self._log_debug(
             "Routing decision: %d dispatchers matched for message_type '%s' (source=%s)",
             len(matching_dispatchers),
             message_type,
-            routing_source,
-            extra=self._build_log_context(
-                topic=topic,
-                category=topic_category,
-                message_type=message_type,
-                dispatcher_count=len(matching_dispatchers),
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-            ),
+            "event_type" if normalized_event_type else "payload_class",
+            topic=topic,
+            category=topic_category,
+            message_type=message_type,
+            dispatcher_count=len(matching_dispatchers),
+            correlation_id=correlation_id,
+            trace_id=trace_id,
         )
 
         if not matching_dispatchers:
@@ -1546,17 +1549,15 @@ class MessageDispatchEngine:
             dispatcher_start_time = time.perf_counter()
 
             # Log dispatcher execution at DEBUG level
-            self._logger.debug(
+            self._log_debug(
                 "Executing dispatcher '%s'",
                 dispatcher_entry.dispatcher_id,
-                extra=self._build_log_context(
-                    topic=topic,
-                    category=topic_category,
-                    message_type=message_type,
-                    dispatcher_id=dispatcher_entry.dispatcher_id,
-                    correlation_id=correlation_id,
-                    trace_id=trace_id,
-                ),
+                topic=topic,
+                category=topic_category,
+                message_type=message_type,
+                dispatcher_id=dispatcher_entry.dispatcher_id,
+                correlation_id=correlation_id,
+                trace_id=trace_id,
             )
 
             try:
@@ -1609,19 +1610,17 @@ class MessageDispatchEngine:
                     )
 
                 # Log dispatcher completion at DEBUG level
-                self._logger.debug(
+                self._log_debug(
                     "Dispatcher '%s' completed successfully in %.2f ms",
                     dispatcher_entry.dispatcher_id,
                     dispatcher_duration_ms,
-                    extra=self._build_log_context(
-                        topic=topic,
-                        category=topic_category,
-                        message_type=message_type,
-                        dispatcher_id=dispatcher_entry.dispatcher_id,
-                        duration_ms=dispatcher_duration_ms,
-                        correlation_id=correlation_id,
-                        trace_id=trace_id,
-                    ),
+                    topic=topic,
+                    category=topic_category,
+                    message_type=message_type,
+                    dispatcher_id=dispatcher_entry.dispatcher_id,
+                    duration_ms=dispatcher_duration_ms,
+                    correlation_id=correlation_id,
+                    trace_id=trace_id,
                 )
 
                 # Normalize dispatcher output using ModelDispatchOutcome to avoid
@@ -1776,24 +1775,23 @@ class MessageDispatchEngine:
                 matched_route_id = route.route_id
                 break
 
-        # Log dispatch completion at INFO level
+        # Log dispatch completion: success at DEBUG (OMN-26152, the start/completion
+        # pair was 79.1% of the dev runtime log), failure at ERROR
         # Use empty string sentinel to avoid str | None union in local scope
         dispatcher_ids_str: str = (
             ", ".join(executed_dispatcher_ids) if executed_dispatcher_ids else ""
         )
         if status == EnumDispatchStatus.SUCCESS:
-            self._logger.info(
+            self._log_debug(
                 "Dispatch completed successfully",
-                extra=self._build_log_context(
-                    topic=topic,
-                    category=topic_category,
-                    message_type=message_type,
-                    dispatcher_id=dispatcher_ids_str,
-                    dispatcher_count=len(executed_dispatcher_ids),
-                    duration_ms=duration_ms,
-                    correlation_id=correlation_id,
-                    trace_id=trace_id,
-                ),
+                topic=topic,
+                category=topic_category,
+                message_type=message_type,
+                dispatcher_id=dispatcher_ids_str,
+                dispatcher_count=len(executed_dispatcher_ids),
+                duration_ms=duration_ms,
+                correlation_id=correlation_id,
+                trace_id=trace_id,
             )
         else:
             self._logger.error(

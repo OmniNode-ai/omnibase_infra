@@ -228,6 +228,7 @@ def check_pin(*, force: bool = False) -> BaseModel | None:
     check_routing(force=force)
     check_routed_commands(force=force)
     check_overdue_dev_merges(force=force)
+    check_dev_container(force=force)
     try:
         tick = time.monotonic()
         interval = (
@@ -455,6 +456,29 @@ def _job_records(state_dir: Path) -> list[object]:
         except (ValidationError, OSError):
             continue
     return records
+
+
+def check_dev_container(*, force: bool = False) -> None:
+    """Run the dev container observer of ``node_dev_roll_events_effect`` once (OMN-25912).
+
+    Called from the idle tick (through ``check_pin``), the trigger that node's contract
+    declares as ``audit_trigger: agent_tick``: it publishes one event for each new start of
+    the dev runtime container and runs the recreate reader. The observer throttles itself to
+    ``container_observation_interval_seconds`` and never raises; neither does this call.
+    """
+    try:
+        roll = _load("nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py")
+        executor = importlib.import_module("deploy_agent.executor")
+        roll.observe_if_due(
+            Path(_agent().STATE_DIR),
+            executor.lane_config_for(executor.EnumRuntimeLane.DEV).compose_project,
+            force=force,
+        )
+    except Exception:
+        logger.exception(
+            "dev container observation could not run "
+            "friction_type=dev_event_publish_failed"
+        )
 
 
 def check_routed_commands(*, force: bool = False) -> BaseModel | None:
@@ -963,6 +987,43 @@ def _idle_class(
     except (RuntimeError, OSError, subprocess.TimeoutExpired):
         logger.exception("build decision class unread for %s %s", repository, head[:12])
     return _DETECTED
+
+
+def runtime_unchanged(repository: str, head: str, running: str) -> bool:
+    """Whether only declared not-runtime paths separate ``running`` from ``head`` (OMN-26316).
+
+    The same classifier writes ``NON_RUNTIME`` build decision rows, so the lag bound and the
+    rows agree on what a runtime change is.
+    """
+    return _idle_class(_agent(), repository, head, running) == "NON_RUNTIME"
+
+
+def lag_refs_reader(
+    host: ProtocolPostFailureHost,
+) -> Callable[[str, bool], tuple[str | None, str | None]]:
+    """The running and head revisions an idle converge judges the lane on (OMN-26316).
+
+    A repository routed to another instance is judged against its dev head as read. For the
+    instance's own repository, a head whose only difference from the running revision is
+    declared not-runtime paths reads as the running revision: a not-runtime merge is no lag
+    and starts no rebuild. An unread classifier keeps the head, which stays a runtime head.
+    """
+
+    def read(repository: str, routed_elsewhere: bool) -> tuple[str | None, str | None]:
+        running = host._idle_read_running_ref(repository)
+        head = host._idle_read_head_ref(repository)
+        if routed_elsewhere or head is None or running is None or head == running:
+            return running, head
+        try:
+            unchanged = runtime_unchanged(repository, head, running)
+        except Exception:
+            logger.exception(
+                "runtime change class unread for %s %s", repository, head[:12]
+            )
+            unchanged = False
+        return running, running if unchanged else head
+
+    return read
 
 
 def record_idle(

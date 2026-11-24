@@ -225,6 +225,127 @@ class TestTheRuleTable:
         assert plan.superseded_count == 2
         assert asked == [(SHA_A, SHA_B), (SHA_B, SHA_C)]
 
+    def test_unrelated_older_commands_fold_into_the_newest_that_contains_them(
+        self,
+    ) -> None:
+        """OMN-26316. Two queued refs on different branches, one newer commit.
+
+        A and X are each an ancestor of C but neither is an ancestor of the
+        other (two PR heads, then the merge that carries both). The
+        consecutive-chain scan ended at A on ``NOT_A_DESCENDANT`` and the agent
+        spent a 28 minute rebuild per stale ref. C contains both, so both are
+        superseded by it and C runs once.
+        """
+        a, x, c = _cmd(SHA_A), _cmd(SHA_OFF_LINE), _cmd(SHA_C)
+        in_c = {(SHA_A, SHA_C), (SHA_OFF_LINE, SHA_C)}
+        plan = plan_coalesce(
+            [_queued(a, 10), _queued(x, 11), _queued(c, 12)],
+            contains=lambda earlier, later: (earlier, later) in in_c,
+        )
+        assert plan.runner.command.correlation_id == c.correlation_id
+        assert [s.superseded.command.correlation_id for s in plan.superseded] == [
+            a.correlation_id,
+            x.correlation_id,
+        ]
+        assert {s.superseded_by_sha for s in plan.superseded} == {SHA_C}
+        assert plan.stop_reason is None
+
+    def test_the_newest_command_that_contains_everything_before_it_runs(
+        self,
+    ) -> None:
+        """The runner is the NEWEST containing command, not the first one found."""
+        a, x, c, d = (
+            _cmd(SHA_A),
+            _cmd(SHA_OFF_LINE),
+            _cmd(SHA_B),
+            _cmd(SHA_C),
+        )
+        in_d = {(SHA_A, SHA_C), (SHA_OFF_LINE, SHA_C), (SHA_B, SHA_C)}
+        plan = plan_coalesce(
+            [_queued(a, 10), _queued(x, 11), _queued(c, 12), _queued(d, 13)],
+            contains=lambda earlier, later: (earlier, later) in in_d,
+        )
+        assert plan.runner.command.correlation_id == d.correlation_id
+        assert plan.superseded_count == 3
+
+    def test_an_unrelated_command_the_newer_one_does_not_contain_is_not_dropped(
+        self,
+    ) -> None:
+        """Dropping X would lose its change, so nothing is folded past it."""
+        a, x, c = _cmd(SHA_A), _cmd(SHA_OFF_LINE), _cmd(SHA_C)
+        in_c = {(SHA_A, SHA_C)}
+        plan = plan_coalesce(
+            [_queued(a, 10), _queued(x, 11), _queued(c, 12)],
+            contains=lambda earlier, later: (earlier, later) in in_c,
+        )
+        assert plan.runner.command.correlation_id == a.correlation_id
+        assert plan.superseded == ()
+        assert plan.stop_reason is EnumCoalesceRefusal.NOT_A_DESCENDANT
+
+    def test_an_unproven_containment_past_an_unrelated_command_does_not_fold(
+        self,
+    ) -> None:
+        a, x, c = _cmd(SHA_A), _cmd(SHA_OFF_LINE), _cmd(SHA_C)
+
+        def _contains(earlier: str, later: str) -> bool | None:
+            if (earlier, later) == (SHA_OFF_LINE, SHA_C):
+                return None
+            return (earlier, later) == (SHA_A, SHA_C)
+
+        plan = plan_coalesce(
+            [_queued(a, 10), _queued(x, 11), _queued(c, 12)], contains=_contains
+        )
+        assert plan.runner.command.correlation_id == a.correlation_id
+        assert plan.superseded == ()
+
+    def test_a_command_that_is_not_foldable_between_them_blocks_the_jump(
+        self,
+    ) -> None:
+        """A staging command between A and C is never dropped by the jump."""
+        a = _cmd(SHA_A)
+        x = _cmd(SHA_OFF_LINE)
+        other_lane = _cmd(
+            SHA_B,
+            runtime_lane=next(
+                lane for lane in EnumRuntimeLane if lane is not EnumRuntimeLane.DEV
+            ),
+        )
+        c = _cmd(SHA_C)
+        plan = plan_coalesce(
+            [_queued(a, 10), _queued(x, 11), _queued(other_lane, 12), _queued(c, 13)],
+            contains=lambda earlier, later: later == SHA_C,
+        )
+        assert plan.runner.command.correlation_id == a.correlation_id
+        assert plan.superseded == ()
+
+    def test_a_duplicate_copy_between_them_blocks_the_jump(self) -> None:
+        a, x = _cmd(SHA_A), _cmd(SHA_OFF_LINE)
+        copy_of_a = _cmd(SHA_B, correlation_id=a.correlation_id)
+        c = _cmd(SHA_C)
+        plan = plan_coalesce(
+            [_queued(a, 10), _queued(x, 11), _queued(copy_of_a, 12), _queued(c, 13)],
+            contains=lambda earlier, later: later == SHA_C,
+        )
+        assert plan.runner.command.correlation_id == a.correlation_id
+        assert plan.superseded == ()
+
+    def test_the_jump_asks_each_pair_once(self) -> None:
+        asked: list[tuple[str, str]] = []
+
+        def _record(earlier: str, later: str) -> bool:
+            asked.append((earlier, later))
+            return later == SHA_C
+
+        plan_coalesce(
+            [
+                _queued(_cmd(SHA_A), 10),
+                _queued(_cmd(SHA_OFF_LINE), 11),
+                _queued(_cmd(SHA_C), 12),
+            ],
+            contains=_record,
+        )
+        assert len(asked) == len(set(asked))
+
     def test_the_journal_line_names_the_position_the_count_and_the_reason(
         self,
     ) -> None:
@@ -669,6 +790,45 @@ class TestTheConsumerFoldsTheBatch:
             "one commit, through the runner, which is at or past every "
             "superseded record's offset"
         )
+
+    def test_unrelated_stale_refs_are_recorded_superseded_by_the_newest_that_contains_them(
+        self, tmp_path: Any
+    ) -> None:
+        """OMN-26316, end to end: two stale refs on different branches, one merge."""
+        store = JobStore(state_dir=tmp_path / "jobs")
+        announced: list[ModelSupersession] = []
+        a, x, c = _cmd(SHA_A), _cmd(SHA_OFF_LINE), _cmd(SHA_C)
+        in_c = {(SHA_A, SHA_C), (SHA_OFF_LINE, SHA_C)}
+        consumer = _consumer(
+            store,
+            ancestry_resolver=lambda earlier, later: (earlier, later) in in_c,
+            on_superseded=announced.append,
+        )
+        consumer.consumer.poll.return_value = {
+            TopicPartition(TOPIC, 0): [
+                _message(a, 290),
+                _message(x, 291),
+                _message(c, 292),
+            ]
+        }
+
+        with patch("deploy_agent.consumer.verify_command", return_value=True):
+            accepted, reason = consumer.poll_and_accept()
+
+        assert reason is None
+        assert accepted is not None
+        assert accepted.correlation_id == c.correlation_id
+        for cmd in (a, x):
+            record = store.load(cmd.correlation_id)
+            assert record is not None
+            assert record.status == "superseded"
+            assert record.superseded_by_sha == SHA_C
+            assert record.superseded_by_correlation_id == c.correlation_id
+        assert [s.superseded.command.correlation_id for s in announced] == [
+            a.correlation_id,
+            x.correlation_id,
+        ]
+        assert _committed(consumer) == [293]
 
     def test_the_self_update_boundary_rewinds_to_the_runner_not_the_head(
         self, tmp_path: Any

@@ -162,6 +162,7 @@ class LazyStartRuntimeTransaction:
         container: object | None,
         readiness_config: ModelTopicReadinessConfig,
         topology: ModelDeploymentTopology | None = None,
+        handler_dependencies: Mapping[str, Mapping[str, object]] | None = None,
     ) -> None:
         self._contracts = dict(contracts)
         self._bus = bus
@@ -172,6 +173,15 @@ class LazyStartRuntimeTransaction:
         # OMN-26594: the topology the kernel loaded at boot. A db_io contract wires only
         # with it, so a lazy start that omits it fails every db_io projection it starts.
         self._topology = topology
+        # OMN-26594: the constructor dependencies the kernel built for its runtime-owned
+        # handlers at boot. A handler that takes a pool or a producer wires only with them,
+        # so a lazy start that omits them fails node_dlq_replay_effect and
+        # node_runtime_manifest_reducer on every wake.
+        self._handler_dependencies = (
+            {name: dict(deps) for name, deps in handler_dependencies.items()}
+            if handler_dependencies is not None
+            else None
+        )
         self._starts: dict[str, NodeStart] = {}
 
     def node_engine(self, contract_name: str) -> MessageDispatchEngine | None:
@@ -190,6 +200,7 @@ class LazyStartRuntimeTransaction:
             container=self._container,
             subscribe_immediately=False,
             topology=self._topology,
+            materialized_explicit_dependencies=self._handler_dependencies,
         )
         if report.total_wired != 1:
             reasons = [f"{r.outcome.value} {r.reason}" for r in report.results]

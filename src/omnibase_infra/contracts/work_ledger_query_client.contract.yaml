@@ -15,7 +15,10 @@ client:
 # The proof the dev deploy agent takes after every dev runtime recreate (OMN-25942):
 # one bounded read through the lab read node, run from the agent's own lab host. The
 # roll reports failed, and the previous image is kept, unless it answers in time.
-# ``argv`` is the ``onex`` command line and ``timeout_s`` its bound in seconds.
+# ``argv`` is the ``onex`` command line and ``timeout_s`` its bound in seconds. The
+# bound is 1.5x the slowest recorded answer (19.5 s on the dev runtime, OMN-26316,
+# ``tests/fixtures/omn26316/ledger_proof_latency.json``); the 10 s it held before
+# timed out one of five reads.
 post_roll_proof:
   argv: [ledger, query, --query, rows, --limit, "1"]
-  timeout_s: 10
+  timeout_s: 30

@@ -28,6 +28,11 @@ requirements:
         statement: "AC5: a request under the http_mount prefix of a contract the lane left dormant wakes that contract, mounts its app and is served, once, with no broker; a failed wake answers 503 and leaves the listener up -- falsifier: uv run pytest tests/integration/handlers/http_mount/test_dormant_http_wake_omn26316.py fails at origin/dev with 404 and passes on the PR branch"
       - id: AC6
         statement: "AC6: the first message to a topic a dormant contract subscribes to, written by a client straight to the broker, wakes that contract's consumers; the watch is group-less and reads from the end -- falsifier: uv run pytest tests/unit/handlers/test_lazy_start_bus_watch_omn26316.py fails at origin/dev (the watch module is absent) and passes on the PR branch"
+  - id: req-omn26316-own-repo-lag-bound
+    statement: The default dev instance's declared lag bound covers its own repository, so an omnibase_infra runtime merge the in-runtime trigger never delivers is converged on by the deploy agent once the bound passes, and a merge of declared not-runtime paths starts no rebuild.
+    acceptance:
+      - id: AC15
+        statement: "AC15: with max_dev_lag_minutes declared, an omnibase_infra head whose runtime paths differ from the running revision for longer than the bound yields one agent/idle-converge job on an otherwise idle lane, while inside the bound, without a bound, inside a probe window, beside a job, on an attempted head or for a not-runtime-only head it yields none -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_own_repo_lag_bound_omn26316.py fails at origin/dev and passes on the PR branch"
   - id: req-omn26316-boot-failure-cause
     statement: A boot failure's recorded cause is the error that ended the kernel; a per-message dispatch error logged on the kernel's logger is set apart and never recorded as the cause.
     acceptance:
@@ -38,6 +43,13 @@ requirements:
     acceptance:
       - id: AC9
         statement: "AC9: the lazy-start front door wakes every dormant consumer of a published topic at once and holds the message for at most one budget -- falsifier: uv run pytest tests/unit/handlers/test_lazy_start_heartbeat_wake_omn26316.py fails at origin/dev (7.2 s against a 2.5 s window for 20 dormant heartbeat consumers, 4 of which never wake) and passes on the PR branch"
+  - id: req-omn26316-ledger-proof-answers-as-deployed
+    statement: The post-roll ledger proof of a dev roll builds its transport from the lane declaration and answers inside a bound that covers the recorded latency, so a verified dev roll is not failed and restored by its own proof.
+    acceptance:
+      - id: AC12
+        statement: "AC12: the ledger read's transport is built from the lane declaration and the stored identity when the process holds KAFKA_SASL_MECHANISM and KAFKA_SECURITY_PROTOCOL without a generic principal -- falsifier: uv run pytest tests/unit/cli/test_work_ledger_proof_omn26316.py -k half_set_env fails at origin/dev with ProtocolConfigurationError and passes on the PR branch"
+      - id: AC13
+        statement: "AC13: the declared post-roll proof bound is at least 1.5 times the slowest recorded answer in tests/fixtures/omn26316/ledger_proof_latency.json -- falsifier: uv run pytest tests/unit/cli/test_work_ledger_proof_omn26316.py -k measured_answer_latency fails at origin/dev (bound 10 s against 19.5 s) and passes on the PR branch"
   - id: req-omn26316-overdue-dev-merge-build
     statement: A dev runtime merge that has gone its window with no dev build is judged REQUEST with one request id per sha, and a merge a dev job carries, a job in flight, a failed head or a non-runtime merge never is.
     acceptance:
@@ -53,6 +65,11 @@ requirements:
     acceptance:
       - id: AC15
         statement: "AC15: the dev boot guard runs the bus append command and the post-roll ledger proof without the agent's KAFKA_SASL_MECHANISM, KAFKA_SECURITY_PROTOCOL and KAFKA_SASL_ENV_PREFIX, so the append and the proof are accepted where the agent's unit declares a SASL mechanism with the lane login held only under the DEV_ prefix, and a refusal is logged with the command's last stderr line -- falsifier: uv run pytest tests/unit/handlers/test_handler_dev_boot_guard_status_append_env_omn26316.py -q fails at origin/dev (the append and the proof are refused and the log names no cause) and passes on the PR branch"
+  - id: req-omn26316-coalesce-newest-containing
+    statement: The deploy agent's accept runs the newest queued command that contains every older command it passes over, including older refs that are not ancestors of one another, and records each passed-over command superseded by it with its own terminal record.
+    acceptance:
+      - id: AC16
+        statement: "AC16: with two queued refs that are each an ancestor of a newer queued ref but not of each other, the accept runs the newer ref once and records both older commands superseded by it, and a passed-over command the newer ref does not contain, one that is unproven, one for another lane or scope, or a redelivered copy stops the fold -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q -k 'unrelated or newest_command_that or jump' fails at origin/dev (the accept runs the oldest ref and records nothing superseded) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -61,11 +78,17 @@ evidence_requirements:
     description: The dormant HTTP mount and dormant topic watch regressions of the lazy-start front door.
     command: uv run --frozen pytest tests/integration/handlers/http_mount/test_dormant_http_wake_omn26316.py tests/unit/handlers/test_lazy_start_bus_watch_omn26316.py -q --no-cov -n 0 -p no:randomly
   - kind: tests
+    description: The own-repository lag bound regression built from the omnibase_infra#6191 and #6204 merges of 2026-11-23.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_own_repo_lag_bound_omn26316.py -q
+  - kind: tests
     description: The boot failure cause regression built from the dev boot ledger event of the 2026-11-23T20:52Z exit.
     command: uv run --frozen pytest tests/unit/runtime/test_boot_failure_cause_omn26316.py -q --no-cov -n 0 -p no:randomly
   - kind: tests
     description: The overdue dev merge build decision driven by the real job records of omnibase_infra#6191.
     command: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_omn26316.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The accept coalesces to the newest queued command that contains every older one, including older refs unrelated to each other.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -149,6 +172,14 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: bash -c 'test "$(curl -s -o /dev/null -w "%{http_code}" -m 30 http://localhost:8085/projection-api/health)" = 200'
+  - id: dod-omn26316-own-repo-lag-bound
+    description: "An overdue omnibase_infra head on the default dev instance yields one agent/idle-converge job; a not-runtime-only head, a lane inside the bound or with no bound, a probe window, a job in flight and an attempted head yield none. Six of the file's tests fail at origin/dev, where the agent reads no omnibase_infra revision and decide refuses not_routed_elsewhere before the bound."
+    source: manual
+    binds_ac: [AC15]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_own_repo_lag_bound_omn26316.py -q
+        cwd: .
   - id: dod-omn26316-boot-failure-cause
     description: "The capture sets the dispatch engine's records apart: the real ledger cause of the 823 s exit is the engine's own message, an exit after it records that no kernel error was logged, and a kernel error stays the cause."
     source: manual
@@ -201,6 +232,34 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/runtime/test_boot_failure_cause_integration_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26316-ledger-proof-transport
+    description: "With the deploy agent's KAFKA_SASL_MECHANISM and KAFKA_SECURITY_PROTOCOL set and no generic principal, the ledger read's transport is built from the lane declaration and the stored identity, and other KAFKA overrides still apply; the test fails at origin/dev with the ProtocolConfigurationError the agent journal recorded for jobs ae9ceb3d and 43b9fb72."
+    source: manual
+    binds_ac: [AC12]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli/test_work_ledger_proof_omn26316.py -k "half_set_env or other_environment_overrides" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/cli/test_work_ledger_proof_process_environment_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-ledger-proof-bound
+    description: "The declared post-roll proof bound covers 1.5 times the slowest recorded answer (19.5 s, five reads on the dev runtime, one timed out at the old 10 s bound)."
+    source: manual
+    binds_ac: [AC13]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli/test_work_ledger_proof_omn26316.py -k measured_answer_latency -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-integration-proof-ledger-proof-roll
+    description: >-
+      Post-deploy probe on the dev runtime host: the dev runtime answers ready after the deploy agent applied this change. The job record under jobs-dev for that roll reads status success with no ledger refusal; the report quotes it. It reads the live container, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: bash -c 'curl -s -m 10 http://localhost:8085/ready | python3 -c "import json,sys; assert json.load(sys.stdin)[\"details\"][\"ready\"] is True"'
   - id: dod-omn26316-overdue-dev-merge-build
     description: "The decision reads the agent's recorded dev jobs and the merge time of omnibase_infra#6191: WAIT one second before the hour ends, REQUEST with one id per sha at it, and SATISFIED once the 19:00:23Z job completes; the stability job, the job accepted before the merge, a superseded job and a job pinned to another sha carry nothing."
     source: manual
@@ -233,4 +292,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_status_append_env_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-coalesce-newest-containing
+    description: "Two stale queued refs on different branches and one newer ref that contains both: the accept runs the newer ref once and writes both older records superseded by it; a passed-over command the newer ref does not contain, an unproven containment, a command for another lane and a redelivered copy each stop the fold. Two of the file's new tests fail at origin/dev, where the group ends at the first unrelated pair."
+    source: manual
+    binds_ac: [AC16]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q
         cwd: .
