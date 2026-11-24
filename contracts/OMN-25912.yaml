@@ -110,3 +110,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/test_dev_recreate_audit_omn25912.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn25912-container-recreate-event
+    description: Each start of the dev runtime container is published as a dev_container_recreated event with its cause (a deploy job, the restart policy or unknown), StartedAt, RestartCount and image, the agent's idle tick calls the recreate reader over the journaled events, and a recreate on the previous build is flagged; the cause enum and the handler do not exist at the merge base.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_container_recreate_omn25912.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
