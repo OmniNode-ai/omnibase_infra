@@ -19,6 +19,8 @@ requirements:
         statement: 'AC4: a regression test built from the recorded 2026-11-20 journal traceback of _maybe_idle_converge with an empty requested_by (fixture path in the PR) fails on the broken code and passes on the fix -- falsifier: uv run pytest -k agent_idle_tick_incident_replay exits non-zero'
       - id: AC5
         statement: 'AC5: over the week to 2026-11-30 the dev agent unit shows NRestarts under 5 in any ten minutes and no gap of more than 60 minutes between its health answers -- falsifier: a read of the unit''s NRestarts and the :8098 health log shows 5 or more restarts in ten minutes'
+      - id: AC6
+        statement: 'AC6: a self-check that exits zero leaves one journal line naming the candidate and the loaded ref -- falsifier: uv run pytest -k agent_adoption_journals exits non-zero'
 evidence_requirements:
   - kind: tests
     description: The deploy agent adoption tests, one group per criterion.
@@ -88,4 +90,21 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: ssh h201 'systemctl --user show -p NRestarts --value deploy-agent-dev.service && curl -sS http://127.0.0.1:8098/health'
+        cwd: .
+  - id: dod-omn26494-self-check-journal-line
+    description: A self-check that exits zero leaves one journal line naming the candidate and the loaded ref, so a reader finds the one-shot self-check running at each adoption. The tests fail at the merge base, which journals nothing for a passing self-check, and pass on the branch; the control shows a refused ref gets its refusal line and never the adopting line.
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_agent_adoption_omn26494.py -q -p no:randomly -k agent_adoption_journals
+        cwd: .
+  - id: dod-omn26494-self-check-journal-line-deploy
+    description: 'Post-deploy read: after the deploy agent applies this branch on dev, its next adoption of a newer dev head journals the self-check line. It reads the live agent, which carries this change only after the deploy agent has applied it and then adopted one more ref, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion, because the unit-level proof above carries the behavior.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh h201 "journalctl --user -u deploy-agent-dev --since '-6 hours' --no-pager | grep -q 'self-check of .* exited 0, adopting it over'"
         cwd: .
