@@ -74,7 +74,6 @@ import os
 import re
 import sys
 import uuid
-from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, cast
 from uuid import UUID
@@ -116,7 +115,6 @@ _VALID_SECURITY_PROTOCOLS = _SASL_PROTOCOLS | _NON_SASL_PROTOCOLS
 # `=`, none of which can appear here.
 _ENV_VAR_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-RuntimePathClassifier = Callable[[list[str]], list[str]]
 
 # Maps the merged PR's base branch to a runtime lane. Values match
 # deploy_agent.events.EnumRuntimeLane (dev | stability-test | prod). prod is not
@@ -160,6 +158,10 @@ class ModelCiBusLaneDsnReference(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     dsn_env: str
+    #: OMN-26121: the ticket that authorizes a non-dev lane's read-only reader.
+    #: Empty on the lane the canary may always read. A ticket id, never a
+    #: credential.
+    authorized_by: str = ""
 
     @field_validator("dsn_env")
     @classmethod
