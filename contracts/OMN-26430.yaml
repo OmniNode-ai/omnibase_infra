@@ -1,65 +1,50 @@
 schema_version: 1.0.0
 ticket_id: OMN-26430
-title: The dev boot-good rollback image 57d2fb03a699 answers /health within the compose start period, not 17 minutes after start
+title: The dev runtime process is not killed by two threads sharing one projection writer's database adapter, so a new build reaches healthy on the dev lane
 summary: >-
-  The boot-good rollback image was built from omnibase_infra 57d2fb03a699, which predates the health acceptor, the wiring yield and the boot step 0, topic provisioner and validator off-loop changes now on origin/dev. A boot of that image on lab host h053 held the event loop for 12 s inside wire_from_manifest and inside TopicProvisioner construction, and the container probe read probe_unreachable after 5.66 s. The stalled-loop /health answer served by the acceptor now carries the innermost frames of the loop thread, so the call that holds the loop is named in the probe's own reading and the container log. The first two holders that answer named on the branch source are the manifest attach's http_mount scan, which now parses only contracts whose text names http_mount, and contract discovery in auto_wiring, which this change leaves alone. The health gate, the Docker probe, its timeout, the boot guard, the start period and the auto-wiring are not changed.
+  The dev lane rolled origin/dev at 0974c88a on 2026-11-23 and the new runtime container died 169 s after start with a segfault in the asyncpg protocol extension, then so did the container before it. The runtime dispatches a projection handler with asyncio.to_thread and admits up to PROJECTION_HANDLER_MAX_INFLIGHT threads at once. A handler that owns its adapter connects, uses and closes that one instance per message, so concurrent messages were one adapter shared across threads and loops. The dispatch callback now takes a per-handler lock, ahead of the runtime-wide inflight gate, for a handler that owns its database adapter. A handler handed its adapter per call keeps its parallelism. No health gate, start period, wait setting or compose file changes.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-omn26430-loop-holder-named
-    statement: The call that holds the runtime event loop while /health cannot be served is named from the stalled-loop answer, and the first /health 200 of the rollback image reads inside the compose start period.
+  - id: req-omn26430-one-message-at-a-time-per-adapter-owner
+    statement: The runtime hands a projection handler that owns its database adapter one message at a time, and leaves the parallelism of every other projection handler alone.
     acceptance:
-      - id: AC1
-        statement: "AC1: the loop or call that holds the HTTP answer for 16 minutes is named from a thread dump or profile of this image -- falsifier: the report holds no stack frame naming it"
-      - id: AC2
-        statement: "AC2: first /health 200 on a boot of this image reads inside the compose start period -- falsifier: a boot reading above the start period from docker logs timestamps"
+      - id: AC3
+        statement: "AC3: with six concurrent messages through one dispatch callback, a handler that owns its adapter is never inside handle() on two threads at once and every message is still handled -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_omn26430_db_owning_projection_serial_dispatch.py fails at origin/dev with six threads inside handle() together and passes on the PR branch"
+      - id: AC4
+        statement: "AC4: a handler that holds no adapter of its own still runs on several threads at once -- falsifier: the control test in the same file reads a peak of 1 thread, so the serialisation is not scoped to adapter owners"
 evidence_requirements:
   - kind: tests
-    description: The stalled-loop answer names the holding frame, and the recorded rollback-image reading sits inside the start period.
-    command: uv run --frozen pytest tests/unit/handlers/http_mount/test_health_probe_acceptor_loop_frame_omn26430.py tests/unit/handlers/http_mount/test_rollback_image_first_health_inside_start_period_omn26430.py tests/unit/handlers/http_mount/test_asgi_mounts_declared_scan_omn26430.py -q --no-cov -n 0 -p no:randomly
+    description: The serial-dispatch regression and the existing projection-runner dispatch tests.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn26430_db_owning_projection_serial_dispatch.py tests/unit/runtime/auto_wiring/test_omn16874_projection_runner_dispatch.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn26430-ac1-loop-frame-named
-    description: "With a synchronous call holding the loop past the acceptor's wait budget, the 503 stalled-loop answer carries loop_thread_stack whose first entry names that call; the test fails at origin/dev with no loop_thread_stack key. The fixture records the frames measured on the rollback image with py-spy on lab host h053."
+  - id: dod-omn26430-ac3-serial-dispatch
+    description: "Six messages through one dispatch callback: a handler owning its adapter peaks at one thread inside handle(); at origin/dev the peak is six."
     source: manual
-    binds_ac: [AC1]
+    binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_health_probe_acceptor_loop_frame_omn26430.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn26430_db_owning_projection_serial_dispatch.py -k never_inside_handle -q --no-cov -n 0 -p no:randomly
         cwd: .
-  - id: dod-omn26430-ac1-attach-scan-mount-only
-    description: "The loop holder the stalled-loop answer named on the branch source (ServiceHealth.attach_manifest -> AsgiMounts.declared -> read_contract_yaml, 10.3 s at 0.5 CPU) no longer parses a contract whose text never names http_mount; the test fails at origin/dev with 41 contracts parsed."
+  - id: dod-omn26430-ac4-injected-db-parallel
+    description: "The positive control: a handler handed its adapter per call peaks above one thread, so the lock is scoped to adapter owners."
     source: manual
-    binds_ac: [AC1]
+    binds_ac: [AC4]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_asgi_mounts_declared_scan_omn26430.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/runtime/test_omn26430_owned_database_gate_scope.py -k passes_the_gate_in_parallel -q --no-cov -n 0 -p no:randomly
         cwd: .
-  - id: dod-omn26430-ac2-first-health-inside-start-period
-    description: "The recorded dev reading of the rollback image's first /health 200 (1032 s after start) is below every semantic-healthcheck start_period of the dev lane compose (1200 s and 1800 s). The same command runs the attach-scan test, which fails at the merge base, so the control has a failing leg: the reading alone is recorded data and passes there."
-    source: manual
-    binds_ac: [AC2]
-    checks:
-      - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_rollback_image_first_health_inside_start_period_omn26430.py tests/unit/handlers/http_mount/test_asgi_mounts_declared_scan_omn26430.py -q --no-cov -n 0 -p no:randomly
-        cwd: .
-  - id: dod-omn26430-integration-proof-real-contract-scan
-    description: "AsgiMounts.declared over this repository's real node contracts parses exactly the contracts whose text names http_mount and fewer than the discovered total."
+  - id: dod-omn26430-deploy-serial-dispatch-live
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime container carries the per-handler lock in its dispatch callback. It reads the live container, which carries the change only after the deploy agent has rebuilt it, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
     source: manual
     execution_scope: local_done_gate
-    checks:
-      - check_type: test_passes
-        check_value: uv run --frozen pytest tests/integration/handlers/http_mount/test_asgi_mounts_declared_scan_real_contracts_omn26430.py -q --no-cov -n 0 -p no:randomly
-        cwd: .
-  - id: dod-omn26430-deploy-branch-source-reads-loop-frame
-    description: "The pushed branch source of the health acceptor defines loop_thread_stack, the function that puts the loop-holding frame into the stalled-loop /health answer. Read from GitHub at the PR branch and from the checked-out tree, it fails at any tree that lacks the function, including the merge base."
-    source: manual
-    binds_ac: [AC1]
+    binds_ac: []
     checks:
       - check_type: command
-        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/http_mount/health_probe_acceptor.py?ref=omn-26430-rollback-image-health-probe" --jq .content | base64 -d | grep 'def loop_thread_stack' >/dev/null && grep 'def loop_thread_stack' src/omnibase_infra/handlers/http_mount/health_probe_acceptor.py >/dev/null
-        cwd: .
+        check_value: docker exec omninode-runtime grep -q serialize_owned_database /app/src/omnibase_infra/runtime/auto_wiring/handler_wiring.py

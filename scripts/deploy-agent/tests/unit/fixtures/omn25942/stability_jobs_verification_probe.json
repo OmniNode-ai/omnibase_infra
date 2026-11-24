@@ -1,0 +1,63 @@
+{
+  "_source": "deploy agent job-reading rows on the rolling ledger for jobs 1f7f39c6, 6ff2c3f5 and 914b6b79 (published 2026-11-19T06:38:14Z, 07:20:14Z, 08:02:08Z), and the container readings taken on h201 at 08:28Z to 08:29Z by lane devverify2 (OMN-25942). The job record files themselves live under the deploy agent's state directory on h201 and were not readable from the lane that built this fixture; no credential value is held here.",
+  "jobs": [
+    {
+      "correlation_id": "1f7f39c6-ec15-460e-b021-a718ce15750a",
+      "requested_by": "agent/stability-follow-tag",
+      "runtime_lane": "STABILITY_TEST",
+      "scope": "runtime",
+      "git_ref": "origin/dev",
+      "kind": "runtime",
+      "status": "failed",
+      "failing_step": "core",
+      "completed_at": "2026-11-19T06:38:14Z",
+      "error_template": "post-deploy verification failed: http://localhost:18085/health ({runtime_service}): curl exited 56: curl: (56) Recv failure: Connection reset by peer"
+    },
+    {
+      "correlation_id": "6ff2c3f5-bd80-4693-bf24-8bc54cddaa65",
+      "requested_by": "agent/stability-follow-tag",
+      "runtime_lane": "STABILITY_TEST",
+      "scope": "runtime",
+      "git_ref": "origin/dev",
+      "kind": "runtime",
+      "status": "failed",
+      "failing_step": "core",
+      "completed_at": "2026-11-19T07:20:13Z",
+      "error_template": "post-deploy verification failed: http://localhost:18085/health ({runtime_service}): curl exited 56: curl: (56) Recv failure: Connection reset by peer"
+    },
+    {
+      "correlation_id": "914b6b79-075e-45a3-93a2-e58877799551",
+      "requested_by": "agent/stability-follow-tag",
+      "runtime_lane": "STABILITY_TEST",
+      "scope": "runtime",
+      "git_ref": "origin/dev",
+      "kind": "runtime",
+      "status": "failed",
+      "failing_step": "core",
+      "completed_at": "2026-11-19T08:02:08Z",
+      "error_template": "post-deploy verification failed: http://localhost:18085/health ({runtime_service}): curl exited 56: curl: (56) Recv failure: Connection reset by peer"
+    }
+  ],
+  "fixed_by": {
+    "probe_waits_for_declared_start": "omnibase_infra#6013 (9095c380b): verify() waits out a stability runtime's declared start",
+    "worker_boots": "omnibase_infra#6023 (ef2f4b9d5): stability runtime services build on the composed omnimarket image"
+  },
+  "container_readings_utc_2026_11_19": {
+    "runtime": {
+      "started_at": "08:00:07Z",
+      "restart_count": 0,
+      "published_ports": [
+        18085,
+        18086
+      ]
+    },
+    "runtime_worker": {
+      "started_at": "08:01:00Z",
+      "restart_count": 5,
+      "health": "unhealthy",
+      "boot_failure": "BIFROST_BASE_CONTRACT_PATH unset: the lane built its services from the infra-only Dockerfile.runtime"
+    },
+    "pre_fold_runtime_effects_container_present": false
+  },
+  "_note": "runtime_lane is the EnumRuntimeLane member name and {runtime_service} is the first runtime_health_targets entry of that lane; the lane's container names are read from the deploy agent's lane configuration, not retyped here."
+}
