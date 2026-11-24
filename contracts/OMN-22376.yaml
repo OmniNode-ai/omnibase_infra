@@ -51,3 +51,35 @@ dod_evidence:
     binds_ac:
       - AC1
       - AC2
+  - id: dod-omn22376-ac1-accepted-20261124t0145z
+    description: AC1 results/model.sha256 binds the TLC outputs to the current spec and cfg digest, Http, Bus, Install and Install1 report no error, and all six properties are stated invariants of a base config under the stated bounds.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/formal/test_runtime_start_first_model.py -q --no-cov -p no:randomly -k "digest or passing or stated"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22376-ac2-accepted-20261124t0145z
+    description: AC2 each of the six properties holds in its base config and its mutant's TLC output reports a violation of it; a mutant that stops failing fails its case.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/formal/test_runtime_start_first_model.py::test_each_property_holds_in_its_base_and_fails_in_its_mutant -q --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+context:
+  ac_binding_provenance:
+    dod-omn22376-ac1-accepted-20261124t0145z:
+      - label: AC1
+        criterion_hash: 7d6568c3e52bf3ed5f6d4a5323c1c6e64a8af2546b6438d3dd75c4275eda88c2
+        proposed_by: lane=dod-closeout-bind-2026-11-24T0145Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-24T0145Z-c3
+        accepted_at: '2026-11-24T02:15:18Z'
+    dod-omn22376-ac2-accepted-20261124t0145z:
+      - label: AC2
+        criterion_hash: ac2f446bf6e1fd65b0585639729c84b5592eb28b6b99fe8ca602b0ecb629125f
+        proposed_by: lane=dod-closeout-bind-2026-11-24T0145Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-24T0145Z-c3
+        accepted_at: '2026-11-24T02:15:18Z'

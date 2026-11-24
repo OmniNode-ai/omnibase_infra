@@ -30,6 +30,8 @@ handler_routing:
       handler: {name: HandlerRoutingKeyCheck, module: omnibase_infra.handlers.handler_routing_key_check}
     - operation: alarm_routed_commands_without_job_record
       handler: {name: HandlerRoutedCommandAlarm, module: omnibase_infra.handlers.handler_routed_command_alarm}
+    - operation: request_overdue_dev_merge_build
+      handler: {name: HandlerDevMergeBuildOverdue, module: omnibase_infra.handlers.handler_dev_merge_build_overdue}
 # The reading writer's append route, by the names its overlay gives the two variables.
 settings:
   append_command_env: ONEX_LEDGER_BUS_APPEND_COMMAND
@@ -78,6 +80,7 @@ settings:
   operation_callers:
     check_routing_key_checks: check_routing
     alarm_routed_commands_without_job_record: check_routed_commands
+    request_overdue_dev_merge_build: check_overdue_dev_merges
   routing_check_interval_seconds: 300
   routing_health_timeout_seconds: 3
   # The health URL of each peer instance's agent, by instance name, read by the key check.
@@ -86,6 +89,12 @@ settings:
   # (or no answer) is read as unread, which the check reports as key-check-unread.
   instance_health_urls: {}
   routed_command_alarm_interval_seconds: 60
+  # OMN-26316: how long a dev runtime merge may wait for a dev build before one is requested
+  # (the operator's goal: every runtime merge on a dev build within an hour).
+  dev_merge_build_window_seconds: 3600
+  # How often the idle tick judges the checkout's recent dev merges, and how far back it reads them.
+  dev_merge_build_check_interval_seconds: 300
+  dev_merge_build_lookback_seconds: 86400
   # The routed commands this instance's alarm polls: one JSON object per line
   # (correlation_id, instance, runtime_lane, requested_by, routed_at) in the agent's state
   # directory. The file is read when present; no writer exists yet.
@@ -93,6 +102,8 @@ settings:
   # The deploy phases in pipeline order; the first one that failed is the failing step.
   phase_order: [preflight, git, compose_gen, seed, core, runtime, verification]
 capabilities:
+  - name: deploy.dev_merge_build_overdue
+    description: Judge whether a dev runtime merge has gone the window with no dev build, as SATISFIED, WAIT or REQUEST, with one request id per sha. A pure decision; it publishes nothing (OMN-26316).
   - name: deploy.routing_key_check
     description: Judge the deploy lane routing table against each available instance's agent key check and the lane runtime's, refuse a mismatched instance with a typed refusal naming both values, and fall back to the default instance (OMN-26485).
   - name: deploy.routed_command_no_job_alarm
