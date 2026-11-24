@@ -101,7 +101,6 @@ import re
 import shutil
 import subprocess
 import sys
-import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
@@ -715,8 +714,13 @@ def grade(obs: Mapping[str, Any], *, as_of: str | None = None) -> Record:
 
 
 def _http_get(url: str, timeout: float = 10.0) -> str:
-    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 - validated loopback or private model URL from argv
-        body: bytes = response.read()
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 - validated loopback or private model URL from argv
+            body: bytes = response.read()
+    except OSError as exc:
+        raise ProbeInputError(
+            f"local model server at {url} is not answering: {exc}"
+        ) from exc
     return body.decode("utf-8", "replace")
 
 
@@ -917,13 +921,8 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     if not onex.exists():
         raise ProbeInputError(f"no onex at {onex}; the customer install did not happen")
     base_url = model_base_url(model_host, int(args.model_port))
-    try:
-        served = served_model_ids(base_url)
-        tokens_before_unconfigured = tokens_predicted(base_url)
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        raise ProbeInputError(
-            f"local model server at {base_url} is not answering: {exc}"
-        ) from exc
+    served = served_model_ids(base_url)
+    tokens_before_unconfigured = tokens_predicted(base_url)
     if args.served_model not in served:
         raise ProbeInputError(
             f"model server serves {served}, not the declared {args.served_model!r}"

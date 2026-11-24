@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING
 
 from omnibase_infra.models.lazy_start import ModelLazyStartPolicy
@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
 __all__: list[str] = [
     "StoreLazyStartDormant",
+    "StoreLazyStartWaker",
     "boot_manifest",
     "boot_universe_warm_enabled",
     "dormant_unattached_topics",
@@ -125,6 +126,25 @@ class StoreLazyStartDormant:
         cls._wired = {}
         cls._provisioner = None
         cls._topology = None
+        StoreLazyStartWaker.record(None)
+
+
+class StoreLazyStartWaker:
+    """The front door's wake of one contract by name, for callers outside the bus (OMN-26316).
+
+    The always-wired ingress records it. The HTTP listener's mount middleware wakes a
+    dormant contract through it.
+    """
+
+    _waker: Callable[[str], Awaitable[None]] | None = None
+
+    @classmethod
+    def record(cls, waker: Callable[[str], Awaitable[None]] | None) -> None:
+        cls._waker = waker
+
+    @classmethod
+    def waker(cls) -> Callable[[str], Awaitable[None]] | None:
+        return cls._waker
 
 
 def lazy_start_policy_of_this_lane(

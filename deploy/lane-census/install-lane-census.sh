@@ -44,6 +44,10 @@
 #   bash deploy/lane-census/install-lane-census.sh --uninstall
 #   bash deploy/lane-census/install-lane-census.sh --status   # print effective unit
 #   bash deploy/lane-census/install-lane-census.sh --verify   # exit 1 if not installed
+#
+# After a drop-in install: run now with `systemctl --user start onex-disk-gc.service`, read it with
+# `journalctl --user -u onex-disk-gc.service -f`, or run once by hand with
+# `bash scripts/lane-census-check.sh --json`.
 
 set -euo pipefail
 
@@ -128,6 +132,12 @@ if [[ "$MODE" == "--verify" ]]; then
       echo "NO BROKER: the effective $unit names no LANE_MEMORY_BROKER_CONTAINER; every memory pass exits 6" >&2
       rc=1
     fi
+    # OMN-26379: a rendered unit is not a running one. The ExecStart is fail-soft ('-'), so a
+    # collector path that is gone exits 127 behind a successful unit; read the path itself.
+    collector="$(grep -o '[^ =]*lane-census-check\.sh' <<<"$effective" | head -n1)"
+    collector="${collector//%h/$HOME}"
+    [[ -n "$collector" && -f "$collector" ]] || { echo "STALE INSTALL: the effective $unit runs lane-census-check.sh at '${collector:-<none>}', which does not exist" >&2; rc=1; }
+    grep -q "LANE_CENSUS_REVISION=." <<<"$effective" || { echo "NO REVISION: the effective $unit records no LANE_CENSUS_REVISION; re-run the installer (OMN-26379)" >&2; rc=1; }
   fi
   if [[ $rc -eq 0 ]]; then
     echo "OK: lane-census pass is registered on $unit, writes a snapshot and publishes the memory event"
@@ -160,6 +170,9 @@ fi
 # directory that is not a git work tree installs nothing.
 REVISION="$(git -C "$REPO_ROOT" rev-parse --verify HEAD 2>/dev/null)" || { echo "ERROR: ${REPO_ROOT} is not a git work tree, so the unit would run code with no revision record; pass --repo-root <omnibase_infra clone>" >&2; exit 2; }
 git -C "$REPO_ROOT" diff --quiet HEAD -- scripts deploy/lane-census || REVISION="${REVISION}-dirty"
+# The unit also outlives the install, so its source must be a durable clone. A linked
+# worktree is removed when its lane ends; h202's census named one and exited 127 hourly.
+[[ "$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-dir)" == "$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir)" ]] || { echo "ERROR: ${REPO_ROOT} is a linked git worktree, which is removed when its lane ends; install from the durable omnibase_infra clone (--repo-root <clone>)" >&2; exit 2; }
 
 # resolve_unit_dir -- the private directory that holds the units, or rc=1 with
 # the reason on stderr. There is no fallback directory.
@@ -249,8 +262,3 @@ systemctl --user daemon-reload
 
 echo "Done. lane-census reconcile registered on the shared onex-disk-gc timer."
 echo "  Drop-in: $DROPIN_DST (clone ${REPO_ROOT}, broker ${BROKER_CONTAINER})"
-echo ""
-echo "Verify:   bash deploy/lane-census/install-lane-census.sh --verify"
-echo "Run now:  systemctl --user start onex-disk-gc.service"
-echo "Logs:     journalctl --user -u onex-disk-gc.service -f"
-echo "On-demand: bash scripts/lane-census-check.sh --json"

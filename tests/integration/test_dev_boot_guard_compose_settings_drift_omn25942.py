@@ -71,6 +71,8 @@ def test_a_verified_roll_is_kept_when_the_rendered_compose_hash_moved(
     monkeypatch.setattr(base.guard_mod, "deliver_reports", lambda *a, **k: None)
     executor = DeployExecutor()
     monkeypatch.setattr(executor, "verify", lambda *args, **kwargs: [])
+    # The post-roll ledger proof has its own tests; this one drives compose drift.
+    monkeypatch.setattr(base.guard_mod, "_prove_work_ledger_answers", lambda *_: None)
     root = tmp_path / "guard"
 
     guard = executor_mod.DevBootGuard(executor, root)

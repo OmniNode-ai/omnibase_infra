@@ -679,6 +679,14 @@ services:
       # Same reasoning as omninode-deploy-runner: inside this container
       # `localhost` is the container itself, not the lab host.
       LANE_PROBE_HOST: host.docker.internal
+      # OMN-19812: the machine identity the C28 consumer-flow probe reads the
+      # stability lane's Kafka SASL secret through. Names only; the values come
+      # from the deployed .env beside this file. The default form keeps an unset
+      # name from breaking interpolation of every other service in this file.
+      INFISICAL_ADDR: ${INFISICAL_ADDR:-}
+      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+      INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
+      INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
@@ -809,6 +817,14 @@ services:
       RUNNER_GROUP: omnibase-deploy
       ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       LANE_PROBE_HOST: host.docker.internal
+      # OMN-19812: the machine identity the C28 consumer-flow probe reads the
+      # stability lane's Kafka SASL secret through. Names only; the values come
+      # from the deployed .env beside this file. The default form keeps an unset
+      # name from breaking interpolation of every other service in this file.
+      INFISICAL_ADDR: ${INFISICAL_ADDR:-}
+      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+      INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
+      INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
@@ -858,6 +874,14 @@ services:
       RUNNER_GROUP: omnibase-deploy
       ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       LANE_PROBE_HOST: host.docker.internal
+      # OMN-19812: the machine identity the C28 consumer-flow probe reads the
+      # stability lane's Kafka SASL secret through. Names only; the values come
+      # from the deployed .env beside this file. The default form keeps an unset
+      # name from breaking interpolation of every other service in this file.
+      INFISICAL_ADDR: ${INFISICAL_ADDR:-}
+      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+      INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
+      INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
