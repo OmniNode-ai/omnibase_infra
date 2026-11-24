@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_infra.handlers import handler_ledger_open_claims as handler_module
+from omnibase_infra.handlers import ledger_bus_calls as handler_module
 from omnibase_infra.handlers.handler_ledger_open_claims import (
     HandlerLedgerOpenClaims,
     LedgerReadRefusedError,

@@ -27,12 +27,12 @@
 #   neither substitutes for the other.
 #
 # WHERE IT RUNS, AND WHICH LANE IT GRADES (OMN-19894)
-#   The lane's ingress, gateway, broker and deploy agent are lab-network ports,
+#   The lane's ingress, broker and deploy agent are lab-network ports,
 #   unreachable from GitHub-hosted compute, so the job is self-hosted. It runs
 #   on any runner of the pool the deployment overlay names
 #   (vars.LAB_PROBE_RUNS_ON_JSON) and grades the first lane of the stability
 #   overlay's ordered list (vars.LAB_PROOF_LANES_JSON, OMN-21485) whose
-#   ingress and gateway both answer,
+#   ingress answers and that declares a tenant_id,
 #   at the addresses the overlay declares; the deploy agent it reads is that
 #   lane's own declared one. No host label or address is written here
 #   (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check must not
@@ -138,8 +138,8 @@ on:
         description: 'Runtime ingress base URL override. Empty uses the resolved lane''s ingress_url.'
         required: false
         default: ''
-      gateway_url:
-        description: 'Tenant-bearing submission route override. Empty uses the resolved lane''s gateway_url.'
+      tenant_id:
+        description: 'Lane tenant id override (OMN-23566). Empty uses the resolved lane''s tenant_id. The probe publishes the delegate request on the bus stamped with it; a missing tenant is RED.'
         required: false
         default: ''
       task_type:
@@ -231,7 +231,7 @@ jobs:
       # lane, the lane the team works in, never the dev lane, so a dev-lane
       # redeploy or outage cannot turn the proof red. The lane is the first
       # lane of the stability overlay's ordered list (vars.LAB_PROOF_LANES_JSON)
-      # that carries lane_role=stability and whose ingress AND gateway both answer
+      # that carries lane_role=stability and whose ingress answers and that declares a tenant_id
       # (OMN-19894's chain of responders). It is resolved FIRST, because the
       # broker every readback leg uses is the one that lane declares (its
       # bus_lane in the CI bus lane table), never a fixed lane. Every lane
@@ -241,7 +241,7 @@ jobs:
         with:
           lanes-json: ${{ vars.LAB_PROOF_LANES_JSON }}
           lanes-var: LAB_PROOF_LANES_JSON
-          require: ingress_url gateway_url bus_lane
+          require: ingress_url tenant_id bus_lane
           match: lane_role=stability
           # OMN-19811: run 37125721313 resolved the lane mid-deploy.
           deploy-wait-seconds: ${{ github.event.inputs.deploy_wait_seconds || '2400' }}
@@ -415,34 +415,21 @@ jobs:
             KAFKA_SASL_USERNAME=STABILITY_TEST_KAFKA_SASL_USERNAME_STABILITY_CHAIN_CANARY
             KAFKA_SASL_PASSWORD=STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_CHAIN_CANARY
             CHAIN_CANARY_PROJECTION_DSN=STABILITY_TEST_CHAIN_CANARY_PROJECTION_DSN
-            CHAIN_CANARY_GATEWAY_API_KEY=STABILITY_TEST_CHAIN_CANARY_GATEWAY_API_KEY
 
       - name: Fire one live delegation through the stability-lane ingress
         env:
-          # The resolved lane's declared addresses (LANE_INGRESS_URL and
-          # LANE_GATEWAY_URL, exported by the resolve step) unless a dispatch
+          # The resolved lane's declared addresses (LANE_INGRESS_URL, exported by the resolve step) unless a dispatch
           # overrides them; combined in the run script below. Never localhost:
           # inside a runner container that is the container itself (OMN-14958).
           PROBE_URL_OVERRIDE: ${{ github.event.inputs.probe_url }}
-          # OMN-18421: THE TENANT-BEARING SUBMISSION ROUTE.
-          #
-          # Why this probe moved off `/skill`. That ingress reads
-          # `X-Correlation-ID` and nothing else — no authorization header, no
-          # tenant — so every event the resulting chain published was
-          # unattributed, and omnimarket's delegation projection writer refused
-          # every one of them fail-closed into
-          # `onex.dlq.omnimarket.projection-delegation-malformed.v1`. The
-          # refusal is correct: a writer under FORCE ROW LEVEL SECURITY cannot
-          # discover a row's tenant by reading, and stamping a house identity
-          # would put rows where the submitting tenant's reader could never see
-          # them. The runtime will not source a tenant either — carrying one
-          # across a hop is its job, inventing one is forbidden. So this probe
-          # reported PROBE-GREEN on a chain that projected nothing while the
-          # DLQ Depth Monitor went red on every run.
-          #
-          # The gateway is the lane's onex-api, at the address its overlay
-          # entry declares as gateway_url.
-          GATEWAY_URL_OVERRIDE: ${{ github.event.inputs.gateway_url }}
+          # OMN-23566: THE DELEGATE REQUEST IS PUBLISHED ON THE BUS, stamped
+          # with the lane's tenant (LANE_TENANT_ID, exported by the resolve
+          # step, unless a dispatch overrides it). The separate HTTP API that
+          # used to resolve a tenant from a credential is removed, and so is
+          # the tenant-less `/skill` route: a lane that declares no tenant_id
+          # makes the resolve step RED, and the probe itself is RED on an
+          # empty tenant. There is no fallback to a tenant-less submission.
+          TENANT_ID_OVERRIDE: ${{ github.event.inputs.tenant_id }}
           TASK_TYPE: ${{ github.event.inputs.task_type || 'test' }}
           BUDGET_MS: ${{ github.event.inputs.budget_ms || '120000' }}
           # OMN-19811: bounded by timeout-minutes above; see that comment.
@@ -484,33 +471,7 @@ jobs:
           # argv is world-readable through /proc, and the dispatch step echoes
           # its own broker values into this log.
           # OMN-21485: the value is the stability lane's reader, never the dev
-          # lane's (stability Infisical, CHAIN_CANARY_PROJECTION_DSN).
-          # OMN-18421: the gateway API key, injected as ENVIRONMENT under the
-          # literal name the probe is told to read, exactly like the two DSNs
-          # above and for the same reason — argv is world-readable through
-          # /proc and the dispatch step echoes its own arguments into this log.
-          # The flag below passes the NAME; the request model refuses a value
-          # that is not a valid environment variable name.
-          #
-          # The key is LANE-LOCAL. It belongs to the tenant the graded lane's own
-          # onex-api issues for itself in-process, through the same
-          # `auth_api_keys.create_api_key` call the /api-keys route uses, and it
-          # authorises nothing outside this compose project. The per-seam
-          # delegation smoke under scripts/smoke drives the same path.
-          #
-          # The script is described rather than named on purpose. The
-          # incident-replay coverage gate (OMN-15547) resolves "guard is wired
-          # as enforcement" by scanning workflow files for script paths, so a
-          # path spelled inside an explanatory comment enrols that script as a
-          # guard owing a replay case it was never meant to owe. Same class as
-          # the omni_home rule about PR bodies: a gate that parses prose fires
-          # on prose.
-          #
-          # ABSENT IS RED, BY DESIGN. When this variable resolves to nothing the
-          # run reports `submission_route_not_configured` and names it. It does
-          # NOT fall back to the tenant-less route: a probe that quietly submits
-          # the unattributed way reports green on a chain that projects nothing,
-          # which is the exact false-clean this ticket exists to remove.
+          # lane's (stability Infisical, CHAIN_CANARY_PROJECTION_DSN, exported by the fetch step).
           # OMN-16964: what a COMPLETE chain must carry, end to end. Declared
           # here rather than inferred from whatever the ledger returned,
           # because the scope's own wording is "no gaps tolerated silently" --
@@ -563,29 +524,19 @@ jobs:
           # an empty broker makes both legs report NOT_CONFIGURED rather than
           # silently probing a guess.
           PROBE_URL="${PROBE_URL_OVERRIDE:-${LANE_INGRESS_URL:-}}"
-          GATEWAY_URL="${GATEWAY_URL_OVERRIDE:-${LANE_GATEWAY_URL:-}}"
+          TENANT_ID="${TENANT_ID_OVERRIDE:-${LANE_TENANT_ID:-}}"
           echo "lane:               ${LANE_NAME:-<unresolved>}"
           QUARANTINE_BOOTSTRAP="${QUARANTINE_BOOTSTRAP_OVERRIDE:-${KAFKA_BOOTSTRAP_SERVERS:-}}"
           TERMINAL_BOOTSTRAP="${TERMINAL_BOOTSTRAP_OVERRIDE:-${KAFKA_BOOTSTRAP_SERVERS:-}}"
           echo "quarantine broker: ${QUARANTINE_BOOTSTRAP:-<unset>}"
           echo "terminal broker:   ${TERMINAL_BOOTSTRAP:-<unset>}"
-          # The NAME is safe to print and is the one thing worth printing: it
-          # is what a reader needs to check the declaration against the secret.
-          if [ -n "${GATEWAY_URL:-}" ]; then
-            echo "submission route:   ${GATEWAY_URL}/v1/workflows (tenant-bearing)"
-          else
-            echo "submission route:   ${PROBE_URL}/skill (NO TENANT — OMN-18421)"
-          fi
-          # The NAME, never the value. Whether anything is behind it is reported
-          # by the probe's own verdict, which is the surface worth reading.
-          echo "gateway key var:    CHAIN_CANARY_GATEWAY_API_KEY"
+          echo "submission route:   bus publish on the lane broker (tenant ${TENANT_ID:-<unset>})"
           echo "projection dsn var: ${CHAIN_CANARY_PROJECTION_DSN_ENV:-<undeclared>}"
           echo "ledger dsn var:     ${CHAIN_CANARY_LEDGER_DSN_ENV:-<undeclared>}"
           echo "deploy agent:       ${DEPLOY_AGENT_URL:-<unresolved>} (wait ${DEPLOY_WAIT_SECONDS}s)"
           uv run python -m omnibase_core.cli.cli_commands skill chain_canary \
             --probe-url "${PROBE_URL}" \
-            --gateway-url "${GATEWAY_URL}" \
-            --gateway-api-key-env CHAIN_CANARY_GATEWAY_API_KEY \
+            --tenant-id "${TENANT_ID}" \
             --task-type "${TASK_TYPE}" \
             --budget-ms "${BUDGET_MS}" \
             --terminal-bootstrap-servers "${TERMINAL_BOOTSTRAP}" \
