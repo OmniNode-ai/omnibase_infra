@@ -1,0 +1,41 @@
+schema_version: "1.0.0"
+ticket_id: OMN-26495
+title: "The overlay store's operator_paths migration is vendored, ledgered and classed in omnibase_infra"
+summary: >-
+  omnimarket's node_projection_overlay_store adds the operator_paths column to omninode_internal.overlay_store in 0002_add_operator_paths.sql. This repository vendors that file byte for byte, ledgers and classes it, so a later omnibase_infra release carries it and omnimarket's Sibling Release Compatibility Gate can find a byte-identical copy in the pinned release.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26495-operator-paths-vendored
+    statement: The overlay store's operator_paths migration is vendored byte for byte from the omnimarket node, ledgered and classed.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the vendored 0002 bytes, ledger binding and migration class are exact -- falsifier: uv run --frozen pytest tests/unit/migrations/test_omn26495_overlay_store_operator_paths_vendored.py -q -n 0 --no-cov fails when the file is absent and passes with it'
+evidence_requirements:
+  - kind: tests
+    description: The vendor test and the overlay store vendor test.
+    command: uv run --frozen pytest tests/unit/migrations/test_omn26495_overlay_store_operator_paths_vendored.py tests/unit/migrations/test_omn22478_overlay_store_vendor.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26495-operator-paths-vendor
+    description: The vendored 0002 file matches its pinned bytes and ledger binding and is declared in the migration classes.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn26495_overlay_store_operator_paths_vendored.py -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn26495-overlay-store-directory
+    description: The overlay store vendor directory holds exactly the create, grant and operator_paths files.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn22478_overlay_store_vendor.py -q -n 0 --no-cov
+        cwd: .
