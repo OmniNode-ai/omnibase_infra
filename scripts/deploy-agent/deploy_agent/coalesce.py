@@ -4,52 +4,33 @@
 
 WHAT THIS COSTS TODAY, MEASURED
 -------------------------------
-The agent pins compose content per rebuild command to the sha that triggered
-it and drains its control topic in commit order, at a mean service time of
-1799.8 s per job (the rolling mean ``queue_depth.mean_service_time`` served on
-``/queue`` the night this was written). At 2026-09-19T02:58Z job ``52e430b2``
-was staging ``f8475f9b``, sixteen commits behind ``origin/dev``, and the job
-before it had staged an older sha still. With roughly forty runtime-affecting
-merges in one night, the lane spends hours rebuilding shas that a later commit
-has already replaced, recreating the runtime family once per superseded sha,
-while the actual dev head waits at the back of the queue.
-
-Nothing surfaced that a declared change was pending. The queue endpoint
-OMN-18144 landed reports the DEPTH; it deliberately observes and never acts
-(``queue_depth``'s own docstring: "Nothing here cancels, reorders, coalesces or
-times out a command"), and it names this ticket as the owner of the acting
-half. This module is that half.
+The agent drains its control topic in commit order at a mean service time of
+1799.8 s per job (``queue_depth.mean_service_time`` the night this was written).
+At 2026-09-19T02:58Z job ``52e430b2`` was staging ``f8475f9b``, sixteen commits
+behind ``origin/dev``. With roughly forty runtime-affecting merges in one night
+the lane spends hours rebuilding shas a later commit has already replaced,
+while the dev head waits at the back. The queue endpoint (OMN-18144) only
+observes; this module is the acting half.
 
 WHAT IS COALESCED, AND WHAT IS REFUSED
 ---------------------------------------
 A PREFIX of the queue, and only a prefix. The scan starts at the command the
 agent is about to accept and walks forward while each next command is
 foldable into the same group; the FIRST command that is not ends the group and
-stays queued, with everything behind it. Ordering is preserved exactly: the
-agent never runs a later command ahead of an earlier one it refused to fold.
-
-Every one of the conditions below is a REFUSAL that ends the group, and each
-has its own reason so the journal says which one fired rather than reporting a
-bare "not coalesced":
+stays queued, with everything behind it, so ordering is preserved exactly.
+Each refusal below ends the group and has its own reason in the journal:
 
 ``DIFFERENT_LANE``
-    Commands for different lanes are never coalesced. They mutate different
-    compose projects; folding them would drop a deploy of one lane entirely.
+    Different lanes mutate different compose projects; folding drops a deploy.
 
 ``ROLLBACK_DECLARED``
     A command carrying a signed rollback declaration (OMN-19270) is never
-    folded, in either direction. A rollback exists to move the lane off the
-    build a newer command would put back, so a newer command running in its
-    place would undo the one deploy that was deliberate.
+    folded, in either direction: a newer command would undo the deliberate one.
 
 ``NOT_FULL_SCOPE``
-    Only ``scope=full`` folds into ``scope=full``. The scope decides WHICH
-    services are recreated, so folding a ``core`` command into a ``full`` one
-    -- or the reverse -- silently drops the services only one of them names.
-    Deliberately narrower than it has to be: two ``core`` commands could in
-    principle fold, but a ``core`` rebuild is not the 45-minute job this
-    module exists to stop spending, and a rule that only ever folds like into
-    like is one a reader can check.
+    Only ``scope=full`` folds into ``scope=full``: the scope decides WHICH
+    services are recreated, so mixing scopes silently drops services. Narrower
+    than it has to be, because a ``core`` rebuild is not the job this stops.
 
 ``SERVICES_DIFFER`` / ``BUILD_SOURCE_DIFFERS``
     Same argument. A command naming services, or built from a different
@@ -57,50 +38,43 @@ bare "not coalesced":
 
 ``PINNED_IMAGE``
     A command carrying ``image_ref`` or ``image_digest`` is a promotion of one
-    exact artifact, not a rebuild of a branch tip, and it is never folded. This
-    is also what makes a ``prod`` command structurally un-coalescable without a
-    lane check of its own: ``ModelRebuildRequested`` refuses a prod request
-    that carries no digest, so every prod command trips this refusal.
+    exact artifact, never folded. Every ``prod`` command trips this, since
+    ``ModelRebuildRequested`` refuses a prod request that carries no digest.
 
 ``REF_NOT_A_SHA``
-    A branch alias resolves at BUILD time to whatever the branch is then, so
-    two alias commands are not comparable by ancestry and "newer" is not a
-    property either of them carries. Only 40-hex pins fold.
+    A branch alias resolves at BUILD time, so two aliases are not comparable
+    by ancestry. Only 40-hex pins fold.
 
 ``ANCESTRY_UNPROVEN`` / ``NOT_A_DESCENDANT``
     The load-bearing one. Coalescing is only safe when the sha that RUNS
-    contains the sha it replaces; otherwise the replaced change is simply
-    dropped and nothing says so. The check is
-    ``git merge-base --is-ancestor <earlier> <later>`` on consecutive members,
-    which gives containment across the whole group by transitivity. An
-    unresolvable comparison -- an object the clone does not have, a git
-    failure, a timeout -- is ``ANCESTRY_UNPROVEN`` and ends the group, so every
-    failure of this module falls back to the behaviour it replaces: run every
-    command, in order, exactly as before.
+    contains the sha it replaces, or the replaced change is dropped silently.
+    The check is ``git merge-base --is-ancestor <earlier> <later>`` on
+    consecutive members, transitive across the group. An unresolvable
+    comparison (missing object, git failure, timeout) is ``ANCESTRY_UNPROVEN``
+    and ends the group, so every failure falls back to running every command
+    in order, exactly as before.
+
+``NOT_A_DESCENDANT`` AND THE JUMP (OMN-26316)
+    Refs that are each contained in a LATER command need not contain one
+    another. See ``_newest_containing``: the group jumps to the newest command
+    that contains everything it passes over, and otherwise ends here.
 
 ``DUPLICATE_COMMAND``
     A look-ahead record whose correlation id is already in the group is a
-    redelivered copy, not newer work (OMN-19521). Folding it made the copy the
-    runner and recorded the first copy as superseded by its own id, which the
-    supersession model refuses; on 2026-09-25 that raise, landing before the
-    offset commit, crash-looped the .201 dev agent on every restart. The copy
-    ends the group and stays queued, where the head path's duplicate and busy
-    checks already own it.
+    redelivered copy, not newer work (OMN-19521): folding it recorded the first
+    copy as superseded by its own id, and that raise crash-looped the agent on
+    2026-09-25. The copy ends the group and stays queued.
 
 WHY THERE IS NO KILL SWITCH
 ----------------------------
 Every failure mode above degrades to the pre-change behaviour by construction,
-so an ``off`` setting would buy nothing an incident cannot already get by
-letting the refusals fire -- and an opt-out left set is how a lane silently
-loses an optimisation nobody notices is gone (rule 5).
+and an opt-out left set is how a lane silently loses the optimisation (rule 5).
 
 WHAT A SUPERSEDED COMMAND GETS
 -------------------------------
-Not silence, and not a failure. Each superseded command gets a durable job
-record with status ``superseded``, naming the sha and the correlation id that
-ran in its place, and a terminal event on the rejection topic carrying the
-same two fields. OMN-18143 AC6 asks for exactly that: a terminal event that
-says "superseded", distinguishably from a timeout and from a rollback.
+Not silence, and not a failure: a durable job record with status
+``superseded`` naming the sha and correlation id that ran in its place, and a
+terminal event on the rejection topic carrying the same two fields (OMN-18143 AC6).
 """
 
 from __future__ import annotations
@@ -153,10 +127,7 @@ GIT_FETCH_COOLDOWN_SECONDS: Final = 60
 class EnumCoalesceRefusal(StrEnum):
     """Why a queued command was NOT folded into the group ahead of it.
 
-    Every value ends the group. They are distinct rather than collapsed into
-    one "not coalescable" because they send a reader to different places: a
-    lane mismatch is the fence working, a pinned image is a promotion, and an
-    unproven ancestry is a clone that needs a look.
+    Every value ends the group, and each sends a reader somewhere different.
     """
 
     DIFFERENT_LANE = "different_lane"
@@ -245,9 +216,8 @@ class ModelCoalescePlan(BaseModel):
     def journal_line(self) -> str:
         """One line naming the decision, for the agent's journal.
 
-        Names the queue position of the command that RAN, how many it
-        replaced, and why the group ended -- the three facts a reader needs to
-        tell a coalesced deploy from a plain one without reading the job store.
+        Names the runner's queue position, how many it replaced, and why the
+        group ended.
         """
         parts = [
             f"coalesce: running {self.runner.command.correlation_id} "
@@ -278,10 +248,8 @@ def _refusal_for(
 ) -> EnumCoalesceRefusal | None:
     """The static half of the decision: everything that is not ancestry.
 
-    Compared against the HEAD rather than against the previous member. All of
-    these are equality tests, so the two are the same comparison, and naming
-    the head is what makes the group's identity a single command's attributes
-    rather than a chain a reader has to replay.
+    Compared against the HEAD: all of these are equality tests, so it is the
+    same comparison as against the previous member.
     """
     if candidate.runtime_lane != head.runtime_lane:
         return EnumCoalesceRefusal.DIFFERENT_LANE
@@ -305,6 +273,43 @@ def _refusal_for(
     return None
 
 
+def _newest_containing(
+    queued: Sequence[ModelQueuedCommand],
+    index: int,
+    group: Sequence[ModelQueuedCommand],
+    known: AncestryResolver,
+) -> int | None:
+    """Position of the newest command that safely replaces ``queued[index:]``'s run."""
+    # OMN-26316. ``queued[index]`` does not contain the group's last member,
+    # but the NEWEST command of the foldable run behind it may contain that
+    # member and every command between. Two PR heads and the merge carrying
+    # both are not ancestor-related pairwise, and the consecutive scan ended
+    # at the first, rebuilding each stale ref in turn at a mean service time
+    # over 1700 s (queue_depth, 2026-11-24). Every command passed over must
+    # pass the static rules, be no redelivered copy and be PROVEN contained in
+    # the runner: anything unproven or negative returns None and the group ends
+    # where the consecutive scan ended. Only the newest command is a candidate,
+    # so a poll asks at most one question per queued command. The head was
+    # vetted by the lineage fence, so the runner descends from the running ref.
+    ids = {member.command.correlation_id for member in group}
+    run: list[ModelQueuedCommand] = []
+    for entry in queued[index:]:
+        command = entry.command
+        if command.correlation_id in ids:
+            break
+        if _refusal_for(group[0].command, command) is not None:
+            break
+        ids.add(command.correlation_id)
+        run.append(entry)
+    if len(run) < 2:
+        return None
+    runner_ref = run[-1].command.git_ref
+    members = [group[-1], *run[:-1]]
+    if all(known(m.command.git_ref, runner_ref) is True for m in members):
+        return index + len(run) - 1
+    return None
+
+
 def plan_coalesce(
     queued: Sequence[ModelQueuedCommand],
     *,
@@ -313,12 +318,9 @@ def plan_coalesce(
     """Decide which of a fetched batch runs, and which it supersedes.
 
     ``queued`` is in control-topic order, head first, and must be non-empty.
-    The head is the command the agent has already validated and is about to
-    accept; everything after it is look-ahead.
-
-    Pure apart from ``contains``. Every host fact this decision needs is behind
-    that one callable, which is what makes the rule table above testable
-    without a clone.
+    The head is the validated command about to be accepted; the rest is
+    look-ahead. Pure apart from ``contains``, the one callable behind every
+    host fact.
     """
     if not queued:
         msg = "plan_coalesce needs at least the command being accepted"
@@ -328,8 +330,17 @@ def plan_coalesce(
     group = [head]
     stop_reason: EnumCoalesceRefusal | None = None
     examined = 0
+    answers: dict[tuple[str, str], bool | None] = {}
 
-    for candidate in queued[1:]:
+    def known(earlier: str, later: str) -> bool | None:
+        # One answer per pair per plan; each is up to three git calls.
+        if (earlier, later) not in answers:
+            answers[earlier, later] = contains(earlier, later)
+        return answers[earlier, later]
+
+    index = 1
+    while index < len(queued):
+        candidate = queued[index]
         examined += 1
         # OMN-19521. A redelivered copy of a command already in the group is
         # not newer work and must never become the runner: the earlier copy
@@ -350,15 +361,19 @@ def plan_coalesce(
         # transitive, so a chain of proven links gives every member of the
         # group containment in the runner while costing one comparison per
         # command instead of one per pair.
-        previous = group[-1]
-        verdict = contains(previous.command.git_ref, candidate.command.git_ref)
+        verdict = known(group[-1].command.git_ref, candidate.command.git_ref)
         if verdict is None:
             stop_reason = EnumCoalesceRefusal.ANCESTRY_UNPROVEN
             break
+        newest: int | None = index
         if not verdict:
+            newest = _newest_containing(queued, index, group, known)
+        if newest is None:
             stop_reason = EnumCoalesceRefusal.NOT_A_DESCENDANT
             break
-        group.append(candidate)
+        examined += newest - index
+        group.extend(queued[index : newest + 1])
+        index = newest + 1
 
     runner = group[-1]
     supersessions = tuple(
@@ -380,18 +395,12 @@ def plan_coalesce(
 class GitAncestryResolver:
     """``contains`` answered by the deploy-source clone.
 
-    THE FETCH IS DELIBERATELY NOT UNDER THE LANE LOCK, and the distinction is
-    the whole reason this is safe. OMN-18124 put ``git_pull`` under the lane's
-    per-compose-project lock because ``git reset --hard`` rewrites the shared
-    WORKING TREE, and two writers rewrote it concurrently. Nothing here touches
-    the tree, the index or ``HEAD``: ``cat-file``, ``merge-base`` and ``fetch``
-    read the tree not at all and write only to ``.git``, where git takes its own
-    ref locks. Taking the lane lock here would instead make this read wait on a
-    deploy -- the exact deploy whose queue it is trying to shorten.
-
-    Every failure is ``None``. A clone that cannot answer is a clone that has
-    not answered, and the caller's contract is that an unproven comparison ends
-    the group rather than guessing at it.
+    THE FETCH IS DELIBERATELY NOT UNDER THE LANE LOCK. OMN-18124 locked
+    ``git_pull`` because ``git reset --hard`` rewrites the shared WORKING TREE;
+    ``cat-file``, ``merge-base`` and ``fetch`` touch only ``.git``, where git
+    takes its own ref locks, and the lane lock would make this read wait on the
+    very deploy whose queue it is shortening. Every failure is ``None``: an
+    unproven comparison ends the group rather than guessing.
     """
 
     def __init__(
