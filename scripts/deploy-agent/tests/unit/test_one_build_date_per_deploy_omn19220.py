@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """One BUILD_DATE per rebuild, shared by every compose build in it (OMN-19220).
 
-``Dockerfile.runtime`` declares ``ARG BUILD_DATE`` at the top of both stages, so
-a changed value misses the cache for every RUN after it. The dev-lane-only
+``Dockerfile.runtime`` declares ``ARG BUILD_DATE`` late in both stages
+(OMN-26316), so a changed value misses the cache for every RUN after it. The dev-lane-only
 build (OMN-18108) is a second ``docker compose build`` of the same Dockerfile
 and args; when it stamped its own clock it re-ran the whole image from scratch
 (2% cached on .201, 2026-09-22) and two consecutive dev-lane rebuilds died at
