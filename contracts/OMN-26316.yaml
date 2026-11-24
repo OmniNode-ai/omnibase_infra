@@ -28,6 +28,11 @@ requirements:
         statement: "AC5: a request under the http_mount prefix of a contract the lane left dormant wakes that contract, mounts its app and is served, once, with no broker; a failed wake answers 503 and leaves the listener up -- falsifier: uv run pytest tests/integration/handlers/http_mount/test_dormant_http_wake_omn26316.py fails at origin/dev with 404 and passes on the PR branch"
       - id: AC6
         statement: "AC6: the first message to a topic a dormant contract subscribes to, written by a client straight to the broker, wakes that contract's consumers; the watch is group-less and reads from the end -- falsifier: uv run pytest tests/unit/handlers/test_lazy_start_bus_watch_omn26316.py fails at origin/dev (the watch module is absent) and passes on the PR branch"
+  - id: req-omn26316-first-heartbeat-not-held-by-serial-wake
+    statement: The runtime's first heartbeat is published within one lazy-start wake budget of the start reaching its introspection step, however many dormant consumers subscribe to the heartbeat topic, so /ready reports heartbeat ready without a minutes-long hold.
+    acceptance:
+      - id: AC9
+        statement: "AC9: the lazy-start front door wakes every dormant consumer of a published topic at once and holds the message for at most one budget -- falsifier: uv run pytest tests/unit/handlers/test_lazy_start_heartbeat_wake_omn26316.py fails at origin/dev (7.2 s against a 2.5 s window for 20 dormant heartbeat consumers, 4 of which never wake) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -118,3 +123,21 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: bash -c 'test "$(curl -s -o /dev/null -w "%{http_code}" -m 30 http://localhost:8085/projection-api/health)" = 200'
+  - id: dod-omn26316-first-heartbeat-not-held
+    description: >-
+      Twenty dormant consumers of the heartbeat topic, four of which never finish waking: the first heartbeat published through the publish gate returns inside 2.5 s (one 1.0 s budget plus margin), where the serial wake took 7.2 s. The test fails at origin/dev and passes on the branch.
+    source: manual
+    binds_ac: [AC9]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_lazy_start_heartbeat_wake_omn26316.py tests/integration/handlers/test_lazy_start_heartbeat_wake_composed_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-integration-proof-heartbeat-ready
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime's /ready answer carries a heartbeat row that is ready. It reads the live container, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: bash -c 'docker exec omninode-runtime curl -s -m 5 http://localhost:8085/ready | python3 -c "import json,sys; assert json.load(sys.stdin)[\"details\"][\"supplemental_readiness\"][\"heartbeat\"][\"ready\"] is True"'

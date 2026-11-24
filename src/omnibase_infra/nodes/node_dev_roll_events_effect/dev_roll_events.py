@@ -24,6 +24,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+import yaml
 from pydantic import BaseModel, JsonValue
 
 if TYPE_CHECKING:
@@ -90,6 +91,20 @@ def docker_started_at(value: object, *, fallback: datetime) -> datetime:
     return parsed.astimezone(UTC)
 
 
+def audit_settings(contract: Path) -> tuple[int, int]:
+    """The recreate reader's announcement lookback and start match tolerance (OMN-25912).
+
+    Read from the node contract the caller names: the reader's bounds are declared there,
+    never spelled in the handler.
+    """
+    declared = yaml.safe_load(contract.read_text(encoding="utf-8"))
+    settings = declared["settings"]
+    return (
+        int(settings["audit_announcement_lookback_seconds"]),
+        int(settings["audit_start_match_tolerance_seconds"]),
+    )
+
+
 class DevRollEventsPublisher:
     """Builds the typed roll events and sends them; every failure is logged and swallowed."""
 
@@ -148,6 +163,21 @@ class DevRollEventsPublisher:
             )
         except Exception:
             logger.exception("dev recreate announcement failed %s", FRICTION)
+            return False
+
+    def recreate_violation(self, violation: BaseModel) -> bool:
+        """Publish one dev recreate violation; True only when the bus accepted it."""
+        try:
+            payload = violation.model_dump(mode="json")
+            return bool(
+                self._send(
+                    self._topics["dev_recreate_violation"],
+                    f"dev-recreate-violation/{payload['event_id']}",
+                    payload,
+                )
+            )
+        except Exception:
+            logger.exception("dev recreate violation failed %s", FRICTION)
             return False
 
     def started(self, job_id: str, started_at: datetime, cause: str) -> None:
