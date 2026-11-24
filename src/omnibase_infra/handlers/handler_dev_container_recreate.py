@@ -69,12 +69,12 @@ class HandlerDevContainerRecreate:
             ),
             key=lambda start: abs(start.started_at - reading.started_at),
         )
-        job_name = requested_by = ""
+        job_id = requested_by = ""
         if matched:
             cause = EnumDevRecreateCause.DEPLOY_AGENT_JOB
-            job_name = matched[0].job_id
+            job_id = matched[0].job_id
             requested_by = next(
-                (m.issuer for m in request.manifests if m.job_id == job_name), ""
+                (m.issuer for m in request.manifests if m.job_id == job_id), ""
             )
         elif (
             previous.container_digest == reading.container_digest
@@ -101,7 +101,7 @@ class HandlerDevContainerRecreate:
                 same_build=bool(reading.image_digest)
                 and reading.image_digest == previous.image_digest,
                 cause=cause,
-                job_name=job_name,
+                job_id=job_id,
                 requested_by=requested_by,
             )
         )
