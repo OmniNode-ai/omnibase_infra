@@ -33,6 +33,11 @@ requirements:
     acceptance:
       - id: AC11
         statement: "AC11: with max_dev_lag_minutes declared, an omnibase_infra head whose runtime paths differ from the running revision for longer than the bound yields one agent/idle-converge job on an otherwise idle lane, while inside the bound, without a bound, inside a probe window, beside a job, on an attempted head or for a not-runtime-only head it yields none -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_own_repo_lag_bound_omn26316.py fails at origin/dev and passes on the PR branch"
+  - id: req-omn26316-boot-failure-cause
+    statement: A boot failure's recorded cause is the error that ended the kernel; a per-message dispatch error logged on the kernel's logger is set apart and never recorded as the cause.
+    acceptance:
+      - id: AC10
+        statement: "AC10: a kernel that exits 1 after the dispatch engine logged Dispatch completed with errors records no kernel error was logged before the exit, naming that last dispatch error, as the boot failure cause, and a kernel error logged before that dispatch error stays the cause -- falsifier: uv run pytest tests/unit/runtime/test_boot_failure_cause_omn26316.py fails at origin/dev (the capture records the dispatch error as the cause) and passes on the PR branch"
   - id: req-omn26316-first-heartbeat-not-held-by-serial-wake
     statement: The runtime's first heartbeat is published within one lazy-start wake budget of the start reaching its introspection step, however many dormant consumers subscribe to the heartbeat topic, so /ready reports heartbeat ready without a minutes-long hold.
     acceptance:
@@ -48,6 +53,9 @@ evidence_requirements:
   - kind: tests
     description: The own-repository lag bound regression built from the omnibase_infra#6191 and #6204 merges of 2026-11-23.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_own_repo_lag_bound_omn26316.py -q
+  - kind: tests
+    description: The boot failure cause regression built from the dev boot ledger event of the 2026-11-23T20:52Z exit.
+    command: uv run --frozen pytest tests/unit/runtime/test_boot_failure_cause_omn26316.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -139,6 +147,23 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_own_repo_lag_bound_omn26316.py -q
         cwd: .
+  - id: dod-omn26316-boot-failure-cause
+    description: "The capture sets the dispatch engine's records apart: the real ledger cause of the 823 s exit is the engine's own message, an exit after it records that no kernel error was logged, and a kernel error stays the cause."
+    source: manual
+    binds_ac: [AC10]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_boot_failure_cause_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-boot-failure-cause-live
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime container carries the capture that sets dispatch errors apart. It reads the live container, which carries the change only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime python -c 'from omnibase_infra.runtime.entrypoint_preflight import KernelErrorCapture; assert KernelErrorCapture().cause == ""'
   - id: dod-omn26316-first-heartbeat-not-held
     description: >-
       Twenty dormant consumers of the heartbeat topic, four of which never finish waking: the first heartbeat published through the publish gate returns inside 2.5 s (one 1.0 s budget plus margin), where the serial wake took 7.2 s. The test fails at origin/dev and passes on the branch.
@@ -157,3 +182,20 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: bash -c 'docker exec omninode-runtime curl -s -m 5 http://localhost:8085/ready | python3 -c "import json,sys; assert json.load(sys.stdin)[\"details\"][\"supplemental_readiness\"][\"heartbeat\"][\"ready\"] is True"'
+  - id: dod-omn26316-integration-proof-boot-failure-cause
+    description: "A separate Python process whose kernel logs the dispatch engine's record and exits 1 publishes the boot-failed event, and the event's cause is the no-kernel-error wording; a kernel error logged first stays the cause."
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_boot_failure_cause_integration_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-boot-failure-cause-process-exit
+    description: "A separate Python process whose kernel logs the dispatch engine's record and exits 1 publishes the boot-failed event with the no-kernel-error cause; the hosted runner runs it at the head and at the merge base."
+    source: manual
+    binds_ac: [AC10]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_boot_failure_cause_integration_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
