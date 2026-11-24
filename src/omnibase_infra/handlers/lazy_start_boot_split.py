@@ -108,6 +108,18 @@ class StoreLazyStartDormant:
         cls._front_door = front_door
 
     @classmethod
+    def awaiting_first_request(cls) -> frozenset[str]:
+        """Dormant contracts no request has reached yet, or nothing (OMN-26316).
+
+        Nothing until the front door exists: a dormant contract nothing can wake
+        yet is not one that waits by design, so it is never excused from the
+        runtime health attachment check.
+        """
+        if cls._front_door is None:
+            return frozenset()
+        return cls._front_door.awaiting_first_request
+
+    @classmethod
     def serving_detail(cls) -> dict[str, object]:
         """The ``lazy_start`` block of the ``/ready`` detail, or nothing (OMN-26316).
 

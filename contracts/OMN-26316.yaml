@@ -87,6 +87,11 @@ requirements:
     acceptance:
       - id: AC41
         statement: "AC41: the dev main runtime's declared max_concurrent_contract_attach models at most half of the 127 s boot attach recorded on h201 at 2026-11-24T20:01:04Z, and the rendered runtime-policy.env carries it -- falsifier: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly fails at origin/dev and passes on the PR branch"
+  - id: req-omn26316-dormant-projection-not-unattached
+    statement: A projection the lazy-start lane left dormant that no request has reached is not read as unattached by the runtime health check, a woken or failed-to-wake projection is judged by the live registry as before, and every unattached or dormant projection is named in full in the runtime log.
+    acceptance:
+      - id: AC42
+        statement: "AC42: with a lazy-start front door recorded, a dormant projection no request has reached leaves projection_attachment HEALTHY and is named on its detail, a dormant projection that was woken without a consumer or whose wake failed and an eager unattached projection each read DEGRADED, and the log names every unattached and every dormant projection past the detail's 8-name cap -- falsifier: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_dormant_projections_omn26316.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (4 of 8 fail: the dormant projection reads unattached, and 4 of 12 unattached names appear nowhere) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -118,6 +123,9 @@ evidence_requirements:
   - kind: tests
     description: The dev main boot attach join limit modeled from the recorded h201 start of 2026-11-24T20:01:04Z.
     command: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: A dormant lazy-start projection is not read as unattached, a woken or failed-to-wake one is, and the log names every unattached and dormant projection.
+    command: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_dormant_projections_omn26316.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -367,4 +375,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-dormant-projection-not-unattached
+    description: "The dev runtime read at 2026-11-24T23:18Z: 39 of 95 projections unattached, named 8 and '+31 more'; of the 38 without a consumer group read from the broker in the same hour, 37 were dormant lazy-start contracts outside the 111-contract boot set with no retained record on their topic. 4 of the file's 8 tests fail at origin/dev (a dormant projection reads unattached; 4 of 12 names reach no log) and pass on the branch; the unattached eager, woken and failed-wake projections stay DEGRADED."
+    source: manual
+    binds_ac: [AC42]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_dormant_projections_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
