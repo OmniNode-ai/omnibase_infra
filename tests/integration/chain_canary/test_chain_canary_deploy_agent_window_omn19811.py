@@ -259,15 +259,19 @@ class _FakeClock:
         self.now += timedelta(seconds=seconds)
 
 
-class _Ingress:
-    """Each submission takes 125 s of fake time, as a budget-exhausted ingress does."""
+class _Publisher:
+    """Each publish takes 125 s of fake time, as a budget-exhausted submission does."""
 
     def __init__(self, clock: _FakeClock) -> None:
         self.clock = clock
         self.calls = 0
 
     async def __call__(
-        self, url: str, body: dict[str, object], timeout_s: float
+        self,
+        bootstrap: str,
+        topic: str,
+        envelope: dict[str, object],
+        timeout_s: float,
     ) -> tuple[dict[str, object] | None, str, int]:
         self.calls += 1
         self.clock.now += timedelta(seconds=125)
@@ -333,6 +337,7 @@ def _canary_request(
         correlation_id=uuid4(),
         probe_url="http://runtime.invalid:8085",
         budget_ms=120_000,
+        tenant_id="820272f9-4aaf-5add-a2df-0af942852ab2",
         terminal_bootstrap_servers="broker.invalid:19092",
         quarantine_bootstrap_servers="broker.invalid:19092",
         projection_dsn_env="CHAIN_CANARY_PROJECTION_DSN",
@@ -344,10 +349,10 @@ def _canary_request(
     )
 
 
-def _canary(clock: _FakeClock) -> tuple[HandlerChainCanary, _Ingress]:
-    ingress = _Ingress(clock)
+def _canary(clock: _FakeClock) -> tuple[HandlerChainCanary, _Publisher]:
+    publisher = _Publisher(clock)
     handler = HandlerChainCanary(
-        ingress=ingress,
+        bus_publish=publisher,
         quarantine_scan=_quarantine,
         terminal_readback=_Readback(),
         projection_readback=_projection,
@@ -359,7 +364,7 @@ def _canary(clock: _FakeClock) -> tuple[HandlerChainCanary, _Ingress]:
         clock=clock,
         sleep=clock.sleep,
     )
-    return handler, ingress
+    return handler, publisher
 
 
 @pytest.mark.asyncio
@@ -396,12 +401,12 @@ async def test_a_deploy_waited_out_over_the_real_reader_earns_the_retry(
         ),
     ]
     clock = _FakeClock()
-    handler, ingress = _canary(clock)
+    handler, publisher = _canary(clock)
 
     result = await handler.handle(_canary_request(agent(), monkeypatch))
 
     window = result.deploy_window
-    assert ingress.calls == 2
+    assert publisher.calls == 2
     assert result.verdict is EnumChainCanaryVerdict.GREEN
     assert window.status is EnumDeployWindowStatus.DEPLOY_IN_WINDOW_RETRIED
     assert str(window.deploy_correlation_ids[0]) == _DEPLOY_JOB
@@ -427,10 +432,10 @@ async def test_an_idle_agent_before_the_fire_widens_nothing_over_the_real_reader
         )
     ]
     clock = _FakeClock()
-    handler, ingress = _canary(clock)
+    handler, publisher = _canary(clock)
 
     result = await handler.handle(_canary_request(agent(), monkeypatch))
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     assert result.verdict is EnumChainCanaryVerdict.TERMINAL_MISSING
     assert result.deploy_window.status is EnumDeployWindowStatus.NO_DEPLOY_IN_WINDOW

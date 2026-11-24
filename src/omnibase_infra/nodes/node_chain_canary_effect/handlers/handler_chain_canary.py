@@ -88,13 +88,12 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-import httpx
-
 from omnibase_core.enums.enum_delegation_traffic_class import (
     EnumDelegationTrafficClass,
 )
 from omnibase_core.models.delegation.wire import ModelDelegationProvenance
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums.generated.enum_omnimarket_topic import EnumOmnimarketTopic
 from omnibase_infra.nodes.node_chain_canary_effect.deploy_agent_window import (
     deploys_in_window,
     lane_ready_via_httpx,
@@ -166,22 +165,16 @@ _KILL_SWITCH_TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
 # canary, which is the one outcome worse than not having it.
 _CLIENT_SLACK_SECONDS = 15.0
 
-# (response_json, transport_error, elapsed_ms)
-TypeIngressPost = Callable[
-    [str, dict[str, object], float],
+# (bootstrap_servers, topic, envelope, timeout_s)
+#   -> (response, transport_error, elapsed_ms)
+# The bus publish that submits the delegate request (OMN-23566). The response
+# is an ACK and never a verdict: it carries ``ok`` and never a terminal-event
+# key, so the run's verdict comes from the correlation-scoped broker readback
+# (OMN-16931).
+TypeBusPublish = Callable[
+    [str, str, dict[str, object], float],
     Awaitable[tuple[dict[str, object] | None, str, int]],
 ]
-# (url, body, api_key, timeout_s) -> (response_json, transport_error, elapsed_ms)
-# Separate from TypeIngressPost because the authenticated route carries a
-# credential and the tenant-less one does not; widening the shared signature
-# with an api_key nobody passes would make the legacy route look like it had
-# one (OMN-18421).
-TypeGatewayPost = Callable[
-    [str, dict[str, object], str, float],
-    Awaitable[tuple[dict[str, object] | None, str, int]],
-]
-# (env var name) -> value, or "" when unset.
-TypeGatewayKeyLookup = Callable[[str], str]
 # (found, records_scanned, error) — found is None when undeterminable.
 TypeQuarantineScan = Callable[
     [str, str, str, int, float],
@@ -306,6 +299,13 @@ _CANARY_DELEGATION_PROVENANCE = ModelDelegationProvenance(
     requested_by="chain-canary",
 )
 
+# The delegate request the canary publishes (OMN-23566): the same workflow
+# identity and event type the workflow gateway stamped for the delegate-skill
+# workflow, with the canary named as the source of the envelope.
+_CANARY_WORKFLOW_TYPE = "delegate-skill"
+_CANARY_EVENT_TYPE = "omnimarket.delegate-skill"
+_CANARY_SOURCE_TOOL = "chain-canary"
+
 # The FSM states that count as terminal in delegation_workflow_state. Anything
 # else that exists as a row is stranded mid-flight — OMN-14843 measured
 # INFERENCE_COMPLETED, RECEIVED and ROUTED, but the set is defined by what IS
@@ -391,120 +391,65 @@ def _readback_window_seconds(
     return max(float(request.terminal_readback_timeout_seconds), remaining_s)
 
 
-async def _post_skill_via_httpx(
-    url: str, body: dict[str, object], timeout_s: float
+async def _publish_to_bus_via_aiokafka(
+    bootstrap: str,
+    topic: str,
+    envelope: dict[str, object],
+    timeout_s: float,
 ) -> tuple[dict[str, object] | None, str, int]:
-    """POST the delegation command to the runtime's generic /skill edge."""
-    started = time.monotonic()
-    try:
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
-            response = await client.post(url, json=body)
-    except Exception as exc:  # noqa: BLE001 - transport failures are a verdict
-        elapsed_ms = int((time.monotonic() - started) * 1000)
-        return None, sanitize_error_message(exc), elapsed_ms
-    elapsed_ms = int((time.monotonic() - started) * 1000)
+    """Publish the delegate request on the lane's broker (OMN-23566).
 
-    # A non-2xx is still an answer from the ingress, and its body usually
-    # carries the typed error. Decode first, classify on content.
-    try:
-        decoded = response.json()
-    except ValueError as exc:
-        return (
-            None,
-            f"ingress returned HTTP {response.status_code} with a non-JSON "
-            f"body: {sanitize_error_message(exc)}",
-            elapsed_ms,
-        )
-    if not isinstance(decoded, dict):
-        return (
-            None,
-            f"ingress returned HTTP {response.status_code} with a non-object body",
-            elapsed_ms,
-        )
-    return decoded, "", elapsed_ms
+    The canary used to submit over HTTP: through the separate API's
+    ``POST /v1/workflows`` (which resolved the tenant from a credential and
+    stamped it), or through the runtime's tenant-less ``/skill`` edge. Both are
+    gone. The probe now publishes the same command envelope the gateway
+    published, with the lane's tenant stamped on it by the caller.
 
+    THE RESULT IS AN ACK, NOT A VERDICT. A broker acknowledgement says the
+    record is on the topic; it says nothing about whether the chain
+    terminalized, so the returned dict carries ``ok`` and never a
+    terminal-event key and the verdict still comes from the correlation-scoped
+    broker readback (OMN-16931).
 
-async def _post_workflow_via_gateway(
-    url: str, body: dict[str, object], api_key: str, timeout_s: float
-) -> tuple[dict[str, object] | None, str, int]:
-    """Submit the delegation through the AUTHENTICATED gateway (OMN-18421).
-
-    Why this exists beside ``_post_skill_via_httpx`` rather than replacing it
-    inline: the two surfaces answer different questions. ``/skill`` answers
-    "did the runtime accept a command", with no identity attached to anything.
-    ``POST /v1/workflows`` answers "did an AUTHENTICATED TENANT's submission
-    reach the bus", and the gateway resolves the tenant from the credential and
-    stamps it on the published envelope. That stamp is the entire point: it is
-    the field omnimarket's delegation projection writer reads, and without it
-    every event the chain publishes is refused fail-closed, forever, however
-    healthy the chain itself is.
-
-    THE RESPONSE IS AN ACK, NOT A VERDICT, and this function deliberately does
-    not dress it up as one. A 202 says the envelope was published; it says
-    nothing about whether the chain terminalized. The returned dict therefore
-    carries ``ok`` and never a terminal-event key, so ``_extract_terminal``
-    reports nothing and the run's verdict comes, as it must, from the
-    correlation-scoped broker readback (OMN-16931). The gateway's publish path
-    is fail-open on an absent topic (it still answers 202), which is a second,
-    independent reason never to read a verdict off this response.
-
-    The API key is passed as an argument and sent in a header. It is never
-    logged, never echoed into the returned dict, and never placed on a command
-    line.
+    The topic is namespaced the same way the readback legs namespace theirs, so
+    the record lands on the topic the lane's consumers read.
     """
+    from aiokafka import AIOKafkaProducer
+
+    from omnibase_infra.event_bus.kafka_auth import (
+        build_aiokafka_auth_kwargs_from_env,
+    )
+
     started = time.monotonic()
+    namespaced = apply_topic_namespace_all((topic,))[0]
+    key = str(envelope.get("correlation_id", "")).encode()
+    value = json.dumps(envelope, sort_keys=True).encode()
+    producer = AIOKafkaProducer(
+        bootstrap_servers=bootstrap,
+        **build_aiokafka_auth_kwargs_from_env(),
+    )
     try:
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
-            response = await client.post(url, json=body, headers={"X-API-Key": api_key})
-    except Exception as exc:  # noqa: BLE001 - transport failures are a verdict
+        await asyncio.wait_for(producer.start(), timeout=timeout_s)
+        metadata = await asyncio.wait_for(
+            producer.send_and_wait(namespaced, value=value, key=key),
+            timeout=timeout_s,
+        )
+    except Exception as exc:  # noqa: BLE001 - a broker failure is a verdict
         elapsed_ms = int((time.monotonic() - started) * 1000)
         return None, sanitize_error_message(exc), elapsed_ms
+    finally:
+        try:
+            await producer.stop()
+        except Exception:  # noqa: BLE001 - closing must not mask the result
+            logger.debug("chain canary producer stop failed", exc_info=True)
     elapsed_ms = int((time.monotonic() - started) * 1000)
-
-    try:
-        decoded = response.json()
-    except ValueError as exc:
-        return (
-            None,
-            f"gateway returned HTTP {response.status_code} with a non-JSON "
-            f"body: {sanitize_error_message(exc)}",
-            elapsed_ms,
-        )
-    if not isinstance(decoded, dict):
-        return (
-            None,
-            f"gateway returned HTTP {response.status_code} with a non-object body",
-            elapsed_ms,
-        )
-
-    if response.status_code != 202:
-        # A refusal is an answer, not a transport failure, and its body carries
-        # the typed reason (`fenced: true` for a fenced catalog entry, a
-        # field-level list for a schema refusal, 401/403 for the credential).
-        # Returned in the shared ingress shape so the receipt renders it the
-        # same way it renders a `/skill` error.
-        return (
-            {
-                "ok": False,
-                "error": {
-                    "code": f"gateway_http_{response.status_code}",
-                    "message": json.dumps(decoded, sort_keys=True)[:600],
-                },
-            },
-            "",
-            elapsed_ms,
-        )
-
-    # Deliberately NOT the gateway's own correlation_id: the probe minted one
-    # and sent it, and the whole readback is keyed on the minted value. Echoing
-    # the gateway's is only useful as a cross-check, so it rides as a separate
-    # field rather than as the identifier anything reads.
     return (
         {
             "ok": True,
-            "gateway_accepted": True,
-            "gateway_workflow_id": str(decoded.get("workflow_id", "")),
-            "gateway_echoed_correlation_id": str(decoded.get("correlation_id", "")),
+            "bus_published": True,
+            "topic": namespaced,
+            "partition": metadata.partition,
+            "offset": metadata.offset,
         },
         "",
         elapsed_ms,
@@ -1030,10 +975,6 @@ def _kill_switch_engaged(raw: str) -> bool:
     return raw.strip().lower() in _KILL_SWITCH_TRUTHY_VALUES
 
 
-def _lookup_gateway_api_key(name: str) -> str:
-    return os.environ.get(name, "")  # ONEX_EXCLUDE
-
-
 def _lookup_projection_dsn_env(name: str) -> str:
     return os.environ.get(name, "")  # ONEX_EXCLUDE
 
@@ -1047,9 +988,7 @@ class HandlerChainCanary:
 
     def __init__(
         self,
-        ingress: TypeIngressPost | None = None,
-        gateway_ingress: TypeGatewayPost | None = None,
-        gateway_key_lookup: TypeGatewayKeyLookup | None = None,
+        bus_publish: TypeBusPublish | None = None,
         quarantine_scan: TypeQuarantineScan | None = None,
         terminal_readback: TypeTerminalReadback | None = None,
         projection_readback: TypeProjectionReadback | None = None,
@@ -1063,13 +1002,7 @@ class HandlerChainCanary:
         sleep: TypeSleep | None = None,
         deploy_poll_seconds: float = _DEPLOY_POLL_SECONDS,
     ) -> None:
-        self._ingress: TypeIngressPost = ingress or _post_skill_via_httpx
-        self._gateway_ingress: TypeGatewayPost = (
-            gateway_ingress or _post_workflow_via_gateway
-        )
-        self._gateway_key_lookup: TypeGatewayKeyLookup = (
-            gateway_key_lookup or _lookup_gateway_api_key
-        )
+        self._bus_publish: TypeBusPublish = bus_publish or _publish_to_bus_via_aiokafka
         self._quarantine_scan: TypeQuarantineScan = (
             quarantine_scan or _scan_quarantine_tail_via_aiokafka
         )
@@ -1366,9 +1299,8 @@ class HandlerChainCanary:
         """Wait for the agent to be idle and the lane's readiness routes to answer.
 
         Converged means: the agent is readable, has no job in flight, is not
-        settling, reports ``state`` idle, and ``{probe_url}/health`` (plus
-        ``{gateway_url}/health`` when the tenant-bearing route is declared)
-        answers 200. An unreadable agent is never converged. Always reads at
+        settling, reports ``state`` idle, and ``{probe_url}/health`` answers
+        200. An unreadable agent is never converged. Always reads at
         least once, so a zero budget still recognises a lane that is already
         converged. Returns ``(converged, seconds waited)``.
         """
@@ -1381,10 +1313,6 @@ class HandlerChainCanary:
                 ready = await self._lane_ready(
                     request.probe_url, _DEPLOY_READ_TIMEOUT_SECONDS
                 )
-                if ready and request.gateway_url:
-                    ready = await self._lane_ready(
-                        request.gateway_url, _DEPLOY_READ_TIMEOUT_SECONDS
-                    )
                 if ready:
                     return True, (self._clock() - started).total_seconds()
             waited = (self._clock() - started).total_seconds()
@@ -1399,56 +1327,59 @@ class HandlerChainCanary:
         # AC1: minted here, per run, never caller-supplied.
         probe_correlation_id = uuid4()
 
-        # OMN-18421: the TENANT-BEARING route when one is declared.
+        # OMN-23566: the delegate request is PUBLISHED ON THE BUS, stamped with
+        # the lane's tenant. The separate HTTP API that used to resolve a
+        # tenant from a credential is gone, and so is the tenant-less `/skill`
+        # route it was the alternative to.
         #
-        # There is deliberately no fallback from here to the tenant-less
-        # `/skill` ingress. A canary that quietly submits the unattributed way
-        # when the authenticated way is unavailable reports PROBE-GREEN on a
-        # chain whose every event the delegation projection writer refuses
-        # fail-closed for want of attribution -- which is exactly the
-        # false-clean that let the malformed sink take continuous arrivals
-        # while this probe said the chain was alive. A missing prerequisite is
-        # RED, naming what is missing.
-        submission_url = (
-            f"{request.gateway_url}/v1/workflows"
-            if request.gateway_url
-            else f"{request.probe_url}/skill"
-        )
-        base_probe_url = request.gateway_url or request.probe_url
+        # There is deliberately no fallback from here to any tenant-less
+        # submission. A canary that quietly submits the unattributed way when
+        # the tenant is unavailable reports PROBE-GREEN on a chain whose every
+        # event the delegation projection writer refuses fail-closed for want
+        # of attribution -- the false-clean that let the malformed sink take
+        # continuous arrivals while this probe said the chain was alive. A
+        # missing prerequisite is RED, naming what is missing.
+        command_topic = EnumOmnimarketTopic.CMD_DELEGATE_SKILL_V1.value
+        submission_target = f"bus topic {command_topic}"
+        base_probe_url = request.probe_url
 
-        if request.gateway_url:
-            api_key = self._gateway_key_lookup(request.gateway_api_key_env)
-            if not api_key:
-                return self._submission_route_not_configured(
-                    request,
-                    probe_correlation_id,
-                    submission_url,
-                    base_probe_url,
-                    detail=(
-                        f"the tenant-bearing submission route {submission_url} is "
-                        f"declared, and the environment variable it names for the "
-                        f"gateway credential, {request.gateway_api_key_env!r}, is "
-                        f"unset or empty in this process. Nothing was published and "
-                        f"no claim is made about the chain. Injecting the value "
-                        f"under that name is the whole repair; submitting through "
-                        f"the tenant-less {request.probe_url}/skill ingress instead "
-                        f"would produce a chain that is refused fail-closed by the "
-                        f"delegation projection writer on every hop, which is what "
-                        f"this route exists to stop."
-                    ),
-                )
-            response, transport_error, elapsed_ms = await self._gateway_ingress(
-                submission_url,
-                self._build_gateway_body(request, str(probe_correlation_id)),
-                api_key,
-                (request.budget_ms / 1000.0) + _CLIENT_SLACK_SECONDS,
+        if not request.tenant_id:
+            return self._submission_route_not_configured(
+                request,
+                probe_correlation_id,
+                submission_target,
+                base_probe_url,
+                detail=(
+                    "no tenant_id was declared for this lane, so the delegate "
+                    f"request cannot be stamped for publication on "
+                    f"{command_topic}. Nothing was published and no claim is "
+                    "made about the chain. Declaring the lane's tenant id is "
+                    "the whole repair; submitting without a tenant would "
+                    "produce a chain that is refused fail-closed by the "
+                    "delegation projection writer on every hop, which is what "
+                    "this probe exists to catch."
+                ),
             )
-        else:
-            response, transport_error, elapsed_ms = await self._ingress(
-                submission_url,
-                self._build_body(request, str(probe_correlation_id)),
-                (request.budget_ms / 1000.0) + _CLIENT_SLACK_SECONDS,
+        if not request.terminal_bootstrap_servers.strip():
+            return self._submission_route_not_configured(
+                request,
+                probe_correlation_id,
+                submission_target,
+                base_probe_url,
+                detail=(
+                    "no broker was declared for this lane "
+                    "(terminal_bootstrap_servers is empty), so the delegate "
+                    f"request cannot be published on {command_topic}. Nothing "
+                    "was published and no claim is made about the chain."
+                ),
             )
+        response, transport_error, elapsed_ms = await self._bus_publish(
+            request.terminal_bootstrap_servers,
+            command_topic,
+            self._build_delegate_envelope(request, str(probe_correlation_id)),
+            (request.budget_ms / 1000.0) + _CLIENT_SLACK_SECONDS,
+        )
+        submission_url = submission_target
 
         base = {
             "correlation_id": request.correlation_id,
@@ -1636,8 +1567,8 @@ class HandlerChainCanary:
             quarantine_topic=request.quarantine_topic,
             detail=detail,
             link_verdicts=_all_links_unevaluated(
-                f"no submission was made: {submission_url} is declared and "
-                "its credential is not configured"
+                f"no submission was made: {submission_url} cannot be "
+                "published to because its prerequisite is not configured"
             ),
             links_proven=0,
             links_total=len(EnumChainLink),
@@ -1645,67 +1576,51 @@ class HandlerChainCanary:
         )
 
     @staticmethod
-    def _build_gateway_body(
+    def _build_delegate_envelope(
         request: ModelChainCanaryRequest, probe_correlation_id: str
     ) -> dict[str, object]:
-        """The gateway submission shape (``ModelWorkflowSubmitRequest``).
+        """The delegate-skill command envelope, stamped with the lane tenant.
 
-        Three top-level keys and nothing else. ``ModelWorkflowSubmitRequest`` is
-        ``extra="forbid"``, and the catalog's ``payload_schema`` declares
-        ``additionalProperties: false`` -- both deliberately, so a caller cannot
-        smuggle a ``topic``, a ``command_topic`` or a ``tenant_id`` into a
-        submission. Users submit workflows, not routing instructions, and the
-        tenant is resolved from the credential, never accepted from the body.
-
-        That is why this builder is SMALLER than ``_build_body`` above rather
-        than a superset of it. The ``/skill`` shape carries ``command_name``,
-        ``timeout_ms``, ``provenance``, ``wait`` and ``metadata``; none of those
-        are the gateway's to accept, and passing any of them is a 400 rather
-        than a field the gateway ignores. The probe's minted correlation id
-        rides at the TOP level, which is where ``ModelWorkflowSubmitRequest``
-        declares it, and the gateway copies it onto both the envelope and the
-        payload -- so the correlation-scoped readbacks key on the same value
-        they always have.
+        The same wire shape the workflow gateway published for the
+        ``delegate-skill`` workflow: the payload keys the delegate-skill
+        consumer reads, the probe's minted correlation id on both the envelope
+        and the payload (so the correlation-scoped readbacks key on the value
+        they always have), and the tenant on both the envelope and the payload
+        -- the field omnimarket's delegation projection writer reads.
         """
+        emitted_at = _utc_now().isoformat().replace("+00:00", "Z")
         return {
-            "workflow_type": request.gateway_workflow_type,
-            "correlation_id": probe_correlation_id,
             "payload": {
                 "prompt": request.prompt,
                 "task_type": request.task_type,
                 "source": _CANARY_DELEGATION_PROVENANCE.source,
                 "max_tokens": request.max_tokens,
-            },
-        }
-
-    @staticmethod
-    def _build_body(
-        request: ModelChainCanaryRequest, probe_correlation_id: str
-    ) -> dict[str, object]:
-        """The recorded dispatch shape (omnidash server/routes.ts:216-234).
-
-        Kept deliberately identical to what the dashboard sends, so a green
-        canary is evidence about the path real callers take rather than
-        about a bespoke probe-only path that could drift away from it.
-        """
-        provenance = _CANARY_DELEGATION_PROVENANCE
-        return {
-            "command_name": request.runtime_command,
-            "correlation_id": probe_correlation_id,
-            "timeout_ms": request.budget_ms,
-            "payload": {
-                "prompt": request.prompt,
-                "task_type": request.task_type,
-                "source": provenance.source,
-                "provenance": provenance.model_dump(mode="json"),
-                "wait": True,
+                # The typed synthetic marker (OMN-18172): the bus has no
+                # gateway schema in front of it, so the governed provenance
+                # travels whole and the projection stores the run as
+                # synthetic rather than unclassified.
+                "provenance": _CANARY_DELEGATION_PROVENANCE.model_dump(mode="json"),
                 "correlation_id": probe_correlation_id,
-                "max_tokens": request.max_tokens,
-                "metadata": {
-                    "requested_by": provenance.requested_by,
-                    "source_surface": provenance.source_surface,
+                "tenant_id": str(request.tenant_id),
+            },
+            "envelope_id": str(uuid4()),
+            "envelope_timestamp": emitted_at,
+            "correlation_id": probe_correlation_id,
+            "tenant_id": str(request.tenant_id),
+            "source_tool": _CANARY_SOURCE_TOOL,
+            "metadata": {
+                "headers": {},
+                "tags": {
+                    "workflow_type": _CANARY_WORKFLOW_TYPE,
+                    "source_tenant_id": str(request.tenant_id),
+                    "source_gateway_instance": _CANARY_SOURCE_TOOL,
                 },
             },
+            "event_type": _CANARY_EVENT_TYPE,
+            "priority": 5,
+            "retry_count": 0,
+            "onex_version": {"major": 1, "minor": 0, "patch": 0},
+            "envelope_version": {"major": 2, "minor": 1, "patch": 0},
         }
 
     async def _replay_ledger(
@@ -2323,24 +2238,15 @@ def _build_link_verdicts(
             ),
             detail=(
                 (
-                    # OMN-18421: name the route that was taken, and say which
-                    # kind it was. A receipt that says only "the ingress
-                    # answered" cannot distinguish an authenticated submission
-                    # from a tenant-less one, and that distinction is the whole
-                    # difference between a chain that projects and a chain
-                    # that is refused on every hop.
-                    f"the live tenant-bearing gateway at "
-                    f"{request.gateway_url}/v1/workflows accepted the "
-                    "submission and the probe's correlation id went on the wire"
-                    if request.gateway_url
-                    else f"the live {request.probe_url}/skill ingress answered "
-                    "and the probe's correlation id went on the wire -- this "
-                    "route carries NO tenant, so every event the resulting "
-                    "chain publishes is unattributed and is refused by the "
-                    "delegation projection writer (OMN-18421)"
+                    # OMN-23566: name the route that was taken. The submission
+                    # is a bus publish stamped with the lane tenant; there is
+                    # no other route.
+                    "the delegate request was published on the bus with the "
+                    "lane's tenant and the probe's correlation id went on the "
+                    "wire"
                 )
                 if ingress_reachable
-                else "the live ingress could not be reached at all"
+                else "the lane's broker could not be published to"
             ),
         ),
         ModelChainLinkVerdict(

@@ -45,7 +45,8 @@ _STORE_NAMES = {
     "CHAIN_CANARY_GATEWAY_API_KEY": "STABILITY_TEST_CHAIN_CANARY_GATEWAY_API_KEY",
 }
 _NEEDS = {
-    _C15: set(_STORE_NAMES),
+    # OMN-23566: C15 submits over the bus; it carries no gateway credential.
+    _C15: set(_STORE_NAMES) - {"CHAIN_CANARY_GATEWAY_API_KEY"},
     _C16: {
         "KAFKA_SASL_USERNAME",
         "KAFKA_SASL_PASSWORD",

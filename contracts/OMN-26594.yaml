@@ -79,6 +79,14 @@ dod_evidence:
     source: manual
     binds_ac:
       - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_lazy_start_attach_no_live_dispatcher_omn26594.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26594-ac5
+    description: 'AC5: the test that fails at origin/dev pins that the attach of a NO_LIVE_DISPATCHER contract returns; the dev log read below is the deploy-time check.'
+    source: manual
+    binds_ac:
       - AC5
     checks:
       - check_type: test_passes
@@ -119,6 +127,14 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/runtime/test_lazy_start_db_io_topology_omn26594.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26594-integration-proof-attach
+    description: 'A really wired standalone-runner contract attaches through the real subscribe step and transaction without raising did not attach.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_lazy_start_attach_no_live_dispatcher_omn26594.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
   - id: dod-omn26594-handler-deps-integration-proof
     description: 'The real node_runtime_manifest_reducer contract wires through a real lazy-start transaction with the kernel dependency map.'
