@@ -10,7 +10,7 @@
 # ------------------------------------
 # Both predecessors drive omniclaude/scripts/prune-worktrees.sh, which removes a
 # clean, pushed, merged worktree with `git worktree remove --force` and reads
-# docs/tracking/ROLLING_WORK_LEDGER.md nowhere. Clean-and-pushed-and-merged is
+# the rolling work ledger nowhere. Clean-and-pushed-and-merged is
 # precisely the state a LIVE lane occupies between its push and its post-merge
 # verification, which is the hazard OMN-15551 measured. This unit runs
 # worktree_auto_prune.py instead, whose predicate additionally requires no open
