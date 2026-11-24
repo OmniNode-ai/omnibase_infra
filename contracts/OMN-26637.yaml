@@ -1,0 +1,73 @@
+schema_version: 1.0.0
+ticket_id: OMN-26637
+title: "dev deploy queue: a newer dev build request cancels every older queued request"
+summary: >-
+  The dev deploy agent's coalesce path folded a queued request into a newer one only when git proved the older ref an ancestor of the newer, so a queue of squash-merge commits ran oldest-first at about 28 minutes each. For the dev lane the agent now supersedes every older queued request of the lane when it accepts a newer one, whatever the ancestry, and records each with one reason naming the accepting request. The dev lane builds only a ref its tracking branch contains and refuses any other with the typed reason not_a_merged_ref. The rebuild trigger publisher refuses a source that is a PR head. tracking_ref.py, the health gate, the boot guard, the compose wait and the start period are not touched.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26637-newer-request-cancels-older-queued
+    statement: Accepting a dev build request supersedes and cancels every older queued dev request, whatever their git ancestry, each recorded with one superseded reason naming the accepting request.
+    acceptance:
+      - id: AC1
+        statement: "AC1: accepting a dev build request cancels every older queued dev request regardless of git ancestry, each recorded with one superseded reason naming the accepting request -- falsifier: uv run pytest tests -k supersede_dev_queue fails at origin/dev and passes on the PR branch"
+  - id: req-omn26637-dev-takes-merged-refs-only
+    statement: The dev lane accepts only a request whose ref its tracking branch contains, and refuses a PR head with a typed reason.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the dev lane accepts only requests whose ref is a merged dev-branch ref, and a PR-head request is refused for dev with a typed reason -- falsifier: uv run pytest tests -k dev_accepts_only_merged_refs fails at origin/dev and passes on the PR branch"
+  - id: req-omn26637-publisher-refuses-pr-head
+    statement: The rebuild trigger publisher refuses a start command whose source is a PR head or belongs to an unmerged PR, and both workflows that run it pass the pull-request event's own facts.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the workflow or node that publishes PR-head build commands for the dev lane is named in the PR body and no longer targets dev -- falsifier: uv run pytest tests -k pr_head_not_published_to_dev fails at origin/dev and passes on the PR branch"
+  - id: req-omn26637-superseded-record-readback
+    statement: A superseded job record is plain JSON in the dev jobs state directory with status superseded, the accepting request's correlation id, and exactly one reason that names it.
+    acceptance:
+      - id: AC4
+        statement: "AC4: integrated: on the running dev deploy agent, a new dev build request accepted while older requests are queued leaves none of them queued and each job record carries one superseded reason, read back from the dev jobs state directory -- falsifier: on the running dev deploy agent, ssh to the dev host through the declared remote path and list the dev jobs state directory, read back, a queued older request or a record with no superseded reason fails it"
+evidence_requirements:
+  - kind: tests
+    description: The dev queue supersede, the merged-ref fence and the publisher refusal of a PR head.
+    command: uv run --frozen pytest tests/ci/test_dev_queue_supersede_omn26637.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The existing coalesce, lineage fence and rejection-reason suites of the deploy agent still pass.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py scripts/deploy-agent/tests/unit/test_lineage_fence_omn19270.py scripts/deploy-agent/tests/unit/test_every_rejection_reason_publishes_omn17079.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26637-ac1-supersede-dev-queue
+    description: Four queued dev requests whose refs no sha contains are folded into the newest, each record superseded with one reason naming it; the same batch with the lane unnamed folds nothing.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_queue_supersede_omn26637.py -k supersede_dev_queue -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26637-ac2-dev-accepts-only-merged-refs
+    description: A PR head is refused with not_a_merged_ref and its offset committed, a merged ref is accepted, and a PR head behind a merge never becomes the runner.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_queue_supersede_omn26637.py -k dev_accepts_only_merged_refs -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26637-ac3-pr-head-not-published-to-dev
+    description: The publisher exits 1 for an unmerged PR and for a source equal to the PR head, and both workflows pass the event's merged state and head sha.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_queue_supersede_omn26637.py -k pr_head_not_published_to_dev -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26637-ac4-superseded-record-shape
+    description: A superseded record written by the job store lists from the jobs state directory as JSON with status superseded, the accepting correlation id and one reason naming it. The live readback on the running agent is a post-merge step recorded in the ticket.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_queue_supersede_omn26637.py -k two_readbacks_agree -q --no-cov -n 0 -p no:randomly
+        cwd: .

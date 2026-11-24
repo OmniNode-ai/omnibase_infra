@@ -1,54 +1,53 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Kafka consumer with acceptance protocol.
-
-POISON PILLS ARE QUARANTINED, NEVER RE-READ FOREVER (OMN-16442)
----------------------------------------------------------------
-
-``onex.cmd.deploy.rebuild-requested.v1`` is a control topic with one consumer:
-this agent. A record it cannot decode used to take the whole control plane
-down, because the failure happened *before* the offset commit and redelivery
-reproduced it exactly. Measured on the .201 dev lane on 2026-09-08: one record
-published with snappy compression by an ``rpk topic produce`` default, against
-a ``kafka-python`` client with no snappy codec installed, raised
-``UnsupportedCodecError`` on every poll -- twelve crashes in sixty seconds, six
-systemd restarts, then the start limit, ``ActiveState=failed``. Nothing on the
-host could recover it: every restart re-read the same offset.
-
-Two distinct classes reach the agent, and they surface in different places:
-
-* **Fetch-level** -- the batch cannot be decompressed or is corrupt on the
-  wire. ``kafka-python`` raises inside ``poll()``; no record object exists, so
-  the offset must be recovered from the consumer's own position.
-* **Record-level** -- the bytes decompress but are not a JSON object, or are a
-  JSON object that ``ModelRebuildRequested`` refuses. A record object exists
-  and names its own partition and offset.
-
-Both are quarantined the same way: a durable local record, a best-effort
-dead-letter publish, a CRITICAL log, and **the offset committed past it**.
-
-WHY COMMITTING IS RIGHT HERE, WHERE THE BOUNDARY DLQ WITHHOLDS
---------------------------------------------------------------
-
-``omnibase_infra.runtime.auto_wiring`` deliberately withholds the offset when a
-dead-letter write is not durable (``BoundaryDlqNotPersistedError``): there, the
-record still exists on the source topic, so withholding preserves it for the
-rewind path. That argument does not transfer. A command this agent cannot
-decode can never be decoded by redelivery -- retrying is not recovery, it is
-the outage -- and the cost of withholding is not one lost record but every
-subsequent deploy command on the partition, which is what actually happened.
-So the commit is unconditional and the durability is best-effort *and*
-recorded, in that order. The gateway-delivery path made the same call for the
-same reason (OMN-15748).
-
-WHAT IS DELIBERATELY *NOT* QUARANTINED
---------------------------------------
-
-Only the two decode-failure error classes are caught at fetch level. A broker
-that is down, a SASL handshake that fails, a rebalance -- all of those are
-transient and must NOT advance an offset, so they propagate. Skipping records
-because the network hiccuped would be a worse failure than the one this fixes.
-"""
+# Kafka consumer with acceptance protocol.
+#
+# POISON PILLS ARE QUARANTINED, NEVER RE-READ FOREVER (OMN-16442)
+# ---------------------------------------------------------------
+#
+# ``onex.cmd.deploy.rebuild-requested.v1`` is a control topic with one consumer:
+# this agent. A record it cannot decode used to take the whole control plane
+# down, because the failure happened *before* the offset commit and redelivery
+# reproduced it exactly. Measured on the lab dev lane on 2026-09-08: one record
+# published with snappy compression by an ``rpk topic produce`` default, against
+# a ``kafka-python`` client with no snappy codec installed, raised
+# ``UnsupportedCodecError`` on every poll -- twelve crashes in sixty seconds, six
+# systemd restarts, then the start limit, ``ActiveState=failed``. Nothing on the
+# host could recover it: every restart re-read the same offset.
+#
+# Two distinct classes reach the agent, and they surface in different places:
+#
+# * **Fetch-level** -- the batch cannot be decompressed or is corrupt on the
+#   wire. ``kafka-python`` raises inside ``poll()``; no record object exists, so
+#   the offset must be recovered from the consumer's own position.
+# * **Record-level** -- the bytes decompress but are not a JSON object, or are a
+#   JSON object that ``ModelRebuildRequested`` refuses. A record object exists
+#   and names its own partition and offset.
+#
+# Both are quarantined the same way: a durable local record, a best-effort
+# dead-letter publish, a CRITICAL log, and **the offset committed past it**.
+#
+# WHY COMMITTING IS RIGHT HERE, WHERE THE BOUNDARY DLQ WITHHOLDS
+# --------------------------------------------------------------
+#
+# ``omnibase_infra.runtime.auto_wiring`` deliberately withholds the offset when a
+# dead-letter write is not durable (``BoundaryDlqNotPersistedError``): there, the
+# record still exists on the source topic, so withholding preserves it for the
+# rewind path. That argument does not transfer. A command this agent cannot
+# decode can never be decoded by redelivery -- retrying is not recovery, it is
+# the outage -- and the cost of withholding is not one lost record but every
+# subsequent deploy command on the partition, which is what actually happened.
+# So the commit is unconditional and the durability is best-effort *and*
+# recorded, in that order. The gateway-delivery path made the same call for the
+# same reason (OMN-15748).
+#
+# WHAT IS DELIBERATELY *NOT* QUARANTINED
+# --------------------------------------
+#
+# Only the two decode-failure error classes are caught at fetch level. A broker
+# that is down, a SASL handshake that fails, a rebalance -- all of those are
+# transient and must NOT advance an offset, so they propagate. Skipping records
+# because the network hiccuped would be a worse failure than the one this fixes.
 
 from __future__ import annotations
 
@@ -103,6 +102,7 @@ from deploy_agent.lineage_fence import (
 )
 from deploy_agent.load_gate import EnumLoadGateVerdict, LoadGate
 from deploy_agent.queue_depth import LagSampler, ModelControlTopicLag
+from deploy_agent.ref_fence import decide_merged_ref
 from deploy_agent.routing import (
     ROUTED_LANES,
     DeployRouter,
@@ -276,6 +276,12 @@ class DeployConsumer:
     #: Lane flags (``deploy_agent.routing`` lane flags): ``flags.freeze`` refuses every
     #: command of this instance's but a promotion, as ``frozen``.
     lane_flags: ModelLaneFlags | None = None
+    #: OMN-26637, on the same terms as every attribute above: a consumer built
+    #: without lane sets supersedes no queue outright and refuses no unmerged
+    #: ref, which is the pre-change behaviour. The agent injects
+    #: ``lane_policy.SUPERSEDING_LANES`` and ``lane_policy.MERGED_REF_LANES``.
+    supersede_lanes: frozenset[EnumRuntimeLane] = frozenset()
+    merged_ref_lanes: frozenset[EnumRuntimeLane] = frozenset()
 
     def __init__(
         self,
@@ -296,6 +302,8 @@ class DeployConsumer:
         host_slot_owner: str = "deploy-agent",
         load_gate: LoadGate | None = None,
         lane_flags: ModelLaneFlags | None = None,
+        supersede_lanes: frozenset[EnumRuntimeLane] = frozenset(),
+        merged_ref_lanes: frozenset[EnumRuntimeLane] = frozenset(),
     ) -> None:
         # OMN-19506 AC3. Each deploy-agent instance reads EVERY record, so each
         # subscribes with its own declared group: in one shared group Kafka
@@ -308,6 +316,8 @@ class DeployConsumer:
         self.load_gate = load_gate
         self.load_gate_paused = None
         self.lane_flags = lane_flags
+        self.supersede_lanes = supersede_lanes
+        self.merged_ref_lanes = merged_ref_lanes
         self.consumer = KafkaConsumer(
             apply_topic_namespace(TOPIC_REBUILD_REQUESTED),
             **kafka_config.consumer_kwargs(),
@@ -523,24 +533,23 @@ class DeployConsumer:
         raw: object = None,
         cmd: ModelRebuildRequested | None = None,
     ) -> str:
-        """Fire the rejection hook and return the reason token the caller returns.
-
-        OMN-17079. Returning the token keeps every call site a one-liner
-        (``return None, self._reject(...)``), so a future refusal cannot be added as a
-        bare ``return None, "reason"`` without visibly departing from the shape its six
-        neighbours use.
-
-        THE IDENTIFIERS ARE RESOLVED, NEVER INVENTED. With a validated ``cmd`` both come
-        straight off it. Without one -- an undecodable record, a bad signature, a payload
-        the contract refuses -- this parses what the raw record still offers and records
-        ``None`` for whatever will not parse. A notice carrying ``None`` cannot become an
-        event, which is the intended outcome: a rejection published under a fabricated
-        correlation id is a durable record pointing at a command that never existed.
-
-        Never raises. A refusal whose notification fails is still a refusal, and the
-        offset is already committed by the caller; losing the hook must not convert that
-        into an unhandled exception on the poll loop.
-        """
+        # Fire the rejection hook and return the reason token the caller returns.
+        #
+        # OMN-17079. Returning the token keeps every call site a one-liner
+        # (``return None, self._reject(...)``), so a future refusal cannot be added as a
+        # bare ``return None, "reason"`` without visibly departing from the shape its six
+        # neighbours use.
+        #
+        # THE IDENTIFIERS ARE RESOLVED, NEVER INVENTED. With a validated ``cmd`` both come
+        # straight off it. Without one -- an undecodable record, a bad signature, a payload
+        # the contract refuses -- this parses what the raw record still offers and records
+        # ``None`` for whatever will not parse. A notice carrying ``None`` cannot become an
+        # event, which is the intended outcome: a rejection published under a fabricated
+        # correlation id is a durable record pointing at a command that never existed.
+        #
+        # Never raises. A refusal whose notification fails is still a refusal, and the
+        # offset is already committed by the caller; losing the hook must not convert that
+        # into an unhandled exception on the poll loop.
         correlation_id = cmd.correlation_id if cmd is not None else None
         scope: Scope | None = cmd.scope if cmd is not None else None
 
@@ -746,6 +755,21 @@ class DeployConsumer:
         # the tracking branch is refused. A signed rollback declaration is the
         # one way backwards. Every comparison the host cannot make lets the
         # command build as requested.
+        # Step 6a0: Merged-ref fence (OMN-26637). A lane in ``merged_ref_lanes``
+        # builds only a ref its tracking branch already contains. A PR head is
+        # refused with its own typed reason, offset committed, nothing run.
+        if self._not_a_merged_ref(cmd):
+            logger.warning(
+                "Rejecting command %s: ref %s is not contained in %s, and lane %s "
+                "builds merged refs only",
+                cmd.correlation_id,
+                cmd.git_ref,
+                self.tracking_ref,
+                cmd.runtime_lane.value,
+            )
+            self._commit_through(msg, replay_from=replay_from)
+            return None, self._reject(EnumRejectionReason.NOT_A_MERGED_REF, cmd=cmd)
+
         lineage = self._lineage_decision(cmd, msg)
         if lineage is not None and lineage.verdict.refuses:
             logger.warning(
@@ -775,7 +799,9 @@ class DeployConsumer:
         # self-update boundary, the accept, the commit and the returned
         # command -- is about the RUNNER, which is this message only when
         # nothing was folded.
-        runner_cmd, runner_msg, superseded_ids = self._coalesce(cmd, msg, lookahead)
+        runner_cmd, runner_msg, superseded_ids, runner_lineage = self._coalesce(
+            cmd, msg, lookahead, lineage
+        )
 
         # Step 7: Self-update boundary (OMN-16442). This is the last point at
         # which nothing is in flight: the command has passed every acceptance
@@ -807,9 +833,10 @@ class DeployConsumer:
 
         # Step 8: Persist job state. The lineage decision is the head's, so it
         # is recorded, and its build ref applied, only when the head is what
-        # runs. A folded runner descends from a head the fence found at or
-        # ahead of the running build, so it builds its own ref.
-        runner_lineage = lineage if runner_cmd is cmd else None
+        # runs. A runner folded by containment descends from a head the fence
+        # found at or ahead of the running build, so it builds its own ref. A
+        # runner folded by queue supersede (OMN-26637) carries no such proof, so
+        # ``_coalesce`` ran the fence on it and hands back that decision.
         self.job_store.accept(
             correlation_id=runner_cmd.correlation_id,
             command=self._command_payload(runner_msg),
@@ -930,22 +957,37 @@ class DeployConsumer:
         return {k: v for k, v in msg.value.items() if k != "_signature"}
 
     # ── coalescing (OMN-18143) ───────────────────────────────────────────────
+    def _not_a_merged_ref(self, cmd: ModelRebuildRequested) -> bool:
+        # Whether ``cmd`` is proven to name a ref its lane's branch lacks (OMN-26637).
+        if self.ancestry_resolver is None:
+            return False
+        return decide_merged_ref(
+            cmd,
+            lanes=self.merged_ref_lanes,
+            tracking_ref=self.tracking_ref,
+            contains=self.ancestry_resolver,
+        ).refuses
+
     def _coalesce(
         self,
         cmd: ModelRebuildRequested,
         msg: Any,
         lookahead: list[Any] | None,
-    ) -> tuple[ModelRebuildRequested, Any, list[UUID]]:
-        """Decide which of the fetched batch runs; record the ones it replaces.
-
-        Returns the command to run, its Kafka record, and the correlation ids
-        it superseded. With no resolver, no look-ahead, or nothing foldable,
-        it returns the head unchanged and an empty list -- the pre-change
-        behaviour, reached by the same code path rather than by a branch
-        around it.
-        """
+        head_lineage: ModelLineageDecision | None,
+    ) -> tuple[ModelRebuildRequested, Any, list[UUID], ModelLineageDecision | None]:
+        # Decide which of the fetched batch runs; record the ones it replaces.
+        #
+        # Returns the command to run, its Kafka record, the correlation ids it
+        # superseded and the lineage decision that applies to the runner. With no
+        # resolver, no look-ahead, or nothing foldable, it returns the head
+        # unchanged, an empty list and the head's own decision -- the pre-change
+        # behaviour, reached by the same code path rather than by a branch
+        # around it.
+        unchanged: tuple[
+            ModelRebuildRequested, Any, list[UUID], ModelLineageDecision | None
+        ] = (cmd, msg, [], head_lineage)
         if self.ancestry_resolver is None or not lookahead:
-            return cmd, msg, []
+            return unchanged
 
         queued = [
             ModelQueuedCommand(command=cmd, partition=msg.partition, offset=msg.offset)
@@ -960,6 +1002,11 @@ class DeployConsumer:
                 # is the one place that owns refusing a command. The group
                 # ends here because the scan may not reorder around it.
                 break
+            if self._not_a_merged_ref(decoded):
+                # OMN-26637. Same rule, same reason: the head path refuses it
+                # with its typed reason when it reaches it, and an unmerged ref
+                # must never become the runner of a group.
+                break
             queued.append(
                 ModelQueuedCommand(
                     command=decoded,
@@ -969,15 +1016,41 @@ class DeployConsumer:
             )
             messages_by_offset[candidate.offset] = candidate
 
-        plan = plan_coalesce(queued, contains=self.ancestry_resolver)
+        plan = plan_coalesce(
+            queued,
+            contains=self.ancestry_resolver,
+            supersede_lanes=self.supersede_lanes,
+        )
         logger.info("%s", plan.journal_line())
         if not plan.superseded:
-            return cmd, msg, []
+            return unchanged
+
+        runner_msg = messages_by_offset[plan.runner.offset]
+        runner_lineage: ModelLineageDecision | None = None
+        if not plan.superseded[0].by_containment:
+            # OMN-26637. No ancestry proved the runner descends from the head
+            # the fence admitted, and queue order is publish order, which is
+            # not merge order: a stale merge published last would walk the lane
+            # backwards. Run the fence on the runner itself. One it refuses, or
+            # finds already in the running build, folds nothing: the head runs
+            # as it would have, and the rest is handled by later polls.
+            runner_lineage = self._lineage_decision(plan.runner.command, runner_msg)
+            if runner_lineage is not None and (
+                runner_lineage.verdict.refuses or runner_lineage.verdict.supersedes
+            ):
+                logger.info(
+                    "coalesce: queue supersede to %s is not taken, the lineage "
+                    "fence says %s; the head runs unfolded",
+                    plan.runner.command.correlation_id,
+                    runner_lineage.journal_line(),
+                )
+                return unchanged
 
         return (
             plan.runner.command,
-            messages_by_offset[plan.runner.offset],
+            runner_msg,
             self._record_supersessions(plan, messages_by_offset),
+            runner_lineage,
         )
 
     def _record_supersessions(
@@ -999,6 +1072,7 @@ class DeployConsumer:
                 command=self._command_payload(record_msg),
                 superseded_by_sha=supersession.superseded_by_sha,
                 superseded_by_correlation_id=supersession.superseded_by_correlation_id,
+                by_containment=supersession.by_containment,
             )
             logger.info(
                 "coalesce: %s (ref=%s) superseded by %s (ref=%s)",

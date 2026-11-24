@@ -1,81 +1,90 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Run the newest queued rebuild for a lane, and record the ones it replaced (OMN-18143).
-
-WHAT THIS COSTS TODAY, MEASURED
--------------------------------
-The agent drains its control topic in commit order at a mean service time of
-1799.8 s per job (``queue_depth.mean_service_time`` the night this was written).
-At 2026-09-19T02:58Z job ``52e430b2`` was staging ``f8475f9b``, sixteen commits
-behind ``origin/dev``. With roughly forty runtime-affecting merges in one night
-the lane spends hours rebuilding shas a later commit has already replaced,
-while the dev head waits at the back. The queue endpoint (OMN-18144) only
-observes; this module is the acting half.
-
-WHAT IS COALESCED, AND WHAT IS REFUSED
----------------------------------------
-A PREFIX of the queue, and only a prefix. The scan starts at the command the
-agent is about to accept and walks forward while each next command is
-foldable into the same group; the FIRST command that is not ends the group and
-stays queued, with everything behind it, so ordering is preserved exactly.
-Each refusal below ends the group and has its own reason in the journal:
-
-``DIFFERENT_LANE``
-    Different lanes mutate different compose projects; folding drops a deploy.
-
-``ROLLBACK_DECLARED``
-    A command carrying a signed rollback declaration (OMN-19270) is never
-    folded, in either direction: a newer command would undo the deliberate one.
-
-``NOT_FULL_SCOPE``
-    Only ``scope=full`` folds into ``scope=full``: the scope decides WHICH
-    services are recreated, so mixing scopes silently drops services. Narrower
-    than it has to be, because a ``core`` rebuild is not the job this stops.
-
-``SERVICES_DIFFER`` / ``BUILD_SOURCE_DIFFERS``
-    Same argument. A command naming services, or built from a different
-    source, is not the same work as the one ahead of it.
-
-``PINNED_IMAGE``
-    A command carrying ``image_ref`` or ``image_digest`` is a promotion of one
-    exact artifact, never folded. Every ``prod`` command trips this, since
-    ``ModelRebuildRequested`` refuses a prod request that carries no digest.
-
-``REF_NOT_A_SHA``
-    A branch alias resolves at BUILD time, so two aliases are not comparable
-    by ancestry. Only 40-hex pins fold.
-
-``ANCESTRY_UNPROVEN`` / ``NOT_A_DESCENDANT``
-    The load-bearing one. Coalescing is only safe when the sha that RUNS
-    contains the sha it replaces, or the replaced change is dropped silently.
-    The check is ``git merge-base --is-ancestor <earlier> <later>`` on
-    consecutive members, transitive across the group. An unresolvable
-    comparison (missing object, git failure, timeout) is ``ANCESTRY_UNPROVEN``
-    and ends the group, so every failure falls back to running every command
-    in order, exactly as before.
-
-``NOT_A_DESCENDANT`` AND THE JUMP (OMN-26316)
-    Refs that are each contained in a LATER command need not contain one
-    another. See ``_newest_containing``: the group jumps to the newest command
-    that contains everything it passes over, and otherwise ends here.
-
-``DUPLICATE_COMMAND``
-    A look-ahead record whose correlation id is already in the group is a
-    redelivered copy, not newer work (OMN-19521): folding it recorded the first
-    copy as superseded by its own id, and that raise crash-looped the agent on
-    2026-09-25. The copy ends the group and stays queued.
-
-WHY THERE IS NO KILL SWITCH
-----------------------------
-Every failure mode above degrades to the pre-change behaviour by construction,
-and an opt-out left set is how a lane silently loses the optimisation (rule 5).
-
-WHAT A SUPERSEDED COMMAND GETS
--------------------------------
-Not silence, and not a failure: a durable job record with status
-``superseded`` naming the sha and correlation id that ran in its place, and a
-terminal event on the rejection topic carrying the same two fields (OMN-18143 AC6).
-"""
+# Run the newest queued rebuild for a lane, and record the ones it replaced (OMN-18143).
+#
+# WHAT THIS COSTS TODAY, MEASURED
+# -------------------------------
+# The agent drains its control topic in commit order at a mean service time of
+# 1799.8 s per job (``queue_depth.mean_service_time`` the night this was written).
+# At 2026-09-19T02:58Z job ``52e430b2`` was staging ``f8475f9b``, sixteen commits
+# behind ``origin/dev``. With roughly forty runtime-affecting merges in one night
+# the lane spends hours rebuilding shas a later commit has already replaced,
+# while the dev head waits at the back. The queue endpoint (OMN-18144) only
+# observes; this module is the acting half.
+#
+# WHAT IS COALESCED, AND WHAT IS REFUSED
+# ---------------------------------------
+# A PREFIX of the queue, and only a prefix. The scan starts at the command the
+# agent is about to accept and walks forward while each next command is
+# foldable into the same group; the FIRST command that is not ends the group and
+# stays queued, with everything behind it, so ordering is preserved exactly.
+# Each refusal below ends the group and has its own reason in the journal:
+#
+# ``DIFFERENT_LANE``
+#     Different lanes mutate different compose projects; folding drops a deploy.
+#
+# ``ROLLBACK_DECLARED``
+#     A command carrying a signed rollback declaration (OMN-19270) is never
+#     folded, in either direction: a newer command would undo the deliberate one.
+#
+# ``NOT_FULL_SCOPE``
+#     Only ``scope=full`` folds into ``scope=full``: the scope decides WHICH
+#     services are recreated, so mixing scopes silently drops services. Narrower
+#     than it has to be, because a ``core`` rebuild is not the job this stops.
+#
+# ``SERVICES_DIFFER`` / ``BUILD_SOURCE_DIFFERS``
+#     Same argument. A command naming services, or built from a different
+#     source, is not the same work as the one ahead of it.
+#
+# ``PINNED_IMAGE``
+#     A command carrying ``image_ref`` or ``image_digest`` is a promotion of one
+#     exact artifact, never folded. Every ``prod`` command trips this, since
+#     ``ModelRebuildRequested`` refuses a prod request that carries no digest.
+#
+# ``REF_NOT_A_SHA``
+#     A branch alias resolves at BUILD time, so two aliases are not comparable
+#     by ancestry. Only 40-hex pins fold.
+#
+# ``ANCESTRY_UNPROVEN`` / ``NOT_A_DESCENDANT``
+#     The load-bearing one. Coalescing is only safe when the sha that RUNS
+#     contains the sha it replaces, or the replaced change is dropped silently.
+#     The check is ``git merge-base --is-ancestor <earlier> <later>`` on
+#     consecutive members, transitive across the group. An unresolvable
+#     comparison (missing object, git failure, timeout) is ``ANCESTRY_UNPROVEN``
+#     and ends the group, so every failure falls back to running every command
+#     in order, exactly as before.
+#
+# ``NOT_A_DESCENDANT`` AND THE JUMP (OMN-26316)
+#     Refs that are each contained in a LATER command need not contain one
+#     another. See ``_newest_containing``: the group jumps to the newest command
+#     that contains everything it passes over, and otherwise ends here.
+#
+# ``QUEUE SUPERSEDE`` (OMN-26637)
+#     For a lane named in ``supersede_lanes`` the ancestry questions above are not
+#     asked at all. Operator ruling 2026-11-24: when a new build comes out, every
+#     older queued build is cancelled. The static refusals still end the group,
+#     because they name work the newest command does not do (another lane, a
+#     declared rollback, a narrower scope, a pinned image); only the question
+#     "does the newer sha contain the older one" is dropped. Squash merges make
+#     sibling PR commits non-ancestors of each other's heads, so that question
+#     ended the group and the stale commands behind it each ran for ~28 minutes.
+#
+# ``DUPLICATE_COMMAND``
+#     A look-ahead record whose correlation id is already in the group is a
+#     redelivered copy, not newer work (OMN-19521): folding it recorded the first
+#     copy as superseded by its own id, and that raise crash-looped the agent on
+#     2026-09-25. The copy ends the group and stays queued.
+#
+# WHY THERE IS NO KILL SWITCH
+# ----------------------------
+# Every failure mode above degrades to the pre-change behaviour by construction,
+# and an opt-out left set is how a lane silently loses the optimisation (rule 5).
+#
+# WHAT A SUPERSEDED COMMAND GETS
+# -------------------------------
+# Not silence, and not a failure: a durable job record with status
+# ``superseded`` naming the sha and correlation id that ran in its place, and a
+# terminal event on the rejection topic carrying the same two fields (OMN-18143 AC6).
 
 from __future__ import annotations
 
@@ -90,7 +99,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from deploy_agent.events import ModelRebuildRequested, Scope
+from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested, Scope
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +172,10 @@ class ModelSupersession(BaseModel):
     superseded: ModelQueuedCommand
     superseded_by_sha: str
     superseded_by_correlation_id: UUID
+    #: ``True`` when ancestry proved the runner contains the replaced ref;
+    #: ``False`` when the lane's queue-supersede rule replaced it without asking
+    #: (OMN-26637). The job record states which, so a reader never has to infer.
+    by_containment: bool = True
 
     @model_validator(mode="after")
     def _by_sha_is_exact(self) -> ModelSupersession:
@@ -314,6 +327,7 @@ def plan_coalesce(
     queued: Sequence[ModelQueuedCommand],
     *,
     contains: AncestryResolver,
+    supersede_lanes: frozenset[EnumRuntimeLane] = frozenset(),
 ) -> ModelCoalescePlan:
     """Decide which of a fetched batch runs, and which it supersedes.
 
@@ -321,6 +335,10 @@ def plan_coalesce(
     The head is the validated command about to be accepted; the rest is
     look-ahead. Pure apart from ``contains``, the one callable behind every
     host fact.
+
+    ``supersede_lanes`` names the lanes whose queue is superseded outright
+    (OMN-26637): for a head on one of them every look-ahead command that passes
+    the static refusals folds into the newest, with no ancestry question.
     """
     if not queued:
         msg = "plan_coalesce needs at least the command being accepted"
@@ -330,6 +348,7 @@ def plan_coalesce(
     group = [head]
     stop_reason: EnumCoalesceRefusal | None = None
     examined = 0
+    supersede_queue = head.command.runtime_lane in supersede_lanes
     answers: dict[tuple[str, str], bool | None] = {}
 
     def known(earlier: str, later: str) -> bool | None:
@@ -357,6 +376,11 @@ def plan_coalesce(
         if refusal is not None:
             stop_reason = refusal
             break
+        if supersede_queue:
+            # OMN-26637. Newest wins, whatever git says about the pair.
+            group.append(candidate)
+            index += 1
+            continue
         # Consecutive comparison, not head-to-candidate: containment is
         # transitive, so a chain of proven links gives every member of the
         # group containment in the runner while costing one comparison per
@@ -381,6 +405,7 @@ def plan_coalesce(
             superseded=member,
             superseded_by_sha=runner.command.git_ref,
             superseded_by_correlation_id=runner.command.correlation_id,
+            by_containment=not supersede_queue,
         )
         for member in group[:-1]
     )
