@@ -36,8 +36,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.event_bus.enum_contract_attach_exclusion_reason import (
+    EnumContractAttachExclusionReason,
+)
 from omnibase_infra.event_bus.enum_contract_attach_status import (
     EnumContractAttachStatus,
+)
+from omnibase_infra.event_bus.model_contract_attach_exclusion import (
+    ModelContractAttachExclusion,
 )
 from omnibase_infra.event_bus.model_contract_attach_result import (
     ModelContractAttachResult,
@@ -79,6 +85,16 @@ if TYPE_CHECKING:
 __all__: list[str] = ["LazyStartRuntimeTransaction"]
 
 logger = logging.getLogger(__name__)
+
+
+def _boot_leaves_unsubscribed(
+    exclusions: list[ModelContractAttachExclusion],
+) -> bool:
+    """True when the boot's own subscribe step deliberately attaches nothing (OMN-26594)."""
+    return any(
+        e.reason is EnumContractAttachExclusionReason.NO_LIVE_DISPATCHER
+        for e in exclusions
+    )
 
 
 class RecordingBus:
@@ -131,6 +147,7 @@ class NodeStart:
     applier: DispatchResultApplier | None = None
     dispatcher_ids: tuple[str, ...] = ()
     attach_results: list[ModelContractAttachResult] = field(default_factory=list)
+    exclusions: list[ModelContractAttachExclusion] = field(default_factory=list)
 
 
 class LazyStartRuntimeTransaction:
@@ -214,7 +231,18 @@ class LazyStartRuntimeTransaction:
             provisioner=self._provisioner,
             readiness_config=self._readiness_config,
             attach_results_out=start.attach_results,
+            exclusions_out=start.exclusions,
         )
+        if not start.attach_results and _boot_leaves_unsubscribed(start.exclusions):
+            # OMN-26594: the boot keeps this contract and subscribes nothing for it
+            # (a standalone runner wires no live dispatcher, OMN-17562), so there is
+            # nothing to attach and the wake is complete.
+            logger.info(
+                "Lazy start: contract '%s' has no live dispatcher to attach; the boot "
+                "subscribes nothing for it either (OMN-26594)",
+                contract_name,
+            )
+            return
         outcome = [r.status for r in start.attach_results]
         if outcome != [EnumContractAttachStatus.ATTACHED]:
             details = [r.detail for r in start.attach_results]

@@ -43,6 +43,11 @@ requirements:
     acceptance:
       - id: AC9
         statement: "AC9: the lazy-start front door wakes every dormant consumer of a published topic at once and holds the message for at most one budget -- falsifier: uv run pytest tests/unit/handlers/test_lazy_start_heartbeat_wake_omn26316.py fails at origin/dev (7.2 s against a 2.5 s window for 20 dormant heartbeat consumers, 4 of which never wake) and passes on the PR branch"
+  - id: req-omn26316-overdue-dev-merge-build
+    statement: A dev runtime merge that has gone its window with no dev build is judged REQUEST with one request id per sha, and a merge a dev job carries, a job in flight, a failed head or a non-runtime merge never is.
+    acceptance:
+      - id: AC11
+        statement: "AC11: the overdue dev merge build decision judges omnibase_infra#6191 (merged 17:46:52Z, next dev job accepted 19:00:23Z) WAIT until 18:46:52Z and REQUEST from then until a dev job carries it -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_overdue_omn26316.py fails at origin/dev (the handler module is absent) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -56,6 +61,9 @@ evidence_requirements:
   - kind: tests
     description: The boot failure cause regression built from the dev boot ledger event of the 2026-11-23T20:52Z exit.
     command: uv run --frozen pytest tests/unit/runtime/test_boot_failure_cause_omn26316.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The overdue dev merge build decision driven by the real job records of omnibase_infra#6191.
+    command: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_omn26316.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -199,3 +207,20 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/runtime/test_boot_failure_cause_integration_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26316-overdue-dev-merge-build
+    description: "The decision reads the agent's recorded dev jobs and the merge time of omnibase_infra#6191: WAIT one second before the hour ends, REQUEST with one id per sha at it, and SATISFIED once the 19:00:23Z job completes; the stability job, the job accepted before the merge, a superseded job and a job pinned to another sha carry nothing."
+    source: manual
+    binds_ac: [AC11]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-overdue-deploy-live
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime container imports the overdue dev merge build handler this change adds. It reads the live container, which carries the module only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime python -c 'from omnibase_infra.handlers.handler_dev_merge_build_overdue import HandlerDevMergeBuildOverdue'

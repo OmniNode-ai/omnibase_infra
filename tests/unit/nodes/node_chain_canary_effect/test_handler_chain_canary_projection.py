@@ -80,6 +80,9 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readb
 # ever failing. `.invalid` cannot resolve, so it cannot reach anything.
 _PROBE_URL = "http://runtime.invalid:8085"
 _BOOTSTRAP = "broker.invalid:19092"
+# OMN-23566: the publish is stamped with the lane's tenant; empty is RED
+# before anything is published, so these fixtures declare one.
+_TENANT = "820272f9-4aaf-5add-a2df-0af942852ab2"
 _SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
 _PROJECTION_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
 # OMN-18060: the request carries the NAME of the variable the DSN arrives in,
@@ -110,6 +113,7 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         "correlation_id": uuid4(),
         "probe_url": _PROBE_URL,
         "budget_ms": 5_000,
+        "tenant_id": _TENANT,
         "terminal_bootstrap_servers": _BOOTSTRAP,
         "quarantine_bootstrap_servers": _BOOTSTRAP,
         "projection_dsn_env": _PROJECTION_DSN_ENV,
@@ -119,12 +123,20 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
     return ModelChainCanaryRequest(**fields)  # type: ignore[arg-type]
 
 
-class _Ingress:
+class _Publisher:
+    """Injected bus publish (OMN-23566). ``response`` is the broker ACK — it
+    carries ``ok`` and never a terminal-event key, so these fixtures stay
+    about link 2 and what the PROJECTION says, not the publish."""
+
     def __init__(self, response: dict[str, object] | None = None) -> None:
         self.response = response if response is not None else {"ok": True}
 
     async def __call__(
-        self, url: str, body: dict[str, object], timeout_s: float
+        self,
+        bootstrap: str,
+        topic: str,
+        envelope: dict[str, object],
+        timeout_s: float,
     ) -> tuple[dict[str, object] | None, str, int]:
         return self.response, "", 42
 
@@ -220,7 +232,7 @@ def _handler(
     quarantine: _Quarantine | None = None,
 ) -> HandlerChainCanary:
     return HandlerChainCanary(
-        ingress=_Ingress(),
+        bus_publish=_Publisher(),
         quarantine_scan=quarantine or _Quarantine(found=False),
         terminal_readback=terminal_readback or _TerminalReadback(),
         projection_readback=projection or _ProjectionReadback(),
