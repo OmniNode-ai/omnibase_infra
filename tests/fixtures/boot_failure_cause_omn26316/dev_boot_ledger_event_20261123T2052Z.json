@@ -1,0 +1,23 @@
+{
+  "source": "the boot-failure ledger (boot_failures/events.jsonl) of the dev runtime container on the dev lane, read 2026-11-23T21:00Z; the container 65df5f78b0a8 ran the build of omnibase_infra fafe00001 that deploy job 52ad6c46-2311-4856-9216-a89ec5d23a52 rolled",
+  "event": {
+    "service": "onex-runtime-main",
+    "container_ref": "65df5f78b0a8",
+    "runtime_source_hash": "unknown",
+    "exit_code": 1,
+    "cause": "Dispatch completed with errors",
+    "uptime_seconds": 822.5221946480451,
+    "consecutive_failures": 1,
+    "max_consecutive_failures": 5,
+    "retries_exhausted": false,
+    "failed_at": "2026-11-23T20:52:05.324741Z"
+  },
+  "earlier_event_with_a_real_cause_cause_cut_at_150_characters": {
+    "service": "onex-runtime-main",
+    "container_ref": "4d5c1cd4dc2d",
+    "exit_code": 1,
+    "cause": "ONEX runtime host error (correlation_id=d0e8eb9d-fff3-4026-ae32-7556848199d5) | RuntimeHeartbeatRequiredError: [ONEX_CORE_086_INVALID_STATE] Runtime h",
+    "uptime_seconds": 457,
+    "failed_at": "2026-11-22T17:15:10.966417Z"
+  }
+}
