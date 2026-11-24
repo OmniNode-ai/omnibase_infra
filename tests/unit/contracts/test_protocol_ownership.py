@@ -270,6 +270,10 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolJobStore": "protocols/protocol_job_store.py",
     "ProtocolLaneFlags": "protocols/protocol_lane_flags.py",
     "ProtocolPostFailureHost": "protocols/protocol_post_failure_host.py",
+    # [RUNTIME] OMN-25942 narrow view of one dev-merge tag (its sha) that the untagged-head
+    # idle build rule reads from the agent's tag reader; the rule imports nothing from
+    # deploy_agent, so the agent's own tag model satisfies this structurally.
+    "ProtocolDevTag": "protocols/protocol_dev_tag.py",
     # [RUNTIME] OMN-12632 narrows the AIOKafkaConsumer.end_offsets surface so
     # AdapterKafkaAdminLag can serve log-end offsets the pinned aiokafka 0.13.0
     # admin omits, without a hard aiokafka import at parse time.
