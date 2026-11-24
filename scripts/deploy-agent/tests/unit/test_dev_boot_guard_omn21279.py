@@ -66,6 +66,16 @@ def _containers(*, healthy: bool = True) -> list[dict]:
     ]
 
 
+def without_env_unset(argv: list[str]) -> list[str]:
+    """``argv`` without the ``env -u NAME ...`` prefix the guard runs its commands under (OMN-26316)."""
+    if argv[:1] != ["env"]:
+        return argv
+    rest = argv[1:]
+    while rest[:1] == ["-u"]:
+        rest = rest[2:]
+    return rest
+
+
 @pytest.fixture
 def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
     state = {
@@ -96,6 +106,7 @@ def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
     }
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        argv = without_env_unset(argv)
         state["commands"].append(argv)
         output = ""
         if argv[:2] == ["docker", "ps"]:
@@ -617,6 +628,7 @@ def test_reporting_outage_keeps_status_and_exception_pending_for_retry(
     run = Mock(return_value=subprocess.CompletedProcess([], 75, "", "bus unavailable"))
 
     def routed(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        argv = without_env_unset(argv)
         if argv[0] != "bash":
             return run(argv, **kwargs)
         return subprocess.run(

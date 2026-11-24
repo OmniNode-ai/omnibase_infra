@@ -51,7 +51,9 @@ def _execution(tmp_path: Path, stderr: str) -> types.SimpleNamespace:
         encoding="utf-8",
     )
 
-    def run(command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+    def run(
+        command: list[str], timeout: int, *, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(command, 1, stdout="", stderr=stderr)
 
     return types.SimpleNamespace(
