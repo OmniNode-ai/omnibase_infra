@@ -43,8 +43,23 @@ def test_run_step_exports_the_kafka_opt_in() -> None:
 
 
 def test_the_opt_in_is_backed_by_the_stack_the_job_boots() -> None:
+    names = [step["name"] for step in _steps()]
     spin_up = _step("Spin up e2e stack")["run"]
     assert isinstance(spin_up, str)
     assert "redpanda" in spin_up
+    # The broker address the opt-in vouches for is exported by a step that runs
+    # after the stack is up and before the step carrying the opt-in, so the
+    # opt-in never names a broker the job has not yet started.
+    resolve = _step("Resolve reachable e2e connectivity host")["run"]
+    assert isinstance(resolve, str)
+    assert "KAFKA_BOOTSTRAP_SERVERS=" in resolve
+    assert (
+        names.index("Spin up e2e stack")
+        < names.index("Resolve reachable e2e connectivity host")
+        < names.index("Run integration tests")
+    )
     env = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["env"]
     assert env["ONEX_EVENT_BUS_TYPE"] == "kafka"
+    run_env = _step("Run integration tests").get("env", {})
+    assert isinstance(run_env, dict)
+    assert run_env.get(KAFKA_OPT_IN) == "1"
