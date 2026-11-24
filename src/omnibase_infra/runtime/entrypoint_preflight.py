@@ -99,6 +99,9 @@ DEFAULT_HEALTHY_AFTER_SECONDS: float = 600.0
 #: kernel's ``logging.basicConfig`` is a no-op once the root has a handler.
 _KERNEL_LOGGER_NAME: str = "omnibase_infra.runtime.service_kernel"
 _MAX_CAUSE_CHARS: int = 500
+_NO_KERNEL_ERROR: str = (
+    "no kernel error was logged before the exit; last dispatch error: "
+)
 _PARK_SLEEP_SECONDS: float = 3600.0
 _PUBLISH_TIMEOUT_SECONDS: float = 8.0
 
@@ -119,17 +122,12 @@ def _safe_dsn(db_url: str) -> str:
     """Strip scheme and userinfo from a DSN, leaving ``host:port/db``.
 
     Mirrors the shell's ``sed 's|^[^/]*//[^@]*@||'`` so the log line is
-    byte-identical and no credential is ever printed.
+    byte-identical and no credential is ever printed; without both ``//`` and
+    ``@`` sed substitutes nothing and the DSN is echoed unchanged.
     """
-    scheme_split = db_url.split("//", 1)
-    if len(scheme_split) == 1:
-        return db_url
-    remainder = scheme_split[1]
-    if "@" not in remainder:
-        # sed's `s|^[^/]*//[^@]*@||` does not substitute at all without an `@`,
-        # so the DSN is echoed unchanged. Match that exactly.
-        return db_url
-    return remainder.split("@", 1)[1]
+    _, scheme, remainder = db_url.partition("//")
+    _, userinfo, tail = remainder.partition("@")
+    return tail if scheme and userinfo else db_url
 
 
 def stamp_fingerprint(
@@ -205,30 +203,23 @@ def stamp_fingerprint(
 
 def stamp_all_fingerprints(env: Mapping[str, str]) -> int:
     """Stamp both declared databases. Returns a non-zero boot-abort code."""
-    infra_db_url = env.get("OMNIBASE_INFRA_DB_URL", "")
-    if infra_db_url:
-        rc = stamp_fingerprint(
-            manifest_name="omnibase_infra", db_url=infra_db_url, required=True
-        )
-        if rc != 0:
-            return rc
-    else:
-        _echo(
-            "[entrypoint] OMNIBASE_INFRA_DB_URL not set -- skipping fingerprint stamp"
-        )
-
-    intel_db_url = env.get("OMNIINTELLIGENCE_DB_URL", "")
-    if intel_db_url:
-        rc = stamp_fingerprint(
-            manifest_name="omniintelligence", db_url=intel_db_url, required=False
-        )
-        if rc != 0:
-            return rc
-    else:
-        _echo(
-            "[entrypoint] OMNIINTELLIGENCE_DB_URL not set -- skipping "
-            "omniintelligence fingerprint stamp"
-        )
+    for manifest, variable, required, skipped in (
+        ("omnibase_infra", "OMNIBASE_INFRA_DB_URL", True, "fingerprint stamp"),
+        (
+            "omniintelligence",
+            "OMNIINTELLIGENCE_DB_URL",
+            False,
+            "omniintelligence fingerprint stamp",
+        ),
+    ):
+        if db_url := env.get(variable, ""):
+            rc = stamp_fingerprint(
+                manifest_name=manifest, db_url=db_url, required=required
+            )
+            if rc != 0:
+                return rc
+        else:
+            _echo(f"[entrypoint] {variable} not set -- skipping {skipped}")
     return 0
 
 
@@ -267,16 +258,11 @@ def run_preflight(env: MutableMapping[str, str]) -> int:
 
     Returns ``0`` when the kernel may start, or the boot-abort exit code.
     """
-    rc = stamp_all_fingerprints(env)
-    if rc != 0:
-        return rc
-    rc = render_bifrost_contract(env)
-    if rc != 0:
-        return rc
-    rc = render_resolver_config(env)
-    if rc != 0:
-        return rc
-    return 0
+    return (
+        stamp_all_fingerprints(env)
+        or render_bifrost_contract(env)
+        or render_resolver_config(env)
+    )
 
 
 def handoff(argv: list[str]) -> int:
@@ -303,7 +289,12 @@ def handoff(argv: list[str]) -> int:
 
 
 class KernelErrorCapture(logging.Handler):
-    """Remembers the kernel's last ERROR record as a sanitized one-line cause."""
+    """Remembers the kernel's last ERROR record as a sanitized one-line cause.
+
+    The dispatch engine logs each failed message on the kernel's logger while the kernel carries
+    on, so one of its records is only the cause of an exit when no kernel error was logged, and
+    says so (OMN-26316).
+    """
 
     def __init__(self) -> None:
         super().__init__(level=logging.ERROR)
@@ -318,6 +309,10 @@ class KernelErrorCapture(logging.Handler):
         exc = record.exc_info[1] if record.exc_info else None
         if isinstance(exc, Exception):
             cause = f"{cause} | {sanitize_error_message(exc)}"
+        if record.module == "message_dispatch_engine":
+            if self.cause and not self.cause.startswith(_NO_KERNEL_ERROR):
+                return
+            cause = _NO_KERNEL_ERROR + cause
         self.cause = cause[:_MAX_CAUSE_CHARS]
 
 
