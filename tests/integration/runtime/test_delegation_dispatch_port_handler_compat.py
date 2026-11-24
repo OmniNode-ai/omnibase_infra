@@ -613,7 +613,7 @@ async def test_model_override_is_refused_before_runtime_bus_publication(
         routes={"delegation.orchestrate": route},
     )
     try:
-        with pytest.raises(NotImplementedError, match="model is not yet supported"):
+        with pytest.raises(NotImplementedError, match="model is not supported"):
             await port.dispatch(
                 prompt="Classify the changelog entry.",
                 task_type="summarization",
@@ -653,9 +653,7 @@ async def test_probe_ladder_is_accepted_by_signature_and_refused_before_publicat
         routes={"delegation.orchestrate": route},
     )
     try:
-        with pytest.raises(
-            NotImplementedError, match="probe_ladder is not yet supported"
-        ):
+        with pytest.raises(NotImplementedError, match="probe_ladder is not supported"):
             await port.dispatch(
                 prompt="Classify the changelog entry.",
                 task_type="summarization",
