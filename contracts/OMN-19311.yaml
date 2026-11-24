@@ -1,0 +1,38 @@
+schema_version: 1.0.0
+ticket_id: OMN-19311
+title: 'D11 blocks staging delivery: both delivery gates refuse unless the newest delegation regression nightly verdict on omnimarket dev is a fresh success'
+summary: omnibase_infra#4012 gave scripts/ci/lab_pass_receipt.py a workflow-verdict reader and wired the D11 read into the lab-pass-gate job of deliver-dev-candidate-to-staging.yml; omnibase_infra#4723 made the reader require the complete lane token. This contract records the acceptance-criterion bindings a second lane accepted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19311-ac1-accepted-20261124t1745z:
+      - label: AC1
+        criterion_hash: d10676b9cadc6301502951b8f80dc6c94df847b5691357236411f9bcfbf20b9e
+        proposed_by: lane=dod-closeout-bind-2026-11-24T1745Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-24T1745Z-c1
+requirements:
+  - id: req-omn-19311-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC1: the D11 workflow-verdict reader refuses the replayed failed run and a 27-hour-old success, and admits only a fresh success of the named lane. Fails at the parent of omnibase_infra#4012.'
+    command: uv run --frozen pytest tests/ci/test_workflow_verdict_omn_d11.py::TestTheD11Verdict -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19311-ac1-accepted-20261124t1745z
+    description: 'AC1: the D11 workflow-verdict reader refuses the replayed failed run and a 27-hour-old success, and admits only a fresh success of the named lane. Fails at the parent of omnibase_infra#4012.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_workflow_verdict_omn_d11.py::TestTheD11Verdict -q --no-cov -n 0 -p no:randomly
+        cwd: .
+    binds_ac:
+      - AC1
