@@ -538,6 +538,8 @@ class DeployAgent:
         reading = load_dev_boot_guard(JOB_READING)
         self._post_failure = reading.post_failure_converge(self, converge_command)
         self._idle_build_gate = reading.idle_build_gate(self)
+        # OMN-26316: the revisions a lag is judged on, net of not-runtime paths.
+        self._idle_lag_refs = reading.lag_refs_reader(self)
         self._idle_converge_last_verdict: EnumIdleConvergeVerdict | None = None
         self._idle_converge_last_verdicts: dict[str, EnumIdleConvergeVerdict] = {}
         self._migration_converge_last_check: float | None = None
@@ -648,6 +650,10 @@ class DeployAgent:
             max_workers=LAG_POOL_MAX_WORKERS,
             thread_name_prefix="deploy-agent-lag",
         )
+        # OMN-26316. The dev boot incident report pass gets a thread of its OWN,
+        # for the reason the lag pool above has one: on the job thread it queues
+        # the consumer's poll behind it.
+        self._report_pass = load_dev_boot_guard().BackgroundPass("deploy-agent-reports")
         # OMN-19501. See SETTLE_POOL_MAX_WORKERS. ``_settle_future`` is the most
         # recently submitted settle; the pool is FIFO with one worker, so that
         # one finishing means every earlier one has.
@@ -818,7 +824,10 @@ class DeployAgent:
 
         # Step 3: Retry pending publishes. Called directly rather than through
         # _offload: nothing is listening yet (the site starts at step 4), so
-        # there is no HTTP surface for a blocking call to deny here.
+        # there is no HTTP surface for a blocking call to deny here. The dev boot
+        # incident reports it starts run on their own thread (OMN-26316): 394
+        # refused incidents held this step, and with it /health and the
+        # consumer, for about twenty minutes after every re-exec.
         self._retry_pending_publishes()
 
         # Step 4: Start health endpoint
@@ -1527,17 +1536,18 @@ class DeployAgent:
         # routing row sends it elsewhere; this instance is its only follower.
         web = getattr(_web_source(), "repository", None) == repository
         routed_elsewhere = web or routed_to != self._router.instance.name
+        lane_flags = getattr(self, "_lane_flags", ModelLaneFlags())
         running_ref = head_ref = probe_blocker = windows_error = None
-        if routed_elsewhere:
+        # OMN-26316: with a declared lag bound the instance's own repository is
+        # read too, so the bound covers a merge its trigger never delivered.
+        if routed_elsewhere or lane_flags.max_dev_lag() is not None:
             try:
                 probe_blocker = self._idle_probe_blocker(now)
             except Exception as exc:  # noqa: BLE001 - an unread schedule refuses
                 windows_error = (
                     f"probe schedule unreadable: {type(exc).__name__}: {exc}"
                 )
-            running_ref = self._idle_read_running_ref(repository)
-            head_ref = self._idle_read_head_ref(repository)
-        lane_flags = getattr(self, "_lane_flags", ModelLaneFlags())
+            running_ref, head_ref = self._idle_lag_refs(repository, routed_elsewhere)
         behind_since = next_behind_since(
             self._dev_lag_behind_since.get(repository), running_ref, head_ref, now
         )
@@ -2948,16 +2958,14 @@ class DeployAgent:
     def _retry_pending_publishes(self) -> None:
         """Replay any result still owed to the bus. BLOCKING — see ``_offload``."""
         # Failure reports use their own durable outbox and survive a runtime
-        # bus outage. Retry only on a dev-capable instance.
+        # bus outage. Retry only on a dev-capable instance, off this thread.
         if EnumRuntimeLane.DEV in self._allowed_lanes:
-            try:
-                deliver_reports(
-                    STATE_DIR
-                    / "dev-boot-guard"
-                    / lane_config_for(EnumRuntimeLane.DEV).compose_project
-                )
-            except (OSError, ValueError, RuntimeError):
-                logger.exception("Dev boot failure reports remain pending")
+            self._report_pass.start(
+                deliver_reports,
+                STATE_DIR
+                / "dev-boot-guard"
+                / lane_config_for(EnumRuntimeLane.DEV).compose_project,
+            )
         pending = self.job_store.get_pending_publish()
         for job in pending:
             cid_str = str(job.correlation_id)
