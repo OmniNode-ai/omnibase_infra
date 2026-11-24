@@ -5,12 +5,12 @@
 
 The canary's job is to notice that the live delegation chain is dead. The
 load-bearing fixture here is ``test_reproduces_omn_16767_signature``, which
-replays the EXACT observed shape of the 2026-08-27 incident: the ingress
-returns ``ok=false`` with ``error.code == "dispatch_timeout"`` after the full
-budget, and the run's own correlation id turns up in the platform quarantine
-sink. The canary must call that RED, and must call it ``QUARANTINED`` rather
-than the vaguer ``TERMINAL_MISSING`` — those are different pages, and the
-quarantine one names the actual defect.
+replays the EXACT observed shape of the 2026-08-27 incident: the submission
+path reports ``error.code == "dispatch_timeout"`` after the full budget, and
+the run's own correlation id turns up in the platform quarantine sink. The
+canary must call that RED, and must call it ``QUARANTINED`` rather than the
+vaguer ``TERMINAL_MISSING`` — those are different pages, and the quarantine
+one names the actual defect.
 
 Every test drives the real handler with injected transport. No network.
 
@@ -20,6 +20,11 @@ the fixtures that used to assert an ingress-derived terminal now assert the
 bus-derived one. The behaviour under test did not soften — it moved to the
 layer that can actually carry evidence. See
 ``test_handler_chain_canary_readback.py`` for the link-4 cases themselves.
+
+Updated by OMN-23566: the submission itself is a bus publish on the
+delegate-skill command topic (the ``/skill`` POST and the gateway route are
+gone), so every handler here injects a ``bus_publish`` instead of an HTTP
+ingress, and every request declares the lane's tenant.
 """
 
 from __future__ import annotations
@@ -51,6 +56,11 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readb
 
 _PROBE_URL = "http://runtime.invalid:8085"
 _BOOTSTRAP = "broker.invalid:19092"
+_TENANT = "820272f9-4aaf-5add-a2df-0af942852ab2"
+# OMN-23566: the submission is a bus publish on the delegate-skill command
+# topic, not an HTTP POST. The injected transport below records what it was
+# handed so the fixtures can assert the envelope's shape.
+_COMMAND_TOPIC = EnumOmnimarketTopic.CMD_DELEGATE_SKILL_V1.value
 _SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
 _PROJECTION_DSN = "postgresql://probe@db.invalid:5436/omnibase_infra"
 # OMN-18060: the request now carries the NAME of the environment variable the
@@ -148,6 +158,9 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         "correlation_id": uuid4(),
         "probe_url": _PROBE_URL,
         "budget_ms": 5_000,
+        # OMN-23566: the publish is stamped with the lane's tenant; empty is
+        # RED before anything is published, so these fixtures declare one.
+        "tenant_id": _TENANT,
         # OMN-16931: link 4 is the claim, so a run with no broker for it makes
         # no claim and cannot be green. These fixtures are about the OTHER
         # legs, so the readback is configured throughout.
@@ -163,8 +176,13 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
     return ModelChainCanaryRequest(**fields)  # type: ignore[arg-type]
 
 
-class _RecordingIngress:
-    """Captures the outbound body so tests can assert the recipe shape."""
+class _RecordingPublisher:
+    """Captures the outbound envelope so tests can assert the published shape.
+
+    ``response`` is the broker ACK, never a verdict: the run's terminal comes
+    from the readback legs, so a successful publish answers ``{"ok": True}``
+    and nothing more.
+    """
 
     def __init__(
         self,
@@ -175,13 +193,24 @@ class _RecordingIngress:
         self.response = response
         self.error = error
         self.elapsed_ms = elapsed_ms
-        self.calls: list[tuple[str, dict[str, object], float]] = []
+        self.calls: list[tuple[str, str, dict[str, object], float]] = []
 
     async def __call__(
-        self, url: str, body: dict[str, object], timeout_s: float
+        self,
+        bootstrap: str,
+        topic: str,
+        envelope: dict[str, object],
+        timeout_s: float,
     ) -> tuple[dict[str, object] | None, str, int]:
-        self.calls.append((url, body, timeout_s))
+        self.calls.append((bootstrap, topic, envelope, timeout_s))
+        if self.error:
+            return None, self.error, self.elapsed_ms
         return self.response, self.error, self.elapsed_ms
+
+
+def _ack() -> dict[str, object]:
+    """A successful broker ACK. It carries ``ok`` and never a terminal."""
+    return {"ok": True}
 
 
 class _RecordingQuarantine:
@@ -230,27 +259,16 @@ class _RecordingTerminalReadback:
         return self.found, 120, self.error
 
 
-def _terminal_response(correlation_id_echo: str = "") -> dict[str, object]:
-    """A successful ingress response carrying a terminal event."""
-    return {
-        "ok": True,
-        "command_name": "node_delegate_skill_orchestrator",
-        "correlation_id": correlation_id_echo,
-        "terminal_event": "omnimarket.delegate-skill-completed",
-        "output_payloads": [{"status": "completed"}],
-    }
-
-
-# -- AC1: fresh correlation id, recorded recipe shape ----------------------
+# -- AC1: fresh correlation id, published envelope shape --------------------
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_mints_a_fresh_correlation_id_per_run() -> None:
     """AC1 — the probe correlation id is minted per run, never reused."""
-    ingress = _RecordingIngress(response=_terminal_response())
+    publisher = _RecordingPublisher(response=_ack())
     handler = HandlerChainCanary(
-        ingress=ingress,
+        bus_publish=publisher,
         quarantine_scan=_RecordingQuarantine(),
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
@@ -266,7 +284,7 @@ async def test_mints_a_fresh_correlation_id_per_run() -> None:
     # A real UUID4, not a placeholder.
     assert UUID(str(first.probe_correlation_id)).version == 4
     # And it is the id actually put on the wire, not a decorative field.
-    sent_ids = [body["correlation_id"] for _, body, _ in ingress.calls]
+    sent_ids = [envelope["correlation_id"] for _, _, envelope, _ in publisher.calls]
     assert sent_ids == [
         str(first.probe_correlation_id),
         str(second.probe_correlation_id),
@@ -275,11 +293,18 @@ async def test_mints_a_fresh_correlation_id_per_run() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_posts_the_recorded_delegation_recipe() -> None:
-    """AC1 — the body matches the recorded omnidash dispatch shape."""
-    ingress = _RecordingIngress(response=_terminal_response())
+async def test_publishes_the_recorded_delegation_recipe() -> None:
+    """AC1 — the envelope carries the recorded dispatch's own recipe.
+
+    OMN-23566 replaced the ``/skill`` POST with this publish, so the recipe
+    assertions moved with it: the probe's prompt, task class and token cap go
+    on the delegate payload, the synthetic provenance's source travels as
+    ``payload["source"]``, and the publish targets the lane's broker and the
+    delegate-skill command topic.
+    """
+    publisher = _RecordingPublisher(response=_ack())
     handler = HandlerChainCanary(
-        ingress=ingress,
+        bus_publish=publisher,
         quarantine_scan=_RecordingQuarantine(),
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
@@ -290,29 +315,21 @@ async def test_posts_the_recorded_delegation_recipe() -> None:
 
     await handler.handle(_request(task_type="test", prompt="ping", max_tokens=32))
 
-    url, body, timeout_s = ingress.calls[0]
-    assert url == f"{_PROBE_URL}/skill"
-    assert body["command_name"] == "node_delegate_skill_orchestrator"
-    assert body["timeout_ms"] == 5_000
-    payload = body["payload"]
+    bootstrap, topic, envelope, timeout_s = publisher.calls[0]
+    assert bootstrap == _BOOTSTRAP
+    assert topic == _COMMAND_TOPIC
+    payload = envelope["payload"]
     assert isinstance(payload, dict)
     assert payload["prompt"] == "ping"
     assert payload["task_type"] == "test"
-    assert payload["provenance"] == {
-        "source": "external-client",
-        "traffic_class": "synthetic",
-        "source_surface": "scheduled-chain-canary",
-        "requested_by": "chain-canary",
-    }
-    assert payload["source"] == payload["provenance"]["source"]
-    metadata = payload["metadata"]
-    assert isinstance(metadata, dict)
-    assert metadata["requested_by"] == payload["provenance"]["requested_by"]
-    assert metadata["source_surface"] == payload["provenance"]["source_surface"]
-    assert payload["wait"] is True
     assert payload["max_tokens"] == 32
-    # The client budget must exceed the runtime budget or the canary times
-    # itself out before the runtime can answer, manufacturing a false RED.
+    # The synthetic provenance the /skill body used to carry as a structured
+    # block now travels as its source identifier.
+    assert payload["source"] == "external-client"
+    assert envelope["tenant_id"] == _TENANT
+    assert payload["tenant_id"] == _TENANT
+    # The publish budget must exceed the runtime budget or the canary times
+    # itself out before the chain can answer, manufacturing a false RED.
     assert timeout_s > 5.0
 
 
@@ -324,7 +341,7 @@ async def test_posts_the_recorded_delegation_recipe() -> None:
 async def test_green_when_terminal_lands_and_quarantine_is_clean() -> None:
     quarantine = _RecordingQuarantine(found=False)
     handler = HandlerChainCanary(
-        ingress=_RecordingIngress(response=_terminal_response()),
+        bus_publish=_RecordingPublisher(response=_ack()),
         quarantine_scan=quarantine,
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
@@ -339,10 +356,11 @@ async def test_green_when_terminal_lands_and_quarantine_is_clean() -> None:
     assert result.success is True
     assert result.quarantine_status is EnumQuarantineCheckStatus.CLEAN
     # OMN-16931: `terminal_event` is the topic the terminal was READ BACK
-    # from, not the name the ingress printed. The ingress's claim is kept
-    # separately so a receipt can show the two disagreeing.
+    # from. The publish ACK claims nothing — an ack is not a verdict — so the
+    # claim field stays empty and every terminal fact here is readback facts.
     assert result.terminal_event == _SUCCESS_TOPIC
-    assert result.ingress_terminal_event == "omnimarket.delegate-skill-completed"
+    assert result.ingress_terminal_event == ""
+    assert result.ingress_ok is True
     # The quarantine scan was asked about THIS run's correlation id.
     assert quarantine.calls[0][2] == str(result.probe_correlation_id)
 
@@ -352,7 +370,7 @@ async def test_green_when_terminal_lands_and_quarantine_is_clean() -> None:
 async def test_reported_traffic_class_comes_from_projection_readback() -> None:
     """OMN-18172 — the request hint cannot force the receipt classification."""
     handler = HandlerChainCanary(
-        ingress=_RecordingIngress(response=_terminal_response()),
+        bus_publish=_RecordingPublisher(response=_ack()),
         quarantine_scan=_RecordingQuarantine(),
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(traffic_class="organic"),
@@ -373,13 +391,14 @@ async def test_reproduces_omn_16767_signature() -> None:
 
     Observed 2026-08-27T15:32Z on the .201 dev lane. Both symptoms are true
     at once; the canary must report the quarantine one, because that is the
-    symptom that names the defect.
+    symptom that names the defect. The publish ACK carries the error block the
+    submission path observed — it is a claim about the request path, and the
+    quarantine finding still outranks it.
     """
     handler = HandlerChainCanary(
-        ingress=_RecordingIngress(
+        bus_publish=_RecordingPublisher(
             response={
                 "ok": False,
-                "command_name": "node_delegate_skill_orchestrator",
                 "error": {
                     "code": "dispatch_timeout",
                     "message": "Local runtime ingress timed out after 5000 ms",
@@ -415,7 +434,7 @@ async def test_terminal_missing_when_ingress_times_out_and_the_bus_is_empty() ->
     ``test_handler_chain_canary_readback.py``.
     """
     handler = HandlerChainCanary(
-        ingress=_RecordingIngress(
+        bus_publish=_RecordingPublisher(
             response={
                 "ok": False,
                 "error": {"code": "dispatch_timeout", "message": "timed out"},
@@ -442,10 +461,10 @@ async def test_terminal_missing_when_ok_true_but_the_bus_carried_nothing() -> No
 
     The OMN-16027 fail-open lesson survives, relocated: what makes this RED
     is that the declared terminal topics carried nothing for this run's
-    correlation id. The ingress could have said anything.
+    correlation id. The publish ACK could have said anything.
     """
     handler = HandlerChainCanary(
-        ingress=_RecordingIngress(response={"ok": True, "terminal_event": ""}),
+        bus_publish=_RecordingPublisher(response=_ack()),
         quarantine_scan=_RecordingQuarantine(found=False),
         terminal_readback=_RecordingTerminalReadback(found=""),
         projection_readback=_RecordingProjectionReadback(),
@@ -464,7 +483,7 @@ async def test_terminal_missing_when_ok_true_but_the_bus_carried_nothing() -> No
 @pytest.mark.asyncio
 async def test_ingress_unreachable_is_its_own_verdict() -> None:
     handler = HandlerChainCanary(
-        ingress=_RecordingIngress(response=None, error="connection refused"),
+        bus_publish=_RecordingPublisher(response=None, error="connection refused"),
         quarantine_scan=_RecordingQuarantine(found=False),
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
@@ -487,7 +506,7 @@ async def test_ingress_unreachable_is_its_own_verdict() -> None:
 async def test_unconfigured_quarantine_reports_skipped_not_clean() -> None:
     quarantine = _RecordingQuarantine(found=False)
     handler = HandlerChainCanary(
-        ingress=_RecordingIngress(response=_terminal_response()),
+        bus_publish=_RecordingPublisher(response=_ack()),
         quarantine_scan=quarantine,
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
@@ -511,7 +530,7 @@ async def test_unconfigured_quarantine_reports_skipped_not_clean() -> None:
 async def test_quarantine_probe_failure_fails_closed() -> None:
     """A configured-but-broken quarantine leg is RED, never a silent pass."""
     handler = HandlerChainCanary(
-        ingress=_RecordingIngress(response=_terminal_response()),
+        bus_publish=_RecordingPublisher(response=_ack()),
         quarantine_scan=_RecordingQuarantine(found=None, error="broker unreachable"),
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
@@ -533,10 +552,10 @@ async def test_quarantine_probe_failure_fails_closed() -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_kill_switch_performs_zero_io() -> None:
-    ingress = _RecordingIngress(response=_terminal_response())
+    publisher = _RecordingPublisher(response=_ack())
     quarantine = _RecordingQuarantine()
     handler = HandlerChainCanary(
-        ingress=ingress,
+        bus_publish=publisher,
         quarantine_scan=quarantine,
         terminal_readback=_RecordingTerminalReadback(),
         kill_switch_disabled=True,
@@ -546,7 +565,7 @@ async def test_kill_switch_performs_zero_io() -> None:
 
     assert result.verdict is EnumChainCanaryVerdict.SKIPPED_DISABLED
     assert result.success is True
-    assert ingress.calls == []
+    assert publisher.calls == []
     assert quarantine.calls == []
 
 
@@ -556,9 +575,9 @@ async def test_kill_switch_read_from_env_at_handle_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A zero-arg contract-driven construction can never miss the switch."""
-    ingress = _RecordingIngress(response=_terminal_response())
+    publisher = _RecordingPublisher(response=_ack())
     handler = HandlerChainCanary(
-        ingress=ingress,
+        bus_publish=publisher,
         quarantine_scan=_RecordingQuarantine(),
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
@@ -571,7 +590,7 @@ async def test_kill_switch_read_from_env_at_handle_time(
     result = await handler.handle(_request())
 
     assert result.verdict is EnumChainCanaryVerdict.SKIPPED_DISABLED
-    assert ingress.calls == []
+    assert publisher.calls == []
 
 
 @pytest.mark.unit
@@ -581,11 +600,11 @@ async def test_kill_switch_env_falsey_values_do_not_disable_canary(
     monkeypatch: pytest.MonkeyPatch,
     disabled_value: str,
 ) -> None:
-    ingress = _RecordingIngress(response=_terminal_response())
+    publisher = _RecordingPublisher(response=_ack())
     quarantine = _RecordingQuarantine(found=False)
     monkeypatch.setenv("ONEX_CHAIN_CANARY_DISABLED", disabled_value)
     handler = HandlerChainCanary(
-        ingress=ingress,
+        bus_publish=publisher,
         quarantine_scan=quarantine,
         terminal_readback=_RecordingTerminalReadback(),
         projection_readback=_RecordingProjectionReadback(),
@@ -596,7 +615,7 @@ async def test_kill_switch_env_falsey_values_do_not_disable_canary(
     result = await handler.handle(_request(quarantine_bootstrap_servers=_BOOTSTRAP))
 
     assert result.verdict is EnumChainCanaryVerdict.GREEN
-    assert len(ingress.calls) == 1
+    assert len(publisher.calls) == 1
 
 
 # -- request validation ----------------------------------------------------
