@@ -89,3 +89,13 @@ dod_evidence:
       - check_type: command
         check_value: grep -F "str(body)[:200]" scripts/ci/c16_receipt_identity_probe.py
         cwd: .
+  - id: dod-omn26122-ac2-c15-receipt-step-soft
+    description: >-
+      The sibling chain canary (C15) ended red at its own receipt step as well as its verdict step: run 45291437443 (dev head 09347b4ab987, concluded 2026-11-24T00:00:08Z) logged "the lane reported no code sha on its deploy agent or its /ready" and exit code 1 at the emit step, a step whose comment says it can never change the run's conclusion. The step runs under the runner's default bash -e, which the script's own set -uo pipefail does not clear. The step now clears errexit, and the check runs the step's real script under bash -e with a stand-in for uv, for a lane that reports no sha and for a failing emit. It touches no probe clause. The base workflow fails both tests.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_chain_lane_receipt_omn18866.py -q --no-cov -n 0 -p no:randomly -k "run_conclusion_alone"
+        cwd: .
