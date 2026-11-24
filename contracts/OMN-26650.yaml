@@ -33,6 +33,15 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_26650_scripts_import_anchor.py -k scripts_import -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
+  - id: dod-omn26650-ac2-sweep-verifier-run
+    description: 'AC2: the sweep handler runs a real verifier subprocess over the recorded sparse-clone layout and the verifier loads the product clone root conftest.py without ModuleNotFoundError; the test file is absent at the merge base so the check fails there (must-fail control). The dod_verify run on OMN-26594 itself is the local Done gate item below.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_26650_scripts_import_anchor.py -k scripts_import_sweep_verifier -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
   - id: dod-omn26650-ac2-dod-verify-run
     description: 'AC2: one dod_verify run on the merged ticket OMN-26594 reads its checks and the output carries no ModuleNotFoundError; read on the lab host with the contract of the product clone, so only the local Done gate runs this unbound check.'
     source: manual
@@ -50,4 +59,15 @@ dod_evidence:
       - check_type: command
         check_value: |-
           out="$(scripts/onex skill dod_verify OMN-26594 --execution-audience hosted --contract-path contracts/OMN-26594.yaml 2>&1)"; printf '%s' "$out" | grep -q 'terminal published to lane dev topic' && printf '%s' "$out" | grep -qE '"verified_count":[1-9]' && ! printf '%s' "$out" | grep -qi check_run_read_failed
+        cwd: .
+  - id: dod-omn26650-ac1-deploy-handler-on-dev
+    description: 'AC1: the sweep handler on the dev branch of omnibase_infra carries the helper that anchors a relative check cwd at the materialised product clone; read from GitHub at ref dev, so it exits non-zero until the fix has merged and zero after.'
+    source: manual
+    binds_ac:
+      - AC1
+      - AC3
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/handlers/handler_evidence_autoclose_sweep.py?ref=dev" --jq .content | base64 -d | grep -q 'materialised_product_clone'
         cwd: .
