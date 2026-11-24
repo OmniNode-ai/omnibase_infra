@@ -198,6 +198,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/cli/test_work_ledger_proof_omn26316.py -k "half_set_env or other_environment_overrides" -q --no-cov -n 0 -p no:randomly
         cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/cli/test_work_ledger_proof_process_environment_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
   - id: dod-omn26316-ledger-proof-bound
     description: "The declared post-roll proof bound covers 1.5 times the slowest recorded answer (19.5 s, five reads on the dev runtime, one timed out at the old 10 s bound)."
     source: manual
