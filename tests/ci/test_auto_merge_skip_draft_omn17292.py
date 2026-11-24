@@ -36,7 +36,12 @@ def _enable_run() -> str:
 
 
 def _run_enable(
-    tmp_path: Path, *, draft: str, merge_output: str = "", merge_rc: int = 0
+    tmp_path: Path,
+    *,
+    draft: str,
+    merge_output: str = "",
+    merge_rc: int = 0,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Run the Enable step's script against a stub ``gh`` that logs its argv.
 
@@ -63,6 +68,7 @@ def _run_enable(
         "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
         "GH_REPO": "OmniNode-ai/omnibase_infra",
         "PR": "1",
+        **(extra_env or {}),
     }
     result = subprocess.run(
         ["bash", "-c", _enable_run()],

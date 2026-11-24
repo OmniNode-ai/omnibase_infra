@@ -297,6 +297,7 @@ jobs:
           fi
 
       - name: Enable auto-merge
+        id: arm
         if: >-
           steps.resolve.outputs.skip != 'true' &&
           steps.resolve.outputs.actor == 'jonahgabriel' &&
@@ -355,6 +356,13 @@ jobs:
             echo "auto-merge enabled: $output"
           elif echo "$output" | grep -qiE "already enqueued|already queued|auto-merge already enabled"; then
             echo "auto-merge not newly enabled (expected): $output"
+          elif echo "$output" | grep -qiE "without .?workflow.? scope"; then
+            # CROSS_REPO_PAT carries no `workflow` scope (OMN-17875 keeps it a PAT),
+            # so GitHub refuses to arm a PR that edits .github/workflows/*. That is
+            # a property of the PR's files, not a failure of this job: leave the PR
+            # unarmed for the controller or a human to arm, and skip the enqueue.
+            echo "::warning::PR #${PR} edits a workflow file and the arming token lacks workflow scope; not armed, arm it by hand: $output"
+            echo "workflow_scope_refused=true" >> "$GITHUB_OUTPUT"
           else
             echo "auto-merge failed: $output"
             exit 1
@@ -364,7 +372,8 @@ jobs:
         if: >-
           steps.resolve.outputs.skip != 'true' &&
           steps.resolve.outputs.actor == 'jonahgabriel' &&
-          steps.hold_gate.outputs.hold != 'true'
+          steps.hold_gate.outputs.hold != 'true' &&
+          steps.arm.outputs.workflow_scope_refused != 'true'
         env:
           # OMN-17875: this step MUTATES merge state twice — `gh pr
           # update-branch` pushes a merge commit onto the PR head branch, and
