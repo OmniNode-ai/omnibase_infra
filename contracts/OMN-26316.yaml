@@ -78,8 +78,8 @@ requirements:
   - id: req-omn26316-boot-report-retry-bounded
     statement: A pass that retries the dev boot incident reports starts no incident after its declared bound, runs on its own thread so it never holds the deploy agent's consumer, its health port or its startup, and moves an incident older than the declared abandon bound to delivered-abandoned with one log line.
     acceptance:
-      - id: AC17
-        statement: "AC17: a delivery pass over 394 incidents that the bus append command refuses ends within the pass bound plus one append, the agent's startup and retry tick return at once while that pass runs, and a second tick starts no second pass -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k 'bounded or never_holds' -q fails at origin/dev (25.9 s for the 394 incidents against a 0.5 s bound)"
+      - id: AC32
+        statement: "AC32: a delivery pass over 394 incidents that the bus append command refuses ends within the pass bound plus one append, the agent's startup and retry tick return at once while that pass runs, and a second tick starts no second pass -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k 'bounded or never_holds' -q fails at origin/dev (25.9 s for the 394 incidents against a 0.5 s bound)"
       - id: AC18
         statement: "AC18: an incident older than the declared abandon bound is marked delivered-abandoned with one log line and is not retried, and an incident inside it is retried with a row stamped at the delivery time so the ledger's clock guard does not refuse it -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k 'abandoned or delivery_stamp' -q fails at origin/dev"
 evidence_requirements:
@@ -333,7 +333,7 @@ dod_evidence:
   - id: dod-omn26316-boot-report-pass-bound
     description: "394 refused incidents: one pass ends within the bound plus one append, the agent's startup and retry tick return at once, a second tick starts no second pass; five of the file's tests fail at origin/dev (25.9 s for the 394 incidents)."
     source: manual
-    binds_ac: [AC17]
+    binds_ac: [AC32]
     checks:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k "bounded or never_holds" -q -p no:cacheprovider
