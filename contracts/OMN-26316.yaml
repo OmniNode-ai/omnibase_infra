@@ -9,9 +9,6 @@ interfaces_touched: []
 requirements:
   - id: req-omn26316-monitor-drops-lazy-dormant
     statement: The runtime health monitor does not expect a contract the lazy-start boot split holds dormant to be attached, so projection_attachment reads HEALTHY on a lazy-start lane whose dormant contracts are unattached by design.
-    acceptance:
-      - id: AC11
-        statement: "AC11: on a booted lazy-start lane, projection_attachment is HEALTHY with the dormant set present and DEGRADED for the same manifest without the dormant record -- falsifier: uv run pytest tests/integration/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q fails at origin/dev (select_projection_contracts has no lazy_dormant parameter and projection_attachment reads DEGRADED) and passes on the branch"
   - id: req-omn26316-health-answers-off-loop
     statement: The runtime answers /health within the probe timeout while its event loop is blocked, with a typed degraded reason, and no gate is weakened.
     acceptance:
@@ -28,26 +25,14 @@ requirements:
         statement: "AC4: the contract_attach readiness detail carries a lazy_start block with the serving set, serving_count and each failed wake's reason, and ready is unchanged -- falsifier: uv run pytest tests/unit/runtime/test_lazy_start_serving_read_omn26316.py -q fails at the merge base (StoreLazyStartDormant has no record_front_door) and passes on the branch"
   - id: req-omn26316-hotwake-first-request-wakes-dormant
     statement: A first request on a dormant contract's HTTP mount, and a first message a client writes straight to the broker to a dormant consumer's topic, wakes that contract through the lazy-start front door; a request for no dormant contract wakes nothing.
-    acceptance:
-      - id: AC5
-        statement: "AC5: a request under the http_mount prefix of a contract the lane left dormant wakes that contract, mounts its app and is served, once, with no broker; a failed wake answers 503 and leaves the listener up -- falsifier: uv run pytest tests/integration/handlers/http_mount/test_dormant_http_wake_omn26316.py fails at origin/dev with 404 and passes on the PR branch"
-      - id: AC6
-        statement: "AC6: the first message to a topic a dormant contract subscribes to, written by a client straight to the broker, wakes that contract's consumers; the watch is group-less and reads from the end -- falsifier: uv run pytest tests/unit/handlers/test_lazy_start_bus_watch_omn26316.py fails at origin/dev (the watch module is absent) and passes on the PR branch"
   - id: req-omn26316-boot-failure-cause
     statement: A boot failure's recorded cause is the error that ended the kernel; a per-message dispatch error logged on the kernel's logger is set apart and never recorded as the cause.
-    acceptance:
-      - id: AC10
-        statement: "AC10: a kernel that exits 1 after the dispatch engine logged Dispatch completed with errors records no kernel error was logged before the exit, naming that last dispatch error, as the boot failure cause, and a kernel error logged before that dispatch error stays the cause -- falsifier: uv run pytest tests/unit/runtime/test_boot_failure_cause_omn26316.py fails at origin/dev (the capture records the dispatch error as the cause) and passes on the PR branch"
   - id: req-omn26316-first-heartbeat-not-held-by-serial-wake
     statement: The runtime's first heartbeat is published within one lazy-start wake budget of the start reaching its introspection step, however many dormant consumers subscribe to the heartbeat topic, so /ready reports heartbeat ready without a minutes-long hold.
-    acceptance:
-      - id: AC9
-        statement: "AC9: the lazy-start front door wakes every dormant consumer of a published topic at once and holds the message for at most one budget -- falsifier: uv run pytest tests/unit/handlers/test_lazy_start_heartbeat_wake_omn26316.py fails at origin/dev (7.2 s against a 2.5 s window for 20 dormant heartbeat consumers, 4 of which never wake) and passes on the PR branch"
   - id: req-omn26316-overdue-dev-merge-build
     statement: A dev runtime merge that has gone its window with no dev build is judged REQUEST with one request id per sha, and a merge a dev job carries, a job in flight, a failed head or a non-runtime merge never is.
-    acceptance:
-      - id: AC12
-        statement: "AC12: the overdue dev merge build decision judges omnibase_infra#6191 (merged 17:46:52Z, next dev job accepted 19:00:23Z) WAIT until 18:46:52Z and REQUEST from then until a dev job carries it -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_overdue_omn26316.py fails at origin/dev (the handler module is absent) and passes on the PR branch"
+  - id: req-omn26316-roll-proof-failure-names-exception
+    statement: A failed post-roll ledger proof records the exception that ended it, so the deploy job record names the cause of a restored roll and no lane has to reproduce the proof by hand.
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -68,13 +53,56 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn26316-monitor-drops-lazy-dormant
     description: >-
-      A lazy-start lane is booted through boot_manifest and the monitor runs over the full manifest: projection_attachment is HEALTHY with the dormant projections unattached, DEGRADED without the dormant record (positive control), and a woken projection that lost a subscription is still reported. The test fails at origin/dev and passes on the branch.
+      A lazy-start lane is booted through boot_manifest and the monitor runs over the full manifest: projection_attachment is HEALTHY with the dormant projections unattached, DEGRADED without the dormant record (positive control), and a woken projection that lost a subscription is still reported. It bears on the first half of AC4 only, that docker health of omninode-runtime can leave starting: a dormant projection no longer holds the projection_attachment finding degraded. The live docker read stays in dod-omn26316-integration-proof-monitor-dormant. The test fails at origin/dev and passes on the branch.
     source: manual
-    binds_ac: [AC11]
+    binds_ac: [AC4]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+    supersedes_ac_binding:
+      - item: dod-omn26316-hotwake-http
+        label: AC5
+        reason_kind: no_longer_applicable
+        reason: "The live ticket carries only AC1 to AC4 (read 2026-11-24T06:32:34Z), so AC5 is not a criterion of OMN-26316: this contract declared it for another change on the same ticket. The declaration is removed from the requirements and the item keeps its check."
+        retired_by: fixr-infra-6198-0640
+        retired_at: '2026-11-24T06:45:00Z'
+      - item: dod-omn26316-hotwake-bus
+        label: AC6
+        reason_kind: no_longer_applicable
+        reason: "The live ticket carries only AC1 to AC4 (read 2026-11-24T06:32:34Z), so AC6 is not a criterion of OMN-26316: this contract declared it for another change on the same ticket. The declaration is removed from the requirements and the item keeps its check."
+        retired_by: fixr-infra-6198-0640
+        retired_at: '2026-11-24T06:45:00Z'
+      - item: dod-omn26316-first-heartbeat-not-held
+        label: AC9
+        reason_kind: no_longer_applicable
+        reason: "The live ticket carries only AC1 to AC4 (read 2026-11-24T06:32:34Z), so AC9 is not a criterion of OMN-26316: this contract declared it for another change on the same ticket. The declaration is removed from the requirements and the item keeps its check."
+        retired_by: fixr-infra-6198-0640
+        retired_at: '2026-11-24T06:45:00Z'
+      - item: dod-omn26316-boot-failure-cause
+        label: AC10
+        reason_kind: no_longer_applicable
+        reason: "The live ticket carries only AC1 to AC4 (read 2026-11-24T06:32:34Z), so AC10 is not a criterion of OMN-26316: this contract declared it for another change on the same ticket. The declaration is removed from the requirements and the item keeps its check."
+        retired_by: fixr-infra-6198-0640
+        retired_at: '2026-11-24T06:45:00Z'
+      - item: dod-omn26316-boot-failure-cause-process-exit
+        label: AC10
+        reason_kind: no_longer_applicable
+        reason: "The live ticket carries only AC1 to AC4 (read 2026-11-24T06:32:34Z), so AC10 is not a criterion of OMN-26316: this contract declared it for another change on the same ticket. The declaration is removed from the requirements and the item keeps its check."
+        retired_by: fixr-infra-6198-0640
+        retired_at: '2026-11-24T06:45:00Z'
+      - item: dod-omn26316-overdue-dev-merge-build
+        label: AC11
+        reason_kind: no_longer_applicable
+        reason: "The live ticket carries only AC1 to AC4 (read 2026-11-24T06:32:34Z), so AC11 is not a criterion of OMN-26316: this contract declared it for another change on the same ticket. The declaration is removed from the requirements and the item keeps its check."
+        retired_by: fixr-infra-6198-0640
+        retired_at: '2026-11-24T06:45:00Z'
+      - item: dod-omn26316-roll-proof-failure-names-exception
+        label: AC14
+        reason_kind: no_longer_applicable
+        reason: "The live ticket carries only AC1 to AC4 (read 2026-11-24T06:32:34Z), so AC14 is not a criterion of OMN-26316: this contract declared it for another change on the same ticket. The declaration is removed from the requirements and the item keeps its check."
+        retired_by: fixr-infra-6198-0640
+        retired_at: '2026-11-24T06:45:00Z'
   - id: dod-omn26316-integration-proof-monitor-dormant
     description: >-
       Post-deploy probe: the rebuilt dev runtime's /health answer no longer carries the projection_attachment finding that names declared projections with no attached consumer. It reads the live container, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
@@ -217,7 +245,7 @@ dod_evidence:
   - id: dod-omn26316-overdue-dev-merge-build
     description: "The decision reads the agent's recorded dev jobs and the merge time of omnibase_infra#6191: WAIT one second before the hour ends, REQUEST with one id per sha at it, and SATISFIED once the 19:00:23Z job completes; the stability job, the job accepted before the merge, a superseded job and a job pinned to another sha carry nothing."
     source: manual
-    binds_ac: [AC12]
+    binds_ac: [AC11]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_omn26316.py -q --no-cov -n 0 -p no:randomly
@@ -231,3 +259,11 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: docker exec omninode-runtime python -c 'from omnibase_infra.handlers.handler_dev_merge_build_overdue import HandlerDevMergeBuildOverdue'
+  - id: dod-omn26316-roll-proof-failure-names-exception
+    description: "The recorded dev job errors of ae9ceb3d, 43b9fb72 and b571579b end at the runpy warning cut at unpredictabl; the same stderr shape, with the exception last, now yields a message that names the exception, inside the 240 character bound."
+    source: manual
+    binds_ac: [AC14]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_proof_failure_tail_omn26316.py tests/integration/handlers/test_dev_boot_guard_ledger_proof_omn25942.py -q --no-cov -n 0 -p no:randomly
+        cwd: .

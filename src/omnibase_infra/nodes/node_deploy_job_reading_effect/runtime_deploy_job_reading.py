@@ -45,6 +45,10 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_deploy_job_reading_effect.runtime_post_failure_converge import (
         PostFailureConverge,
     )
+    from omnibase_infra.nodes.node_deploy_job_reading_effect.runtime_untagged_head_gate import (
+        IdleBuildGate,
+        UntaggedHeadGate,
+    )
     from omnibase_infra.protocols.protocol_command import ProtocolCommand
     from omnibase_infra.protocols.protocol_post_failure_host import (
         ProtocolPostFailureHost,
@@ -95,6 +99,7 @@ _POST_FAILURE_MODULES = (
     "models/model_post_failure_inputs.py",
     "models/model_post_failure_decision.py",
     "protocols/protocol_command.py",
+    "protocols/protocol_dev_tag.py",
     "protocols/protocol_job_store.py",
     "protocols/protocol_lane_flags.py",
     "protocols/protocol_post_failure_host.py",
@@ -860,6 +865,32 @@ def _probe_earliest(
     return None
 
 
+_UNTAGGED_HEAD_MODULES = (
+    *_FAILED_HEAD_MODULES,
+    "nodes/node_deploy_job_reading_effect/runtime_untagged_head_gate.py",
+)
+
+
+def untagged_head_gate(host: ProtocolPostFailureHost) -> UntaggedHeadGate:
+    """The agent's untagged-head rule for its idle builds (OMN-25942), loaded from this checkout once.
+
+    It reads origin's dev tags through the host's idle seam and writes its one row per head
+    through this module's build decision entry.
+    """
+    *_, rule = (_load(relative) for relative in _UNTAGGED_HEAD_MODULES)
+    gate: UntaggedHeadGate = rule.UntaggedHeadGate(host, record_untagged_head)
+    return gate
+
+
+def idle_build_gate(host: ProtocolPostFailureHost) -> IdleBuildGate:
+    """The agent's refusals for its two idle builds: failed head (OMN-26493), then untagged head (OMN-25942)."""
+    *_, rule = (_load(relative) for relative in _UNTAGGED_HEAD_MODULES)
+    gate: IdleBuildGate = rule.IdleBuildGate(
+        failed_head_gate(host), untagged_head_gate(host)
+    )
+    return gate
+
+
 def _emit(
     repository: str,
     sha: str,
@@ -1031,6 +1062,22 @@ def record_failed_head(refusal: object, now: datetime) -> BaseModel | None:
         reason="failed_head",
         job=_field(refusal, "failed_job"),
         verdict_class=_field(refusal, "verdict_class"),
+    )
+
+
+def record_untagged_head(head: str, now: datetime) -> BaseModel | None:
+    """An idle build refused because no dev tag names the dev head yet (OMN-25942); never raises.
+
+    One row per head: the key (repository, head, ``refused``, ``untagged_head``) is marked in
+    the agent's state directory, so the next refusal of the head writes nothing.
+    """
+    return _emit(
+        "omnibase_infra",
+        head,
+        _DETECTED,
+        now,
+        result="refused",
+        reason="untagged_head",
     )
 
 
