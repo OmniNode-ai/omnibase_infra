@@ -763,13 +763,13 @@ def runtime_unchanged(repository: str, head: str, running: str) -> bool:
     return _idle_class(_agent(), repository, head, running) == "NON_RUNTIME"
 
 
-class _IdleRefsHost(Protocol):
+class IdleRefsHost(Protocol):
     _idle_read_running_ref: Callable[[str], str | None]
     _idle_read_head_ref: Callable[[str], str | None]
 
 
 def lag_refs_reader(
-    host: _IdleRefsHost,
+    host: IdleRefsHost,
 ) -> Callable[[str, bool], tuple[str | None, str | None]]:
     """The running and head revisions an idle converge judges the lane on (OMN-26316).
 
