@@ -71,6 +71,9 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readb
 # ever failing. `.invalid` cannot resolve, so it cannot reach anything.
 _PROBE_URL = "http://runtime.invalid:8085"
 _BOOTSTRAP = "broker.invalid:19092"
+# OMN-23566: the publish is stamped with the lane's tenant; empty is RED
+# before anything is published, so these fixtures declare one.
+_TENANT = "820272f9-4aaf-5add-a2df-0af942852ab2"
 _SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
 _LEDGER_SOURCE_ENV = "CHAIN_CANARY_LEDGER_DSN_FOR_TESTS"
 # The DSN the fake lookup resolves that NAME to. Never passed as a field.
@@ -131,6 +134,7 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
     fields: dict[str, object] = {
         "correlation_id": uuid4(),
         "probe_url": _PROBE_URL,
+        "tenant_id": _TENANT,
         # OMN-18389: link 5 now WAITS for the writer it grades, bounded by the
         # readback window — which is `max(terminal_readback_timeout_seconds,
         # budget_ms - elapsed)`. Both are declared here rather than defaulted,
@@ -153,9 +157,17 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
     return ModelChainCanaryRequest(**fields)  # type: ignore[arg-type]
 
 
-class _Ingress:
+class _Publisher:
+    """Injected bus publish (OMN-23566). ``response`` is the broker ACK — it
+    carries ``ok`` and never a terminal-event key, so the verdict still comes
+    from the readback legs these fixtures stub."""
+
     async def __call__(
-        self, url: str, body: dict[str, object], timeout_s: float
+        self,
+        bootstrap: str,
+        topic: str,
+        envelope: dict[str, object],
+        timeout_s: float,
     ) -> tuple[dict[str, object] | None, str, int]:
         return {"ok": True}, "", 42
 
@@ -225,7 +237,7 @@ class _LedgerReplay:
 
 def _handler(ledger: _LedgerReplay | None = None) -> HandlerChainCanary:
     return HandlerChainCanary(
-        ingress=_Ingress(),
+        bus_publish=_Publisher(),
         quarantine_scan=_Quarantine(),
         terminal_readback=_TerminalReadback(),
         projection_readback=_ProjectionReadback(),

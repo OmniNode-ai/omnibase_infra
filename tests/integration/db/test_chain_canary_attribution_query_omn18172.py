@@ -253,7 +253,7 @@ async def _run_canary_delegation(
 ) -> UUID:
     """Run a canary through the handler and return the probe correlation id."""
     handler = HandlerChainCanary(
-        ingress=ingress,
+        bus_publish=ingress,
         quarantine_scan=_quarantine_clean,
         terminal_readback=_terminal_present,
         projection_dsn_lookup=lambda name: (
@@ -266,6 +266,7 @@ async def _run_canary_delegation(
     request = ModelChainCanaryRequest(
         correlation_id=run_correlation_id,
         probe_url="http://runtime.invalid:8085",
+        tenant_id="820272f9-4aaf-5add-a2df-0af942852ab2",
         budget_ms=5_000,
         terminal_bootstrap_servers="broker.invalid:19092",
         projection_dsn_env=_PROJECTION_DSN_ENV,
@@ -284,7 +285,7 @@ async def _run_noncanary_delegation(
     created_correlation_ids: list[UUID],
 ) -> UUID:
     """Run a non-canary (provenance stripped) and return its probe correlation id."""
-    build_body = HandlerChainCanary._build_body
+    build_body = HandlerChainCanary._build_delegate_envelope
 
     def _build_body_without_provenance(
         request: ModelChainCanaryRequest, probe_correlation_id: str
@@ -296,11 +297,11 @@ async def _run_noncanary_delegation(
 
     with patch.object(
         HandlerChainCanary,
-        "_build_body",
+        "_build_delegate_envelope",
         staticmethod(_build_body_without_provenance),
     ):
         handler = HandlerChainCanary(
-            ingress=ingress,
+            bus_publish=ingress,
             quarantine_scan=_quarantine_clean,
             terminal_readback=_terminal_present,
             projection_dsn_lookup=lambda name: (
@@ -313,6 +314,7 @@ async def _run_noncanary_delegation(
         request = ModelChainCanaryRequest(
             correlation_id=run_correlation_id,
             probe_url="http://runtime.invalid:8085",
+            tenant_id="820272f9-4aaf-5add-a2df-0af942852ab2",
             budget_ms=5_000,
             terminal_bootstrap_servers="broker.invalid:19092",
             projection_dsn_env=_PROJECTION_DSN_ENV,

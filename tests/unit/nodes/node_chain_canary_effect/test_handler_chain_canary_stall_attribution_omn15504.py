@@ -35,8 +35,8 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.enum_chain_link_status
 )
 from tests.unit.nodes.node_chain_canary_effect.test_handler_chain_canary_readback import (
     _handler,
-    _Ingress,
     _link,
+    _Publisher,
     _request,
     _TerminalReadback,
 )
@@ -69,7 +69,7 @@ async def test_budget_exhausted_ingress_is_not_blamed_for_the_missing_terminal()
 ):
     """The live 2026-09-10 shape: full budget spent, no terminal on the bus."""
     handler = _handler(
-        _Ingress(
+        _Publisher(
             response=_DISPATCH_TIMEOUT_RESPONSE,
             elapsed_ms=_BUDGET_MS + 126,
         ),
@@ -97,7 +97,7 @@ async def test_link_one_still_passes_when_the_ingress_answered() -> None:
     with the prose verdict beside it.
     """
     handler = _handler(
-        _Ingress(response=_DISPATCH_TIMEOUT_RESPONSE, elapsed_ms=_BUDGET_MS + 126),
+        _Publisher(response=_DISPATCH_TIMEOUT_RESPONSE, elapsed_ms=_BUDGET_MS + 126),
         terminal_readback=_TerminalReadback(found=""),
     )
 
@@ -117,7 +117,7 @@ async def test_an_ingress_that_refuses_inside_its_budget_keeps_its_own_wording()
     ingress again, which would lose a finding rather than correct one.
     """
     handler = _handler(
-        _Ingress(response=_REFUSAL_RESPONSE, elapsed_ms=37),
+        _Publisher(response=_REFUSAL_RESPONSE, elapsed_ms=37),
         terminal_readback=_TerminalReadback(found=""),
     )
 
