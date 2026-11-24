@@ -509,31 +509,30 @@ def load_ci_bus_overlay(path: Path) -> ModelCiBusOverlay:
 
 
 def assert_declared_overlay_loads(bus_overlay: Path | None) -> None:
-    """Validate the handed-in overlay on a path that will NOT publish (OMN-18060).
-
-    WHY A NO-PUBLISH RUN VALIDATES ANYTHING. Until this existed, ``main()``
-    classified the merge and returned before it had looked at the overlay at
-    all: a merge with no runtime path and no ``runtime_change`` label printed
-    "No rebuild trigger" and exited 0 without parsing
-    ``config/ci_bus_lanes.yaml``. Those runs were green and PROVED NOTHING, so
-    the strict half of this cross-repo contract was only ever exercised on a
-    runtime merge -- and a producer-side key added in omnimarket therefore sat
-    undetected until whichever unrelated PR happened to touch runtime next.
-    On 2026-09-09 that gap was the whole failure: ``projection_readback``
-    landed in the overlay at 02:15Z, and every trigger run between then and the
-    first runtime merge reported success while carrying a skew it never read.
-
-    The semantics this preserves are exactly the no-publish ones: nothing here
-    contacts a broker, resolves a lane, or produces a command. It is a parse of
-    a checked-in file, and the only outcome it can change is green to red.
-
-    HONEST LIMIT. With no ``--bus-overlay`` there is nothing to validate and
-    the caller's early exit stays green. That is not a CI hole -- the workflow
-    always passes the flag, which
-    ``test_workflow_uses_authoritative_overlay_not_raw_kafka_secrets`` pins --
-    but a hand-run invocation without it is not a skew check, and saying so is
-    better than implying a guarantee the argument list does not carry.
-    """
+    # Validate the handed-in overlay on a path that will NOT publish (OMN-18060).
+    #
+    # WHY A NO-PUBLISH RUN VALIDATES ANYTHING. Until this existed, ``main()``
+    # classified the merge and returned before it had looked at the overlay at
+    # all: a merge with no runtime path and no ``runtime_change`` label printed
+    # "No rebuild trigger" and exited 0 without parsing
+    # ``config/ci_bus_lanes.yaml``. Those runs were green and PROVED NOTHING, so
+    # the strict half of this cross-repo contract was only ever exercised on a
+    # runtime merge -- and a producer-side key added in omnimarket therefore sat
+    # undetected until whichever unrelated PR happened to touch runtime next.
+    # On 2026-09-09 that gap was the whole failure: ``projection_readback``
+    # landed in the overlay at 02:15Z, and every trigger run between then and the
+    # first runtime merge reported success while carrying a skew it never read.
+    #
+    # The semantics this preserves are exactly the no-publish ones: nothing here
+    # contacts a broker, resolves a lane, or produces a command. It is a parse of
+    # a checked-in file, and the only outcome it can change is green to red.
+    #
+    # HONEST LIMIT. With no ``--bus-overlay`` there is nothing to validate and
+    # the caller's early exit stays green. That is not a CI hole -- the workflow
+    # always passes the flag, which
+    # ``test_workflow_uses_authoritative_overlay_not_raw_kafka_secrets`` pins --
+    # but a hand-run invocation without it is not a skew check, and saying so is
+    # better than implying a guarantee the argument list does not carry.
     if bus_overlay is None:
         return
     load_ci_bus_overlay(bus_overlay)
@@ -887,37 +886,36 @@ def resolve_publish_ref(
     source_sha: str,
     primary_ref: str,
 ) -> str:
-    """Decide the ``git_ref`` this publisher puts on the start command (OMN-18268).
-
-    Two facts are in play and they are NOT interchangeable.
-
-    ``source_sha`` is the merge commit of the repository whose PR fired the
-    trigger. ``git_ref`` is the ref the deploy agent resets its BUILD-CONTEXT
-    clone to, and that clone is always ``omnibase_infra``.
-
-    For an ``omnibase_infra`` merge the two coincide, which is why the shape went
-    unnoticed for as long as there was only one publisher. For a sibling
-    repository -- omnimarket, whose sources the runtime image vendors through
-    ``stage_workspace.sh`` -- they do not: the sibling's merge SHA names no
-    commit in ``omnibase_infra``, so publishing it would fail every
-    sibling-triggered job at the git phase. That is the same failure OMN-17135
-    measured from the other direction, where an ``omnibase_infra`` SHA was handed
-    to the siblings (``ERROR: omnibase_core: cannot resolve ref '<infra sha>'``,
-    exit 4) and every CI-triggered rebuild failed by construction.
-
-    So a sibling trigger supplies ``--primary-ref``: the ``omnibase_infra`` commit
-    the lane is rebuilt at. The sibling's own revision is resolved at staging
-    time by ``DEPLOY_SIBLING_FALLBACK_REF`` and recorded per repo in the image's
-    ``build-provenance.json``; the convergence guard asserts it there.
-
-    Every ambiguous combination is refused rather than defaulted:
-
-    * a sibling with no primary ref has no ref the deploy clone could reset to;
-    * ``omnibase_infra`` WITH a primary ref offers two candidates for one slot;
-    * a primary ref that is a branch ALIAS rather than a SHA is the OMN-18122
-      defect class (``origin/main`` silently resolving somewhere stale), refused
-      at the producer so it can never reach the agent's fence at all.
-    """
+    # Decide the ``git_ref`` this publisher puts on the start command (OMN-18268).
+    #
+    # Two facts are in play and they are NOT interchangeable.
+    #
+    # ``source_sha`` is the merge commit of the repository whose PR fired the
+    # trigger. ``git_ref`` is the ref the deploy agent resets its BUILD-CONTEXT
+    # clone to, and that clone is always ``omnibase_infra``.
+    #
+    # For an ``omnibase_infra`` merge the two coincide, which is why the shape went
+    # unnoticed for as long as there was only one publisher. For a sibling
+    # repository -- omnimarket, whose sources the runtime image vendors through
+    # ``stage_workspace.sh`` -- they do not: the sibling's merge SHA names no
+    # commit in ``omnibase_infra``, so publishing it would fail every
+    # sibling-triggered job at the git phase. That is the same failure OMN-17135
+    # measured from the other direction, where an ``omnibase_infra`` SHA was handed
+    # to the siblings (``ERROR: omnibase_core: cannot resolve ref '<infra sha>'``,
+    # exit 4) and every CI-triggered rebuild failed by construction.
+    #
+    # So a sibling trigger supplies ``--primary-ref``: the ``omnibase_infra`` commit
+    # the lane is rebuilt at. The sibling's own revision is resolved at staging
+    # time by ``DEPLOY_SIBLING_FALLBACK_REF`` and recorded per repo in the image's
+    # ``build-provenance.json``; the convergence guard asserts it there.
+    #
+    # Every ambiguous combination is refused rather than defaulted:
+    #
+    # * a sibling with no primary ref has no ref the deploy clone could reset to;
+    # * ``omnibase_infra`` WITH a primary ref offers two candidates for one slot;
+    # * a primary ref that is a branch ALIAS rather than a SHA is the OMN-18122
+    #   defect class (``origin/main`` silently resolving somewhere stale), refused
+    #   at the producer so it can never reach the agent's fence at all.
     repo = source_repo.strip()
     ref = primary_ref.strip()
     if not repo:
@@ -946,6 +944,34 @@ def resolve_publish_ref(
             "a commit before publishing."
         )
     return ref
+
+
+def assert_source_is_merged_ref(
+    *, source_sha: str, pr_merged: str, pr_head_sha: str
+) -> None:
+    # Refuse a start command whose source is a PR head, not a merged ref (OMN-26637).
+    #
+    # Operator ruling 2026-11-24: the dev lane builds only merged dev-branch refs.
+    # The deploy agent refuses an unmerged ref on its side (``not_a_merged_ref``);
+    # this is the producer's half, so a PR head never reaches the queue. Both
+    # values come from the workflow's own event (``pull_request.merged`` and
+    # ``pull_request.head.sha``). A publish with neither is not a pull-request
+    # event and the check does not apply; a value that is present must say merged,
+    # and a source equal to the PR head is that head, whatever ``merged`` says.
+    merged = pr_merged.strip().lower()
+    head = pr_head_sha.strip().lower()
+    if merged == "false":
+        raise ValueError(
+            f"--source-sha={source_sha!r} belongs to a pull request that is not "
+            "merged. The dev lane builds merged refs only; prove a PR head on a "
+            "pre-PR slot (OMN-26637)."
+        )
+    if head and head == source_sha.strip().lower():
+        raise ValueError(
+            f"--source-sha={source_sha!r} is the pull request's head commit, not "
+            "its merge commit. The dev lane builds merged refs only; prove a PR "
+            "head on a pre-PR slot (OMN-26637)."
+        )
 
 
 def lane_for_base_branch(base_branch: str) -> str:
@@ -1126,6 +1152,23 @@ def emit_github_output(
     help="Merge commit SHA of the triggering PR (the ref node_redeploy_orchestrator rebuilds)",
 )
 @click.option(
+    "--pr-merged",
+    type=click.Choice(["", "true", "false"]),
+    default="",
+    help=(
+        "The triggering pull request's merged state, from the event. Empty when "
+        "the publish is not a pull-request event; 'false' is refused (OMN-26637)."
+    ),
+)
+@click.option(
+    "--pr-head-sha",
+    default="",
+    help=(
+        "The triggering pull request's head commit, from the event. A "
+        "--source-sha equal to it is a PR head and is refused (OMN-26637)."
+    ),
+)
+@click.option(
     "--source-repo",
     default=OWN_REPO,
     help=(
@@ -1206,6 +1249,8 @@ def main(
     labels: str,
     base_branch: str,
     source_sha: str,
+    pr_merged: str,
+    pr_head_sha: str,
     source_repo: str,
     primary_ref: str,
     requested_by: str,
@@ -1237,6 +1282,14 @@ def main(
 
     runtime_lane = lane_for_base_branch(base_branch)
     build_source = build_source_for_base_branch(base_branch)
+
+    try:
+        assert_source_is_merged_ref(
+            source_sha=source_sha, pr_merged=pr_merged, pr_head_sha=pr_head_sha
+        )
+    except ValueError as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        sys.exit(1)
 
     # OMN-18268: for this repo's own merge these are the same string; for a
     # sibling they are not, and conflating them publishes a ref the deploy

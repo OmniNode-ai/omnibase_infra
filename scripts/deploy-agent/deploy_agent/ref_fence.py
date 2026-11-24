@@ -1,66 +1,68 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Refuse a deploy ref that would move the lane's clone backwards (OMN-18122).
-
-WHAT THIS COST, MEASURED
-------------------------
-
-Between 2026-09-10T00:48:53Z and 03:31:48Z five rebuild commands carrying
-``git_ref: "origin/main"`` reached the .201 dev agent -- jobs ``d62ec83e``,
-``68295ceb``, ``1316f524``, ``77343308``, ``ced0ac22`` -- and each ran
-``git reset --hard origin/main`` on the SHARED deploy-source clone. At that
-moment ``origin/main`` was ``276d69383`` and ``origin/dev`` was ``bcb3e6460``:
-77 commits apart, with ``main`` carrying none of its own. The clone landed
-behind the commit that introduced ``scripts/preflight_required_compose_env.py``,
-so every CI-triggered dev rebuild died at compose generation until the clone was
-reconciled by hand.
-
-``deploy_agent.tracking_ref`` already carries the operator ruling that produced
-this module's sibling fix: *the deploy agent tracks the lane's deploy branch,
-never* ``main``. OMN-16442 applied that to the agent's own self-update and to the
-``ModelRebuildRequested.git_ref`` DEFAULT. It did not apply it to a request that
-names another branch EXPLICITLY, which is the case that actually fired -- the
-upstream producer (OMN-18121) put the literal there itself.
-
-WHY THE RULE IS SHAPED THIS WAY
--------------------------------
-
-Three candidate rules were weighed against the measured facts.
-
-*Refuse the literal* ``main``. Rejected. It reintroduces exactly the hardcoded
-branch literal OMN-16442 removed from this package, and it silently passes a repo
-whose release-synced branch is named something else. Denying a literal is a
-smaller sin than defaulting to one, but it is the same sin.
-
-*Require the ref to be reachable from the tracking branch.* Rejected on
-evidence, not on taste: ``git merge-base --is-ancestor origin/main origin/dev``
-exited 0 at the time of the incident. ``main`` on these repos is release-synced,
-so its tip is normally an ancestor of ``dev``. This rule does not catch the case
-it was proposed for.
-
-*Refuse a branch reference that is STRICTLY BEHIND the tracking branch* -- no
-commits of its own, at least one commit missing. Implemented. It names no
-branch, it encodes the actual harm (the deploy clone moves backwards off its
-lane's own lineage), and it leaves a feature-branch deploy working because a
-feature branch carries commits the tracking branch does not.
-
-WHAT IS DELIBERATELY OUT OF SCOPE
----------------------------------
-
-A bare commit SHA. A SHA is an unambiguous pin the caller chose and typed, and
-the GitHub Actions publisher pins one on every dev deploy -- ``gha-redeploy``
-records on the start topic carry a 40-hex ref, never a branch. The defect class
-here is a branch ALIAS that silently resolves somewhere stale; a SHA cannot
-drift between the moment it is published and the moment it is reset to.
-
-There is no override flag and no environment escape. An override would make this
-fence advisory, and an advisory fence is what the five jobs above already had.
-"""
+# Refuse a deploy ref that would move the lane's clone backwards (OMN-18122).
+#
+# WHAT THIS COST, MEASURED
+# ------------------------
+#
+# Between 2026-09-10T00:48:53Z and 03:31:48Z five rebuild commands carrying
+# ``git_ref: "origin/main"`` reached the lab dev agent -- jobs ``d62ec83e``,
+# ``68295ceb``, ``1316f524``, ``77343308``, ``ced0ac22`` -- and each ran
+# ``git reset --hard origin/main`` on the SHARED deploy-source clone. At that
+# moment ``origin/main`` was ``276d69383`` and ``origin/dev`` was ``bcb3e6460``:
+# 77 commits apart, with ``main`` carrying none of its own. The clone landed
+# behind the commit that introduced ``scripts/preflight_required_compose_env.py``,
+# so every CI-triggered dev rebuild died at compose generation until the clone was
+# reconciled by hand.
+#
+# ``deploy_agent.tracking_ref`` already carries the operator ruling that produced
+# this module's sibling fix: *the deploy agent tracks the lane's deploy branch,
+# never* ``main``. OMN-16442 applied that to the agent's own self-update and to the
+# ``ModelRebuildRequested.git_ref`` DEFAULT. It did not apply it to a request that
+# names another branch EXPLICITLY, which is the case that actually fired -- the
+# upstream producer (OMN-18121) put the literal there itself.
+#
+# WHY THE RULE IS SHAPED THIS WAY
+# -------------------------------
+#
+# Three candidate rules were weighed against the measured facts.
+#
+# *Refuse the literal* ``main``. Rejected. It reintroduces exactly the hardcoded
+# branch literal OMN-16442 removed from this package, and it silently passes a repo
+# whose release-synced branch is named something else. Denying a literal is a
+# smaller sin than defaulting to one, but it is the same sin.
+#
+# *Require the ref to be reachable from the tracking branch.* Rejected on
+# evidence, not on taste: ``git merge-base --is-ancestor origin/main origin/dev``
+# exited 0 at the time of the incident. ``main`` on these repos is release-synced,
+# so its tip is normally an ancestor of ``dev``. This rule does not catch the case
+# it was proposed for.
+#
+# *Refuse a branch reference that is STRICTLY BEHIND the tracking branch* -- no
+# commits of its own, at least one commit missing. Implemented. It names no
+# branch, it encodes the actual harm (the deploy clone moves backwards off its
+# lane's own lineage), and it leaves a feature-branch deploy working because a
+# feature branch carries commits the tracking branch does not.
+#
+# WHAT IS DELIBERATELY OUT OF SCOPE
+# ---------------------------------
+#
+# A bare commit SHA. A SHA is an unambiguous pin the caller chose and typed, and
+# the GitHub Actions publisher pins one on every dev deploy -- ``gha-redeploy``
+# records on the start topic carry a 40-hex ref, never a branch. The defect class
+# here is a branch ALIAS that silently resolves somewhere stale; a SHA cannot
+# drift between the moment it is published and the moment it is reset to.
+#
+# There is no override flag and no environment escape. An override would make this
+# fence advisory, and an advisory fence is what the five jobs above already had.
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 
+from deploy_agent.coalesce import AncestryResolver
+from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested
 from deploy_agent.tracking_ref import ENV_TRACKING_REF
 
 
@@ -111,3 +113,50 @@ def assert_ref_not_stale_branch(facts: ModelRefLineageFacts) -> None:
         f"{ENV_TRACKING_REF}; publish an explicit commit SHA, or the tracking "
         "branch itself, if this deploy is intended."
     )
+
+
+class EnumMergedRefVerdict(StrEnum):
+    # Whether a command's ref is a merged ref of the lane's tracking branch.
+
+    #: The tracking branch contains the ref: it is merged.
+    MERGED = "merged"
+    #: The tracking branch is proven NOT to contain the ref: a PR head or an
+    #: unmerged branch. Refused with ``not_a_merged_ref``.
+    NOT_MERGED = "not_merged"
+    #: The rule does not apply: another lane, a pinned image (a promotion), or a
+    #: signed rollback declaration (the deliberate way to an exact commit).
+    NOT_APPLICABLE = "not_applicable"
+    #: The host could not answer (no tracking ref, a sha the clone cannot
+    #: fetch). Built as requested, the same fail-open every fence here takes:
+    #: a lane that is down must still accept a rebuild.
+    UNPROVEN = "unproven"
+
+    @property
+    def refuses(self) -> bool:
+        return self is EnumMergedRefVerdict.NOT_MERGED
+
+
+def decide_merged_ref(
+    cmd: ModelRebuildRequested,
+    *,
+    lanes: frozenset[EnumRuntimeLane],
+    tracking_ref: str | None,
+    contains: AncestryResolver,
+) -> EnumMergedRefVerdict:
+    # Decide whether ``cmd`` names a ref its lane's tracking branch already has (OMN-26637).
+    #
+    # Operator ruling 2026-11-24: the dev lane takes only merged dev-branch refs.
+    # A PR head reached it through the same queue as merges, ran for ~28 minutes,
+    # and left the lane on a commit no later merge contained. PR heads are proven
+    # on a pre-PR slot instead. ``lanes`` is injected, so no lane is named here.
+    # Pure apart from ``contains``.
+    if cmd.runtime_lane not in lanes:
+        return EnumMergedRefVerdict.NOT_APPLICABLE
+    if cmd.rollback is not None or cmd.image_ref or cmd.image_digest:
+        return EnumMergedRefVerdict.NOT_APPLICABLE
+    if not tracking_ref:
+        return EnumMergedRefVerdict.UNPROVEN
+    verdict = contains(cmd.git_ref, tracking_ref)
+    if verdict is None:
+        return EnumMergedRefVerdict.UNPROVEN
+    return EnumMergedRefVerdict.MERGED if verdict else EnumMergedRefVerdict.NOT_MERGED
