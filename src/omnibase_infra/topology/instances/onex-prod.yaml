@@ -112,6 +112,7 @@ databases:
               - goal_traces
               - host_disk_class
               - host_disk_volume
+              - lab_alerts
               - lab_container_memory_window
               - lab_job_state
               - lab_job_transitions

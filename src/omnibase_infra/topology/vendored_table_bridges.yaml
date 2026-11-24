@@ -63,3 +63,13 @@
   prefix: ""
   opts: {}
   tables: [floor_integration_pass]
+# OMN-26663: infra vendors lab_alerts (node_projection_lab_alerts 0000-0001) ahead
+# of the omnimarket node contract (omnimarket#6788); 0001 grants omninode_runtime
+# SELECT, INSERT, UPDATE and no DELETE: a cleared alert stays as a cleared row.
+# Retired when the omnimarket pin carries the node.
+- ticket: OMN-26663 # omnimarket#6788
+  node: node_projection_lab_alerts
+  create: 0000_create_lab_alerts.sql
+  prefix: ""
+  opts: {}
+  tables: [lab_alerts]
