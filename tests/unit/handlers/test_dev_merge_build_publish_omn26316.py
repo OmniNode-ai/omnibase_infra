@@ -195,20 +195,19 @@ def test_the_tick_requests_each_overdue_sha_once_and_never_on_a_prod_lane(
     git("config", "user.name", "t")
     git("commit", "--allow-empty", "-q", "-m", "merge (#6191)")
     sender = _Sender()
-    monkeypatch.setattr(caller, "_AgentDevMergeSender", lambda *_a: sender)
+    monkeypatch.setattr(caller, "AgentDevMergeSender", lambda *_a: sender)
     monkeypatch.setattr(caller, "_TRACKED_HEAD", "HEAD")
     execution = SimpleNamespace(STATE_DIR=str(state), REPO_DIR=str(repo))
     settings = {
         "dev_merge_build_runtime_lane": "dev",
         "dev_merge_build_overdue_topic": "topic-from-settings",
         "dev_merge_build_command_topic": "command-topic-from-settings",
+        "build_decision_git_diff_timeout_seconds": 10,
     }
     overdue = [_decision()]
     subjects = {_MERGE: "merge (#6191)"}
     for _ in range(2):
-        caller._request_overdue_builds(
-            execution, settings, overdue, subjects, str(repo), 10.0
-        )
+        caller._request_overdue_builds(execution, settings, overdue, subjects)
     assert len(sender.commands) == 1 and len(sender.events) == 1
     assert (state / caller._REQUESTED_KEYS).read_text().split() == [
         str(request_id_for("omnibase_infra", _MERGE))
@@ -219,7 +218,5 @@ def test_the_tick_requests_each_overdue_sha_once_and_never_on_a_prod_lane(
             {**settings, "dev_merge_build_runtime_lane": "prod"},
             [_decision()],
             subjects,
-            str(repo),
-            10.0,
         )
     assert len(sender.commands) == 1

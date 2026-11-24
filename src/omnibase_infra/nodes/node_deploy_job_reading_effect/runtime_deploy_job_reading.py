@@ -666,7 +666,7 @@ def _dev_merges(
     return merges
 
 
-class _AgentDevMergeSender:
+class AgentDevMergeSender:
     """The overdue dev merge's two sends, made from the deploy agent's own process (OMN-26316).
 
     Both go out on the agent's control-bus producer, so a wedged dev runtime cannot hold them.
@@ -701,8 +701,6 @@ def _request_overdue_builds(
     settings: dict[str, JsonValue],
     overdue: list[BaseModel],
     subjects: dict[str, str],
-    clone: str,
-    timeout: float,
 ) -> None:
     """Publish the event and request the dev build of each overdue merge, once per sha (OMN-26316).
 
@@ -721,8 +719,9 @@ def _request_overdue_builds(
         raise RuntimeError(
             "the deploy job reading contract's publish settings are not strings"
         )
+    timeout = float(_seconds(settings, "build_decision_git_diff_timeout_seconds"))
     head = subprocess.run(
-        ["git", "-C", clone, "rev-parse", _TRACKED_HEAD],
+        ["git", "-C", str(execution.REPO_DIR), "rev-parse", _TRACKED_HEAD],
         capture_output=True,
         text=True,
         check=False,
@@ -741,7 +740,7 @@ def _request_overdue_builds(
     ].ProtocolDevMergeBuildSender
     run_coro_sync(
         container.service_registry.register_instance(
-            sender_key, _AgentDevMergeSender(topic, command_topic)
+            sender_key, AgentDevMergeSender(topic, command_topic)
         )
     )
     handler = handler_mod.HandlerDevMergeBuildPublish(container)
@@ -851,9 +850,7 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
             )
         if overdue:
             try:
-                _request_overdue_builds(
-                    execution, settings, overdue, subjects, clone, git_timeout
-                )
+                _request_overdue_builds(execution, settings, overdue, subjects)
             except Exception:  # the publish never costs the tick its decisions
                 logger.exception("overdue dev merge build request was not made")
         return tuple(decisions)
