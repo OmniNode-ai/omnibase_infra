@@ -224,6 +224,10 @@ def test_catalog_tracing_bundle_injects_otel_env() -> None:
         stack.injected_env.get("OTEL_EXPORTER_OTLP_ENDPOINT") == "http://phoenix:6006"
     )
     assert stack.injected_env.get("OTEL_TRACES_EXPORTER") == "otlp"
+    assert (
+        stack.injected_env.get("OTEL_RESOURCE_ATTRIBUTES")
+        == "openinference.project.name=onex-runtime"
+    )
 
     # OMNIMEMORY vars must NOT leak in from tracing bundle
     for key in stack.injected_env:
