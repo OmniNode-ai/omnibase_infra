@@ -43,8 +43,8 @@
 #
 # THE CREDENTIALS: LANE-LOCAL, THE STABILITY LANE'S OWN (OMN-21485)
 #   `CHAIN_CANARY_GATEWAY_API_KEY` and `KAFKA_SASL_*` are
-#   the stability environment's secrets, injected under the names the
-#   probe reads, exactly as chain-canary.yml injects them; the broker and its
+#   read from the stability Infisical (OMN-26121) and exported under the names the
+#   probe reads, exactly as chain-canary.yml exports them; the broker and its
 #   transport come from the bus_lane the resolved lane declares. Configure all
 #   three names in that environment before enabling the proof; GitHub otherwise
 #   falls back to a same-named repository secret. The API key is
@@ -218,6 +218,20 @@ jobs:
                   handle.write(f'{key}={value}\n')
           "
 
+      # OMN-26121 (operator ruling 2026-11-23T23:06:19Z): C16 drives the stability lane's front door.
+      # Stability reads its credentials from the stability Infisical through the
+      # runner's own machine identity, never from repository or environment
+      # secrets. Each value is masked and exported to the job environment; a
+      # missing one fails here naming the variable, the Infisical name and the
+      # store path. See .github/actions/fetch-stability-secrets.
+      - name: Fetch the stability probe credentials from the stability Infisical
+        uses: ./.github/actions/fetch-stability-secrets
+        with:
+          secrets: |
+            KAFKA_SASL_USERNAME=STABILITY_TEST_KAFKA_SASL_USERNAME_STABILITY_CHAIN_CANARY
+            KAFKA_SASL_PASSWORD=STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_CHAIN_CANARY
+            CHAIN_CANARY_GATEWAY_API_KEY=STABILITY_TEST_CHAIN_CANARY_GATEWAY_API_KEY
+
       - name: Drive the healthy and the dying delegation and grade C16
         env:
           # The lane's address as the overlay declares it (LANE_INGRESS_URL,
@@ -228,9 +242,6 @@ jobs:
           RUNNER_IDENTITY: gha-${{ github.run_id }}-${{ github.run_attempt }}
           # The NAMES are what the probe is told; the VALUES reach it only
           # here, as environment. See the header note.
-          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.CHAIN_CANARY_GATEWAY_API_KEY }}
-          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
-          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
           # The healthy run's terminal, read off the bus for R-DELEG-12. Named
           # here, as chain-canary.yml names its hops, never in the script.
           TERMINAL_TOPIC: onex.evt.omnimarket.delegate-skill-completed.v1
@@ -266,9 +277,6 @@ jobs:
           # A JSON array: the read-only SQL client prefix for delegation_events.
           # Unset grades SKIP, which is red.
           PSQL_ARGV_JSON: ${{ vars.C16_PINNED_PSQL_ARGV_JSON }}
-          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.CHAIN_CANARY_GATEWAY_API_KEY }}
-          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
-          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
         run: |
           set -uo pipefail
           uv run --frozen python -c "
