@@ -70,5 +70,5 @@ dod_evidence:
       - AC1
     checks:
       - check_type: command
-        check_value: bash -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_chain_canary_effect/handlers/handler_chain_canary.py?ref=omn-23566-canary-submits-over-bus" --jq .content | base64 -d | grep -q "_publish_to_bus_via_aiokafka"'
+        check_value: bash -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_chain_canary_effect/handlers/handler_chain_canary.py?ref=omn-23566-canary-submits-over-bus" --jq .content | base64 -d | grep -q "_publish_to_bus_via_aiokafka" && grep -q "_publish_to_bus_via_aiokafka" src/omnibase_infra/nodes/node_chain_canary_effect/handlers/handler_chain_canary.py'
         cwd: .
