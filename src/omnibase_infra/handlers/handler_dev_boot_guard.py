@@ -69,6 +69,11 @@ WORK_LEDGER_CONTRACT: Final = (
     "src/omnibase_infra/contracts/work_ledger_query_client.contract.yaml"
 )
 ONEX_ENTRY: Final = "scripts/onex"
+# A failed proof reports the end of its stderr: a Python stderr opens with warnings and
+# ends with the exception that stopped the command. The read window sits under the
+# sanitizer's own bound so that bound never cuts the end off.
+PROOF_FAILURE_READ_CHARS: Final = 1500
+PROOF_FAILURE_TAIL_CHARS: Final = 240
 REPORT_SECONDS = 20
 # A full container log (json-file rotation holds up to 30 MB) is read before recovery.
 LOG_READ_SECONDS = 60
@@ -321,7 +326,7 @@ def _prove_work_ledger_answers(execution: ModuleType) -> None:
     if done.returncode != 0:
         raise DevBootFailedError(
             f"work ledger: {argv[0]} exited {done.returncode}: "
-            f"{_safe(done.stderr or done.stdout)[:240]}"
+            f"{_safe((done.stderr or done.stdout)[-PROOF_FAILURE_READ_CHARS:])[-PROOF_FAILURE_TAIL_CHARS:]}"
         )
     try:
         answer = json.loads(done.stdout)
