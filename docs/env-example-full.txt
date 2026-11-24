@@ -704,8 +704,10 @@ ONEX_LOG_LEVEL=INFO
 # Written by provision-keycloak.py. Do not set manually.
 #
 # KEYCLOAK_ADMIN_URL: ALWAYS internal (http://keycloak:8080).
-#   Used by: runtime containers, onex-api. Never set to localhost.
-#   onex-api in k8s gets this via Infisical /services/onex-api/auth/.
+#   Used by: runtime containers. Never set to localhost.
+#   onex-api is retired (RULING 2026-11-02T15:02:01Z D3, OMN-21288): the runtime is
+#   the one runtime. The legacy path name /services/onex-api/auth/ (onex-api retired)
+#   is still seeded by provision-keycloak.py and names no running service.
 #
 # KEYCLOAK_ISSUER: ALWAYS external browser-visible URL.
 #   Must match the `iss` claim in Keycloak-issued tokens.
@@ -714,10 +716,10 @@ ONEX_LOG_LEVEL=INFO
 KEYCLOAK_ADMIN_URL=http://keycloak:8080
 KEYCLOAK_REALM=omninode
 KEYCLOAK_ADMIN_CLIENT_ID=onex-admin
-KEYCLOAK_ADMIN_CLIENT_SECRET=          # restricted: /services/onex-api/auth/ in Infisical
+KEYCLOAK_ADMIN_CLIENT_SECRET=          # restricted: legacy Infisical path /services/onex-api/auth/ (onex-api retired)
 KEYCLOAK_ISSUER=http://localhost:28080/realms/omninode
 GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL=http://keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect
 GATEWAY_ATTACH_KEYCLOAK_JWKS_URL=http://keycloak:8080/realms/omninode/protocol/openid-connect/certs
 ONEX_SERVICE_CLIENT_ID=onex-service
-ONEX_SERVICE_CLIENT_SECRET=            # restricted: /services/onex-api/auth/ in Infisical
+ONEX_SERVICE_CLIENT_SECRET=            # restricted: legacy Infisical path /services/onex-api/auth/ (onex-api retired)
 # KEYCLOAK_ADMIN_PASSWORD is NOT stored here (transient, bootstrap-only input)

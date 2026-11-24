@@ -1,0 +1,81 @@
+schema_version: "1.0.0"
+ticket_id: OMN-26379
+title: "The lane census installer records the revision a unit runs and refuses a copy with none, so each lab host's census unit runs one declared source"
+summary: >-
+  The standalone census unit on lab host h202 ran a hand-placed proof copy of the scripts with no revision record, while h051 already runs the lane census node from a pinned venv. This change makes deploy/lane-census/install-lane-census.sh write the clone's HEAD into the unit as LANE_CENSUS_REVISION and refuse a --repo-root that is not a git work tree, with tests that fail at the base.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26379-one-declared-source
+    statement: >-
+      Each lab host's lane census unit runs one declared source whose revision is recorded, and the census has one planner.
+    acceptance:
+      - id: AC1
+        statement: "AC1: each lab host's lane census unit runs one declared source whose revision is recorded (installed=<host>:<revision> in a Lab line) and no proof copy"
+      - id: AC2
+        statement: "AC2: one scheduled run on h051 and one on h202 exit 0"
+      - id: AC3
+        statement: "AC3: the census has one planner: scripts/lane_census_plan.py plans it and node_lane_census_effect runs the collector without planning, adding no file to the private config root"
+  - id: req-omn26379-durable-source
+    statement: >-
+      A census unit names a durable clone, and the installer's own verify reads that the collector the unit runs exists and that a revision is recorded.
+    acceptance:
+      - id: AC4
+        statement: "AC4: the installer refuses a --repo-root that is a linked git worktree"
+      - id: AC5
+        statement: "AC5: --verify exits 1 when the collector path the unit names is gone or the unit records no revision"
+evidence_requirements:
+  - kind: tests
+    description: The installer tests, including the five that fail at the base for the missing revision record.
+    command: uv run --frozen pytest tests/unit/scripts/test_lane_census_timer_dropin.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26379-ac1-revision-recorded
+    description: >-
+      The installer writes the clone's HEAD into the unit it renders (standalone unit and drop-in) and refuses a directory that is not a git work tree. The live readback on h202 (systemctl --user cat onex-lane-census.service shows LANE_CENSUS_REVISION and no lab-proof path) is in the pull request Lab line.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_lane_census_timer_dropin.py -q --no-cov -n 0 -p no:cacheprovider -k "records_the_revision or no_revision_record"
+        cwd: .
+  - id: dod-omn26379-ac2-exit-zero
+    description: >-
+      The installer test renders and installs the unit against a stub systemctl, and the rendered unit keeps the collector ExecStart and names its revision (it fails at the merge base, which records none). The scheduled-run exit codes (ExecMainStatus=0 on h051 and h202) are in the pull request Lab line.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_lane_census_timer_dropin.py -q --no-cov -n 0 -p no:cacheprovider -k "keeps_the_collector_beside_its_revision"
+        cwd: .
+  - id: dod-omn26379-ac3-one-planner
+    description: >-
+      The installed unit names one source, the clone whose lane-census-check.sh it runs, with one revision record for it (the merge base records none, so the check fails there). The planner is scripts/lane_census_plan.py in this repository and the census node in omnimarket only runs lane-census-check.sh; this change adds no file to the private config root.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_lane_census_timer_dropin.py -q --no-cov -n 0 -p no:cacheprovider -k "runs_one_source_whose_revision_is_recorded"
+        cwd: .
+  - id: dod-omn26379-ac4-durable-source
+    description: >-
+      h202's census drop-in named a lane worktree's scripts; the worktree was removed and every hourly pass exited 127 behind a fail-soft ExecStart. The installer now refuses a linked worktree as the source (the base installer installs it).
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_lane_census_timer_dropin.py -q --no-cov -n 0 -p no:cacheprovider -k "refuses_a_linked_worktree"
+        cwd: .
+  - id: dod-omn26379-ac5-verify-reads-the-source
+    description: >-
+      --verify read only the rendered text, so the broken h202 install verified OK. It now fails when the collector path is gone or the unit records no revision (both tests fail at the base, which answers OK).
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_lane_census_timer_dropin.py -q --no-cov -n 0 -p no:cacheprovider -k "verify_fails"
+        cwd: .

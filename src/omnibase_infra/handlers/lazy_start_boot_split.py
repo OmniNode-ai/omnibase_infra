@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
+from typing import TYPE_CHECKING
 
 from omnibase_infra.models.lazy_start import ModelLazyStartPolicy
 from omnibase_infra.models.model_contract_hotload_lane_overlay import (
@@ -30,8 +31,15 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelDiscoveredContract,
 )
 
+if TYPE_CHECKING:
+    from omnibase_core.models.core.model_deployment_topology import (
+        ModelDeploymentTopology,
+    )
+    from omnibase_infra.handlers.lazy_start_front_door import LazyStartFrontDoor
+
 __all__: list[str] = [
     "StoreLazyStartDormant",
+    "StoreLazyStartWaker",
     "boot_manifest",
     "boot_universe_warm_enabled",
     "lazy_start_policy_of_this_lane",
@@ -46,8 +54,10 @@ class StoreLazyStartDormant:
 
     _policy: ModelLazyStartPolicy | None = None
     _contracts: dict[str, ModelDiscoveredContract] = {}
+    _front_door: LazyStartFrontDoor | None = None
     _wired: dict[str, ModelDiscoveredContract] = {}
     _provisioner: object | None = None
+    _topology: ModelDeploymentTopology | None = None
 
     @classmethod
     def record(
@@ -57,15 +67,26 @@ class StoreLazyStartDormant:
         provisioner: object | None = None,
         wired: tuple[ModelDiscoveredContract, ...] = (),
     ) -> None:
+        cls._topology = None
         cls._policy = policy
         cls._contracts = {contract.name: contract for contract in dormant}
         cls._wired = {contract.name: contract for contract in wired}
         cls._provisioner = provisioner
 
     @classmethod
+    def record_topology(cls, topology: ModelDeploymentTopology | None) -> None:
+        """Keep the boot's database topology beside the dormant contracts (OMN-26594)."""
+        cls._topology = topology
+
+    @classmethod
     def provisioner(cls) -> object | None:
         """The boot's topic provisioner, reused by every start."""
         return cls._provisioner
+
+    @classmethod
+    def topology(cls) -> ModelDeploymentTopology | None:
+        """The boot's database topology, which a dormant db_io contract wires with (OMN-26594)."""
+        return cls._topology
 
     @classmethod
     def policy(cls) -> ModelLazyStartPolicy | None:
@@ -81,11 +102,48 @@ class StoreLazyStartDormant:
         return dict(cls._wired)
 
     @classmethod
+    def record_front_door(cls, front_door: LazyStartFrontDoor) -> None:
+        """Keep the boot's front door so ``/ready`` can read its serving set (OMN-26316)."""
+        cls._front_door = front_door
+
+    @classmethod
+    def serving_detail(cls) -> dict[str, object]:
+        """The ``lazy_start`` block of the ``/ready`` detail, or nothing (OMN-26316).
+
+        Nothing before the policy and the front door exist.
+        """
+        if cls._policy is None or cls._front_door is None:
+            return {}
+        status = cls._front_door.serving_status()
+        return {"lazy_start": status.model_dump(mode="json")}
+
+    @classmethod
     def clear(cls) -> None:
         cls._policy = None
+        cls._front_door = None
         cls._contracts = {}
         cls._wired = {}
         cls._provisioner = None
+        cls._topology = None
+        StoreLazyStartWaker.record(None)
+
+
+class StoreLazyStartWaker:
+    """The front door's wake of one contract by name, for callers outside the bus (OMN-26316).
+
+    The always-wired ingress records it. The HTTP listener's mount middleware wakes a
+    dormant contract through it.
+    """
+
+    _waker: Callable[[str], Awaitable[None]] | None = None
+
+    @classmethod
+    def record(cls, waker: Callable[[str], Awaitable[None]] | None) -> None:
+        cls._waker = waker
+
+    @classmethod
+    def waker(cls) -> Callable[[str], Awaitable[None]] | None:
+        return cls._waker
 
 
 def lazy_start_policy_of_this_lane(
@@ -94,6 +152,24 @@ def lazy_start_policy_of_this_lane(
     """The lane row's lazy-start block when the row is on_demand, else None."""
     row = ModelContractHotloadLaneOverlay.row_of_this_lane(environ)
     return None if row is None else row.lazy_start_policy
+
+
+def _boot_database_topology(
+    environ: Mapping[str, str] | None = None,
+) -> ModelDeploymentTopology | None:
+    """The database topology the kernel's boot loads: the explicit profile, else None (OMN-26594).
+
+    The kernel reads ``ONEX_DATABASE_TOPOLOGY_PROFILE`` the same way; a dormant ``db_io``
+    contract wires with it or is refused.
+    """
+    profile = (os.environ if environ is None else environ).get(
+        "ONEX_DATABASE_TOPOLOGY_PROFILE"
+    )
+    if profile is None:
+        return None
+    from omnibase_infra.topology import load_topology_profile
+
+    return load_topology_profile(profile)
 
 
 def split_boot_manifest(
@@ -111,13 +187,22 @@ def boot_manifest(
     manifest: ModelAutoWiringManifest,
     provisioner: object | None = None,
     environ: Mapping[str, str] | None = None,
+    topology: ModelDeploymentTopology | None = None,
 ) -> ModelAutoWiringManifest:
     """The kernel's boot manifest: the boot set on a lazy-start lane, else unchanged."""
     policy = lazy_start_policy_of_this_lane(environ)
     if policy is None:
         return manifest
     boot, dormant = split_boot_manifest(manifest, policy)
-    StoreLazyStartDormant.record(policy, dormant, provisioner, boot.contracts)
+    StoreLazyStartDormant.record(
+        policy,
+        dormant,
+        provisioner,
+        boot.contracts,
+    )
+    StoreLazyStartDormant.record_topology(
+        topology if topology is not None else _boot_database_topology(environ)
+    )
     missing = sorted(policy.boot_set - {c.name for c in boot.contracts})
     logger.info(
         "Lazy start: %d contract(s) wired at boot, %d dormant until their first "

@@ -1037,7 +1037,12 @@ services:
       - "${DEV_RUNTIME_MAIN_RUNTIME_EFFECTS_RUNTIME_PROFILE:-runtime}"
       - "${DEV_RUNTIME_MAIN_RUNTIME_EFFECTS_FULL_PROFILE:-full}"
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_placement_identity_env]
+      # OMN-26473: the tenant provision effect is placed on the effects runtime profile and reads its
+      # database through the logical secret tenant_identity.database.dsn (mapped to this env by the dev
+      # profile of contracts/services/runtime_policy.contract.yaml), so this role carries the same
+      # fail-closed DSN the main runtime does. Dev instances that run a separate effects container need it
+      # here; on primary dev the effects role is folded into main, which already carries it.
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_tenant_identity_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_placement_identity_env]
       ONEX_BOOT_READY_BOUND_SECONDS: ${DEV_RUNTIME_EFFECTS_READY_BOUND_SECONDS:?runtime policy contract must set DEV_RUNTIME_EFFECTS_READY_BOUND_SECONDS}
       ONEX_MAX_CONCURRENT_CONTRACT_ATTACH: ${DEV_RUNTIME_EFFECTS_MAX_CONCURRENT_CONTRACT_ATTACH:?runtime policy contract must set DEV_RUNTIME_EFFECTS_MAX_CONCURRENT_CONTRACT_ATTACH}
       ONEX_BOOT_PRIORITY_CONTRACTS: ${DEV_RUNTIME_EFFECTS_BOOT_PRIORITY_CONTRACTS:?runtime policy contract must set DEV_RUNTIME_EFFECTS_BOOT_PRIORITY_CONTRACTS}

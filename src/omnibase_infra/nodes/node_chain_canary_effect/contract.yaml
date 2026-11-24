@@ -52,6 +52,10 @@
 #
 name: "node_chain_canary_effect"
 node_type: "EFFECT_GENERIC"
+# OMN-26121: the archetype the no-I/O-outside-effects hook reads (it does not recognise
+# EFFECT_GENERIC), so this effect node's modules are judged as effect modules.
+descriptor:
+  node_archetype: effect
 # 1.1.0 -> 1.2.0: additive. The node gains declared capability rather than a
 # fix — every non-passing projection and ledger outcome is now a verdict the
 # handler can actually emit, and LEDGER_REPLAY_UNREADABLE closes the last

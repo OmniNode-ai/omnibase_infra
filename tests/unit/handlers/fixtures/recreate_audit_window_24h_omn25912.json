@@ -1,0 +1,1020 @@
+{
+ "ticket": "OMN-25912",
+ "read_from": "h201 dev lane: the deploy agent job records (jobs-dev, runtime_lane dev, runtime phase success or failed, accepted 2026-11-22T20:04Z to 2026-11-23T20:04Z) and the dev bus topics dev-runtime-started, dev-roll-manifest and dev-recreate-announced over the same window, read 2026-11-23T21:1xZ; trimmed to the 16 recreates' start and manifest events, the immediate announcements, and the one hold announcement (92ab0ad6) published before the 04:46:07Z rollback",
+ "window": {
+  "from": "2026-11-22T20:04:00Z",
+  "to": "2026-11-23T20:04:00Z"
+ },
+ "container_observations": {
+  "source": "docker inspect omninode-runtime read by lane recreate-1950 on h201 (ledger MSG 2026-11-23T20:18:57Z, report recreate-1950-2026-11-23T2020Z): exit 0 under the restart policy, no deploy job, RestartCount 2 then 3",
+  "rows": [
+   {
+    "container": "omninode-runtime",
+    "started_at": "2026-11-23T19:36:13Z",
+    "restart_count": 2,
+    "exit_code": 0
+   },
+   {
+    "container": "omninode-runtime",
+    "started_at": "2026-11-23T20:08:48Z",
+    "restart_count": 3,
+    "exit_code": 0
+   }
+  ]
+ },
+ "job_records": [
+  {
+   "job_id": "ee0cd6a7-3725-436d-a07c-ece71d8e2fe2",
+   "requested_by": "lane/devunstick-2150",
+   "accepted_at": "2026-11-22T21:45:32.288696Z"
+  },
+  {
+   "job_id": "15f93a88-268c-4792-bb81-3973c55333ce",
+   "requested_by": "agent/idle-converge",
+   "accepted_at": "2026-11-22T23:00:33.754452Z"
+  },
+  {
+   "job_id": "89b12696-4928-4e9c-92e7-41e3ed41a7ab",
+   "requested_by": "agent/idle-converge",
+   "accepted_at": "2026-11-23T01:00:28.932152Z"
+  },
+  {
+   "job_id": "0ca618c3-3fd1-416b-b8e9-dd858a5edef0",
+   "requested_by": "lane/rollgate-0420",
+   "accepted_at": "2026-11-23T04:46:07.029270Z"
+  },
+  {
+   "job_id": "0a7a8ab3-4205-4ad1-ae4b-db3e2294257c",
+   "requested_by": "agent/idle-restore",
+   "accepted_at": "2026-11-23T06:21:58.028441Z"
+  },
+  {
+   "job_id": "69bd53a1-f05b-461c-afad-5b89dbfcade9",
+   "requested_by": "agent/idle-restore",
+   "accepted_at": "2026-11-23T08:06:41.687790Z"
+  },
+  {
+   "job_id": "5d1afc11-f24b-4047-9d9e-3ec98e626fa5",
+   "requested_by": "lane/devsecret-1050",
+   "accepted_at": "2026-11-23T10:46:47.736129Z"
+  },
+  {
+   "job_id": "7feab6dc-2f9c-46f9-97eb-62b6e6b78a88",
+   "requested_by": "agent/idle-restore",
+   "accepted_at": "2026-11-23T12:19:38.493483Z"
+  },
+  {
+   "job_id": "62afc654-abdf-4f6b-a489-9ce9c2a7551d",
+   "requested_by": "lane/gwrun-1255",
+   "accepted_at": "2026-11-23T12:52:04.534372Z"
+  },
+  {
+   "job_id": "73dff129-c511-4ca7-ad46-be1ed95ce901",
+   "requested_by": "agent/idle-restore",
+   "accepted_at": "2026-11-23T14:06:04.738463Z"
+  },
+  {
+   "job_id": "199d1107-32f8-4072-a92a-9e9ef27dda29",
+   "requested_by": "agent/idle-restore",
+   "accepted_at": "2026-11-23T15:00:37.140287Z"
+  },
+  {
+   "job_id": "61df2c2c-512a-493f-ab76-35e0af2c3e9d",
+   "requested_by": "agent/idle-restore",
+   "accepted_at": "2026-11-23T15:53:33.934697Z"
+  },
+  {
+   "job_id": "dd757818-3098-4eb5-b020-0156552b1308",
+   "requested_by": "agent/idle-restore",
+   "accepted_at": "2026-11-23T16:32:48.110306Z"
+  },
+  {
+   "job_id": "f59d4cdf-04f1-456f-a592-1cb1c109956e",
+   "requested_by": "agent/idle-restore",
+   "accepted_at": "2026-11-23T17:00:00.113388Z"
+  },
+  {
+   "job_id": "82d5fd01-0542-4b60-bd4a-192c46d849c5",
+   "requested_by": "agent/idle-restore",
+   "accepted_at": "2026-11-23T17:39:09.512919Z"
+  },
+  {
+   "job_id": "2098b18c-b02e-4721-97ec-43d744ab1120",
+   "requested_by": "agent/idle-restore",
+   "accepted_at": "2026-11-23T19:00:23.619848Z"
+  }
+ ],
+ "starts": [
+  {
+   "event_id": "4cde08f5-029c-4a38-8f39-f124efdae4c1",
+   "job_id": "ee0cd6a7-3725-436d-a07c-ece71d8e2fe2",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-22T21:53:30.295391Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "06bd34e0-77ed-4c2e-a4c4-2e40ebabcca3",
+   "job_id": "15f93a88-268c-4792-bb81-3973c55333ce",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-22T23:10:18.953198Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "07f4db25-d65e-455c-9b44-52711966c7c3",
+   "job_id": "89b12696-4928-4e9c-92e7-41e3ed41a7ab",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T01:10:33.024733Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "423940e3-8002-4000-adac-a017d7c86371",
+   "job_id": "0ca618c3-3fd1-416b-b8e9-dd858a5edef0",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T04:54:52.775839Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "77a5f97c-fe45-46bb-ac34-7ebf5e976d5a",
+   "job_id": "0a7a8ab3-4205-4ad1-ae4b-db3e2294257c",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T06:33:30.756497Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "3ec16415-e36b-4976-b946-bb1d62a871f9",
+   "job_id": "69bd53a1-f05b-461c-afad-5b89dbfcade9",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T08:16:25.581743Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "5757af7d-4cc2-4f0f-87d5-112cfff8e7ff",
+   "job_id": "5d1afc11-f24b-4047-9d9e-3ec98e626fa5",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T10:55:21.068027Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "0e0ac50e-bfe7-42f6-87e6-bd30defd99fe",
+   "job_id": "7feab6dc-2f9c-46f9-97eb-62b6e6b78a88",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T12:29:54.127205Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "fcced8f8-73c1-4858-87da-4ea658398908",
+   "job_id": "62afc654-abdf-4f6b-a489-9ce9c2a7551d",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T13:01:09.717117Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "939ddcf9-8cc2-4aac-b30f-5e36873e4416",
+   "job_id": "73dff129-c511-4ca7-ad46-be1ed95ce901",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T14:15:39.136865Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "b705b4a2-2e8d-4e60-abd9-217d8d577cdb",
+   "job_id": "199d1107-32f8-4072-a92a-9e9ef27dda29",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T15:08:28.602327Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "ad674fd4-4851-43a0-ad67-b613a29a7999",
+   "job_id": "61df2c2c-512a-493f-ab76-35e0af2c3e9d",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T16:01:28.531968Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "03113d6a-9747-4ea4-a92d-f2dd13a14c8a",
+   "job_id": "dd757818-3098-4eb5-b020-0156552b1308",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T16:42:00.317490Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "593b0d23-92ac-43f4-90c5-261654dd47a2",
+   "job_id": "f59d4cdf-04f1-456f-a592-1cb1c109956e",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T17:08:41.651045Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "ffe0c4b9-7ddb-4d32-b29a-83fb3193b52b",
+   "job_id": "82d5fd01-0542-4b60-bd4a-192c46d849c5",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T17:49:26.756926Z",
+   "cause": "roll_recreate"
+  },
+  {
+   "event_id": "93212be8-bdec-4190-9a91-8850c2ec72dc",
+   "job_id": "2098b18c-b02e-4721-97ec-43d744ab1120",
+   "runtime_lane": "dev",
+   "started_at": "2026-11-23T19:09:12.957269Z",
+   "cause": "roll_recreate"
+  }
+ ],
+ "manifests": [
+  {
+   "event_id": "ccd1d45c-747c-492f-bfc7-de350f48bf9f",
+   "job_id": "ee0cd6a7-3725-436d-a07c-ece71d8e2fe2",
+   "issuer": "lane/devunstick-2150",
+   "git_ref": "f498ef20f6c14de062bbde0a3f912c4d6e7078e2",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-22T21:45:32.859395Z",
+   "open_pr": "",
+   "rollback": true
+  },
+  {
+   "event_id": "424fe131-3fc0-4964-838b-9638421bd430",
+   "job_id": "15f93a88-268c-4792-bb81-3973c55333ce",
+   "issuer": "agent/idle-converge",
+   "git_ref": "origin/dev",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-22T23:00:43.067619Z",
+   "open_pr": "",
+   "rollback": false
+  },
+  {
+   "event_id": "4f24e845-45a8-422b-ab93-0264f7b4ff20",
+   "job_id": "89b12696-4928-4e9c-92e7-41e3ed41a7ab",
+   "issuer": "agent/idle-converge",
+   "git_ref": "origin/dev",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T01:00:38.652172Z",
+   "open_pr": "",
+   "rollback": false
+  },
+  {
+   "event_id": "72fd0208-e691-456b-8eb7-f4dab8e6f106",
+   "job_id": "0ca618c3-3fd1-416b-b8e9-dd858a5edef0",
+   "issuer": "lane/rollgate-0420",
+   "git_ref": "dadd796d135f4452ac6cbb18d64c7b8525a568bd",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T04:46:12.981262Z",
+   "open_pr": "",
+   "rollback": true
+  },
+  {
+   "event_id": "0f102ef8-2321-4cdc-a687-e17903fed656",
+   "job_id": "0a7a8ab3-4205-4ad1-ae4b-db3e2294257c",
+   "issuer": "agent/idle-restore",
+   "git_ref": "origin/dev",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T06:21:58.473651Z",
+   "open_pr": "",
+   "rollback": false
+  },
+  {
+   "event_id": "4b1f25bf-acac-486f-ac55-1c725e8a18ca",
+   "job_id": "69bd53a1-f05b-461c-afad-5b89dbfcade9",
+   "issuer": "agent/idle-restore",
+   "git_ref": "origin/dev",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T08:06:42.089527Z",
+   "open_pr": "",
+   "rollback": false
+  },
+  {
+   "event_id": "cd740229-c2be-4901-b91c-34122c58f6de",
+   "job_id": "5d1afc11-f24b-4047-9d9e-3ec98e626fa5",
+   "issuer": "lane/devsecret-1050",
+   "git_ref": "1e1a83e64bbfcb8c3f305ae190cffea5e28c3a1e",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T10:46:53.720596Z",
+   "open_pr": "omnibase_infra#6165@1e1a83e64bbfcb8c3f305ae190cffea5e28c3a1e",
+   "rollback": true
+  },
+  {
+   "event_id": "f2c6b590-3ed1-43ad-a7bc-8625e5ccf48b",
+   "job_id": "7feab6dc-2f9c-46f9-97eb-62b6e6b78a88",
+   "issuer": "agent/idle-restore",
+   "git_ref": "origin/dev",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T12:19:38.822271Z",
+   "open_pr": "",
+   "rollback": false
+  },
+  {
+   "event_id": "6e692fe0-22b0-40cb-96cd-c7a4524835d7",
+   "job_id": "62afc654-abdf-4f6b-a489-9ce9c2a7551d",
+   "issuer": "lane/gwrun-1255",
+   "git_ref": "c01f621755db54602f9f714196c3940c5f5b20f1",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T12:52:04.921476Z",
+   "open_pr": "omnibase_infra#6161@c01f621755db54602f9f714196c3940c5f5b20f1",
+   "rollback": true
+  },
+  {
+   "event_id": "f77b640f-a607-4eb2-a5c4-713c35a7e12f",
+   "job_id": "73dff129-c511-4ca7-ad46-be1ed95ce901",
+   "issuer": "agent/idle-restore",
+   "git_ref": "origin/dev",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T14:06:05.141071Z",
+   "open_pr": "",
+   "rollback": false
+  },
+  {
+   "event_id": "860cc0c2-c727-46ad-81b5-370438c0878a",
+   "job_id": "199d1107-32f8-4072-a92a-9e9ef27dda29",
+   "issuer": "agent/idle-restore",
+   "git_ref": "origin/dev",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T15:00:37.547688Z",
+   "open_pr": "",
+   "rollback": false
+  },
+  {
+   "event_id": "c50ce9ab-bef7-40a7-8882-91677bade28e",
+   "job_id": "61df2c2c-512a-493f-ab76-35e0af2c3e9d",
+   "issuer": "agent/idle-restore",
+   "git_ref": "origin/dev",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T15:53:34.344282Z",
+   "open_pr": "",
+   "rollback": false
+  },
+  {
+   "event_id": "9ae33047-be66-41e3-b3a1-879886a30df0",
+   "job_id": "dd757818-3098-4eb5-b020-0156552b1308",
+   "issuer": "agent/idle-restore",
+   "git_ref": "origin/dev",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T16:32:48.558028Z",
+   "open_pr": "",
+   "rollback": false
+  },
+  {
+   "event_id": "5bc97060-c393-4710-9670-208ee1ac417c",
+   "job_id": "f59d4cdf-04f1-456f-a592-1cb1c109956e",
+   "issuer": "agent/idle-restore",
+   "git_ref": "origin/dev",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T17:00:00.604133Z",
+   "open_pr": "",
+   "rollback": false
+  },
+  {
+   "event_id": "81aeb842-6b7e-4190-9747-c27473bb2a79",
+   "job_id": "82d5fd01-0542-4b60-bd4a-192c46d849c5",
+   "issuer": "agent/idle-restore",
+   "git_ref": "origin/dev",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T17:39:09.954476Z",
+   "open_pr": "",
+   "rollback": false
+  },
+  {
+   "event_id": "005762e5-4155-4ea6-b5c0-aeed29f4259f",
+   "job_id": "2098b18c-b02e-4721-97ec-43d744ab1120",
+   "issuer": "agent/idle-restore",
+   "git_ref": "origin/dev",
+   "scope": "runtime",
+   "requested_at": null,
+   "accepted_at": "2026-11-23T19:00:24.021512Z",
+   "open_pr": "",
+   "rollback": false
+  }
+ ],
+ "announcements": [
+  {
+   "event_id": "ccc98681-a7fb-4fc4-aead-7ddc92af634a",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-22T21:02:20.582473Z",
+   "next_recreate_at": "2026-11-22T21:02:20.582473Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "69e5e8e0-8396-45ca-9ec5-861726dbb728",
+   "runtime_lane": "dev",
+   "requested_by": "agent/stability-follow-tag",
+   "announced_at": "2026-11-22T22:01:08.203882Z",
+   "next_recreate_at": "2026-11-22T22:01:08.203882Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "c9b9c332-8c9f-4e45-a2d3-ee7284c364a9",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-22T22:02:48.099543Z",
+   "next_recreate_at": "2026-11-22T22:02:48.099543Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "50c18268-1da6-4565-8f05-3972783054a8",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-22T23:00:33.645814Z",
+   "next_recreate_at": "2026-11-22T23:00:33.645814Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "9517bd99-c423-4c7f-ab26-fdfbc42ab091",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-22T23:03:14.666442Z",
+   "next_recreate_at": "2026-11-22T23:03:14.666442Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "dc761644-080b-489b-ba8f-699faccff2c9",
+   "runtime_lane": "dev",
+   "requested_by": "agent/stability-follow-tag",
+   "announced_at": "2026-11-23T00:00:07.289206Z",
+   "next_recreate_at": "2026-11-23T00:00:07.289206Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "239fa543-2e41-42f7-9b24-3ca5d4f7d80e",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T00:03:40.479359Z",
+   "next_recreate_at": "2026-11-23T00:03:40.479359Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "dede746f-021a-49de-9b1e-7be55eb5acbc",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T01:00:28.820590Z",
+   "next_recreate_at": "2026-11-23T01:00:28.820590Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "dc1f7de6-bd68-4e32-a1f0-290b2c651d88",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T01:04:05.973513Z",
+   "next_recreate_at": "2026-11-23T01:04:05.973513Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "5723f9da-165f-4b0e-98b2-07911603ec63",
+   "runtime_lane": "dev",
+   "requested_by": "agent/stability-follow-tag",
+   "announced_at": "2026-11-23T02:00:36.239305Z",
+   "next_recreate_at": "2026-11-23T02:00:36.239305Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "3ee82e4a-ffec-4400-bf8f-208c59c02e67",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T02:00:48.925356Z",
+   "next_recreate_at": "2026-11-23T02:00:48.925356Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "4f789851-a4f6-4a4c-b288-d5f8300136e9",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T02:01:49.739450Z",
+   "next_recreate_at": "2026-11-23T02:01:49.739450Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "6e3e5161-99e6-4333-9f40-a1755e3e2656",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T02:49:02.860811Z",
+   "next_recreate_at": "2026-11-23T02:49:02.860811Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "5c05394c-aca7-4e07-a902-22fc23ba21d8",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T03:00:08.296175Z",
+   "next_recreate_at": "2026-11-23T03:00:08.296175Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "8a170a0d-8b91-4338-899c-e807a7207c77",
+   "runtime_lane": "dev",
+   "requested_by": "agent/stability-follow-tag",
+   "announced_at": "2026-11-23T03:00:13.725220Z",
+   "next_recreate_at": "2026-11-23T03:00:13.725220Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "25663407-3282-405a-918a-5c8251a54ab5",
+   "runtime_lane": "dev",
+   "requested_by": "agent/stability-follow-tag",
+   "announced_at": "2026-11-23T04:00:10.810098Z",
+   "next_recreate_at": "2026-11-23T04:00:10.810098Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "4c3891f8-8ed7-4922-aeb4-ff1fa123b04c",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T04:00:33.480429Z",
+   "next_recreate_at": "2026-11-23T04:00:33.480429Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "92ab0ad6-8a87-4bac-953d-f7a0bf341532",
+   "runtime_lane": "dev",
+   "requested_by": "agent/stability-follow-tag",
+   "announced_at": "2026-11-23T04:43:46.462070Z",
+   "next_recreate_at": "2026-11-23T05:00:00Z",
+   "reason": "window_missed",
+   "immediate": false
+  },
+  {
+   "event_id": "78d1c19c-7e46-4919-b805-fcebaa0261d9",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T05:00:37.856108Z",
+   "next_recreate_at": "2026-11-23T05:00:37.856108Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "b032ced2-3af2-4150-bd2a-d5360ace4741",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T05:47:38.633778Z",
+   "next_recreate_at": "2026-11-23T05:47:38.633778Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "a9d8c578-5599-4000-bfe7-ddda735fb5fa",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T06:00:45.135657Z",
+   "next_recreate_at": "2026-11-23T06:00:45.135657Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "953d610d-5d0e-471d-881e-a208e04ffc37",
+   "runtime_lane": "dev",
+   "requested_by": "agent/stability-follow-tag",
+   "announced_at": "2026-11-23T06:00:59.858563Z",
+   "next_recreate_at": "2026-11-23T06:00:59.858563Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "739f776d-e425-49b9-bb2c-302953435959",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T06:21:57.920881Z",
+   "next_recreate_at": "2026-11-23T06:21:57.920881Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "95851280-e355-423f-a2ec-bd78a81025fb",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T06:49:56.906496Z",
+   "next_recreate_at": "2026-11-23T06:49:56.906496Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "692f3725-b45b-43a8-8282-0e20f0b244c6",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T07:00:02.487460Z",
+   "next_recreate_at": "2026-11-23T07:00:02.487460Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "1f5e889e-eb50-4fdf-97d5-c4eeec3b52e6",
+   "runtime_lane": "dev",
+   "requested_by": "agent/stability-follow-tag",
+   "announced_at": "2026-11-23T07:01:01.515145Z",
+   "next_recreate_at": "2026-11-23T07:01:01.515145Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "d389ecd7-c27d-4b03-9461-a6fda191d85e",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T07:04:01.887348Z",
+   "next_recreate_at": "2026-11-23T07:04:01.887348Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "5b4aac72-254d-41a5-9c2c-fca823a4816a",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T08:00:33.373116Z",
+   "next_recreate_at": "2026-11-23T08:00:33.373116Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "b902b973-9dc5-4d65-be6d-d41ae9feaa36",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T08:06:41.579549Z",
+   "next_recreate_at": "2026-11-23T08:06:41.579549Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "b68d54c4-f7c0-4a1c-af88-a4a514386e1d",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T08:36:27.747187Z",
+   "next_recreate_at": "2026-11-23T08:36:27.747187Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "e1c45687-1dad-4018-98d7-4b603fb37e53",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T08:59:22.369902Z",
+   "next_recreate_at": "2026-11-23T08:59:22.369902Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "cea73595-d3de-4bd2-8b6a-f5685cd8a384",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T09:00:43.200493Z",
+   "next_recreate_at": "2026-11-23T09:00:43.200493Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "aa105323-a839-4463-ab04-83b4dc2f26cf",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T09:02:06.218439Z",
+   "next_recreate_at": "2026-11-23T09:02:06.218439Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "cd909f6f-1ce8-433a-8651-d909eb2c9710",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T09:10:51.496933Z",
+   "next_recreate_at": "2026-11-23T09:10:51.496933Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "662109c4-e788-496d-8141-b0c505fe4e83",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T10:00:07.919030Z",
+   "next_recreate_at": "2026-11-23T10:00:07.919030Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "2a322fd9-ed68-4aff-b5d4-5a7dc836e3e5",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T10:00:11.493699Z",
+   "next_recreate_at": "2026-11-23T10:00:11.493699Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "77b3ca2e-3f83-475f-97e1-5380af2751e9",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T11:00:40.347813Z",
+   "next_recreate_at": "2026-11-23T11:00:40.347813Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "d02f9d46-73cf-4fea-a43a-d011436c9795",
+   "runtime_lane": "dev",
+   "requested_by": "agent/stability-follow-tag",
+   "announced_at": "2026-11-23T11:02:41.103636Z",
+   "next_recreate_at": "2026-11-23T11:02:41.103636Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "2b7beac1-45a4-4f10-a93c-2f4e35e8ec05",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T12:00:36.460623Z",
+   "next_recreate_at": "2026-11-23T12:00:36.460623Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "c63dd830-28d8-4722-b44c-d6cea3e2f869",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T12:19:38.384049Z",
+   "next_recreate_at": "2026-11-23T12:19:38.384049Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "71cf16b1-f0f8-451f-a63b-1183db356da4",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T13:00:06.683481Z",
+   "next_recreate_at": "2026-11-23T13:00:06.683481Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "f42ae55b-719e-42c5-8742-1415d7ebad79",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T13:01:11.775302Z",
+   "next_recreate_at": "2026-11-23T13:01:11.775302Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "62b3cb4f-a0bf-4b30-b875-93775842a95c",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T13:03:28.106491Z",
+   "next_recreate_at": "2026-11-23T13:03:28.106491Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "9861f596-0bcb-4a1b-ad29-51bd1bc3b94f",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T14:00:14.421220Z",
+   "next_recreate_at": "2026-11-23T14:00:14.421220Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "bf733452-749e-4df8-9885-81306a65aa49",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T14:02:22.381626Z",
+   "next_recreate_at": "2026-11-23T14:02:22.381626Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "535427ee-ee76-4fc5-aa84-7c6e25b25e58",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T14:06:04.630842Z",
+   "next_recreate_at": "2026-11-23T14:06:04.630842Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "2779f939-c9a0-40bf-a4cc-93e14e0c4b0c",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T14:29:44.862579Z",
+   "next_recreate_at": "2026-11-23T14:29:44.862579Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "fe04c033-31fd-4bca-a480-ec265707c788",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T15:00:15.562780Z",
+   "next_recreate_at": "2026-11-23T15:00:15.562780Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "4f0aa83b-f1fd-4fa0-b903-79c9fa73a26f",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T15:00:37.028979Z",
+   "next_recreate_at": "2026-11-23T15:00:37.028979Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "0e37a240-2439-4a19-8014-d6115f5ce488",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T15:48:20.730345Z",
+   "next_recreate_at": "2026-11-23T15:48:20.730345Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "9b7653f9-36b1-468e-986c-b5e2c1d3e275",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T15:53:33.827078Z",
+   "next_recreate_at": "2026-11-23T15:53:33.827078Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "1a57ac57-305f-428c-b0c8-ebdcb372a816",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T16:00:37.097137Z",
+   "next_recreate_at": "2026-11-23T16:00:37.097137Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "00cab5ff-f7fe-4a63-814f-ed5f8118aa69",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T16:32:48.000402Z",
+   "next_recreate_at": "2026-11-23T16:32:48.000402Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "70754bc2-3182-46c3-bcec-5dda20d28d22",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T16:44:51.563972Z",
+   "next_recreate_at": "2026-11-23T16:44:51.563972Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "bb44ab09-0d2b-43d6-9eb2-8cfd781c8999",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T17:00:00.002330Z",
+   "next_recreate_at": "2026-11-23T17:00:00.002330Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "97ade839-9059-4280-a8bd-8d8a9acc7e70",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T17:00:05.060519Z",
+   "next_recreate_at": "2026-11-23T17:00:05.060519Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "d5486cce-7a32-4b6f-959b-d80a15981df4",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T17:02:12.359396Z",
+   "next_recreate_at": "2026-11-23T17:02:12.359396Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "ed89edba-26b4-4397-93dc-745ec8ed447d",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T17:33:22.793247Z",
+   "next_recreate_at": "2026-11-23T17:33:22.793247Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "69a7ed09-81c9-46d4-aea3-e684ed23f0b2",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T17:39:09.402791Z",
+   "next_recreate_at": "2026-11-23T17:39:09.402791Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "7a28347d-4f3d-4eba-8e48-2ddfc3959ac1",
+   "runtime_lane": "dev",
+   "requested_by": "agent/stability-follow-tag",
+   "announced_at": "2026-11-23T18:00:21.605721Z",
+   "next_recreate_at": "2026-11-23T18:00:21.605721Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "d8e9be47-783e-4c66-8639-0b5966cfc69e",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T18:00:42.255573Z",
+   "next_recreate_at": "2026-11-23T18:00:42.255573Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "064637c9-0769-4e29-b5b4-aa3b0d1be030",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T19:00:23.364234Z",
+   "next_recreate_at": "2026-11-23T19:00:23.364234Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "02207f5f-cb16-4328-b6a6-76e2c421bedb",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T19:00:34.927702Z",
+   "next_recreate_at": "2026-11-23T19:00:34.927702Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "69f5dd03-684d-48de-bee1-e67a54eb7054",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-converge",
+   "announced_at": "2026-11-23T19:02:43.456580Z",
+   "next_recreate_at": "2026-11-23T19:02:43.456580Z",
+   "reason": "window_open",
+   "immediate": true
+  },
+  {
+   "event_id": "bd41336d-d790-4ed3-a3cd-9b4a1336c8f0",
+   "runtime_lane": "dev",
+   "requested_by": "agent/merge-restore",
+   "announced_at": "2026-11-23T19:32:00.771425Z",
+   "next_recreate_at": "2026-11-23T19:32:00.771425Z",
+   "reason": "pinned_fix",
+   "immediate": true
+  },
+  {
+   "event_id": "f622fc2d-4890-4302-9db7-0f916b063f51",
+   "runtime_lane": "dev",
+   "requested_by": "agent/idle-restore",
+   "announced_at": "2026-11-23T20:00:31.896489Z",
+   "next_recreate_at": "2026-11-23T20:00:31.896489Z",
+   "reason": "window_open",
+   "immediate": true
+  }
+ ],
+ "expected": {
+  "recreates": 16,
+  "two_starts_in_window": 3,
+  "off_window_start": 4,
+  "unannounced_start": 4,
+  "start_without_job_record": 2,
+  "total": 13,
+  "two_starts_windows": [
+   "2026-11-23T12:00:00Z",
+   "2026-11-23T15:00:00Z",
+   "2026-11-23T17:00:00Z"
+  ],
+  "off_window_jobs": [
+   "ee0cd6a7",
+   "0ca618c3",
+   "5d1afc11",
+   "62afc654"
+  ],
+  "unannounced_jobs": [
+   "ee0cd6a7",
+   "0ca618c3",
+   "5d1afc11",
+   "62afc654"
+  ]
+ }
+}

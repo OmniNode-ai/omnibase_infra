@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from omnibase_infra.models.event_bus.model_contract_topic_scan import (
     ModelContractTopicScan,
 )
+from omnibase_infra.models.node_announce.model_boot_clock import ModelBootClock
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.auto_wiring.models import (
@@ -91,5 +92,6 @@ async def warm_topic_migration_scan(
         if "provisioner" not in held.get(entry.handler.name, {})
     ]
     if any(map(_requires_migration_collaborators, entries)):
-        with contextlib.suppress(Exception):  # the synchronous construction re-raises
+        with ModelBootClock.phase("provisioner"), contextlib.suppress(Exception):
+            # the synchronous construction re-raises what the warm read cannot
             await ModelContractTopicScan.read_off_loop(contracts_root=root)

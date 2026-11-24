@@ -18,7 +18,7 @@ node id names a step of that workflow, not a contract, so topics are the only ed
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 from omnibase_infra.runtime.auto_wiring.models import ModelDiscoveredContract
 
@@ -56,6 +56,15 @@ class LazyStartClosureGraph:
     def consumers_of(self, topic: str) -> tuple[str, ...]:
         """The contracts that subscribe to ``topic``, by name."""
         return self._consumers.get(topic, ())
+
+    def topics_consumed_by(self, names: Iterable[str]) -> frozenset[str]:
+        """Every topic that at least one of ``names`` subscribes to."""
+        wanted = frozenset(names)
+        return frozenset(
+            topic
+            for topic, consumers in self._consumers.items()
+            if wanted.intersection(consumers)
+        )
 
     def closure_of(self, root: str) -> tuple[str, ...]:
         """``root`` and every contract reachable from it, in one stable order.

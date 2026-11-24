@@ -18,6 +18,7 @@ append, so a refused append is logged and counted and never retried.
 from __future__ import annotations
 
 import functools
+import http.client
 import importlib
 import importlib.util
 import json
@@ -27,6 +28,7 @@ import re
 import subprocess
 import sys
 import time
+import urllib.parse
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -192,6 +194,15 @@ _PIN_HANDLER = "omnibase_infra.handlers.handler_dev_lane_code_ref_pin"
 _PIN_RETRY_SECONDS = 300.0
 
 
+def _idle_settings() -> dict[str, JsonValue]:
+    """The node contract's settings of the agent's own checkout, read once per process."""
+    if not _pin_settings:
+        _pin_settings[:] = [
+            _contract_settings(_PACKAGE_ROOT.parents[1] / NODE / "contract.yaml")
+        ]
+    return _pin_settings[0]
+
+
 def check_pin(*, force: bool = False) -> BaseModel | None:
     """Alarm when the agent's live code-ref pin is inside the window before its expiry; never raises.
 
@@ -203,7 +214,14 @@ def check_pin(*, force: bool = False) -> BaseModel | None:
     stamped before any read, so a failing read logs once per interval, not once per tick.
     Returns the handler's result, or ``None`` when throttled, when no pin is live or on an
     unreadable record.
+
+    It is the one entry the idle tick calls for this node, so it also runs the callers the
+    contract's ``operation_callers`` declares (OMN-26524): ``check_routing`` and
+    ``check_routed_commands``. Each is throttled on its own interval, never raises and
+    leaves this function's result as it was.
     """
+    check_routing(force=force)
+    check_routed_commands(force=force)
     try:
         tick = time.monotonic()
         interval = (
@@ -245,6 +263,257 @@ def check_pin(*, force: bool = False) -> BaseModel | None:
     except (KeyError, TypeError, ValueError, ValidationError, RuntimeError, OSError):
         logger.exception(
             "pin alarm check skipped: the pin or contract could not be read"
+        )
+        return None
+
+
+# --- OMN-26524: the callers of the two routing operations -------------------------------
+
+_ROUTING_MODULES = (
+    "models/model_deploy_lane_instance.py",
+    "models/model_deploy_lane_route.py",
+    "models/model_deploy_lane_routing_table.py",
+    "models/model_routing_key_refusal.py",
+    "models/model_routing_key_check_request.py",
+    "models/model_routing_key_check_result.py",
+    "handlers/handler_routing_key_check.py",
+)
+_ALARM_MODULES = (
+    "enums/enum_job_status.py",
+    "models/model_job_command.py",
+    "models/model_job_lineage.py",
+    "models/model_job_record.py",
+    "models/model_routed_command.py",
+    "models/model_routed_command_alarm_row.py",
+    "models/model_routed_command_alarm_request.py",
+    "models/model_routed_command_alarm_result.py",
+    "handlers/handler_routed_command_alarm.py",
+)
+_ROUTING_TABLE = "config/deploy_lane_routing.yaml"
+_routing_last: list[float] = []
+_alarm_last: list[float] = []
+
+
+def _due(
+    last: list[float], settings: dict[str, JsonValue], key: str, force: bool
+) -> bool:
+    """Whether the interval the contract's ``key`` declares has passed; stamps the tick."""
+    interval = settings[key]
+    tick = time.monotonic()
+    if (
+        not force
+        and last
+        and isinstance(interval, int | float)
+        and tick - last[0] < interval
+    ):
+        return False
+    last[:] = [tick]
+    return True
+
+
+def _read_key_check(url: str, timeout: float) -> str:
+    """The ``hmac_key_check`` of the agent health answer at ``url``; empty when unread.
+
+    Only an ``http`` URL is read. A 503 health answer still carries the agent's key check.
+    """
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "http" or not parts.hostname:
+        return ""
+    connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=timeout)
+    try:
+        connection.request("GET", parts.path or "/")
+        body = json.loads(connection.getresponse().read())
+    except (http.client.HTTPException, OSError, ValueError):
+        return ""
+    finally:
+        connection.close()
+    value = body.get("hmac_key_check") if isinstance(body, dict) else None
+    return value if isinstance(value, str) else ""
+
+
+def check_routing(*, force: bool = False) -> BaseModel | None:
+    """Run ``check_routing_key_checks`` once: the routing table against the agents' key checks.
+
+    Called from the idle tick (through ``check_pin``), so it runs with no job. The table is the
+    one shipped with this agent's checkout. The reference key check is this agent's own: the
+    sender signs each command once, so every available instance's agent must hold the key
+    this one holds. The answers are this agent's own for its own instance and, for each
+    other instance, a read of the health URL the contract's ``instance_health_urls`` declares
+    for it; an instance with no URL or no answer is unread. Writes one run line per run
+    (``routing key check outcome=...``); a mismatch is logged at WARNING with both values.
+    Throttled to ``routing_check_interval_seconds`` (``force`` skips the throttle); never
+    raises; returns the handler's result, or ``None`` when throttled or not runnable.
+    """
+    try:
+        settings = _idle_settings()
+        if not _due(_routing_last, settings, "routing_check_interval_seconds", force):
+            return None
+        *_, handler_mod = (_load(relative) for relative in _ROUTING_MODULES)
+        request_mod, table_mod = (
+            sys.modules["omnibase_infra.models.model_routing_key_check_request"],
+            sys.modules["omnibase_infra.models.model_deploy_lane_routing_table"],
+        )
+        agent_routing = importlib.import_module("deploy_agent.routing")
+        own_check = importlib.import_module("deploy_agent.auth").hmac_key_check()
+        if not own_check:
+            logger.warning(
+                "routing key check skipped: this agent holds no signing key "
+                "friction_type=routing_key_check_skipped"
+            )
+            return None
+        table = table_mod.ModelDeployLaneRoutingTable.model_validate(
+            yaml.safe_load(
+                (_PACKAGE_ROOT.parents[1] / _ROUTING_TABLE).read_text(encoding="utf-8")
+            )
+        )
+        own = agent_routing.resolve_instance(agent_routing.load_routing_table()).name
+        urls = settings["instance_health_urls"]
+        timeout = settings["routing_health_timeout_seconds"]
+        if not isinstance(urls, dict) or not isinstance(timeout, int | float):
+            raise RuntimeError("the deploy job reading contract's routing settings")
+        answers = {own: own_check}
+        for name, spec in table.instances.items():
+            url = urls.get(name)
+            if name != own and spec.available and isinstance(url, str) and url:
+                answers[name] = _read_key_check(url, float(timeout))
+        handler = handler_mod.HandlerRoutingKeyCheck()
+        result: BaseModel = handler.handle(
+            request_mod.ModelRoutingKeyCheckRequest(
+                table=table, runtime_key_check=own_check, instance_key_checks=answers
+            )
+        )
+        mismatches = getattr(result, "mismatches", ())
+        logger.log(
+            logging.WARNING if mismatches else logging.INFO,
+            "routing key check outcome=%s instance=%s mismatches=%s",
+            getattr(result, "outcome", ""),
+            own,
+            ",".join(
+                f"{m.instance}:{m.reason}:{m.instance_key_check or '-'}"
+                f"!={m.runtime_key_check}"
+                for m in mismatches
+            )
+            or "none",
+        )
+        return result
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        ValidationError,
+        RuntimeError,
+        OSError,
+        ImportError,
+        yaml.YAMLError,
+    ):
+        logger.exception("routing key check skipped: the table or contract was unread")
+        return None
+
+
+def _routed_commands(
+    settings: dict[str, JsonValue], state_dir: Path, instance: str
+) -> list[object]:
+    """This instance's routed commands from the contract's ``routed_commands_file``; none when absent."""
+    name = settings["routed_commands_file"]
+    if not isinstance(name, str):
+        raise RuntimeError("the deploy job reading contract's routed_commands_file")
+    path = state_dir / name
+    if not path.is_file():
+        return []
+    command_mod = sys.modules["omnibase_infra.models.model_routed_command"]
+    commands = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            command = command_mod.ModelRoutedCommand.model_validate_json(line)
+        except ValidationError:
+            logger.warning("routed commands: a line of %s is not a command", name)
+            continue
+        if command.instance == instance:
+            commands.append(command)
+    return commands
+
+
+def _job_records(state_dir: Path) -> list[object]:
+    """The agent's own job records (``<correlation_id>.json`` in its state directory)."""
+    record_mod = sys.modules["omnibase_infra.models.model_job_record"]
+    records = []
+    for path in sorted(state_dir.glob("*.json")):
+        try:
+            records.append(
+                record_mod.ModelJobRecord.model_validate_json(
+                    path.read_text(encoding="utf-8")
+                )
+            )
+        except (ValidationError, OSError):
+            continue
+    return records
+
+
+def check_routed_commands(*, force: bool = False) -> BaseModel | None:
+    """Run ``alarm_routed_commands_without_job_record`` once over this instance's job records.
+
+    Called from the idle tick (through ``check_pin``), so it runs with no job. The commands
+    are this instance's lines of the contract's ``routed_commands_file`` and the job records
+    are the agent's own state directory's; a record on another instance's agent is not read
+    here, so only commands routed to this instance are polled. A command with no record after
+    ``routed_command_no_job_window_seconds`` writes its alarm row through the node's append.
+    Writes one run line per run (``routed command alarm polled=...``). Throttled to
+    ``routed_command_alarm_interval_seconds`` (``force`` skips the throttle); never raises;
+    returns the handler's result, or ``None`` when throttled or not runnable.
+    """
+    try:
+        settings = _idle_settings()
+        if not _due(
+            _alarm_last, settings, "routed_command_alarm_interval_seconds", force
+        ):
+            return None
+        for relative in _ALARM_MODULES:
+            _load(relative)
+        alarm_mod = sys.modules["omnibase_infra.handlers.handler_routed_command_alarm"]
+        request_mod = sys.modules[
+            "omnibase_infra.models.model_routed_command_alarm_request"
+        ]
+        agent_routing = importlib.import_module("deploy_agent.routing")
+        own = agent_routing.resolve_instance(agent_routing.load_routing_table()).name
+        state_dir = Path(_agent().STATE_DIR)
+        commands = _routed_commands(settings, state_dir, own)
+        handler = alarm_mod.HandlerRoutedCommandAlarm(
+            settings=settings,
+            append=functools.partial(
+                handler_module.append_ledger_row, settings, os.environ
+            ),
+        )
+        result: BaseModel = handler.handle(
+            request_mod.ModelRoutedCommandAlarmRequest(
+                commands=tuple(commands),
+                job_records={own: tuple(_job_records(state_dir))},
+                now=datetime.now(UTC),
+            )
+        )
+        alarms = getattr(result, "alarms", ())
+        logger.log(
+            logging.WARNING if alarms else logging.INFO,
+            "routed command alarm polled=%d instance=%s alarms=%d waiting=%d",
+            len(commands),
+            own,
+            len(alarms),
+            len(getattr(result, "waiting", ())),
+        )
+        return result
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        ValidationError,
+        RuntimeError,
+        OSError,
+        ImportError,
+        yaml.YAMLError,
+    ):
+        logger.exception(
+            "routed command alarm skipped: the commands or contract were unread"
         )
         return None
 

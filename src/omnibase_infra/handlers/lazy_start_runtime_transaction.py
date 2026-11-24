@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.event_bus.enum_contract_attach_status import (
@@ -70,6 +70,11 @@ from omnibase_infra.runtime.service_dispatch_result_applier import (
     DispatchResultApplier,
     build_contract_result_applier,
 )
+
+if TYPE_CHECKING:
+    from omnibase_core.models.core.model_deployment_topology import (
+        ModelDeploymentTopology,
+    )
 
 __all__: list[str] = ["LazyStartRuntimeTransaction"]
 
@@ -139,6 +144,7 @@ class LazyStartRuntimeTransaction:
         provisioner: ProtocolTopicProvisioner | None,
         container: object | None,
         readiness_config: ModelTopicReadinessConfig,
+        topology: ModelDeploymentTopology | None = None,
     ) -> None:
         self._contracts = dict(contracts)
         self._bus = bus
@@ -146,6 +152,9 @@ class LazyStartRuntimeTransaction:
         self._provisioner = provisioner
         self._container = container
         self._readiness_config = readiness_config
+        # OMN-26594: the topology the kernel loaded at boot. A db_io contract wires only
+        # with it, so a lazy start that omits it fails every db_io projection it starts.
+        self._topology = topology
         self._starts: dict[str, NodeStart] = {}
 
     def node_engine(self, contract_name: str) -> MessageDispatchEngine | None:
@@ -163,6 +172,7 @@ class LazyStartRuntimeTransaction:
             environment=self._environment,
             container=self._container,
             subscribe_immediately=False,
+            topology=self._topology,
         )
         if report.total_wired != 1:
             reasons = [f"{r.outcome.value} {r.reason}" for r in report.results]

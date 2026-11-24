@@ -1,0 +1,37 @@
+{
+  "_provenance": {
+    "captured_utc": "2026-11-23T12:21:58Z",
+    "redacted": [
+      "accessToken",
+      "secretValue"
+    ],
+    "source": "the dev secret store's universal-auth login and raw secret read, called live from the lab host that runs the C28 job, as the runner's machine identity would call them"
+  },
+  "login_response": {
+    "accessToken": "<redacted>",
+    "accessTokenMaxTTL": 2592000,
+    "expiresIn": 86400,
+    "tokenType": "Bearer"
+  },
+  "secret_response": {
+    "secret": {
+      "_id": "5d9c49c3-3346-4c27-ae8e-5e43e0ae4dbb",
+      "createdAt": "2026-11-23T11:58:27.413Z",
+      "environment": "dev",
+      "id": "5d9c49c3-3346-4c27-ae8e-5e43e0ae4dbb",
+      "secretComment": "",
+      "secretKey": "STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_C28_PROBE",
+      "secretMetadata": [],
+      "secretReminderNote": null,
+      "secretReminderRepeatDays": null,
+      "secretValue": "<redacted>",
+      "secretValueHidden": false,
+      "skipMultilineEncoding": false,
+      "tags": [],
+      "type": "shared",
+      "updatedAt": "2026-11-23T11:58:27.413Z",
+      "version": 1,
+      "workspace": "872e00f4-1279-49a4-8e16-a2bd961f4996"
+    }
+  }
+}
