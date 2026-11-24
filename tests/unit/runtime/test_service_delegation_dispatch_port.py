@@ -474,16 +474,44 @@ async def test_runtime_delegation_dispatch_port_forwards_response_contract(
 
 
 @pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_publishes_completion_shaping_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-15482: the three wire fields ride the bus command and validate there."""
+    _, payloads, _, _ = await _dispatch_with_fake_broker(
+        monkeypatch,
+        system_prompt="Answer tersely.",
+        temperature=0.2,
+        response_format={"type": "json_object"},
+    )
+
+    assert payloads[0]["system_prompt"] == "Answer tersely."
+    assert payloads[0]["temperature"] == 0.2
+    assert payloads[0]["response_format"] == {"type": "json_object"}
+    # The consumer validates the command payload as the canonical wire request,
+    # which forbids extras: what is published must parse there.
+    wire = ModelDelegationRequest.model_validate(payloads[0])
+    assert wire.system_prompt == "Answer tersely."
+    assert wire.temperature == 0.2
+    assert wire.response_format == {"type": "json_object"}
+
+
+@pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_publishes_zero_temperature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A temperature of 0.0 is a value, not an absent field."""
+    _, payloads, _, _ = await _dispatch_with_fake_broker(monkeypatch, temperature=0.0)
+
+    assert payloads[0]["temperature"] == 0.0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("dispatch_kwargs", "unsupported_feature"),
     [
-        ({"system_prompt": "Answer tersely."}, "system_prompt"),
-        ({"temperature": 0.2}, "temperature"),
-        (
-            {"response_format": {"type": "json_object"}},
-            "response_format",
-        ),
         ({"model": "google/gemini-2.5-flash-lite"}, "model"),
+        ({"probe_ladder": object()}, "probe_ladder"),
     ],
 )
 async def test_runtime_delegation_dispatch_port_rejects_unsupported_bus_features(
@@ -491,7 +519,7 @@ async def test_runtime_delegation_dispatch_port_rejects_unsupported_bus_features
     dispatch_kwargs: dict[str, object],
     unsupported_feature: str,
 ) -> None:
-    """Explicit bus-only feature requests fail closed instead of being dropped."""
+    """The two features the bus wire cannot carry still fail closed."""
     with pytest.raises(NotImplementedError, match=unsupported_feature):
         await _dispatch_with_fake_broker(monkeypatch, **dispatch_kwargs)
 

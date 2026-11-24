@@ -1,0 +1,66 @@
+schema_version: 1.0.0
+ticket_id: OMN-15482
+title: "dispatch port: publish system_prompt, temperature and response_format on the delegation bus command"
+summary: >-
+  RuntimeDelegationDispatchPort.dispatch refused system_prompt, temperature and response_format with NotImplementedError although the canonical delegation request wire at the pinned omnibase_core carries all three and the delegation orchestrator reads them. The port now publishes the three fields on the bus command, omitting an unset one, and the published payload parses as the canonical wire request. model and probe_ladder stay refused: the wire does not carry them. This is the infra half of OMN-15482; the steel_onslaught client half is not touched here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn15482-dispatch-port-publishes-completion-shaping
+    statement: The runtime delegation dispatch port publishes system_prompt, temperature and response_format on the bus command and no longer refuses them, while leaving an unset field off the wire.
+    acceptance:
+      - id: AC1
+        statement: "AC1: dispatch publishes system_prompt, temperature (zero included) and response_format on the bus command payload and omits each when unset -- falsifier: uv run pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -k completion_shaping fails at origin/dev and passes on the PR branch"
+  - id: req-omn15482-published-payload-is-the-wire-request
+    statement: The payload the port publishes with the three fields parses as the canonical omnibase_core delegation wire request, which forbids extra keys.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the published payload validates as ModelDelegationRequest and the three fields read back equal to what the caller passed -- falsifier: the same -k completion_shaping run fails at origin/dev, where dispatch raises NotImplementedError before any payload exists"
+  - id: req-omn15482-model-and-probe-ladder-stay-refused
+    statement: model and probe_ladder, which the bus wire does not carry, still fail closed with NotImplementedError.
+    acceptance:
+      - id: AC3
+        statement: "AC3: dispatch with model or probe_ladder set raises NotImplementedError naming the field -- falsifier: uv run pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -k rejects_unsupported_bus_features fails if either is accepted or silently dropped"
+evidence_requirements:
+  - kind: tests
+    description: The dispatch port publishes the three fields, omits them when unset, and still refuses model and probe_ladder.
+    command: uv run --frozen pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn15482-ac1-publishes-three-fields
+    description: The three fields ride the bus command payload, a zero temperature is published, and an unset field leaves no key.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -k "completion_shaping or zero_temperature or absent_optional_bus_features" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn15482-ac2-payload-is-wire-request
+    description: The published payload parses as the canonical wire request, which forbids extra keys, and the three fields read back equal.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -k completion_shaping -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn15482-ac3-model-probe-ladder-refused
+    description: model and probe_ladder still raise NotImplementedError naming the field.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -k rejects_unsupported_bus_features -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn15482-deploy
+    description: Hosted-runner probe that reads the committed dispatch port from GitHub at the checked-out commit and requires the three fields to be put on the bus command payload and no longer in the refusal tuple.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/service_delegation_dispatch_port.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert all(f"\x22{k}\x22: {k}," in src for k in ("system_prompt", "temperature", "response_format")); assert "(\x22system_prompt\x22, system_prompt)" not in src'
+        cwd: ${OMNI_HOME}/omnibase_infra
