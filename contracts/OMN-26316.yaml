@@ -63,13 +63,13 @@ requirements:
   - id: req-omn26316-overdue-dev-merge-built-by-carry
     statement: A dev job counts as building a merge only when its built sha descends from the merge; the stability follow job and a job whose built sha is unread never count.
     acceptance:
-      - id: AC12
-        statement: "AC12: the overdue dev merge build decision reads omnibase_infra#6191 (merged 17:46:52Z) as not built at 18:13Z and 18:50Z with the stability follow job b32e8022 recorded as a successful dev job, and as built only by job 2098b18c -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_carried_omn26316.py fails at the 6210 head (a dev-lane b32e8022 reads SATISFIED built_by_job at 18:13Z) and passes on the PR branch"
+      - id: AC17
+        statement: "AC17: the overdue dev merge build decision reads omnibase_infra#6191 (merged 17:46:52Z) as not built at 18:13Z and 18:50Z with the stability follow job b32e8022 recorded as a successful dev job, and as built only by job 2098b18c -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_carried_omn26316.py fails at the 6210 head (a dev-lane b32e8022 reads SATISFIED built_by_job at 18:13Z) and passes on the PR branch"
   - id: req-omn26316-overdue-dev-merge-build-publish
     statement: A runtime merge judged REQUEST gets one overdue event and one signed dev build request from the deploy agent's own tick, once per sha, on the dev lane only; a prod lane is refused with a typed error.
     acceptance:
-      - id: AC13
-        statement: "AC13: an overdue merge publishes the event and sends one signed dev build request whose correlation id is the decision's request id, sends nothing for a job in flight, the failed head, an already requested sha or a lane other than dev (typed refusal) -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_publish_omn26316.py fails at the 6210 head (the publish handler is absent) and passes on the PR branch"
+      - id: AC18
+        statement: "AC18: an overdue merge publishes the event and sends one signed dev build request whose correlation id is the decision's request id, sends nothing for a job in flight, the failed head, an already requested sha or a lane other than dev (typed refusal) -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_publish_omn26316.py fails at the 6210 head (the publish handler is absent) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -288,7 +288,7 @@ dod_evidence:
   - id: dod-omn26316-overdue-built-by-carry
     description: "The stability follow job b32e8022 recorded as a successful dev job, a dev job with an unread built sha and one that built a head without the merge each leave 6191 unbuilt; job 2098b18c, whose built sha descends from the merge, reads it built; the caller proves ancestry with git merge-base."
     source: manual
-    binds_ac: [AC12]
+    binds_ac: [AC17]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_carried_omn26316.py -q --no-cov -n 0 -p no:randomly
@@ -296,7 +296,7 @@ dod_evidence:
   - id: dod-omn26316-overdue-publish
     description: "An overdue merge sends its event and one signed dev build request from a fake sender; a decision that is not a request, an already requested sha and a missing pull request number send nothing; a prod, stability or empty lane raises the typed configuration error; a refused or failed send leaves the sha unrecorded so the next tick tries again."
     source: manual
-    binds_ac: [AC13]
+    binds_ac: [AC18]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_publish_omn26316.py -q --no-cov -n 0 -p no:randomly
