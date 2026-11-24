@@ -140,6 +140,8 @@ def _notice(
         # OMN-19270: the lineage fence's two refusals route the same way.
         EnumRejectionReason.SUPERSEDED_BY_RUNNING_BUILD,
         EnumRejectionReason.DIVERGENT_REF,
+        # OMN-26637: the merged-ref fence's refusal routes the same way.
+        EnumRejectionReason.NOT_A_MERGED_REF,
         # Lane flags: a frozen lane's refusal routes the same way.
         EnumRejectionReason.FROZEN,
     ],
@@ -298,6 +300,7 @@ def test_every_reason_the_consumer_resolves_reaches_the_hook() -> None:
         "DUPLICATE",
         "SUPERSEDED_BY_RUNNING_BUILD",
         "DIVERGENT_REF",
+        "NOT_A_MERGED_REF",
         "FROZEN",
     }
     assert routed == expected, (

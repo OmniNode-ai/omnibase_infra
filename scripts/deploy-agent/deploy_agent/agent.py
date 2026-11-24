@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Main orchestrator. Single-job concurrency. Runs consumer + health + publisher concurrently."""
+# Main orchestrator. Single-job concurrency. Runs consumer + health + publisher concurrently.
 
 from __future__ import annotations
 
@@ -149,6 +149,8 @@ from deploy_agent.lane_lock_client import (
     lane_lock,
 )
 from deploy_agent.lane_policy import (
+    MERGED_REF_LANES,
+    SUPERSEDING_LANES,
     follows_stability,
     is_lab_dev_fence,
     load_allowed_lanes_from_env,
@@ -907,6 +909,11 @@ class DeployAgent:
             running_build=DockerProvenanceReader(_runtime_container_for_lane),
             ref_resolver=GitRefResolver(REPO_DIR),
             tracking_ref=load_tracking_remote_ref_from_env(),
+            # OMN-26637. Operator ruling 2026-11-24: a newer build request
+            # cancels every older queued one, and the dev lane builds only
+            # merged refs. Both lane sets are declared in lane_policy.
+            supersede_lanes=SUPERSEDING_LANES,
+            merged_ref_lanes=MERGED_REF_LANES,
             router=self._router,
             # OMN-19544 AC1: refuse, as busy, while a prover holds the host.
             host_slot=self._host_slot,
@@ -2512,36 +2519,35 @@ class DeployAgent:
     def _deliver_onex_api_pin(
         self, cmd: ModelRebuildRequested, *, sha: str, manifest_sha: str | None
     ) -> ModelOnexApiDelivery | None:
-        """Advance ``ONEX_API_IMAGE`` to the image the settle just built (OMN-18572).
-
-        The build makes a correct onex-api image EXIST on this host; this is the
-        step that makes the lane RUN it. ``manifest_sha`` is the overlay SOURCE
-        commit the image was built from (its tags are ``<sha8>-<stamp>``), not
-        the merged omnibase_infra sha the fence answered: passing the fence's
-        sha searched for a lineage no image ever carried, and thirty deliveries
-        refused on that between 2026-09-17 and 2026-09-19.
-
-        A MISSING LINEAGE IS A NAMED NON-DELIVERY, NEVER A FALLBACK. The repoint
-        script will happily take the newest resident image of any lineage when
-        ``--sha`` is omitted, and reaching for that here would deliver some
-        other merge's image and record it as this one's. ``NOT_ATTEMPTED`` says
-        what happened instead.
-
-        STILL DOES NOT RAISE, AND NO LONGER STAYS QUIET. The delivery runs after
-        the compose lane's verdict is written; converting its failure into a
-        failed deploy would report a lane that converged as broken, and an
-        escape here would skip the terminal publish that sits after this
-        method's caller. Both of those remain true. What changes is that every
-        outcome is now a typed record on the job and on the terminal event, and
-        a failing one is logged at ``ERROR``: the refusal above was emitted at
-        ``INFO`` thirty times and read exactly like a successful no-op.
-
-        OMN-19501: runs on the settle worker, and RE-ACQUIRES the dev lane lock
-        for the recreate, because the recreate is a mutation of the compose
-        project and the next compose job may hold it. ``sha`` is the fence's
-        answer from the job thread; it is not re-derived here, because the
-        agent's per-job sha now belongs to whichever job runs next.
-        """
+        # Advance ``ONEX_API_IMAGE`` to the image the settle just built (OMN-18572).
+        #
+        # The build makes a correct onex-api image EXIST on this host; this is the
+        # step that makes the lane RUN it. ``manifest_sha`` is the overlay SOURCE
+        # commit the image was built from (its tags are ``<sha8>-<stamp>``), not
+        # the merged omnibase_infra sha the fence answered: passing the fence's
+        # sha searched for a lineage no image ever carried, and thirty deliveries
+        # refused on that between 2026-09-17 and 2026-09-19.
+        #
+        # A MISSING LINEAGE IS A NAMED NON-DELIVERY, NEVER A FALLBACK. The repoint
+        # script will happily take the newest resident image of any lineage when
+        # ``--sha`` is omitted, and reaching for that here would deliver some
+        # other merge's image and record it as this one's. ``NOT_ATTEMPTED`` says
+        # what happened instead.
+        #
+        # STILL DOES NOT RAISE, AND NO LONGER STAYS QUIET. The delivery runs after
+        # the compose lane's verdict is written; converting its failure into a
+        # failed deploy would report a lane that converged as broken, and an
+        # escape here would skip the terminal publish that sits after this
+        # method's caller. Both of those remain true. What changes is that every
+        # outcome is now a typed record on the job and on the terminal event, and
+        # a failing one is logged at ``ERROR``: the refusal above was emitted at
+        # ``INFO`` thirty times and read exactly like a successful no-op.
+        #
+        # OMN-19501: runs on the settle worker, and RE-ACQUIRES the dev lane lock
+        # for the recreate, because the recreate is a mutation of the compose
+        # project and the next compose job may hold it. ``sha`` is the fence's
+        # answer from the job thread; it is not re-derived here, because the
+        # agent's per-job sha now belongs to whichever job runs next.
         if not lane_runs_phase(cmd.runtime_lane, EnumInstancePhase.ONEX_API_PIN):
             # OMN-19522: no onex-api runs on this instance (its overlay
             # disables the service), so there is no pin to deliver.

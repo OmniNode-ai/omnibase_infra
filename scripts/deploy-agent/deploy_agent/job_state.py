@@ -378,21 +378,33 @@ class JobStore:
         *,
         superseded_by_sha: str,
         superseded_by_correlation_id: UUID,
+        by_containment: bool = True,
     ) -> JobState:
-        """Write a command's terminal record without ever running it (OMN-18143).
-
-        Born terminal, in one atomic write. There is deliberately no
-        accept-then-complete pair: a crash between the two would leave an
-        ``accepted`` record for a command nothing is going to execute, and
-        ``has_active_job`` would then refuse every command behind it until
-        ``recover_crashed_jobs`` reclassified it as a FAILURE -- turning a
-        supersession into exactly the lane-failure claim this status exists to
-        avoid making.
-
-        ``result_publish_pending`` is set: the terminal event owed to the bus
-        for this command is the one AC6 asks for, and the agent's existing
-        retry loop is what makes it survive a broker that is briefly away.
-        """
+        # Write a command's terminal record without ever running it (OMN-18143).
+        #
+        # Born terminal, in one atomic write. There is deliberately no
+        # accept-then-complete pair: a crash between the two would leave an
+        # ``accepted`` record for a command nothing is going to execute, and
+        # ``has_active_job`` would then refuse every command behind it until
+        # ``recover_crashed_jobs`` reclassified it as a FAILURE -- turning a
+        # supersession into exactly the lane-failure claim this status exists to
+        # avoid making.
+        #
+        # ``result_publish_pending`` is set: the terminal event owed to the bus
+        # for this command is the one AC6 asks for, and the agent's existing
+        # retry loop is what makes it survive a broker that is briefly away.
+        # OMN-26637. Exactly one reason, and it is true: containment is claimed
+        # only when ancestry proved it.
+        reason = (
+            f"superseded by {superseded_by_correlation_id} at "
+            f"{superseded_by_sha}, which contains this command's ref and "
+            "was already queued when the agent reached this one"
+            if by_containment
+            else f"superseded by {superseded_by_correlation_id} at "
+            f"{superseded_by_sha}, a newer request for this lane that was "
+            "accepted while this one was queued; the lane cancels every older "
+            "queued request whatever its git ancestry"
+        )
         now = datetime.now(UTC)
         job = JobState(
             correlation_id=correlation_id,
@@ -407,11 +419,7 @@ class JobStore:
             # run" is a fact on the record, not a gap in it.
             phase_results=reconcile_terminal_phase_results({}),
             result_publish_pending=True,
-            errors=[
-                f"superseded by {superseded_by_correlation_id} at "
-                f"{superseded_by_sha}, which contains this command's ref and "
-                "was already queued when the agent reached this one"
-            ],
+            errors=[reason],
         )
         self._save(job)
         return job
