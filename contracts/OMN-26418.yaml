@@ -38,9 +38,10 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/handlers/test_boot_deferred_subscribe_omn26418.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26418-ac3-savings-node-wires
-    description: "The real savings estimation contract is read from disk and wires through wire_from_manifest with the kernel's arguments and zero failures (the runtime-startup gate the repository requires for a service_kernel.py change)."
+    description: "The real savings estimation contract is read from disk and wires through wire_from_manifest with the kernel's arguments and zero failures (the runtime-startup gate the repository requires for a service_kernel.py change). It reads the savings node contract, which this change does not touch, so it passes at the merge base as well and cannot be a must-fail control; it binds no acceptance criterion and the hosted tests job runs it on every pull request."
     source: manual
-    binds_ac: [AC3]
+    execution_scope: local_done_gate
+    binds_ac: []
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/runtime/test_savings_node_auto_wiring_boot_omn26418.py -q --no-cov -n 0 -p no:randomly
