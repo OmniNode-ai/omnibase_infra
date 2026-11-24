@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# The same table with inst-b withdrawn, which is what the check asks an operator to do
+# while its agent key check differs from the runtime's.
+default_instance: inst-a
+instances:
+  inst-a: {}
+  inst-b:
+    available: false
+routes:
+  - runtime_lane: dev
+    requester_repository: omnimarket
+    instance: inst-b

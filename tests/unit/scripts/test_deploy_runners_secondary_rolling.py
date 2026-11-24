@@ -48,7 +48,7 @@ def h202() -> str:
 
 
 def _installer(
-    tmp_path: Path, *args: str
+    tmp_path: Path, *args: str, extra_env: dict[str, str] | None = None
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     # A test invocation must never read or mutate a live runner or ask for a token.
     bin_dir = tmp_path / "bin"
@@ -74,6 +74,7 @@ def _installer(
             "ROLL_TEST_PYTHON": sys.executable,
             "PYTHONPATH": str(ROOT / "src"),
             "ONEX_STATE_DIR": str(tmp_path / "state"),
+            **(extra_env or {}),
         },
         capture_output=True,
         text=True,
@@ -365,3 +366,21 @@ def test_bound_runner_image_registers_uv_libpython_with_the_loader() -> None:
     dockerfile = (ROOT / "docker/runners/Dockerfile").read_text()
     assert "ld.so.conf.d/onex-uv-python-libpython.conf" in dockerfile
     assert "&& ldconfig" in dockerfile
+
+
+def test_secondary_dry_run_accepts_a_registry_snapshot_and_reads_no_registry(
+    tmp_path: Path, token_file: Path
+) -> None:
+    """OMN-24139: the declared registry file reaches the roll; no gh call is made."""
+    snapshot = tmp_path / "registry.json"
+    snapshot.write_text('[{"runners": []}]')
+    result, effects = _installer(
+        tmp_path,
+        "--host=h053",
+        "--dry-run",
+        f"--token-file={token_file}",
+        "--only=hp053-ci-runner-1",
+        extra_env={"RUNNER_REGISTRY_SNAPSHOT": str(snapshot)},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert effects == ""

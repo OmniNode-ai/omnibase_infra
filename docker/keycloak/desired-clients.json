@@ -28,6 +28,18 @@
         "http://localhost:3000",
         "http://localhost:8080"
       ],
+      "environmentOverrides": {
+        "staging": {
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "post.logout.redirect.uris": "https://staging.app.omninode.ai/signed-out"
+          },
+          "redirectUris": ["https://staging.app.omninode.ai/*"],
+          "webOrigins": ["https://staging.app.omninode.ai", "https://staging.omninode.ai"],
+          "ticket": "OMN-23298",
+          "reason": "The staging realm serves only the staging hosts. The seed job reconciles this roster on every staging sync, so redirect URIs added by hand are wiped; declaring them here keeps them. An override replaces the whole field, so each list is the full staging set and attributes repeats PKCE."
+        }
+      },
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"],
       "protocolMappers": [
         {
@@ -117,6 +129,14 @@
         "http://localhost:3000",
         "http://localhost:8080"
       ],
+      "environmentOverrides": {
+        "staging": {
+          "redirectUris": ["https://staging.dash.omninode.ai/*"],
+          "webOrigins": ["https://staging.dash.omninode.ai"],
+          "ticket": "OMN-23298",
+          "reason": "The staging realm serves only the staging hosts. The seed job reconciles this roster on every staging sync, so redirect URIs added by hand are wiped; declaring them here keeps them. An override replaces the whole field, so each list is the full staging set and attributes repeats PKCE."
+        }
+      },
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"],
       "protocolMappers": [
         {
@@ -152,6 +172,14 @@
         "https://dev.omninode.ai",
         "https://dev.app.omninode.ai"
       ],
+      "environmentOverrides": {
+        "staging": {
+          "redirectUris": ["https://staging.omninode.ai", "https://staging.app.omninode.ai"],
+          "webOrigins": ["https://staging.omninode.ai", "https://staging.app.omninode.ai"],
+          "ticket": "OMN-23298",
+          "reason": "The staging realm serves only the staging hosts. The seed job reconciles this roster on every staging sync, so redirect URIs added by hand are wiped; declaring them here keeps them. An override replaces the whole field, so each list is the full staging set and attributes repeats PKCE."
+        }
+      },
       "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"],
       "protocolMappers": [
         {

@@ -22,6 +22,12 @@ heartbeat task on the loop records when the loop last ran a task:
 A claim and a withdrawal take the same lock, so exactly one side answers a
 connection, including one offered just before the loop stalls.
 
+Each accepted connection is routed on its own short-lived thread. A stalled
+loop makes every connection wait out ``wait_budget_seconds``; routing them one
+after another on the accept thread served a second probe at about twice the
+budget, past the container healthcheck's 5 s timeout, so it read
+``probe_unreachable`` for a runtime that was alive (OMN-26417).
+
 The 503 fails ``curl -sf`` and the semantic container healthcheck just as a
 silent socket did, so no gate becomes easier to pass. The difference is that
 the probe gets an answer within its timeout, and the answer names the cause.
@@ -32,8 +38,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+import sys
 import threading
 import time
+import traceback
 from collections.abc import Callable
 
 from omnibase_infra.models.health.enum_health_degraded_reason import (
@@ -54,10 +62,33 @@ DEFAULT_WAIT_BUDGET_SECONDS = 4.0
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 0.25
 _ACCEPT_POLL_SECONDS = 0.25
 _REQUEST_READ_SECONDS = 0.5
+# Connections routed at once. Each waits at most the wait budget, so a stalled
+# loop holds at most this many short-lived threads; one past the cap is closed.
+_MAX_INFLIGHT_CONNECTIONS = 32
+_LOOP_STACK_MAX_FRAMES = 12
+
+
+def loop_thread_stack(thread_id: int | None) -> tuple[str, ...]:
+    """Innermost-first frames of the thread running the event loop (OMN-26430).
+
+    Read from a thread other than the loop's, so it names the call that holds the
+    loop while the loop cannot answer for itself.
+    """
+    if thread_id is None:
+        return ()
+    frame = sys._current_frames().get(thread_id)
+    if frame is None:
+        return ()
+    frames = traceback.extract_stack(frame)[::-1][:_LOOP_STACK_MAX_FRAMES]
+    return tuple(f"{f.name} ({f.filename}:{f.lineno})" for f in frames)
 
 
 def render_event_loop_stall_response(
-    *, version: str, stalled_seconds: float, wait_budget_seconds: float
+    *,
+    version: str,
+    stalled_seconds: float,
+    wait_budget_seconds: float,
+    loop_stack: tuple[str, ...] = (),
 ) -> bytes:
     """Render the HTTP/1.1 503 response for a stalled event loop."""
     body = ModelEventLoopStallHealth(
@@ -66,6 +97,7 @@ def render_event_loop_stall_response(
             degraded_reason=EnumHealthDegradedReason.EVENT_LOOP_UNRESPONSIVE,
             event_loop_stalled_seconds=round(max(stalled_seconds, 0.0), 3),
             wait_budget_seconds=wait_budget_seconds,
+            loop_thread_stack=loop_stack,
         ),
     ).model_dump_json()
     payload = body.encode("utf-8")
@@ -109,12 +141,14 @@ class HealthProbeAcceptor:
         self._wait_budget_seconds = wait_budget_seconds
         self._heartbeat_interval_seconds = heartbeat_interval_seconds
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_thread_id: int | None = None
         self._sock: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stopping: threading.Event | None = None
         self._last_beat: float | None = None
         self._beat_task: asyncio.Task[None] | None = None
         self._handoffs: set[asyncio.Task[object]] = set()
+        self._inflight = threading.BoundedSemaphore(_MAX_INFLIGHT_CONNECTIONS)
 
     @property
     def port(self) -> int:
@@ -130,6 +164,7 @@ class HealthProbeAcceptor:
     async def start(self) -> None:
         """Bind the port, start the heartbeat and the accept thread."""
         self._loop = asyncio.get_running_loop()
+        self._loop_thread_id = threading.get_ident()
         sock = socket.create_server((self._host, self._port), backlog=128)
         sock.settimeout(_ACCEPT_POLL_SECONDS)
         self._sock = sock
@@ -178,11 +213,37 @@ class HealthProbeAcceptor:
                 continue
             except OSError:
                 return
-            try:
-                self._route(conn)
-            except Exception:
-                logger.exception("health acceptor failed to route a connection")
-                conn.close()
+            self._dispatch(conn)
+
+    def _dispatch(self, conn: socket.socket) -> None:
+        """Route ``conn`` on its own thread so a stalled wait blocks no other probe."""
+        if not self._inflight.acquire(blocking=False):
+            logger.warning(
+                "health acceptor has %d connections in flight; closing one",
+                _MAX_INFLIGHT_CONNECTIONS,
+            )
+            conn.close()
+            return
+        try:
+            threading.Thread(
+                target=self._route_connection,
+                args=(conn,),
+                name="onex-health-route",
+                daemon=True,
+            ).start()
+        except RuntimeError:
+            self._inflight.release()
+            logger.exception("health acceptor failed to start a routing thread")
+            conn.close()
+
+    def _route_connection(self, conn: socket.socket) -> None:
+        try:
+            self._route(conn)
+        except Exception:
+            logger.exception("health acceptor failed to route a connection")
+            conn.close()
+        finally:
+            self._inflight.release()
 
     def _route(self, conn: socket.socket) -> None:
         loop = self._loop
@@ -221,11 +282,13 @@ class HealthProbeAcceptor:
 
     def _answer_stalled(self, conn: socket.socket) -> None:
         stalled = self.event_loop_stalled_seconds()
+        stack = loop_thread_stack(self._loop_thread_id)
         logger.warning(
             "health probe answered off-loop: event loop ran no task for %.1fs "
-            "(degraded_reason=%s)",
+            "(degraded_reason=%s); loop thread stack, innermost first: %s",
             stalled,
             EnumHealthDegradedReason.EVENT_LOOP_UNRESPONSIVE.value,
+            " <- ".join(stack) or "unavailable",
         )
         try:
             conn.settimeout(_REQUEST_READ_SECONDS)
@@ -238,6 +301,7 @@ class HealthProbeAcceptor:
                     version=self._version,
                     stalled_seconds=stalled,
                     wait_budget_seconds=self._wait_budget_seconds,
+                    loop_stack=stack,
                 )
             )
         except OSError:
@@ -249,5 +313,6 @@ class HealthProbeAcceptor:
 __all__ = [
     "DEFAULT_WAIT_BUDGET_SECONDS",
     "HealthProbeAcceptor",
+    "loop_thread_stack",
     "render_event_loop_stall_response",
 ]

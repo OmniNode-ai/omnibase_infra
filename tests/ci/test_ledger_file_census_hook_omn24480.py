@@ -101,3 +101,20 @@ def test_a_config_without_the_hook_fails_the_check() -> None:
         ]
     with pytest.raises(AssertionError, match="found 0"):
         _check_census_hook_wired(stripped)
+
+
+def test_the_per_file_table_holds_one_row_per_counted_file() -> None:
+    """The ratchet file carries a per-file table whose rows add up to the repository row."""
+    ratchet: dict[str, Any] = yaml.safe_load(RATCHET_FILE.read_text(encoding="utf-8"))
+    table = ratchet["files"]["omnibase_infra"]
+    assert isinstance(table, dict) and table, (
+        "the ratchet file must hold a non-empty per-file table for omnibase_infra"
+    )
+    for path, lines in table.items():
+        assert isinstance(lines, int) and not isinstance(lines, bool) and lines > 0, (
+            f"the per-file row for {path} must be a positive int, got {lines!r}"
+        )
+    assert len(table) == ratchet["ratchet"]["omnibase_infra"], (
+        "the per-file table must hold one row per file the repository row counts: "
+        f"{len(table)} rows against a ratchet row of {ratchet['ratchet']['omnibase_infra']}"
+    )

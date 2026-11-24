@@ -1188,7 +1188,10 @@ class TestBootstrap:
                 )
             }
 
-        def freeze_and_record(engine_self: object) -> None:
+        def freeze_and_record(
+            engine_self: object, *, freeze_gc_heap: bool = False
+        ) -> None:
+            assert freeze_gc_heap is True
             order.append("freeze")
 
         with (

@@ -183,6 +183,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/model_dev_boot_result.py",
         "handlers/handler_dev_boot_guard.py",
         "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",
+        "nodes/node_dev_roll_events_effect/runtime_dev_agent_adoption.py",
         "models/model_dev_lane_code_ref_pin.py",
         "handlers/handler_dev_lane_code_ref_pin.py",
         "nodes/node_deploy_job_reading_effect/runtime_deploy_job_reading.py",
@@ -860,6 +861,7 @@ _LAYER_MODULE = "nodes.node_setup_local_provision_effect.runtime_host_broker_lay
 _PIN_GUARD = "handler_dev_lane_pin_compose_guard"
 _LANE_ENV = "nodes.node_setup_local_provision_effect.runtime_lane_env_overlay"
 _CODE_REF_PIN_MODULE = "handler_dev_lane_code_ref_pin"
+ADOPTION_MODULE = "nodes.node_dev_roll_events_effect.runtime_dev_agent_adoption"
 
 # OMN-15181 round 3 (Finding 9): maps each prod runtime service to the compose
 # env var that repoints its `image:` field (docker-compose.prod.yml). This is
@@ -3592,37 +3594,14 @@ class DeployExecutor:
         * the sha recorded at startup by ``deploy_agent.loaded_code`` versus the
           clone's HEAD decides whether to RE-EXEC.
 
-        Collapsing them into the first is what this method did until now, and
-        it is wrong in one direction that matters. Something other than this
-        method can advance the clone -- on the lab host an hourly reconciler
-        resets it to ``origin/dev`` at :19 past -- and past each of those ticks
-        the clone is current, so the method reported ``already at origin/dev,
-        nothing to do`` and skipped the re-exec while the process went on
-        executing the code it had imported days earlier. Measured
-        2026-09-14T08:00Z: the ``#3520`` fix to this agent's own lab-overlay
-        build sat on disk at ``ead1f59b1`` while a process from 2026-09-09
-        14:06 EDT kept failing ``images_pinned`` on every automated api build.
+        Collapsing them into the first skipped the re-exec whenever something else advanced the
+        clone (on the lab host an hourly reconciler resets it to ``origin/dev``), while the
+        process went on executing the code it had imported days earlier (measured 2026-09-14).
 
-        A fix to the deploy agent could not reach the deploy agent, which is
-        the same sentence ``#3522`` had to write about the rebuild trigger one
-        step upstream.
-
-        Called ONLY at a boundary where nothing is in flight, never between the
-        phases of a deploy (OMN-16442). ``boundary`` is required and has no
-        default: every call site names where it fired, the journal line carries
-        that name, and a future mid-deploy caller cannot quietly omit it.
-
-        Why the boundary is the whole contract. This method replaces the
-        process image. Until 2026-09-08 it was invoked as the first statement
-        of ``rebuild_scope`` -- that is, after preflight, git, compose_gen and
-        seed had already run for an accepted command. Command
-        ``8d0c861a-f91e-4ca2-954e-a073759dd39d`` on the .201 dev lane is the
-        live proof of what that costs: those four phases succeeded, this method
-        logged ``behind origin/dev ... pulling and re-execing``, and the
-        replacement process logged ``Recovered 1 crashed job(s)`` and published
-        the command as ``status=failed``. A process that re-execs mid-deploy
-        cannot finish the deploy it is executing, so a deploy that starts on
-        version X must be allowed to complete on version X.
+        Called ONLY at a boundary where nothing is in flight, never between the phases of a
+        deploy (OMN-16442): ``boundary`` is required, so every journal line names where it fired.
+        A process that re-execs mid-deploy cannot finish the deploy it is executing, so a deploy
+        that starts on version X must complete on version X.
 
         The legal boundaries are declared in ``EnumSelfUpdateBoundary``:
         ``PRE_ACCEPT`` (before a polled command is marked started),
@@ -3726,23 +3705,11 @@ class DeployExecutor:
         agent_dir = os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR)
         timeout = 60
 
-        # Discard a job's rewrite of the known TRACKED byproducts BEFORE the
-        # dirty-check, one path at a time, so it is never counted as a tracked
-        # modification and never blocks the pull below (OMN-19376). Only a
-        # path that is actually dirty is touched, and only when it is; a clean
-        # placeholder is left alone. The ":/<path>" magic pathspec resolves
-        # against the repo root regardless of ``agent_dir`` being a
-        # subdirectory of it -- a bare relative pathspec resolves against
-        # ``agent_dir`` instead and fails to match (measured: ``git -C
-        # scripts/deploy-agent checkout -- workspace/x.json`` errors
-        # "pathspec ... did not match any file(s)" even though the same path
-        # shows up in ``git -C scripts/deploy-agent status --porcelain``,
-        # because status paths are always repo-root-relative but a checkout
-        # pathspec is resolved against the ``-C`` directory). Discarding is
-        # safe because this content is never work worth keeping: the next job
-        # overwrites the same paths from scratch, and self_update() is never
-        # called while a job is in flight (see boundary discussion above), so
-        # there is no in-progress job depending on what is here right now.
+        # Discard a job's rewrite of the known TRACKED byproducts BEFORE the dirty-check, one
+        # dirty path at a time, so it never blocks the pull below (OMN-19376). The ":/<path>"
+        # pathspec resolves against the repo root; a bare relative one resolves against
+        # ``agent_dir`` and fails to match. Safe: the next job rewrites these paths from
+        # scratch, and no job is in flight at a self_update boundary.
         for byproduct_path in SELF_UPDATE_KNOWN_BYPRODUCT_PATHS:
             pathspec = f":/{byproduct_path}"
             byproduct_status = _run(
@@ -3955,8 +3922,15 @@ class DeployExecutor:
             disk_sha[:12],
         )
 
-        # Sync deps so new imports are available after re-exec.
-        _uv_sync_after_pull(agent_dir, boundary)
+        # Adopt only a ref whose one-shot self-check passes; else stay on the loaded ref (OMN-26494).
+        if not load_dev_boot_guard(ADOPTION_MODULE).adopts(
+            agent_dir,
+            self._migration_record_dir,
+            (loaded_sha, disk_sha),
+            _run,
+            lambda clone: _uv_sync_after_pull(clone, boundary),
+        ):
+            return
 
         # Hand off immediately before the process image is replaced, and ONLY
         # when it is about to be. The PRE_ACCEPT caller rewinds its committed

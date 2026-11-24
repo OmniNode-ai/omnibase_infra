@@ -144,11 +144,15 @@ from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.handlers import boot_readiness_checks
+from omnibase_infra.handlers import lazy_start_boot_split as lazy
+from omnibase_infra.handlers import topic_migration_dependencies as tmd
+from omnibase_infra.handlers.boot_topic_provisioning import auto_create_missing_topics
 from omnibase_infra.handlers.event_bus_recovering import EventBusRecovering
 from omnibase_infra.handlers.handler_package_announcer import (
     build_registered_events,
     run_boot_step0,
 )
+from omnibase_infra.handlers.handler_prebuilt_manifest import run_boot_catalog
 from omnibase_infra.handlers.handler_runtime_introspection_startup import (
     HandlerRuntimeIntrospectionStartup as _Startup,
 )
@@ -162,6 +166,7 @@ from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
 from omnibase_infra.models.network_binding import load_network_binding_settings
+from omnibase_infra.models.node_announce.model_boot_clock import ModelBootClock
 from omnibase_infra.models.node_announce.model_node_announcement_topic import (
     ModelNodeAnnouncementTopic,
 )
@@ -778,6 +783,7 @@ def _build_runtime_handler_dependencies(
     savings_correlation_pool: object | None = None,
     savings_correlation_publisher: object | None = None,
     dlq_tracking: object | None = None,
+    topic_provisioner: object | None = None,
 ) -> dict[str, dict[str, object]] | None:
     """Build constructor dependencies for runtime-owned handlers.
 
@@ -827,7 +833,8 @@ def _build_runtime_handler_dependencies(
             ``tests/integration/test_omn18111_dlq_tracking_dependency_wired.py``,
             which discovers the required names from ``contract.yaml``.
     """
-    dependencies: dict[str, dict[str, object]] = {}
+    # OMN-26359: the topic-migration executor reuses the kernel's one provisioner.
+    dependencies = tmd.provisioner_dependencies(topic_provisioner)
     if postgres_pool is not None:
         dependencies.update(
             {
@@ -1007,7 +1014,8 @@ def _build_runtime_handler_dependencies(
 
     if not dependencies:
         return None
-    return dependencies
+    # OMN-26594: a dormant contract wires its handler with this same map.
+    return lazy.boot_handler_dependencies(dependencies)
 
 
 # The logical secret name the lane's rendered resolver config maps to the GitHub
@@ -1818,7 +1826,7 @@ async def bootstrap() -> int:
     _dlq_replay_tracking: ServiceDlqTracking | None = None
     runtime_health_monitor = None  # ServiceRuntimeHealthMonitor | None
     correlation_id = generate_correlation_id()
-    bootstrap_start_time = time.time()
+    bootstrap_start_time = ModelBootClock.note_kernel_start()
 
     try:
         # 1. Determine contracts directory
@@ -2154,16 +2162,13 @@ async def bootstrap() -> int:
 
         # 3.5. Provision platform topics.
         # OMN-13237: the universe pass below is DEMOTED to a best-effort warm of
-        # cross-producer topics — it is no longer load-bearing for THIS runtime's
-        # consumers. The per-contract confirm in Phase B (provision -> ready ->
-        # attach) is the authority that gates consumer attach. The universe warm
-        # can be disabled (ONEX_BOOT_UNIVERSE_PROVISION=0) to prove the
-        # per-contract confirm carries all owned consumers (W2 evidence). The
-        # provisioner instance is reused by the Phase B interleave.
+        # cross-producer topics, no longer load-bearing for THIS runtime's consumers.
+        # The per-contract confirm in Phase B (provision -> ready -> attach) gates
+        # consumer attach and reuses this provisioner. The warm can be disabled
+        # (ONEX_BOOT_UNIVERSE_PROVISION=0) to prove the confirm carries all owned
+        # consumers (W2 evidence).
         topic_provisioner: object | None = None
-        _universe_warm_enabled = (
-            os.environ.get("ONEX_BOOT_UNIVERSE_PROVISION", "1") != "0"
-        )
+        _universe_warm_enabled = lazy.boot_universe_warm_enabled()
         if use_kafka:
             _contracts_root = _get_contracts_dir()
             _skill_manifests_root: Path | None = None
@@ -2195,12 +2200,12 @@ async def bootstrap() -> int:
 
                 # Infra standalone manifests (cli/topics.yaml, services/topics.yaml)
                 _infra_src = Path(__file__).resolve().parent.parent
-                for _subdir in ("cli", "services"):
-                    _candidate = _infra_src / _subdir
+                for _candidate in (_infra_src / "cli", _infra_src / "services"):
                     if _candidate.is_dir():
                         _extra_manifest_roots.append(_candidate)
 
-                topic_provisioner = TopicProvisioner(
+                topic_provisioner = await asyncio.to_thread(
+                    TopicProvisioner,
                     bootstrap_servers=kafka_bootstrap_servers,
                     contracts_root=_contracts_root,
                     skill_manifests_root=_skill_manifests_root,
@@ -2275,54 +2280,15 @@ async def bootstrap() -> int:
                     validation_is_valid=validation_result.is_valid,
                     universe_warm_enabled=_universe_warm_enabled,
                 ):
-                    # OMN-7810: Auto-create missing topics before failing strict
-                    # validation. This handles topics that were added to the
-                    # provisioning registry but not yet created on the broker
-                    # (e.g. first startup after adding new topic suffixes).
-                    try:
-                        from omnibase_infra.event_bus.service_topic_manager import (
-                            TopicProvisioner as _AutoCreateProvisioner,
-                        )
-
-                        _auto_provisioner = _AutoCreateProvisioner(
-                            bootstrap_servers=kafka_bootstrap_servers,
-                            contracts_root=_contracts_root,
-                            skill_manifests_root=_skill_manifests_root,
-                            skill_manifests_roots=_extra_manifest_roots,
-                        )
-                        _auto_result = (
-                            await _auto_provisioner.ensure_provisioned_topics_exist(
-                                correlation_id=correlation_id,
-                            )
-                        )
-                        if _auto_result["created"]:
-                            logger.info(
-                                "Auto-created %d missing topics after validation: %s "
-                                "(correlation_id=%s)",
-                                len(_auto_result["created"]),
-                                _auto_result["created"],
-                                correlation_id,
-                            )
-                        validation_result = await validator.validate(
-                            correlation_id=correlation_id,
-                            log_missing=strict_topic_validation,
-                        )
-                        if validation_result.status == "success":
-                            logger.info(
-                                "Topic validation recovered after auto-create "
-                                "(correlation_id=%s)",
-                                correlation_id,
-                            )
-                    except TopicReplicationPolicyError:
-                        # OMN-15395: fail-closed past the best-effort boundary.
-                        raise
-                    except Exception:  # noqa: BLE001
-                        logger.warning(
-                            "Auto-create missing topics failed (best-effort) "
-                            "(correlation_id=%s)",
-                            correlation_id,
-                            exc_info=True,
-                        )
+                    # OMN-7810: auto-create missing topics before failing strict
+                    # validation, through the kernel's one TopicProvisioner.
+                    validation_result = await auto_create_missing_topics(
+                        cast("TopicProvisioner | None", topic_provisioner),
+                        validator,
+                        validation_result,
+                        correlation_id=correlation_id,
+                        strict_validation=strict_topic_validation,
+                    )
 
                 if strict_topic_validation and not validation_result.is_valid:
                     raise RuntimeError(
@@ -2563,6 +2529,9 @@ async def bootstrap() -> int:
                 from omnibase_core.models.events.model_event_envelope import (
                     ModelEventEnvelope,
                 )
+                from omnibase_infra.handlers.boot_deferred_subscribe import (
+                    subscribe_topics_concurrently,
+                )
                 from omnibase_infra.nodes.node_savings_estimation_compute.handlers.handler_savings_correlation import (
                     HandlerSavingsCorrelation,
                     decode_event_message,
@@ -2678,7 +2647,7 @@ async def bootstrap() -> int:
                             _topic, _payload
                         )
 
-                    for _signal_topic, _on_message in (
+                    _savings_subscriptions = (
                         (
                             SUFFIX_OMNICLAUDE_HOOK_CONTEXT_INJECTED,
                             _savings_on_injection_message,
@@ -2691,22 +2660,17 @@ async def bootstrap() -> int:
                             SUFFIX_OMNICLAUDE_PATTERN_ENFORCEMENT,
                             _savings_on_validator_catch_message,
                         ),
-                    ):
-                        try:
-                            await event_bus.subscribe(
-                                _signal_topic,
-                                node_identity=_savings_node_identity,
-                                on_message=_on_message,
-                            )
-                        except Exception:  # noqa: BLE001
-                            logger.warning(
-                                "Could not subscribe to %s for savings correlation",
-                                _signal_topic,
-                                exc_info=True,
-                            )
+                    )
 
                     async def _savings_correlation_loop() -> None:
-                        """Periodic savings-correlation batch loop."""
+                        """Join the signal topics, then run the periodic batch loop."""
+                        # OMN-26418: joined off the boot path; inline they held it 25 s to 35 s.
+                        await subscribe_topics_concurrently(
+                            event_bus.subscribe,
+                            _savings_subscriptions,
+                            node_identity=_savings_node_identity,
+                            purpose="savings correlation",
+                        )
                         while True:
                             try:
                                 await asyncio.sleep(_savings_interval)
@@ -2798,18 +2762,16 @@ async def bootstrap() -> int:
                 )
                 runtime_health_monitor = None
 
-        # 3.9. Boot step 0 (OMN-21590): announce every installed package's
-        # contracts on an in-memory bus and build the node catalog BEFORE the
-        # container exists. Nothing here imports a handler or constructs a node,
-        # and the container below receives the catalog as an injected service;
-        # the runtime reads it instead of scanning entry points and pushing
-        # contracts to the registry. A failure degrades to the same catalog
-        # folded without a bus inside discover_contracts().
-        node_catalog_result: ModelPackageAnnounceResult | None = None
+        # 3.9. Boot step 0 (OMN-21590): the node catalog, built BEFORE the container
+        # exists: loaded from the image's prebuilt file when its stamp holds
+        # (OMN-26361), else announced from every installed package. The container
+        # gets it as an injected service; a failure degrades to discover_contracts().
+        node_catalog_result, prebuilt_manifest = None, None
         try:
-            node_catalog_result = await run_boot_step0(
-                workload=resolve_runtime_profile_name()
+            _boot = await run_boot_catalog(
+                workload=resolve_runtime_profile_name(), announce=run_boot_step0
             )
+            node_catalog_result, prebuilt_manifest = _boot.announced, _boot.manifest
             logger.info(
                 "Boot step 0: %d contracts announced, %d admitted (correlation_id=%s)",
                 len(node_catalog_result.announcements),
@@ -3659,11 +3621,9 @@ async def bootstrap() -> int:
             )
 
             # 1. Discover all contracts from installed packages
-            auto_wiring_start = time.time()
-            manifest = discover_contracts(node_catalog_result)
-            auto_wiring_manifest_discovered = (
-                manifest  # OMN-11198: captured for introspection
-            )
+            auto_wiring_start = ModelBootClock.begin("wiring_pass")
+            manifest = prebuilt_manifest or discover_contracts(node_catalog_result)
+            auto_wiring_manifest_discovered = manifest  # OMN-11198: introspection
             logger.info(
                 "Auto-wiring discovery: %d contracts found, %d errors "
                 "(correlation_id=%s)",
@@ -3686,7 +3646,7 @@ async def bootstrap() -> int:
                 manifest=manifest,
                 runtime_profile=runtime_profile,
             )
-            manifest = ownership_result.manifest
+            manifest = lazy.boot_manifest(ownership_result.manifest, topic_provisioner)
             if auto_wiring_manifest_discovered.total_discovered > 0:
                 if ownership_result.folded_profiles:
                     # OMN-17427: this runtime carries other roles' nodes too.
@@ -4086,15 +4046,15 @@ async def bootstrap() -> int:
                         if gateway_secret_resolver_config_path_raw
                         else None
                     ),
-                    # OMN-17510: §3.9 already built both, and it runs earlier in
-                    # this same bootstrap. Passing the application-database pool
-                    # (never registration_service.postgres_pool — that is
-                    # OMNIBASE_INFRA_DB_URL, the wrong database per OMN-16770)
-                    # is what lets the resolver satisfy HandlerSavingsCorrelation
+                    # OMN-17510: §3.9 already built both, earlier in this bootstrap.
+                    # Passing the application-database pool (never registration_service
+                    # .postgres_pool: that is OMNIBASE_INFRA_DB_URL, the wrong database
+                    # per OMN-16770) lets the resolver satisfy HandlerSavingsCorrelation
                     # at Step 2 instead of exhausting the chain and raising.
                     savings_correlation_pool=_savings_correlation_pool,
                     savings_correlation_publisher=_savings_correlation_publisher,
                     dlq_tracking=_dlq_replay_tracking,
+                    topic_provisioner=topic_provisioner,
                 )
 
                 # 5. Wire handlers into dispatch engine
@@ -4111,6 +4071,7 @@ async def bootstrap() -> int:
                 )
 
                 auto_wiring_duration = time.time() - auto_wiring_start
+                ModelBootClock.end("wiring_pass", auto_wiring_start)
 
                 # OMN-9126: in strict mode wire_from_manifest raises, so
                 # total_failed == 0 is guaranteed. In non-strict mode failures
@@ -4162,7 +4123,7 @@ async def bootstrap() -> int:
         # --- Freeze dispatch engine ---
         # All plugins and auto-wired handlers have registered their dispatchers.
         # Freeze the engine to make it read-only and thread-safe for concurrent dispatch.
-        dispatch_engine.freeze()
+        dispatch_engine.freeze(freeze_gc_heap=True)
         logger.info(
             "MessageDispatchEngine frozen after all wire_dispatchers() "
             "and auto-wiring (correlation_id=%s)",
@@ -5011,8 +4972,7 @@ async def bootstrap() -> int:
                     correlation_id,
                     exc_info=True,
                 )
-                wiring_health_checker = None
-                wiring_health_task = None
+                wiring_health_checker = wiring_health_task = None
 
         # 9.5. Introspection event consumer is now started by domain plugins
         # during plugin activation (step 4.5). The ServiceRegistration.start_consumers()
@@ -5433,8 +5393,7 @@ async def bootstrap() -> int:
                         sanitize_error_message(unsub_error),
                         correlation_id,
                     )
-        contract_unsub_registered = None
-        contract_unsub_deregistered = None
+        contract_unsub_registered = contract_unsub_deregistered = None
         contract_unsub_heartbeat = None
 
         if build_loop_db_handler is not None:

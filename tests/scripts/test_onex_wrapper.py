@@ -48,6 +48,9 @@ from pathlib import Path
 
 import pytest
 
+from scripts.reconcile_verify_movement import FLOOR_SCHEMA
+from tests.scripts.onex_dispatch_fake import install_fake_core_cli
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -82,7 +85,11 @@ class _Workspace:
         shutil.copy2(_WRAPPER_SOURCE, self.wrapper)
         self.wrapper.chmod(0o755)
 
-        self.entrypoint = self.venv_bin / "onex"
+        # OMN-25070: the wrapper runs the dispatch venv's python -m the core
+        # CLI; ``entrypoint`` is that strict fake interpreter, and
+        # ``dispatch_onex`` is where an older core's console script sits.
+        self.entrypoint = self.venv_bin / "python"
+        self.dispatch_onex = self.venv_bin / "onex"
         self.reconciler = self.scripts / "reconcile-workspace-venvs.sh"
 
         self.shim_bin = root / "shimbin"
@@ -118,7 +125,7 @@ class _Workspace:
         (self.root / ".onex-workspace-floor.json").write_text(
             json.dumps(
                 {
-                    "schema": "onex.workspace.floor.v1",
+                    "schema": FLOOR_SCHEMA,
                     "generated_at": "2026-08-31T00:00:00Z",
                     "host": "test",
                     "omni_home": str(self.root),
@@ -133,13 +140,13 @@ class _Workspace:
 
     def install_entrypoint(self) -> None:
         """The real CLI entrypoint: records its argv and exits with a sentinel."""
-        self.entrypoint.write_text(
-            "#!/usr/bin/env bash\n"
-            'printf "ENTRYPOINT %s\\n" "$*" >> "$WITNESS"\n'
-            f"exit {_SENTINEL_OK}\n",
-            encoding="utf-8",
+        self.write_entrypoint(
+            f'printf "ENTRYPOINT %s\\n" "$*" >> "$WITNESS"\nexit {_SENTINEL_OK}\n'
         )
-        self.entrypoint.chmod(0o755)
+
+    def write_entrypoint(self, body: str) -> None:
+        """The dispatch interpreter, running ``body`` with the CLI's arguments."""
+        install_fake_core_cli(self.dispatch_venv, body)
 
     def install_path_onex(self) -> None:
         """The stale ``onex`` on PATH -- the thing that must never run.
@@ -177,14 +184,12 @@ class _Workspace:
             'printf "RECONCILE %s\\n" "$*" >> "$WITNESS"',
         ]
         if creates_entrypoint:
-            body += [
-                f'cat > "{self.entrypoint}" <<EOS',
-                "#!/usr/bin/env bash",
-                'printf "ENTRYPOINT %s\\n" "$*" >> "$WITNESS"',
-                f"exit {_SENTINEL_OK}",
-                "EOS",
-                f'chmod +x "{self.entrypoint}"',
-            ]
+            staged = self.root / "staged-dispatch-venv"
+            install_fake_core_cli(
+                staged,
+                f'printf "ENTRYPOINT %s\\n" "$*" >> "$WITNESS"\nexit {_SENTINEL_OK}\n',
+            )
+            body += [f'cp -R "{staged}/." "{self.dispatch_venv}/"']
         body.append(f"exit {exit_code}")
         self.reconciler.write_text("\n".join(body) + "\n", encoding="utf-8")
         self.reconciler.chmod(0o755)
@@ -386,7 +391,11 @@ def test_no_warning_when_path_onex_is_a_symlink_to_the_entrypoint(
     path and compared unequal to $ENTRYPOINT every time, printing a false
     WARNING on every dispatch."""
     workspace.install_entrypoint()
-    workspace.install_path_onex_symlink_to(workspace.entrypoint)
+    workspace.dispatch_onex.write_text(
+        "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8"
+    )
+    workspace.dispatch_onex.chmod(0o755)
+    workspace.install_path_onex_symlink_to(workspace.dispatch_onex)
 
     result = workspace.run("node", "x")
 
@@ -493,19 +502,12 @@ def test_inherited_omni_home_never_selects_the_workspace(tmp_path: Path) -> None
     hands the CLI that tree as OMNIBASE_PATH -- never the decoy."""
     own = _Workspace(tmp_path / "own")
     decoy = _Workspace(tmp_path / "decoy")
-    own.entrypoint.write_text(
-        "#!/usr/bin/env bash\n"
+    own.write_entrypoint(
         'printf "OWN OMNIBASE_PATH=%s OMNI_HOME=%s\\n" '
         '"${OMNIBASE_PATH-<unset>}" "${OMNI_HOME-<unset>}" >> "$WITNESS"\n'
-        f"exit {_SENTINEL_OK}\n",
-        encoding="utf-8",
+        f"exit {_SENTINEL_OK}\n"
     )
-    own.entrypoint.chmod(0o755)
-    decoy.entrypoint.write_text(
-        '#!/usr/bin/env bash\nprintf "DECOY\\n" >> "$WITNESS"\nexit 1\n',
-        encoding="utf-8",
-    )
-    decoy.entrypoint.chmod(0o755)
+    decoy.write_entrypoint('printf "DECOY\\n" >> "$WITNESS"\nexit 1\n')
 
     result = own.run(
         "node",
@@ -572,15 +574,10 @@ def test_dispatch_venv_location_is_overridable_and_shared_with_the_reconciler(
     """``ONEX_DISPATCH_VENV`` is read here with the same default the reconciler
     uses, so the two cannot end up pointing at different directories."""
     elsewhere = workspace.root / "somewhere-else"
-    (elsewhere / "bin").mkdir(parents=True)
-    entrypoint = elsewhere / "bin" / "onex"
-    entrypoint.write_text(
-        "#!/usr/bin/env bash\n"
-        'printf "ELSEWHERE %s\\n" "$*" >> "$WITNESS"\n'
-        f"exit {_SENTINEL_OK}\n",
-        encoding="utf-8",
+    install_fake_core_cli(
+        elsewhere,
+        f'printf "ELSEWHERE %s\\n" "$*" >> "$WITNESS"\nexit {_SENTINEL_OK}\n',
     )
-    entrypoint.chmod(0o755)
 
     result = workspace.run("--help", extra_env={"ONEX_DISPATCH_VENV": str(elsewhere)})
 
@@ -608,13 +605,10 @@ def test_the_reconciler_default_and_the_wrapper_default_are_the_same_string() ->
 # --------------------------------------------------------------------------- #
 def _install_root_reporting_entrypoint(workspace: _Workspace) -> None:
     """An entrypoint that records the workspace root the CLI would see."""
-    workspace.entrypoint.write_text(
-        "#!/usr/bin/env bash\n"
+    workspace.write_entrypoint(
         'printf "OMNIBASE_PATH=%s\\n" "${OMNIBASE_PATH-<unset>}" >> "$WITNESS"\n'
-        f"exit {_SENTINEL_OK}\n",
-        encoding="utf-8",
+        f"exit {_SENTINEL_OK}\n"
     )
-    workspace.entrypoint.chmod(0o755)
 
 
 def test_the_workspace_root_is_bound_for_the_cli(workspace: _Workspace) -> None:

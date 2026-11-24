@@ -123,6 +123,7 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     "TENANT_PROJECTION_WRITER_PASSWORD": "render-only-tenant-projection-writer-password",
     # OMN-26151: the lab gateway login, fail-closed in the lane overlay. Render-only.
     "GATEWAY_RUNTIME_PASSWORD": "d" * 64,
+    "TENANT_IDENTITY_WRITER_PASSWORD": "e" * 64,
     "LINEAR_API_KEY": "test-linear-api-key",
     "GITHUB_TOKEN": "test-github-token",
     "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",
@@ -1938,3 +1939,30 @@ def test_reachability_flags_a_runtime_wired_to_a_failing_cloud_migration() -> No
     assert _services_reaching(
         {"list-runtime": {"depends_on": ["cloud-migration"]}}, _CLOUD_ONE_SHOTS
     ) == {"list-runtime": ["list-runtime", "cloud-migration"]}
+
+
+# OMN-26472: the gateway-lane indicator that scopes the tenant_api_keys expiry
+# seam. The dev lane overlay sets it to `dev`; the bare base file every lane
+# merges must not carry it (the tests/scripts/test_node_migration_fence_parity.py
+# pattern, over the rendered config).
+_GATEWAY_LANE_INDICATOR = "ONEX_MIGRATION_GATEWAY_LANE"
+
+
+@pytest.mark.integration
+def test_dev_lane_forward_migration_carries_the_gateway_lane_indicator() -> None:
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+    assert result.returncode == 0, result.stderr
+    service = yaml.safe_load(result.stdout)["services"]["forward-migration"]
+    assert service["environment"][_GATEWAY_LANE_INDICATOR] == "dev"
+
+
+@pytest.mark.integration
+def test_base_render_without_the_dev_overlay_carries_no_gateway_lane_indicator() -> (
+    None
+):
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=False)
+    assert result.returncode == 0, result.stderr
+    service = yaml.safe_load(result.stdout)["services"]["forward-migration"]
+    assert _GATEWAY_LANE_INDICATOR not in service.get("environment", {})

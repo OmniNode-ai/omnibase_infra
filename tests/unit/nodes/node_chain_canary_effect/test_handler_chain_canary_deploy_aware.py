@@ -64,6 +64,7 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_projection_readb
 _PROBE_URL = "http://runtime.invalid:8085"
 _AGENT_URL = "http://agent.invalid:8098"
 _BOOTSTRAP = "broker.invalid:19092"
+_TENANT = "820272f9-4aaf-5add-a2df-0af942852ab2"
 _SUCCESS_TOPIC = EnumOmnimarketTopic.EVT_DELEGATE_SKILL_COMPLETED_V1.value
 _PROJECTION_DSN_ENV = "CHAIN_CANARY_PROJECTION_DSN"
 _LEDGER_SOURCE_ENV = "CHAIN_CANARY_LEDGER_DSN_FOR_TESTS"
@@ -94,8 +95,8 @@ class _Clock:
         self.now += timedelta(seconds=seconds)
 
 
-class _Ingress:
-    """Each submission takes ``elapsed_s`` of fake wall clock."""
+class _Publisher:
+    """Each publish takes ``elapsed_s`` of fake wall clock."""
 
     def __init__(
         self,
@@ -106,20 +107,25 @@ class _Ingress:
         self.clock = clock
         self.elapsed_s = elapsed_s
         self.calls = 0
-        # 1-based call numbers whose connection is refused, the way onex-api
-        # answered while deploy 3d3f4b1a recreated it (lab run 36279784915).
+        # 1-based call numbers whose broker is unreachable, the way the lane's
+        # broker answered while deploy 3d3f4b1a recreated onex-api (lab run
+        # 36279784915).
         self.unreachable_calls = unreachable_calls
 
     async def __call__(
-        self, url: str, body: dict[str, object], timeout_s: float
+        self,
+        bootstrap: str,
+        topic: str,
+        envelope: dict[str, object],
+        timeout_s: float,
     ) -> tuple[dict[str, object] | None, str, int]:
         self.calls += 1
         if self.calls in self.unreachable_calls:
             self.clock.now += timedelta(seconds=1)
             return None, "ConnectError: All connection attempts failed", 1000
         self.clock.now += timedelta(seconds=self.elapsed_s)
-        # The ingress answer is recorded, never trusted (OMN-16931): the
-        # verdict comes from the terminal readback below.
+        # The publish ACK is recorded, never trusted (OMN-16931): the verdict
+        # comes from the terminal readback below.
         return {"ok": True}, "", int(self.elapsed_s * 1000)
 
 
@@ -229,6 +235,7 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         "correlation_id": uuid4(),
         "probe_url": _PROBE_URL,
         "budget_ms": 120_000,
+        "tenant_id": _TENANT,
         "terminal_bootstrap_servers": _BOOTSTRAP,
         "quarantine_bootstrap_servers": _BOOTSTRAP,
         "projection_dsn_env": _PROJECTION_DSN_ENV,
@@ -256,12 +263,12 @@ def _handler(
     clock: _Clock,
     agent: _Agent,
     readback: _TerminalReadback,
-    ingress: _Ingress | None = None,
+    publisher: _Publisher | None = None,
     ready: _Ready | None = None,
-) -> tuple[HandlerChainCanary, _Ingress]:
-    ingress = ingress or _Ingress(clock)
+) -> tuple[HandlerChainCanary, _Publisher]:
+    publisher = publisher or _Publisher(clock)
     handler = HandlerChainCanary(
-        ingress=ingress,
+        bus_publish=publisher,
         quarantine_scan=_quarantine,
         terminal_readback=readback,
         projection_readback=_projection,
@@ -273,7 +280,7 @@ def _handler(
         clock=clock,
         sleep=clock.sleep,
     )
-    return handler, ingress
+    return handler, publisher
 
 
 # -- AC1: a deploy in the window earns exactly one retry ---------------------
@@ -299,11 +306,11 @@ async def test_deploy_in_window_retries_once_and_names_the_job() -> None:
         _idle(_DEPLOY_JOB, accepted, finished),  # converged
     )
     readback = _TerminalReadback("", _SUCCESS_TOPIC)
-    handler, ingress = _handler(clock, agent, readback)
+    handler, publisher = _handler(clock, agent, readback)
 
     result = await handler.handle(_request())
 
-    assert ingress.calls == 2
+    assert publisher.calls == 2
     assert result.verdict is EnumChainCanaryVerdict.GREEN
     assert result.success is True
     window = result.deploy_window
@@ -331,11 +338,11 @@ async def test_deploy_that_completed_inside_the_window_also_retries() -> None:
             _T0 + timedelta(seconds=60),
         ),
     )
-    handler, ingress = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
+    handler, publisher = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
 
     result = await handler.handle(_request())
 
-    assert ingress.calls == 2
+    assert publisher.calls == 2
     assert (
         result.deploy_window.status is EnumDeployWindowStatus.DEPLOY_IN_WINDOW_RETRIED
     )
@@ -354,11 +361,11 @@ async def test_a_retry_that_is_still_terminal_missing_stays_red_and_is_not_retri
         _idle(),
         _idle(_DEPLOY_JOB, _T0 + timedelta(seconds=10), _T0 + timedelta(seconds=90)),
     )
-    handler, ingress = _handler(clock, agent, _TerminalReadback(""))
+    handler, publisher = _handler(clock, agent, _TerminalReadback(""))
 
     result = await handler.handle(_request())
 
-    assert ingress.calls == 2
+    assert publisher.calls == 2
     assert result.verdict is EnumChainCanaryVerdict.TERMINAL_MISSING
     assert result.success is False
     assert (
@@ -382,11 +389,11 @@ async def test_no_deploy_in_window_terminal_missing_stays_red_without_retry() ->
             _T0 - timedelta(hours=1),
         )
     )
-    handler, ingress = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
+    handler, publisher = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
 
     result = await handler.handle(_request())
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     assert result.verdict is EnumChainCanaryVerdict.TERMINAL_MISSING
     assert result.success is False
     assert result.deploy_window.status is EnumDeployWindowStatus.NO_DEPLOY_IN_WINDOW
@@ -401,11 +408,11 @@ async def test_no_deploy_unreadable_agent_never_turns_red_into_a_retry() -> None
     """An agent nobody could read is no evidence of a deploy. Fail closed."""
     clock = _Clock()
     agent = _Agent(_unreadable)
-    handler, ingress = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
+    handler, publisher = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
 
     result = await handler.handle(_request())
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     assert result.verdict is EnumChainCanaryVerdict.TERMINAL_MISSING
     assert result.deploy_window.status is EnumDeployWindowStatus.AGENT_UNREADABLE
     assert result.deploy_window.preflight_agent_error == "connection refused"
@@ -417,11 +424,11 @@ async def test_no_deploy_configured_behaves_as_before() -> None:
     """With no agent URL the run makes no deploy claim and never retries."""
     clock = _Clock()
     agent = _Agent(_unreadable)
-    handler, ingress = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
+    handler, publisher = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
 
     result = await handler.handle(_request(deploy_agent_url=""))
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     assert agent.reads == []
     assert result.verdict is EnumChainCanaryVerdict.TERMINAL_MISSING
     assert result.deploy_window.status is EnumDeployWindowStatus.NOT_CONFIGURED
@@ -435,11 +442,11 @@ async def test_no_deploy_convergence_inside_the_budget_means_no_retry() -> None:
     clock = _Clock()
     accepted = _T0 + timedelta(seconds=20)
     agent = _Agent(_idle(), _deploying(_DEPLOY_JOB, accepted))
-    handler, ingress = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
+    handler, publisher = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
 
     result = await handler.handle(_request(deploy_wait_seconds=60))
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     assert result.verdict is EnumChainCanaryVerdict.TERMINAL_MISSING
     window = result.deploy_window
     assert window.status is EnumDeployWindowStatus.DEPLOY_IN_WINDOW_NOT_CONVERGED
@@ -457,7 +464,7 @@ async def test_no_deploy_retry_when_readiness_never_answers() -> None:
         _idle(),
         _idle(_DEPLOY_JOB, _T0 + timedelta(seconds=10), _T0 + timedelta(seconds=90)),
     )
-    handler, ingress = _handler(
+    handler, publisher = _handler(
         clock,
         agent,
         _TerminalReadback("", _SUCCESS_TOPIC),
@@ -466,7 +473,7 @@ async def test_no_deploy_retry_when_readiness_never_answers() -> None:
 
     result = await handler.handle(_request(deploy_wait_seconds=45))
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     assert (
         result.deploy_window.status
         is EnumDeployWindowStatus.DEPLOY_IN_WINDOW_NOT_CONVERGED
@@ -479,11 +486,11 @@ async def test_no_deploy_retry_for_a_green_first_attempt() -> None:
     """A GREEN first attempt is never re-fired, even with a deploy running."""
     clock = _Clock()
     agent = _Agent(_idle(), _deploying(_DEPLOY_JOB, _T0 + timedelta(seconds=5)))
-    handler, ingress = _handler(clock, agent, _TerminalReadback(_SUCCESS_TOPIC))
+    handler, publisher = _handler(clock, agent, _TerminalReadback(_SUCCESS_TOPIC))
 
     result = await handler.handle(_request())
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     assert result.verdict is EnumChainCanaryVerdict.GREEN
     assert result.deploy_window.status is EnumDeployWindowStatus.NOT_NEEDED
 
@@ -504,12 +511,12 @@ async def test_in_flight_deploy_at_start_is_waited_out_before_firing() -> None:
     )
     ready = _Ready()
     readback = _TerminalReadback(_SUCCESS_TOPIC)
-    ingress = _Ingress(clock)
-    handler, _ = _handler(clock, agent, readback, ingress=ingress, ready=ready)
+    publisher = _Publisher(clock)
+    handler, _ = _handler(clock, agent, readback, publisher=publisher, ready=ready)
 
     result = await handler.handle(_request())
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     assert result.verdict is EnumChainCanaryVerdict.GREEN
     window = result.deploy_window
     assert window.preflight_deploy_correlation_id == _DEPLOY_JOB
@@ -545,7 +552,7 @@ async def test_a_deploy_waited_out_before_firing_explains_its_aftermath() -> Non
         _idle(_DEPLOY_JOB, accepted, _T0 + timedelta(seconds=14)),
     )
     readback = _TerminalReadback("", _SUCCESS_TOPIC)
-    handler, ingress = _handler(clock, agent, readback)
+    handler, publisher = _handler(clock, agent, readback)
 
     result = await handler.handle(_request())
 
@@ -553,7 +560,7 @@ async def test_a_deploy_waited_out_before_firing_explains_its_aftermath() -> Non
     # The job completed before the first attempt's window opened, by more
     # than the window's clock skew ...
     assert window.window_started_at == (_T0 + timedelta(seconds=30)).isoformat()
-    assert ingress.calls == 2
+    assert publisher.calls == 2
     assert result.verdict is EnumChainCanaryVerdict.GREEN
     assert window.preflight_deploy_correlation_id == _DEPLOY_JOB
     # ... and still explains it, because the canary waited on it.
@@ -572,11 +579,11 @@ async def test_a_deploy_that_ended_before_an_unwaited_fire_still_stands_red() ->
     agent = _Agent(
         _idle(_DEPLOY_JOB, _T0 - timedelta(seconds=600), _T0 - timedelta(seconds=16))
     )
-    handler, ingress = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
+    handler, publisher = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
 
     result = await handler.handle(_request())
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     assert result.verdict is EnumChainCanaryVerdict.TERMINAL_MISSING
     assert result.deploy_window.status is EnumDeployWindowStatus.NO_DEPLOY_IN_WINDOW
     assert result.deploy_window.retried is False
@@ -590,62 +597,15 @@ async def test_in_flight_wait_counts_against_the_retry_budget() -> None:
     clock = _Clock()
     accepted = _T0 - timedelta(seconds=30)
     agent = _Agent(_deploying(_DEPLOY_JOB, accepted))
-    handler, ingress = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
+    handler, publisher = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
 
     result = await handler.handle(_request(deploy_wait_seconds=60))
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     window = result.deploy_window
     assert window.preflight_converged is False
     assert window.status is EnumDeployWindowStatus.DEPLOY_IN_WINDOW_NOT_CONVERGED
     assert result.verdict is EnumChainCanaryVerdict.TERMINAL_MISSING
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_in_flight_gateway_readiness_is_checked_when_the_gateway_route_is_used() -> (
-    None
-):
-    clock = _Clock()
-    accepted = _T0 - timedelta(seconds=30)
-    agent = _Agent(
-        _deploying(_DEPLOY_JOB, accepted),
-        _idle(_DEPLOY_JOB, accepted, _T0),
-    )
-    ready = _Ready()
-    handler = HandlerChainCanary(
-        gateway_ingress=_gateway_ingress(clock),
-        gateway_key_lookup=lambda name: "key-for-tests",
-        quarantine_scan=_quarantine,
-        terminal_readback=_TerminalReadback(_SUCCESS_TOPIC),
-        projection_readback=_projection,
-        ledger_replay=_ledger,
-        ledger_dsn_lookup=_ledger_dsn_lookup,
-        kill_switch_disabled=False,
-        deploy_agent_read=agent,
-        lane_ready=ready,
-        clock=clock,
-        sleep=clock.sleep,
-    )
-
-    await handler.handle(
-        _request(
-            gateway_url="http://gateway.invalid:8090",
-            gateway_api_key_env="CHAIN_CANARY_GATEWAY_API_KEY",
-        )
-    )
-
-    assert ready.calls == [_PROBE_URL, "http://gateway.invalid:8090"]
-
-
-def _gateway_ingress(clock: _Clock) -> object:
-    async def post(
-        url: str, body: dict[str, object], api_key: str, timeout_s: float
-    ) -> tuple[dict[str, object] | None, str, int]:
-        clock.now += timedelta(seconds=5)
-        return {"ok": True}, "", 5000
-
-    return post
 
 
 # -- the window arithmetic, against the agent's real payload shapes -------------
@@ -730,14 +690,14 @@ async def test_in_flight_queued_command_behind_an_idle_agent_is_waited_out() -> 
         _deploying(_DEPLOY_JOB, started),  # the queued command started
         _idle(_DEPLOY_JOB, started, _T0 + timedelta(seconds=40)),
     )
-    ingress = _Ingress(clock)
+    publisher = _Publisher(clock)
     handler, _ = _handler(
-        clock, agent, _TerminalReadback(_SUCCESS_TOPIC), ingress=ingress
+        clock, agent, _TerminalReadback(_SUCCESS_TOPIC), publisher=publisher
     )
 
     result = await handler.handle(_request())
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     assert result.verdict is EnumChainCanaryVerdict.GREEN
     window = result.deploy_window
     assert window.preflight_queued_commands == 1
@@ -789,7 +749,7 @@ def test_an_unread_queue_does_not_make_an_idle_agent_busy() -> None:
 @pytest.mark.asyncio
 async def test_deploy_in_window_ingress_unreachable_retries_once() -> None:
     """Lab run 36279784915 (2026-09-26T23:54Z): fired while deploy 3d3f4b1a
-    recreated onex-api, so the submission route refused the connection. The
+    recreated onex-api, so the publish to the lane's broker was refused. The
     deploy explains it exactly as it explains a missing terminal."""
     clock = _Clock()
     started = _T0 - timedelta(seconds=60)
@@ -798,14 +758,14 @@ async def test_deploy_in_window_ingress_unreachable_retries_once() -> None:
         _deploying(_DEPLOY_JOB, started),  # after the attempt
         _idle(_DEPLOY_JOB, started, _T0 + timedelta(seconds=200)),
     )
-    ingress = _Ingress(clock, unreachable_calls=frozenset({1}))
+    publisher = _Publisher(clock, unreachable_calls=frozenset({1}))
     handler, _ = _handler(
-        clock, agent, _TerminalReadback(_SUCCESS_TOPIC), ingress=ingress
+        clock, agent, _TerminalReadback(_SUCCESS_TOPIC), publisher=publisher
     )
 
     result = await handler.handle(_request())
 
-    assert ingress.calls == 2
+    assert publisher.calls == 2
     assert result.verdict is EnumChainCanaryVerdict.GREEN
     window = result.deploy_window
     assert window.status is EnumDeployWindowStatus.DEPLOY_IN_WINDOW_RETRIED
@@ -816,7 +776,7 @@ async def test_deploy_in_window_ingress_unreachable_retries_once() -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_no_deploy_ingress_unreachable_stays_red_without_retry() -> None:
-    """An ingress that is down with no deploy behind it is a real outage."""
+    """A submission route that is down with no deploy behind it is a real outage."""
     clock = _Clock()
     agent = _Agent(
         _idle(
@@ -825,14 +785,14 @@ async def test_no_deploy_ingress_unreachable_stays_red_without_retry() -> None:
             _T0 - timedelta(hours=1),
         )
     )
-    ingress = _Ingress(clock, unreachable_calls=frozenset({1, 2}))
+    publisher = _Publisher(clock, unreachable_calls=frozenset({1, 2}))
     handler, _ = _handler(
-        clock, agent, _TerminalReadback(_SUCCESS_TOPIC), ingress=ingress
+        clock, agent, _TerminalReadback(_SUCCESS_TOPIC), publisher=publisher
     )
 
     result = await handler.handle(_request())
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     assert result.verdict is EnumChainCanaryVerdict.INGRESS_UNREACHABLE
     assert result.success is False
     assert result.deploy_window.status is EnumDeployWindowStatus.NO_DEPLOY_IN_WINDOW
@@ -846,11 +806,11 @@ async def test_no_deploy_retry_for_a_red_a_redeploy_does_not_explain() -> None:
     cannot cause: an unreadable bus is not a missing terminal."""
     clock = _Clock()
     agent = _Agent(_idle(), _deploying(_DEPLOY_JOB, _T0 + timedelta(seconds=5)))
-    handler, ingress = _handler(clock, agent, _TerminalReadback(None))  # type: ignore[arg-type]
+    handler, publisher = _handler(clock, agent, _TerminalReadback(None))  # type: ignore[arg-type]
 
     result = await handler.handle(_request())
 
-    assert ingress.calls == 1
+    assert publisher.calls == 1
     assert result.success is False
     assert result.verdict not in (
         EnumChainCanaryVerdict.TERMINAL_MISSING,

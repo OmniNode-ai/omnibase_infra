@@ -24,6 +24,7 @@ import re
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import yaml
 
@@ -32,11 +33,19 @@ from omnibase_infra.errors import TopicReplicationPolicyError
 from omnibase_infra.models.event_bus.model_contract_topic_entry import (
     TENANT_SLUG_PATTERN,
 )
+from omnibase_infra.models.node_announce.model_boot_clock import ModelBootClock
 from omnibase_infra.protocols.protocol_topic_provisioner import (
     ProtocolTopicProvisioner,
 )
 
 if TYPE_CHECKING:
+    from omnibase_infra.event_bus.model_topic_validation_result import (
+        ModelTopicValidationResult,
+    )
+    from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
+    from omnibase_infra.event_bus.service_topic_startup_validator import (
+        TopicStartupValidator,
+    )
     from omnibase_infra.runtime.auto_wiring.models import (
         ModelAutoWiringManifest,
         ModelDiscoveredContract,
@@ -152,10 +161,11 @@ async def ensure_topics_exist(
     logged with the contract and topic and left out of the result; none is fatal
     to the boot.
     """
-    outcomes = await asyncio.gather(
-        *(provisioner.ensure_topic_exists(topic_name=t) for t in topics),
-        return_exceptions=True,
-    )
+    with ModelBootClock.phase("provisioner"):
+        outcomes = await asyncio.gather(
+            *(provisioner.ensure_topic_exists(topic_name=t) for t in topics),
+            return_exceptions=True,
+        )
     ensured: list[str] = []
     for topic, outcome in zip(topics, outcomes, strict=True):
         if isinstance(outcome, TopicReplicationPolicyError) or not isinstance(
@@ -237,3 +247,61 @@ __all__: list[str] = [
     "ensure_topics_exist",
     "provision_unattached_publish_topics",
 ]
+
+
+async def auto_create_missing_topics(
+    provisioner: TopicProvisioner | None,
+    validator: TopicStartupValidator,
+    validation_result: ModelTopicValidationResult,
+    *,
+    correlation_id: UUID | None,
+    strict_validation: bool,
+) -> ModelTopicValidationResult:
+    """Create the topics a failed startup validation found missing (OMN-7810).
+
+    Handles topics added to the provisioning registry but not yet created on the
+    broker (first startup after adding new topic suffixes), then validates again
+    and returns the new result. The pass reuses the kernel's one
+    ``TopicProvisioner`` (OMN-26359) rather than building a second one and
+    scanning every contract again; with no provisioner (the kernel's
+    construction failed) the original result stands. A durability-policy
+    violation (``TopicReplicationPolicyError``) re-raises (OMN-15395); any other
+    failure is logged and leaves the original result in place.
+    """
+    if provisioner is None:
+        logger.warning(
+            "Auto-create missing topics skipped: the kernel built no topic "
+            "provisioner (correlation_id=%s)",
+            correlation_id,
+        )
+        return validation_result
+    try:
+        auto_result = await provisioner.ensure_provisioned_topics_exist(
+            correlation_id=correlation_id,
+        )
+        created = auto_result["created"]
+        if isinstance(created, list) and created:
+            logger.info(
+                "Auto-created %d missing topics after validation: %s "
+                "(correlation_id=%s)",
+                len(created),
+                created,
+                correlation_id,
+            )
+        validation_result = await validator.validate(
+            correlation_id=correlation_id,
+            log_missing=strict_validation,
+        )
+        if validation_result.status == "success":
+            logger.info(
+                "Topic validation recovered after auto-create (correlation_id=%s)",
+                correlation_id,
+            )
+    except TopicReplicationPolicyError:
+        raise
+    except Exception:
+        logger.exception(
+            "Auto-create missing topics failed (best-effort) (correlation_id=%s)",
+            correlation_id,
+        )
+    return validation_result

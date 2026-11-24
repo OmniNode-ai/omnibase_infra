@@ -15,6 +15,10 @@ WHAT THIS IS
     ``0``  all four clauses proven, and every control behaved
     ``1``  at least one clause unproven or one control misbehaved; the record
            names which and why
+    ``3``  NOT_MEASURED: the local rung never answered because the lab model
+           server timed out or failed, so no clause could be proven or refuted;
+           the record carries ``cause_class`` ``lab-model`` (OMN-26534). A FAIL
+           carries ``cause_class`` ``product``
     ``2``  the probe could not run at all (no ``onex`` on the customer PATH, no
            model server, no strace, unreadable replay). Deliberately distinct
            from ``1``: "I could not run" is not "the product failed".
@@ -97,7 +101,6 @@ import re
 import shutil
 import subprocess
 import sys
-import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
@@ -110,6 +113,7 @@ RECORD_VERSION: Final[int] = 1
 EXIT_OK: Final[int] = 0
 EXIT_FINDINGS: Final[int] = 1
 EXIT_INPUT: Final[int] = 2
+EXIT_NOT_MEASURED: Final[int] = 3
 
 #: The four distributions a delegation imports. The no-checkout clause requires
 #: every one of them to have come from the package index.
@@ -146,6 +150,9 @@ LOOPBACK_MODEL_HOST: Final[str] = "127.0.0.1"
 #: The shipped routing sends code classes to ``local-coder`` and prose classes
 #: (``document`` among them) to ``local-heavy-reasoning``, so both are declared.
 LOCAL_BACKEND_IDS: Final[tuple[str, ...]] = ("local-coder", "local-heavy-reasoning")
+
+#: A local attempt that failed this way never got an answer: the lab model server, not the product.
+LAB_MODEL_FAILURES: Final[tuple[str, ...]] = ("timeout", "provider_call_failed")
 
 _INET_RE: Final = re.compile(
     r"sa_family=AF_INET, sin_port=htons\((?P<port>\d+)\), "
@@ -189,13 +196,7 @@ class Connect:
 
 
 def _is_loopback(host: str) -> bool:
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
-        return address.ipv4_mapped.is_loopback
-    return address.is_loopback
+    return (address := _ip(host)) is not None and address.is_loopback
 
 
 def _ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
@@ -282,42 +283,22 @@ def parse_connects(
         if family_match is None:
             continue
         family = family_match.group("family")
-        host: str | None = None
-        port: int | None = None
-        path: str | None = None
-        if family == "AF_INET":
-            match = _INET_RE.search(line)
-            if match:
-                host, port = match.group("host"), int(match.group("port"))
-        elif family == "AF_INET6":
-            match = _INET6_RE.search(line)
-            if match:
-                host, port = match.group("host"), int(match.group("port"))
-        elif family == "AF_UNIX":
-            match = _UNIX_RE.search(line)
-            if match:
-                path = match.group("path")
+        regex = {"AF_INET": _INET_RE, "AF_INET6": _INET6_RE, "AF_UNIX": _UNIX_RE}.get(
+            family
+        )
+        found = regex.search(line) if regex else None
+        host = found.group("host") if found and family != "AF_UNIX" else None
+        port = int(found.group("port")) if found and family != "AF_UNIX" else None
+        path = found.group("path") if found and family == "AF_UNIX" else None
         if family in ("AF_INET", "AF_INET6") and host is None:
             # An inet connect whose address this parser cannot read is graded
             # as external: an unreadable address is not a proven-local one.
             connects.append(Connect(family, None, None, None, "external"))
             continue
-        connects.append(
-            Connect(
-                family,
-                host,
-                port,
-                path,
-                classify(
-                    family,
-                    host,
-                    port,
-                    path,
-                    model_port=model_port,
-                    model_host=model_host,
-                ),
-            )
+        kind = classify(
+            family, host, port, path, model_port=model_port, model_host=model_host
         )
+        connects.append(Connect(family, host, port, path, kind))
     return connects
 
 
@@ -663,15 +644,29 @@ def grade_zero_provider(obs: Mapping[str, Any]) -> Clause:
     return clause
 
 
+def lab_model_cause(receipt: Any, clauses: Sequence[Clause]) -> bool:
+    """Whether the lab model server never answered the local rung and nothing else is wrong."""
+    attempts = receipt.get("attempts") if isinstance(receipt, dict) else None
+    return bool(
+        attempts
+        and any(a.get("failure_class") in LAB_MODEL_FAILURES for a in attempts)
+        and all(a.get("tier") == "local" for a in attempts)
+        and not any(a.get("acceptance_decision") == "accept" for a in attempts)
+        and {c.name for c in clauses if not c.passed} <= {"three_files", "local_model"}
+    )
+
+
 @dataclass
 class Record:
     verdict: str
     clauses: list[Clause]
     as_of: str
     context: dict[str, Any]
+    cause_class: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "cause_class": self.cause_class,
             "record_version": RECORD_VERSION,
             "criterion": "C13",
             "ticket": "OMN-19179",
@@ -692,7 +687,9 @@ def grade(obs: Mapping[str, Any], *, as_of: str | None = None) -> Record:
         grade_local_model(obs, receipt),
         grade_zero_provider(obs),
     ]
+    lab = lab_model_cause(receipt, clauses)
     verdict = "PASS" if all(c.passed for c in clauses) else "FAIL"
+    verdict = "NOT_MEASURED" if lab and verdict == "FAIL" else verdict
     context = {
         "installed": obs.get("installed"),
         "model_artifact": obs.get("model_artifact"),
@@ -702,6 +699,7 @@ def grade(obs: Mapping[str, Any], *, as_of: str | None = None) -> Record:
     }
     return Record(
         verdict=verdict,
+        cause_class={"PASS": None, "NOT_MEASURED": "lab-model"}.get(verdict, "product"),
         clauses=clauses,
         as_of=as_of
         or obs.get("as_of")
@@ -716,8 +714,13 @@ def grade(obs: Mapping[str, Any], *, as_of: str | None = None) -> Record:
 
 
 def _http_get(url: str, timeout: float = 10.0) -> str:
-    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 - validated loopback or private model URL from argv
-        body: bytes = response.read()
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 - validated loopback or private model URL from argv
+            body: bytes = response.read()
+    except OSError as exc:
+        raise ProbeInputError(
+            f"local model server at {url} is not answering: {exc}"
+        ) from exc
     return body.decode("utf-8", "replace")
 
 
@@ -918,13 +921,8 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     if not onex.exists():
         raise ProbeInputError(f"no onex at {onex}; the customer install did not happen")
     base_url = model_base_url(model_host, int(args.model_port))
-    try:
-        served = served_model_ids(base_url)
-        tokens_before_unconfigured = tokens_predicted(base_url)
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        raise ProbeInputError(
-            f"local model server at {base_url} is not answering: {exc}"
-        ) from exc
+    served = served_model_ids(base_url)
+    tokens_before_unconfigured = tokens_predicted(base_url)
     if args.served_model not in served:
         raise ProbeInputError(
             f"model server serves {served}, not the declared {args.served_model!r}"
@@ -1099,7 +1097,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
 
 def render_summary(record: Record) -> str:
     lines = [
-        f"## C13 customer-local delegation — {record.verdict}",
+        f"## C13 customer-local delegation — {record.verdict} ({record.cause_class or 'no cause'})",
         "",
         f"as of `{record.as_of}`",
         "",
@@ -1125,6 +1123,13 @@ def _write_outputs(record: Record, args: argparse.Namespace) -> None:
     for clause in record.clauses:
         for reason in clause.reasons:
             print(f"FAIL {clause.name}: {reason}")
+
+
+def exit_code(record: Record) -> int:
+    """The verdict's exit: PASS 0, NOT_MEASURED 3, any other verdict 1."""
+    return {"PASS": EXIT_OK, "NOT_MEASURED": EXIT_NOT_MEASURED}.get(
+        record.verdict, EXIT_FINDINGS
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1190,7 +1195,7 @@ def main(argv: list[str] | None = None) -> int:
 
     record = grade(observations)
     _write_outputs(record, args)
-    return EXIT_OK if record.verdict == "PASS" else EXIT_FINDINGS
+    return exit_code(record)
 
 
 if __name__ == "__main__":

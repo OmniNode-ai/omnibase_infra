@@ -1,0 +1,16 @@
+{
+  "host": "omni-201",
+  "container": "omninode-runtime c69c927f583c",
+  "container_started_at": "2026-11-24T00:55:17Z",
+  "infra_revision": "1bde756d456695f252d3fc7c3bc29841502cf774",
+  "read_at": "2026-11-24T00:56:30Z",
+  "command": "docker exec omninode-runtime python -I - (handler_prebuilt_manifest.stamp_of against the image's prebuilt_node_manifest.json, differing_fields counted by kind)",
+  "boot_log_line_shows": "the first 20 of 1268 differing fields, all distribution_added:omnimarket:*",
+  "differing_total": 1268,
+  "distribution_added": {"omnimarket": 1267},
+  "baked_distributions": ["omnibase_infra", "omninode-intelligence"],
+  "active_packages": {
+    "stored": "omnibase_infra,omnimarket",
+    "current": "omnibase_infra,omniclaude,omniintelligence,omnimarket"
+  }
+}

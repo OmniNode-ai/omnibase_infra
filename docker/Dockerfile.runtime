@@ -1133,6 +1133,46 @@ RUN --mount=type=bind,from=node_inventory,target=/node_inventory \
 # LABEL, so the sanctioned build path supplies com.omninode.node_inventory as a
 # compose build label (see stamp_node_inventory in handler_runtime_deploy.sh).
 
+# OMN-26361: the prebuilt node manifest. For a given image the installed packages
+# are fixed, so boot step 0 (announce every onex.nodes contract) and contract
+# discovery (parse each contract again) give the same answer on every boot. Run
+# both once here, inside the image, and write the node catalog and the
+# ModelAutoWiringManifest as one file stamped with the installed distributions,
+# their versions and every contract's content hash. The kernel loads it at boot
+# after a stamp check (HandlerPrebuiltManifest, node_boot_catalog_effect) and falls
+# back to announce-and-discover, logging the stamp field that differed, when the
+# stamp no longer matches. The file is built under the lane filter the build args
+# name; a boot under another ONEX_ACTIVE_RUNTIME_PACKAGES, cloud-mirroring switch or
+# runtime profile reads that as a stamp difference and takes the fallback.
+#
+# OMN-26405: with no build argument the set is empty, and the runtime compose gives
+# the container ONEX_ACTIVE_RUNTIME_PACKAGES from docker/runtime-policy.env, so the
+# dev image's stamp read active_packages='' against 'omnibase_infra,omnimarket' and
+# every boot of the image read the file stale. The build reads that same file (the
+# --env-file compose reads) when no argument names the set; an argument still wins.
+# This RUN stays the last instruction that changes any stamp input.
+ARG PREBUILT_ACTIVE_RUNTIME_PACKAGES=""
+ARG PREBUILT_WORKLOAD=main
+#
+# The read fails closed: a missing file fails the bind mount, and a missing key, an
+# empty value or a value that is not a plain comma list (quoted, commented, spaced)
+# stops the build with a message rather than stamping an empty or mangled set. A repeated
+# key takes the last line, as compose's --env-file does.
+RUN --mount=type=bind,source=docker/runtime-policy.env,target=/tmp/runtime-policy.env \
+    set -eu; \
+    active="${PREBUILT_ACTIVE_RUNTIME_PACKAGES}"; \
+    if [ -z "${active}" ]; then \
+      active="$(sed -n 's/^ONEX_ACTIVE_RUNTIME_PACKAGES=//p' /tmp/runtime-policy.env | tail -n 1)"; \
+    fi; \
+    case "${active}" in \
+      ""|*[!A-Za-z0-9_.,-]*) \
+        echo "OMN-26405: no usable ONEX_ACTIVE_RUNTIME_PACKAGES for the prebuilt manifest (got '${active}'); set PREBUILT_ACTIVE_RUNTIME_PACKAGES or a plain comma list in docker/runtime-policy.env" >&2; \
+        exit 1;; \
+    esac; \
+    ONEX_ACTIVE_RUNTIME_PACKAGES="${active}" \
+    python -m omnibase_infra.nodes.node_boot_catalog_effect.runtime_prebuilt_manifest build \
+      --workload "${PREBUILT_WORKLOAD}"
+
 # OMN-15217: semantic health check.
 #
 # The previous check was `curl --fail --silent .../health`, and the comment here

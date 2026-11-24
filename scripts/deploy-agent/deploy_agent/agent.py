@@ -55,6 +55,7 @@ from deploy_agent.events import (
     Scope,
 )
 from deploy_agent.executor import (
+    ADOPTION_MODULE,
     DEPLOY_AGENT_DIR,
     REPO_DIR,
     SCOPE_BUNDLES,
@@ -534,6 +535,11 @@ class DeployAgent:
         self._idle_converge_started_at = datetime.now(UTC)
         self._idle_converge_last_check: float | None = None
         self._idle_converge_attempted: set[str] = set()
+        reading = load_dev_boot_guard(JOB_READING)
+        self._post_failure = reading.post_failure_converge(self, converge_command)
+        self._idle_build_gate = reading.idle_build_gate(self)
+        # OMN-26316: the revisions a lag is judged on, net of not-runtime paths.
+        self._idle_lag_refs = reading.lag_refs_reader(self)
         self._idle_converge_last_verdict: EnumIdleConvergeVerdict | None = None
         self._idle_converge_last_verdicts: dict[str, EnumIdleConvergeVerdict] = {}
         self._migration_converge_last_check: float | None = None
@@ -644,6 +650,10 @@ class DeployAgent:
             max_workers=LAG_POOL_MAX_WORKERS,
             thread_name_prefix="deploy-agent-lag",
         )
+        # OMN-26316. The dev boot incident report pass gets a thread of its OWN,
+        # for the reason the lag pool above has one: on the job thread it queues
+        # the consumer's poll behind it.
+        self._report_pass = load_dev_boot_guard().BackgroundPass("deploy-agent-reports")
         # OMN-19501. See SETTLE_POOL_MAX_WORKERS. ``_settle_future`` is the most
         # recently submitted settle; the pool is FIFO with one worker, so that
         # one finishing means every earlier one has.
@@ -792,17 +802,17 @@ class DeployAgent:
             flags.frozen_reason(datetime.now(UTC)) or "not frozen",
         )
 
-        # Step 0: record which code this process actually loaded, before
-        # anything can move the clone underneath it, and NAME IT IN THE JOURNAL
-        # (OMN-18200). Until this line existed there was no artifact anywhere --
-        # not the journal, not the health payload, not a job record -- that said
-        # which commit a running agent was executing, which is why a process
-        # four days stale beside a fixed clone looked exactly like a healthy
-        # one. self_update compares against this value, not against the remote.
+        # Step 0: record the code this process loaded (OMN-18200), then count this start: five
+        # restarts of an adopted ref in ten minutes return the clone to the previous ref (OMN-26494).
         loaded_sha = record_loaded_code_sha(
             os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR)
         )
-        logger.info("Deploy agent loaded code sha: %s", loaded_sha)
+        load_dev_boot_guard(ADOPTION_MODULE).guard_boot(
+            sys.modules[__name__],
+            loaded_sha,
+            load_dev_boot_guard(JOB_READING).record_adoption_revert,
+            os.execv,
+        )
 
         # Step 1: Recover crashed jobs
         if recovered := self.job_store.recover_crashed_jobs():
@@ -814,7 +824,10 @@ class DeployAgent:
 
         # Step 3: Retry pending publishes. Called directly rather than through
         # _offload: nothing is listening yet (the site starts at step 4), so
-        # there is no HTTP surface for a blocking call to deny here.
+        # there is no HTTP surface for a blocking call to deny here. The dev boot
+        # incident reports it starts run on their own thread (OMN-26316): 394
+        # refused incidents held this step, and with it /health and the
+        # consumer, for about twenty minutes after every re-exec.
         self._retry_pending_publishes()
 
         # Step 4: Start health endpoint
@@ -956,6 +969,7 @@ class DeployAgent:
                         await self._offload(self._job_reading, "check_pin")
                     if getattr(consumer, "load_gate_paused", None) is None:
                         await self._offload(self._maybe_idle_converge)
+                        await self._offload(self._post_failure.check)
                         await self._offload(self._maybe_converge_forward_migration)
                     await asyncio.sleep(1)
         finally:
@@ -1140,26 +1154,13 @@ class DeployAgent:
         The third boundary, and the only one that is not job-driven. Both
         OMN-16442 boundaries fire inside the handling of a command, so an agent
         with no traffic can never pick up a fix -- including, and especially, a
-        fix to itself. That is not hypothetical: on 2026-09-14 the change that
-        needed to reach this process was the change to this process, and the
-        only merge that would have published a rebuild command was that same
-        merge.
+        fix to itself (2026-09-14: the only merge that would have published a
+        rebuild command was the change to this process).
 
-        Two guards, both asserted rather than assumed, because "the poll
-        returned nothing" is not the same fact as "nothing is in flight":
-
-        * an accepted or in-progress job means a deploy is running and a
-          re-exec would abort it -- the OMN-16442 defect, arrived at from a
-          different direction;
-        * a job awaiting its terminal publish means a result is owed to the
-          bus. It IS durable (``result_publish_pending`` on disk, replayed by
-          ``_retry_pending_publishes`` at startup), so a re-exec here would not
-          lose it -- but it would delay it by a process restart for no reason,
-          and the next idle tick is one interval away.
-
-        The interval is stamped whether or not the guards let the check through,
-        so a guarded agent re-checks on the next interval rather than probing
-        the job store on every one-second poll.
+        Two guards, both asserted: an accepted or in-progress job means a deploy is running and
+        a re-exec would abort it (OMN-16442); a result awaiting its terminal publish is durable
+        but would be delayed by a restart for no reason. The interval is stamped whether or not
+        a guard lets the check through, so a guarded agent re-checks one interval later.
         """
         now = time.monotonic()
         if (
@@ -1332,8 +1333,7 @@ class DeployAgent:
         # Converge on a followed repository's dev head when idle (OMN-19509, rule in
         # deploy_agent.idle_converge), one check per interval. Each followed repository
         # (OMN-20867) and the declared web source (OMN-22808) is decided in turn; the
-        # first converge runs, once per verdict change logged, as an ordinary job
-        # through _execute_command (agent/idle-converge), after the recreate window.
+        # first converge runs as an ordinary job (agent/idle-converge), after the recreate window.
         if self._router is None:
             return
         tick = time.monotonic()
@@ -1346,9 +1346,8 @@ class DeployAgent:
         self._idle_converge_last_check = tick
 
         now = self._idle_converge_now()
-        # OMN-20864: a lane with no running runtime is restored, not followed.
-        # Evaluated first: the converge below reads the running revision out
-        # of that container and can only refuse while it is down.
+        # OMN-20864: a lane with no running runtime is restored, not followed; first,
+        # because the converge below reads that container's revision and can only refuse.
         lane_down = self._maybe_idle_restore(now)
         # OMN-19998: the heartbeat beats whatever the lane does next; a lane
         # that is down runs no revision, so it beats unread.
@@ -1358,46 +1357,44 @@ class DeployAgent:
             return
         decision: ModelIdleConvergeDecision | None = None
         web = _web_source()
-        for repository in (
-            *IDLE_CONVERGE_REPOSITORIES,
-            *((web.repository,) if web else ()),
-        ):
+        followed = (*IDLE_CONVERGE_REPOSITORIES, *((web.repository,) if web else ()))
+        for repository in followed:
             decision = self._decide_idle_converge(repository, now)
-            if decision.verdict is not self._idle_converge_last_verdicts.get(
-                repository
-            ):
-                if decision.verdict is not EnumIdleConvergeVerdict.CONVERGE:
-                    logger.info(
-                        "idle converge: %s (%s)",
-                        decision.verdict.value,
-                        decision.detail,
-                    )
-                self._idle_converge_last_verdicts[repository] = decision.verdict
+            last = self._idle_converge_last_verdicts.get(repository)
+            if decision.verdict not in (last, EnumIdleConvergeVerdict.CONVERGE):
+                logger.info(
+                    "idle converge: %s (%s)", decision.verdict.value, decision.detail
+                )
+            self._idle_converge_last_verdicts[repository] = decision.verdict
             if decision.verdict is EnumIdleConvergeVerdict.CONVERGE:
                 break
         assert decision is not None  # FOLLOWED_REPOSITORIES is never empty
         self._idle_converge_last_verdict = decision.verdict
         if decision.verdict is not EnumIdleConvergeVerdict.CONVERGE:
-            # OMN-19998: the dev lane needs nothing, so the stability lane may
-            # take the tag dev runs.
+            # OMN-19998: dev needs nothing, so the stability lane may take dev's tag.
             self._maybe_stability_follow(now)
             return
         assert decision.head_ref is not None  # CONVERGE always names the head
-        # OMN-19507: a converge is a deploy like any other, so it waits for the
-        # load gate too. The head is not marked attempted, so it runs once the
-        # gate opens.
+        # OMN-19507: a converge waits for the load gate like any deploy; its head is
+        # not marked attempted, so it runs once the gate opens (OMN-26431: row either way).
         cmd = converge_command()
+        if self._idle_build_gate.refuses(cmd):
+            return  # OMN-26493: that head's last dev job failed; one ledger row per head
         if not self._idle_converge_gate_open(cmd.requested_by):
+            self._job_reading("record_deferred", repository, decision.head_ref, now)
             return
         self._idle_converge_attempted.add(decision.head_ref)
-        logger.info(
-            "idle converge: running %s as %s: %s",
-            cmd.correlation_id,
-            cmd.requested_by,
-            decision.detail,
-        )
-        self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
+        self._accept_idle_job("idle converge", logging.INFO, cmd, decision.detail)
+        self._job_reading("record_queued", repository, decision, cmd, now)
         self._execute_command(cmd)
+
+    def _accept_idle_job(
+        self, label: str, level: int, cmd: ModelRebuildRequested, detail: str
+    ) -> None:
+        # Log the idle build the agent starts, then record its job as accepted.
+        id_, by = cmd.correlation_id, cmd.requested_by
+        logger.log(level, "%s: running %s as %s: %s", label, id_, by, detail)
+        self.job_store.accept(id_, cmd.model_dump(mode="json"))
 
     def _maybe_stability_follow(
         self, now: datetime
@@ -1504,12 +1501,12 @@ class DeployAgent:
                 ).frozen_reason(now),
             )
         )
-        if decision.verdict is not self._idle_restore_last_verdict:
-            if decision.verdict is not EnumIdleRestoreVerdict.RESTORE:
-                logger.info(
-                    "idle restore: %s (%s)", decision.verdict.value, decision.detail
-                )
-            self._idle_restore_last_verdict = decision.verdict
+        last = self._idle_restore_last_verdict
+        if decision.verdict not in (last, EnumIdleRestoreVerdict.RESTORE):
+            logger.info(
+                "idle restore: %s (%s)", decision.verdict.value, decision.detail
+            )
+        self._idle_restore_last_verdict = decision.verdict
         if not presence.restorable:
             return False
         if decision.verdict is not EnumIdleRestoreVerdict.RESTORE:
@@ -1518,16 +1515,12 @@ class DeployAgent:
             logger.info("idle restore: leaves the recreate window to %s", waiting)
             return True
         cmd = restore_command()
-        if not self._idle_converge_gate_open(cmd.requested_by):
+        if self._idle_build_gate.refuses(cmd) or not self._idle_converge_gate_open(
+            cmd.requested_by
+        ):
             return True
         self._idle_restore_last_attempt = now
-        logger.warning(
-            "idle restore: running %s as %s: %s",
-            cmd.correlation_id,
-            cmd.requested_by,
-            decision.detail,
-        )
-        self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
+        self._accept_idle_job("idle restore", logging.WARNING, cmd, decision.detail)
         self._execute_command(cmd)
         return True
 
@@ -1543,17 +1536,18 @@ class DeployAgent:
         # routing row sends it elsewhere; this instance is its only follower.
         web = getattr(_web_source(), "repository", None) == repository
         routed_elsewhere = web or routed_to != self._router.instance.name
+        lane_flags = getattr(self, "_lane_flags", ModelLaneFlags())
         running_ref = head_ref = probe_blocker = windows_error = None
-        if routed_elsewhere:
+        # OMN-26316: with a declared lag bound the instance's own repository is
+        # read too, so the bound covers a merge its trigger never delivered.
+        if routed_elsewhere or lane_flags.max_dev_lag() is not None:
             try:
                 probe_blocker = self._idle_probe_blocker(now)
             except Exception as exc:  # noqa: BLE001 - an unread schedule refuses
                 windows_error = (
                     f"probe schedule unreadable: {type(exc).__name__}: {exc}"
                 )
-            running_ref = self._idle_read_running_ref(repository)
-            head_ref = self._idle_read_head_ref(repository)
-        lane_flags = getattr(self, "_lane_flags", ModelLaneFlags())
+            running_ref, head_ref = self._idle_lag_refs(repository, routed_elsewhere)
         behind_since = next_behind_since(
             self._dev_lag_behind_since.get(repository), running_ref, head_ref, now
         )
@@ -1565,27 +1559,27 @@ class DeployAgent:
             self._record_dev_lane_drift(
                 repository, running_ref, head_ref, behind_since, lane_flags, now
             )
-        return decide_idle_converge(
-            ModelIdleConvergeInputs(
-                now=now,
-                repository=repository,
-                routed_elsewhere=routed_elsewhere,
-                job_active=self.job_store.has_active_job(),
-                last_activity=max(
-                    self.job_store.last_completed_at()
-                    or self._idle_converge_started_at,
-                    self._idle_converge_started_at,
-                ),
-                running_ref=running_ref,
-                head_ref=head_ref,
-                probe_blocker=probe_blocker,
-                windows_error=windows_error,
-                attempted_heads=frozenset(self._idle_converge_attempted),
-                frozen_reason=lane_flags.frozen_reason(now),
-                behind_since=behind_since,
-                max_lag=lane_flags.max_dev_lag(),
-            )
+        inputs = ModelIdleConvergeInputs(
+            now=now,
+            repository=repository,
+            routed_elsewhere=routed_elsewhere,
+            job_active=self.job_store.has_active_job(),
+            last_activity=max(
+                self.job_store.last_completed_at() or self._idle_converge_started_at,
+                self._idle_converge_started_at,
+            ),
+            running_ref=running_ref,
+            head_ref=head_ref,
+            probe_blocker=probe_blocker,
+            windows_error=windows_error,
+            attempted_heads=frozenset(self._idle_converge_attempted),
+            frozen_reason=lane_flags.frozen_reason(now),
+            behind_since=behind_since,
+            max_lag=lane_flags.max_dev_lag(),
         )
+        decision = decide_idle_converge(inputs)
+        self._job_reading("record_idle", self._idle_read_head_ref, inputs, decision)
+        return decision
 
     def _record_dev_lane_drift(
         self,
@@ -1826,13 +1820,10 @@ class DeployAgent:
     def _execute_command(self, cmd: ModelRebuildRequested) -> None:
         """Run one accepted command to its terminal state. BLOCKING, by design.
 
-        OMN-18636 made this synchronous rather than ``async``. It never awaited
-        anything: every statement in it and in ``_run_deploy`` is a blocking
-        call, and declaring that ``async`` said the opposite of what the body
-        did — which is precisely how the whole deploy came to run on the event
-        loop thread. It is now called through ``DeployAgent._offload``, and its
-        signature is the honest one for what it is.
+        OMN-18636: synchronous, because every statement in it and in ``_run_deploy``
+        blocks; it runs off the event loop thread through ``DeployAgent._offload``.
         """
+        self._job_reading("record_command", cmd)  # OMN-26431: the queued row
         try:
             with single_flight_lock():
                 self._run_deploy(cmd)
@@ -2967,16 +2958,14 @@ class DeployAgent:
     def _retry_pending_publishes(self) -> None:
         """Replay any result still owed to the bus. BLOCKING — see ``_offload``."""
         # Failure reports use their own durable outbox and survive a runtime
-        # bus outage. Retry only on a dev-capable instance.
+        # bus outage. Retry only on a dev-capable instance, off this thread.
         if EnumRuntimeLane.DEV in self._allowed_lanes:
-            try:
-                deliver_reports(
-                    STATE_DIR
-                    / "dev-boot-guard"
-                    / lane_config_for(EnumRuntimeLane.DEV).compose_project
-                )
-            except (OSError, ValueError, RuntimeError):
-                logger.exception("Dev boot failure reports remain pending")
+            self._report_pass.start(
+                deliver_reports,
+                STATE_DIR
+                / "dev-boot-guard"
+                / lane_config_for(EnumRuntimeLane.DEV).compose_project,
+            )
         pending = self.job_store.get_pending_publish()
         for job in pending:
             cid_str = str(job.correlation_id)

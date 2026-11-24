@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Measured boot of the omnibase_infra kernel before and after the stat-keyed contract
+# read cache (OMN-26359). Read by
+# tests/unit/runtime/auto_wiring/test_contract_parse_once_omn26359.py.
+ticket_id: OMN-26359
+branch: omn-26359-parse-once
+base: omn-26338-startup-loop-holds-2
+host: h053
+host_cores: 56
+cpu_quota: 100%
+environment: scratch redpanda v24.2.7 and postgres 16, removed afterwards
+contracts_discovered: 1383
+before_ref: d665c91de
+after_ref: b0c7e2fd7
+counter: yaml BaseConstructor.get_single_data, counted until 15 s after /health 200
+measured_by_lane: parseonce-1530
+note: >-
+  The host load average was 57 on 56 cores during passes 2 and 3 and other lanes ran at the same time, so seconds to /health are not comparable between passes; the YAML constructor run counts and the CPU seconds are the stable measures. CPU seconds at /health 200 were not recorded for pass 1.
+passes:
+  - pass: 1
+    before_yaml_parses: 13209
+    after_yaml_parses: 3241
+    before_seconds_to_health: 121.9
+    before_utc: "2026-11-21T16:10:36Z"
+    after_seconds_to_health: 145.2
+    after_utc: "2026-11-21T16:30:46Z"
+  - pass: 2
+    before_yaml_parses: 15471
+    after_yaml_parses: 3241
+    before_seconds_to_health: 554.8
+    before_utc: "2026-11-21T16:44:42Z"
+    after_seconds_to_health: 148.6
+    after_utc: "2026-11-21T16:54:12Z"
+    before_cpu_seconds_at_health: 198.2
+    after_cpu_seconds_at_health: 94.4
+  - pass: 3
+    before_yaml_parses: 15755
+    after_yaml_parses: 3241
+    before_seconds_to_health: 383.8
+    before_utc: "2026-11-21T16:56:56Z"
+    after_seconds_to_health: 323.3
+    after_utc: "2026-11-21T17:03:34Z"
+    before_cpu_seconds_at_health: 188.7
+    after_cpu_seconds_at_health: 100.4

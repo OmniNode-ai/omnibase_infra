@@ -1,0 +1,52 @@
+schema_version: 1.0.0
+ticket_id: OMN-26534
+title: The C13 customer-local grader reads a lab model timeout as NOT_MEASURED with cause class lab-model, not as a product FAIL
+summary: >-
+  The C13 grader gave only PASS or FAIL, so a run whose local-tier attempt failed because the lab model server timed out (run 45164398043, receipt attempts[0] failure_class timeout, error_message request timed out) read FAIL like a product defect, with no cause class. The grader now reads the failed local attempt on the receipt. A local-tier attempt that failed with timeout or provider_call_failed, with no accepted attempt, no attempt off the local tier and no failing clause outside local_model and three_files, grades NOT_MEASURED with cause_class lab-model in the record and the run summary, and the probe exits 3. Every other failure still grades FAIL, and a PASS stays a PASS. The workflow change that reports the new verdict lives in the cloud owner's repository and is returned as a patch, not pushed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26534-cause-named
+    statement: The cause of the empty result.txt and missing routing attempt is the lab model server timing out, and the grader names it.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the recorded receipt of run 45164398043 (attempts[0] failure_class timeout, error_message request timed out) grades NOT_MEASURED with cause_class lab-model, and a PASS carries no cause class"
+  - id: req-omn26534-fix-with-test
+    statement: A lab-model timeout is not graded as a product failure, and a product defect still is.
+    acceptance:
+      - id: AC2
+        statement: "AC2: a test plants the timed-out receipt and asserts NOT_MEASURED with the cause class, it fails at the merge base, and controls keep a served-but-wrong response, a cloud attempt and an external connect at FAIL"
+evidence_requirements:
+  - kind: tests
+    description: The C13 producer's offline grading tests, including the NOT_MEASURED cases.
+    command: uv run --frozen pytest tests/ci/test_c13_metrics_unavailable_omn26534.py tests/ci/test_c13_not_measured_omn26534.py tests/ci/test_c13_customer_local_probe_omn19179.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26534-ac1-cause-named
+    description: "The recorded timed-out receipt of run 45164398043 grades NOT_MEASURED with cause_class lab-model, in the record and in the run summary."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c13_not_measured_omn26534.py -k "timed_out_local_attempt or both_lab_failure_classes" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26534-ac2-fix-with-test
+    description: "NOT_MEASURED has its own exit 3, a PASS carries no cause class, a FAIL carries cause_class product, and the product-defect controls stay FAIL."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c13_not_measured_omn26534.py -k "not_measured_has_its_own_exit or pass_has_no_cause or not_a_local_lab_failure or hide_a_product_defect or cloud_rung_answering" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26534-ac2-metrics-503
+    description: "A model server answering 503 on /metrics (run 45237853027, step 6, HTTPError from tokens_predicted) is a COULD_NOT_RUN record naming the server, not a traceback with no record."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c13_metrics_unavailable_omn26534.py -q --no-cov -n 0 -p no:randomly
+        cwd: .

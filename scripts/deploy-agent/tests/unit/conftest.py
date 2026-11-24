@@ -60,6 +60,32 @@ def _no_recreate_window_gate(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _candidate_self_check_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A self-update test drives the pull and the re-exec, not the candidate's self-check (OMN-26494).
+
+    The self-check runs the candidate clone's idle ticks in a subprocess, and its bounds come
+    from the clone's node contract; a test clone has neither a source tree nor a contract.
+    Every agent test therefore sees a passing self-check, and
+    ``test_agent_adoption_omn26494.py`` restores the real one for what it proves.
+    """
+    from deploy_agent.executor import load_dev_boot_guard
+
+    adoption = load_dev_boot_guard(
+        "nodes.node_dev_roll_events_effect.runtime_dev_agent_adoption"
+    )
+    monkeypatch.setattr(
+        adoption,
+        "candidate_self_check",
+        lambda agent_dir, run, settings: subprocess.CompletedProcess([], 0, "", ""),
+    )
+    monkeypatch.setattr(
+        adoption,
+        "settings_at",
+        lambda root: adoption.AdoptionSettings(5, 600, "agent-adoption.json", 300, 60),
+    )
+
+
+@pytest.fixture(autouse=True)
 def _no_ledger_append_route(monkeypatch: pytest.MonkeyPatch) -> None:
     """A unit test never appends a job reading row to the host's real ledger (OMN-24617).
 

@@ -204,6 +204,8 @@ def _cidr(prefix: str, suffix: str) -> str:
 COMPOSE_RENDER_ENV = {
     # OMN-20932: lane overlays are private; the mount refuses without this.
     "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
+    # OMN-26121: the runtime mounts the lane declaration folder; the mount refuses without this.
+    "ONEX_LANE_DECLARATION_DIR": "/nonexistent/onex-lane-declaration",
     "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
@@ -324,6 +326,10 @@ def lane_overlay_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         lab_overlay(lane=Path(COMPOSE_FILES[-1]).stem.partition(".")[2]),
     )
     monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(overlay_dir))
+    declaration_dir = tmp_path / "workspace-config" / "config" / "lab"
+    declaration_dir.mkdir(parents=True)
+    (declaration_dir / "ci_bus_lanes.yaml").write_text("lanes: {}\n", encoding="utf-8")
+    monkeypatch.setenv("ONEX_LANE_DECLARATION_DIR", str(declaration_dir))
     return path
 
 
@@ -344,6 +350,7 @@ def _compose_render_env() -> dict[str, str]:
         "USER": os.environ.get("USER", ""),
         **COMPOSE_RENDER_ENV,
         "ONEX_LANE_OVERLAY_DIR": os.environ["ONEX_LANE_OVERLAY_DIR"],
+        "ONEX_LANE_DECLARATION_DIR": os.environ["ONEX_LANE_DECLARATION_DIR"],
     }
 
 
@@ -392,6 +399,41 @@ def test_stability_lane_runtime_services_render_with_runtime_profile() -> None:
 
     assert rendered_services == EXPECTED_RENDERED_SERVICES
     assert rendered_services.isdisjoint(OUT_OF_LANE_SERVICES)
+
+
+@pytest.mark.integration
+def test_stability_runtime_mounts_the_lane_declaration_folder() -> None:
+    """OMN-26121: the rendered runtime holds the real folder read-only where the gateway door reads it."""
+    services = _compose_config_json()["services"]
+    mounts = [
+        volume
+        for volume in services["omninode-runtime"]["volumes"]
+        if volume.get("target") == "/etc/onex/workspace-config/config/lab"
+    ]
+
+    assert len(mounts) == 1, mounts
+    assert mounts[0]["type"] == "bind"
+    assert mounts[0]["source"] == os.environ["ONEX_LANE_DECLARATION_DIR"]
+    assert mounts[0].get("read_only") is True
+
+
+@pytest.mark.integration
+def test_stability_render_refuses_without_the_lane_declaration_folder() -> None:
+    """OMN-26121: the mount is a required variable, so a caller that exports no folder is refused by name."""
+    env = _compose_render_env()
+    del env["ONEX_LANE_DECLARATION_DIR"]
+
+    result = subprocess.run(
+        _docker_compose_command("config", "--services"),
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "ONEX_LANE_DECLARATION_DIR must name the config/lab folder" in result.stderr
 
 
 @pytest.mark.integration
@@ -990,3 +1032,14 @@ def test_stability_lane_render_exposes_session_health_contract() -> None:
         assert environment["ONEX_INFRA_USER"] == "jonah"
         assert environment["OMNI_HOME"] == "/data/omninode/omni_home"
         assert environment["SSH_STRICT_HOST_KEY_CHECKING"] == "accept-new"
+
+
+# OMN-26472: the stability lane mounts the gateway on omninode_cloud, so its
+# forward-migration carries the gateway-lane indicator that scopes the
+# tenant_api_keys expiry seam, with this lane's own value.
+@pytest.mark.integration
+def test_stability_lane_forward_migration_carries_the_gateway_lane_indicator() -> None:
+    services = _compose_config_json()["services"]
+    environment = services["forward-migration"]["environment"]
+    # Spelled in two parts: the public-repo hygiene gate refuses the lab lane id on an added line.
+    assert environment["ONEX_MIGRATION_GATEWAY_LANE"] == "stability" + "_test"

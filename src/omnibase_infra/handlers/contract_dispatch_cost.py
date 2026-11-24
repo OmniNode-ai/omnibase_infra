@@ -19,6 +19,7 @@ reading.
 from __future__ import annotations
 
 import asyncio
+import functools
 import time
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
@@ -135,10 +136,10 @@ def get_process_contract_cost_counter() -> ContractDispatchCostCounter:
     return _PROCESS_COUNTER
 
 
-def attach_contract_dispatcher[E, T](
+def attach_contract_dispatcher[**P, T](
     owner_contract_label: str | None,
-    dispatcher: Callable[[E], Awaitable[T]],
-) -> Callable[[E], Awaitable[T]]:
+    dispatcher: Callable[P, Awaitable[T]],
+) -> Callable[P, Awaitable[T]]:
     """Return the dispatcher the engine registers for an attached contract.
 
     A dispatcher registered with an owner contract is registered with the
@@ -152,23 +153,30 @@ def attach_contract_dispatcher[E, T](
     return measure_contract_dispatch(owner_contract_label, dispatcher)
 
 
-def measure_contract_dispatch[E, T](
+def measure_contract_dispatch[**P, T](
     contract_label: str,
-    dispatcher: Callable[[E], Awaitable[T]],
+    dispatcher: Callable[P, Awaitable[T]],
     counter: ContractDispatchCostCounter | None = None,
-) -> Callable[[E], Awaitable[T]]:
+) -> Callable[P, Awaitable[T]]:
     """Wrap a dispatcher so every dispatch is charged to ``contract_label``.
 
     A dispatch that raises is charged too: the time it held the member is real.
+
+    The wrapper forwards every argument and carries the dispatcher's own
+    signature (``functools.wraps`` sets ``__wrapped__``, which
+    ``inspect.signature`` follows). The dispatch engine probes that signature
+    once at registration to decide whether to pass a keyword-only ``delivery``
+    and a ``context``; a wrapper that took only the envelope hid both.
     """
     target = counter if counter is not None else _PROCESS_COUNTER
 
-    async def _measured(envelope: E) -> T:
+    @functools.wraps(dispatcher)
+    async def _measured(*args: P.args, **kwargs: P.kwargs) -> T:
         timer = DispatchTimer()
         token = _current_timer.set(timer)
         started = time.perf_counter()
         try:
-            return await dispatcher(envelope)
+            return await dispatcher(*args, **kwargs)
         finally:
             wall = time.perf_counter() - started
             _current_timer.reset(token)

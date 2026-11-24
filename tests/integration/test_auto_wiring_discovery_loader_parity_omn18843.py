@@ -14,12 +14,12 @@ from __future__ import annotations
 import pytest
 import yaml
 
+from omnibase_infra.contracts.contract_completion_bound import read_completion_bound
 from omnibase_infra.runtime.auto_wiring.discovery import (
     discover_contracts,
     discover_contracts_cache_clear,
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
-    _read_completion_bound,
     _read_declared_key_grains,
     _read_dlq_topics,
     _read_state_io,
@@ -36,7 +36,7 @@ def test_real_manifest_identical_under_both_yaml_loaders(
     discover_contracts_cache_clear()
     fast = discover_contracts()
     readers = (
-        _read_completion_bound,
+        read_completion_bound,
         _read_declared_key_grains,
         _read_dlq_topics,
         _read_state_io,

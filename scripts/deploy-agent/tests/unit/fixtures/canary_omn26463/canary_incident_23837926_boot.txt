@@ -1,0 +1,17 @@
+# RECONSTRUCTED fixture (OMN-26463). Job 23837926 ran on the dev host 2026-11-22; the
+# container log of its 16:59:29Z boot was not read by this lane (docker on the dev host
+# is out of scope). The lines below rebuild the sequence the ticket and OMN-21753 record:
+# the boot set wired 54 contracts, waking node_schedule_run_reducer raised TypeError on
+# consumer_group_handover on a RecordingBus, and the first heartbeat failed. The shape is
+# the runtime's own log format; replace this file with the recorded log when it is read.
+2026-11-22 16:59:21,004 INFO omnibase_infra.runtime.service_kernel Boot manifest: 54 contract(s) wired at boot
+2026-11-22 16:59:29,118 INFO omnibase_infra.handlers.lazy_start_boot_split Lazy start: 54 contract(s) wired at boot, 412 dormant until their first request; boot set names not owned here=[]
+2026-11-22 16:59:29,402 INFO omnibase_infra.handlers.lazy_start_front_door Waking node_schedule_run_reducer on its first request
+2026-11-22 16:59:29,455 ERROR omnibase_infra.handlers.lazy_start_runtime_transaction Start of node_schedule_run_reducer failed
+Traceback (most recent call last):
+  File "/app/.venv/lib/python3.12/site-packages/omnibase_infra/handlers/lazy_start_runtime_transaction.py", line 212, in start
+    await self._attach(contract)
+  File "/app/.venv/lib/python3.12/site-packages/omnibase_infra/runtime/auto_wiring/handler_wiring.py", line 1187, in _attach
+    await bus.subscribe(topic, group, handler, consumer_group_handover=handover)
+TypeError: RecordingBus.subscribe() got an unexpected keyword argument 'consumer_group_handover'
+2026-11-22 16:59:29,901 ERROR omnibase_infra.runtime.heartbeat First heartbeat failed; the runtime refuses to start

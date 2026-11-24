@@ -107,6 +107,7 @@ from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchRe
 from omnibase_infra.models.model_contract_hotload_config import (
     ModelContractHotloadConfig,
 )
+from omnibase_infra.models.node_announce.model_boot_clock import ModelBootClock
 from omnibase_infra.models.runtime import ModelRuntimeNodeSelection
 from omnibase_infra.models.runtime.model_resolved_dependencies import (
     ModelResolvedDependencies,
@@ -2137,9 +2138,8 @@ class RuntimeHostProcess:
         # Step 4.5: Initialize idempotency store if configured (OMN-945)
         await self._initialize_idempotency_store()
 
-        # Step 4.6: Initialize gateway if configured (OMN-1899)
-        # Gateway provides envelope signing, validation, and policy enforcement.
-        # Non-fatal - system operates without gateway if initialization fails.
+        # Step 4.6: Initialize gateway if configured (OMN-1899): envelope signing,
+        # validation and policy enforcement. Non-fatal without it.
         await self._initialize_gateway_from_config()
 
         # Step 5: Subscribe to input topic (legacy direct path)
@@ -2173,7 +2173,7 @@ class RuntimeHostProcess:
             await self._batch_publisher.start()
 
         # Step 5.75: Start local runtime ingress once dispatch routing is ready.
-        await self._start_local_ingress()
+        await ModelBootClock.run("local_ingress_start", self._start_local_ingress())
         try:
             await self._start_pattern_b_broker()
         except Exception:
@@ -2439,8 +2439,7 @@ class RuntimeHostProcess:
                     "Error closing materialized resources",
                     extra={"error": str(e)},
                 )
-            self._dependency_materializer = None
-            self._materialized_resources = None
+            self._dependency_materializer = self._materialized_resources = None
 
         # Step 2.4.5: Stop heartbeat task if introspection was started (OMN-1930)
         # Must be called before closing event bus to avoid publish attempts on closed bus.
@@ -2516,8 +2515,8 @@ class RuntimeHostProcess:
             self._local_ingress_config.package_names
         )
         self._local_ingress_active_packages = package_names
-        self._local_ingress_routes = discover_runtime_local_ingress_routes(
-            package_names
+        self._local_ingress_routes = await asyncio.to_thread(
+            discover_runtime_local_ingress_routes, package_names
         )
         self._local_ingress_dispatch_result_applier = (
             await self._resolve_dispatch_result_applier_from_container()

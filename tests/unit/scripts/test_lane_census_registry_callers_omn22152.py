@@ -177,6 +177,28 @@ def _installer_env(
     return env, home
 
 
+def _durable_clone(base: Path) -> Path:
+    """A clone with its own git dir: the installer refuses a linked worktree (OMN-26379)."""
+    clone = base / "clone" / "omnibase_infra"
+    if not clone.exists():
+        (clone / "scripts").mkdir(parents=True)
+        shutil.copyfile(_DRIVER, clone / "scripts" / "lane-census-check.sh")
+        for args in (
+            ("init", "-q"),
+            ("add", "scripts"),
+            ("-c", "user.name=census-test", "-c", "user.email=t@example.invalid"),
+        ):
+            if args[0] == "-c":
+                args = (*args, "commit", "-q", "-m", "collector")
+            subprocess.run(
+                ["git", "-C", str(clone), *args],
+                check=True,
+                capture_output=True,
+                env=scrub_git_location_env(os.environ),
+            )
+    return clone
+
+
 def _install(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
@@ -186,7 +208,7 @@ def _install(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
             "--broker-container",
             "b",
             "--repo-root",
-            str(_REPO),
+            str(_durable_clone(Path(env["HOME"]).parent)),
         ],
         capture_output=True,
         text=True,

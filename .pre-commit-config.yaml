@@ -64,6 +64,16 @@ repos:
         files: ^(contracts/[^/]+\.yaml|tests/ci/test_contracts_strict_load_omn20945\.py|\.pre-commit-config\.yaml)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-26418: a dod_evidence id over the core limit passed every commit hook
+      # and failed contract-validation, repo-evidence and CI Split 1/15 on the
+      # pushed head. The same test runs in the CI test splits (OMN-17427).
+      - id: contracts-dod-id-length
+        name: Ticket contract dod_evidence ids fit the core limit (OMN-17427)
+        entry: uv run --frozen pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q --no-cov -n 0 -p no:randomly
+        language: system
+        files: ^(contracts/[^/]+\.yaml|tests/ci/test_contract_dod_evidence_id_length_omn17427\.py|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: imperative-contract-guard-caller
         name: Caller-owned imperative guard regression (OMN-21004)
         entry: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
@@ -207,6 +217,13 @@ repos:
         entry: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
         language: system
         files: ^(scripts/(lab_alarm|lane_census_plan)\.py|config/lab_alarm\.json|tests/ci/test_lab_alarm_omn18867\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: wiring-report-ratchet
+        name: Wiring report counts only fall (OMN-26335)
+        entry: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        files: ^(src/omnibase_infra/(handlers/(handler_wiring_report_counts\.py|handler_wiring_report_ratchet/.*)|models/wiring_ratchet/.*|nodes/node_wiring_report_ratchet_compute/.*|runtime/auto_wiring/.*)|tests/ci/(test_wiring_report_ratchet_omn26335\.py|fixtures/wiring_report_2026_11_21\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: linear-transport-consolidation

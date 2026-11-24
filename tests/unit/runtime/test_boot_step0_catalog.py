@@ -420,7 +420,7 @@ def test_the_kernel_runs_step0_before_the_container_and_reads_the_catalog() -> N
     from omnibase_infra.runtime import service_kernel
 
     source = Path(service_kernel.__file__).read_text()
-    step0 = source.index("await run_boot_step0(")
+    step0 = source.index("await run_boot_catalog(")
     container = source.index("container = ModelONEXContainer()")
     discovery = source.index("discover_contracts(node_catalog_result)")
     assert step0 < container < discovery

@@ -16,10 +16,18 @@ requirements:
         statement: 'AC2: the probe''s next run reads green against what exists now, with no retired thing restored and no clause removed unless a ruling retired the fact it graded -- falsifier: the newest c16-receipt-identity run reads red, or the clause table in the report lists a removed assertion that no ruling retires'
       - id: AC3
         statement: 'AC3: the lane writes one STATUS row `crit=C16 probe=c16-receipt-identity verdict=<green|red> read_at=<UTC>` -- falsifier: a ledger grep for `crit=C16 probe=c16-receipt-identity` finds no STATUS row after this ticket''s creation'
+  - id: req-omn26122-stability-probe-waits-for-its-own-lane
+    statement: A stability proof waits only for a deploy job of the stability lane, never for another lane's job on the shared deploy agent; a job whose lane the agent does not name stays a reason to wait.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: the resolver reads a deploy job that rolls another named lane as not busy for the graded lane, and the deploy agent names the lane of its active and last job in /health -- falsifier: the resolver waits out a dev job for the stability lane, or reads a job with no named lane as not busy'
 evidence_requirements:
   - kind: tests
     description: The stability lane declaration seam test and the stability proofs workflow pins, including the control that a lane with no ingress_url is refused naming the field.
     command: uv run --frozen pytest tests/ci/test_stability_proof_lane_declaration_omn24191.py tests/ci/test_proofs_target_stability_lane_omn21485.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The probe records the gateway's own refusal body when a submission is not accepted, and still records nothing of the request.
+    command: uv run --frozen pytest tests/ci/test_c16_receipt_identity_probe_omn19181.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -54,4 +62,40 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_stability_proof_lane_declaration_omn24191.py -q --no-cov -n 0 -p no:randomly -k "c16"
+        cwd: .
+  - id: dod-omn26122-ac4-own-lane-wait
+    description: >-
+      Run 44919897557 (2026-11-21T15:34Z) spent its 2400 s lane-resolve budget behind a dev idle-restore job; the agent job store held fourteen jobs from 2026-11-20T15:21Z to 2026-11-21T18:15Z, all of the dev lane. The check holds that the resolver ignores another named lane's job, still waits for the graded lane's own job and for a job that names no lane, and that the agent's health names the lane of its active and last job.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_resolve_lab_lane_other_lane_job_omn26122.py tests/ci/test_resolve_lab_lane_deploy_wait_omn19811.py tests/ci/test_resolve_lab_lane_wait_while_busy_omn20410.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_health_active_job_runtime_lane_omn26122.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26122-ac1-probe-records-refusal-detail
+    description: >-
+      Runs 45129905267 (head 356fa65dc9a1, concluded 2026-11-23T07:17:19Z) and 45131998180 (head 356fa65dc9a1, concluded 07:34:29Z) both ended with the stability runtime answering the probe's submissions 503, and the probe's record said only "submit answered 503": the gateway's refusal text was read and thrown away, so the cause had to be dug out of a job log that the lane's read budget could not reach. The probe now appends the gateway's own refusal body (bounded to 200 characters, never the request or the credential) to that line, and every clause of R-DELEG-11, R-DELEG-12 and R-DELEG-26 is unchanged. The hosted check below reads the checked-out tree and fails on the merge base, where the bound is absent.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c16_receipt_identity_probe_omn19181.py -q --no-cov -n 0 -p no:randomly -k "refused_submission or accepted_submission"
+        cwd: .
+      - check_type: command
+        check_value: grep -F "str(body)[:200]" scripts/ci/c16_receipt_identity_probe.py
+        cwd: .
+  - id: dod-omn26122-ac2-c15-receipt-step-soft
+    description: >-
+      The sibling chain canary (C15) ended red at its own receipt step as well as its verdict step: run 45291437443 (dev head 09347b4ab987, concluded 2026-11-24T00:00:08Z) logged "the lane reported no code sha on its deploy agent or its /ready" and exit code 1 at the emit step, a step whose comment says it can never change the run's conclusion. The step runs under the runner's default bash -e, which the script's own set -uo pipefail does not clear. The step now clears errexit, and the check runs the step's real script under bash -e with a stand-in for uv, for a lane that reports no sha and for a failing emit. It touches no probe clause. The base workflow fails both tests.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_chain_lane_receipt_omn18866.py -q --no-cov -n 0 -p no:randomly -k "run_conclusion_alone"
         cwd: .

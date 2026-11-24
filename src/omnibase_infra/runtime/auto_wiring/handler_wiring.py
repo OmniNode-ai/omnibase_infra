@@ -89,6 +89,7 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.contracts.contract_completion_bound import read_completion_bound
 from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.errors import (
     ProjectionNotMaterializedError,
@@ -131,7 +132,21 @@ from omnibase_infra.handlers.handler_projection_derived_write import (
 from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
+from omnibase_infra.handlers.projection_database_ownership import (
+    owned_database_gate,
+    serves_its_own_database,
+)
 from omnibase_infra.handlers.projection_failure_classification import is_content_failure
+from omnibase_infra.handlers.projection_noop_classification import (
+    ROWS_REFUSED_KEY,
+    is_windowless_consumer_flow_heartbeat,
+    read_attested_noop_reason,
+)
+from omnibase_infra.handlers.topic_migration_dependencies import (
+    TOPIC_MIGRATION_EXECUTOR_DEPS,
+    required_handler_init_params,
+    warm_topic_migration_scan,
+)
 from omnibase_infra.models.dispatch.model_injected_request import ModelInjectedRequest
 from omnibase_infra.models.model_contract_hotload_lane_overlay import (
     lane_defers_topics_to_first_request,
@@ -510,7 +525,6 @@ _BOUND_SWEEP_MIN_INTERVAL_SECONDS = 15.0
 # identifier (the row's primary-key column), so it is validated the same way
 # StateStoreAdapter validates its table name before interpolating it into SQL.
 _STATE_IO_KEY_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-_TOPIC_MIGRATION_EXECUTOR_DEPS = frozenset({"provisioner", "drain_proof_gate"})
 _DELEGATION_INFERENCE_INTENT_MODULE = "omnibase_core.models.delegation.wire"
 _DELEGATION_INFERENCE_INTENT_NAME = "ModelInferenceIntent"
 _DELEGATION_INFERENCE_INTENT_DISCRIMINATOR = "llm_inference"
@@ -3109,41 +3123,6 @@ def _read_state_io(contract_path: Path) -> dict[str, object]:
     return state_io if isinstance(state_io, dict) else {}
 
 
-def _read_completion_bound(contract_path: Path) -> ModelCompletionBound | None:
-    """Read and validate the top-level ``completion_bound`` block (OMN-18296).
-
-    Returns ``None`` when the block is absent — a ``state_io`` contract that
-    declares no bound keeps the pre-OMN-18296 behaviour (the environment-variable
-    give-up TTL, row-only), so this is additive for every contract that has not
-    opted in. A block that IS present but malformed raises: a bound the runtime
-    cannot read is worse than no bound at all, because a reader would believe one
-    was being enforced.
-
-    Shape and rationale live in
-    :mod:`omnibase_infra.runtime.state_io.model_completion_bound`.
-    """
-    try:
-        raw = read_contract_yaml(contract_path)
-    except FileNotFoundError:
-        return None
-    if not isinstance(raw, dict):
-        return None
-    block = raw.get("completion_bound")
-    if block is None:
-        return None
-    if not isinstance(block, dict):
-        raise ModelOnexError(
-            f"handler_wiring: completion_bound in {contract_path} must be a "
-            f"mapping — got {type(block).__name__}."
-        )
-    try:
-        return ModelCompletionBound.model_validate(block)
-    except ValidationError as exc:
-        raise ModelOnexError(
-            f"handler_wiring: completion_bound in {contract_path} is invalid: {exc}"
-        ) from exc
-
-
 def _contract_declares_state_io(contract: ModelDiscoveredContract) -> bool:
     return bool(_read_state_io(contract.contract_path))
 
@@ -4135,23 +4114,6 @@ PROJECTION_INPROCESS_DISPATCH_ATTR = "onex_runtime_inprocess_dispatch"
 PROJECTION_OWNED_DATABASE_BIND_ATTR = "bind_projection_database_url"
 
 
-def _serves_its_own_database(handler_instance: object) -> bool:
-    """Whether the handler carries a DB adapter it opened itself.
-
-    A handler on the DB-injection arm receives its adapter from the runtime as
-    ``input_data["_db"]`` and holds none of its own. A runner-shaped handler
-    constructs an async pool adapter in ``__init__`` and reaches it through
-    ``self.db`` — the runtime never sees that adapter's construction and cannot
-    scope its lifetime.
-    """
-    db = getattr(handler_instance, "db", None)
-    if db is None:
-        return False
-    return callable(getattr(db, "connect", None)) and callable(
-        getattr(db, "close", None)
-    )
-
-
 def _is_standalone_projection_runner(handler_instance: object) -> bool:
     """Whether this handler_routing entry is a standalone runner, not a target.
 
@@ -4176,7 +4138,7 @@ def _is_standalone_projection_runner(handler_instance: object) -> bool:
         callable(getattr(handler_instance, "project_event", None))
         and callable(getattr(handler_instance, "run", None))
         and hasattr(handler_instance, "topics")
-        and _serves_its_own_database(handler_instance)
+        and serves_its_own_database(handler_instance)
     )
     if not runner_shaped:
         return False
@@ -4223,7 +4185,7 @@ def _bind_handler_owned_projection_database(
     Standalone runners never reach here — the runtime does not dispatch them,
     so it does not own their configuration either.
     """
-    if not _serves_its_own_database(handler_instance):
+    if not serves_its_own_database(handler_instance):
         return
     handler_name = type(handler_instance).__name__
     binding_refs = sorted({binding.binding_ref for binding in target.bindings})
@@ -4249,11 +4211,13 @@ def _bind_handler_owned_projection_database(
     bind(db_urls[binding_refs[0]])
 
 
-#: OMN-18992. The optional field a projection handler uses to say "I wrote
-#: nothing ON PURPOSE, and here is how many rows an ordering guard refused".
-#: Optional by construction: a handler omitting it is read exactly as it is
-#: today, which is what makes this consumer-first across the repo boundary.
-ROWS_REFUSED_KEY: Final[str] = "rows_refused_by_ordering_guard"
+# OMN-26520. The optional field a projection handler uses to say "my contract's
+# filter owes this event no row" (a work-ledger TERMINAL that is not done). An
+# event so reported is not counted as consumed, the way a runtime tick is not
+# (OMN-26419): the apply-divergence dimension grades events that owed a row, so a
+# filtering writer is not read as a silent one. A handler that omits the field,
+# or a writer that raises, is graded exactly as before.
+EVENTS_NOT_APPLICABLE_KEY: Final[str] = "events_not_applicable"
 
 
 #: OMN-18910. The optional field a projection writer uses to report its
@@ -4293,62 +4257,29 @@ def _extract_deltas_dropped_total(result: object) -> int | None:
     return None
 
 
+def _extract_count(result: object, key: str) -> int:
+    """A non-negative integer a handler reported under ``key``, else 0."""
+    value = result.get(key, 0) if isinstance(result, dict) else 0
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _extract_rows_refused(result: object) -> int:
-    """Rows a projection handler DECLINED to write, as its own count.
-
-    OMN-18992. A zero-row return has two causes the runtime cannot tell apart,
-    and it has been logging both as the same ERROR.
-
-    The first is a writer that silently wrote nothing -- a real defect, and the
-    one the error line exists to surface. The second is an ordering guard doing
-    its job: the consumer-flow writer's upsert carries
-    ``OR ingest_sequence <= EXCLUDED.ingest_sequence`` on its conflict arm and a
-    ``RETURNING`` clause, so an older same-node sequence is refused by SQL
-    and legitimately returns no rows. Equality is accepted by this predicate.
-    The guard is deliberate: read-compare-write would race under concurrent
-    consumers and let an older redelivery win.
-
-    The captured 33-minute window contains 26 zero-row ERROR lines, four
-    from the consumer-flow writer. Those bytes do not establish whether SQL
-    refused a row or the heartbeat carried no flow window (B23 correction).
-    Refusals must be established by the real upsert's RETURNING outcome.
-
-    A writer that does not report refusals returns 0 here and is treated
-    exactly as it is today, which is what lets this land in ``omnibase_infra``
-    before any writer in ``omnimarket`` sends the field. The consumer tolerates
-    the absence; the producer follows.
-    """
-    if isinstance(result, dict) and ROWS_REFUSED_KEY in result:
-        try:
-            refused = int(result[ROWS_REFUSED_KEY])
-        except (TypeError, ValueError):
-            return 0
-        return refused if refused > 0 else 0
-    return 0
-
-
-def _is_windowless_consumer_flow_heartbeat(
-    *, contract_name: str, event_type: str, payload: object, result: object
-) -> bool:
-    """Recognize the consumer-flow contract's deliberate empty heartbeat.
-
-    OMN-18992 / B23. This contract projects ``flow_window``, not node liveness.
-    Only its new, explicit zero/refusal result shape can attest the no-op;
-    legacy or malformed results keep the zero-write ERROR. Other heartbeat
-    projections may still owe rows, so event type alone cannot exempt them.
-    """
-    return (
-        contract_name == "projection_consumer_flow"
-        and event_type == "heartbeat"
-        and isinstance(payload, dict)
-        and payload.get("flow_window") is None
-        and isinstance(result, dict)
-        and type(result.get("rows_upserted")) is int
-        and result["rows_upserted"] == 0
-        and result.get("flow_rows") == []
-        and type(result.get(ROWS_REFUSED_KEY)) is int
-        and result[ROWS_REFUSED_KEY] == 0
-    )
+    """Rows a projection handler DECLINED to write, as its own count (OMN-18992)."""
+    # A zero-row return has two causes the runtime cannot tell apart: a writer
+    # that silently wrote nothing (a real defect, the one the error line exists
+    # to surface) and an ordering guard doing its job -- the consumer-flow
+    # writer's upsert carries ``OR ingest_sequence <= EXCLUDED.ingest_sequence``
+    # and a ``RETURNING`` clause, so an older same-node sequence is refused by
+    # SQL and legitimately returns no rows. The guard is deliberate:
+    # read-compare-write would race under concurrent consumers and let an older
+    # redelivery win. Refusals are established by the real upsert's RETURNING
+    # outcome (B23 correction). A writer that does not report refusals returns 0
+    # here and is treated exactly as it is today, which is what lets this land
+    # in ``omnibase_infra`` before any writer in ``omnimarket`` sends the field.
+    return _extract_count(result, ROWS_REFUSED_KEY)
 
 
 def _record_projection_apply(
@@ -4358,6 +4289,7 @@ def _record_projection_apply(
     rows_upserted: int,
     rows_refused: int,
     deltas_dropped_total: int | None = None,
+    not_applicable: int = 0,
 ) -> None:
     """Record one projection dispatch on the process apply accumulator.
 
@@ -4385,7 +4317,7 @@ def _record_projection_apply(
         counters.record_apply(
             projection,
             topic,
-            consumed=1,
+            consumed=0 if not_applicable else 1,
             upserted=max(rows_upserted, 0),
             refused_by_guard=max(rows_refused, 0),
         )
@@ -5225,7 +5157,12 @@ def _make_projection_dispatch_callback(
             # budget above. Held only across the blocking call, so it caps
             # concurrent materialisation without serialising the async work
             # on either side of it.
-            async with _projection_inflight_gate():
+            # OMN-26430: an adapter owner is admitted one message at a time,
+            # ahead of the shared gate so its wait holds no inflight slot.
+            async with (
+                owned_database_gate(handler_instance),
+                _projection_inflight_gate(),
+            ):
                 result = await asyncio.to_thread(_invoke_projection_handler)
             if asyncio.iscoroutine(result):
                 result = await cast("Awaitable[object]", result)
@@ -5253,6 +5190,7 @@ def _make_projection_dispatch_callback(
                 rows_upserted=rows_upserted,
                 rows_refused=_extract_rows_refused(result),
                 deltas_dropped_total=_extract_deltas_dropped_total(result),
+                not_applicable=_extract_count(result, EVENTS_NOT_APPLICABLE_KEY),
             )
             if projected:
                 logger.debug(
@@ -5279,7 +5217,16 @@ def _make_projection_dispatch_callback(
                         event_type,
                         rows_refused,
                     )
-                elif _is_windowless_consumer_flow_heartbeat(
+                elif _extract_count(result, EVENTS_NOT_APPLICABLE_KEY):
+                    logger.info(
+                        "Projection handler filtered the event, no row owed "
+                        "(expected): outcome=EVENT_NOT_APPLICABLE handler=%s "
+                        "topic=%s event_type=%s",
+                        type(handler_instance).__name__,
+                        topic or "unknown",
+                        event_type,
+                    )
+                elif is_windowless_consumer_flow_heartbeat(
                     contract_name=contract_name,
                     event_type=event_type,
                     payload=projection_payload,
@@ -5291,6 +5238,18 @@ def _make_projection_dispatch_callback(
                         "outcome=WINDOW_LESS_HEARTBEAT "
                         "handler=%s topic=%s event_type=%s",
                         handler_name,
+                        topic or "unknown",
+                        event_type,
+                    )
+                elif (
+                    noop := read_attested_noop_reason(result, topic=topic)
+                ) is not None:
+                    logger.info(
+                        "Projection handler wrote zero rows, attested no-op "
+                        "(expected, no terminal owed): outcome=NOOP_ATTESTED "
+                        "reason=%s handler=%s topic=%s event_type=%s",
+                        noop.value,
+                        type(handler_instance).__name__,
                         topic or "unknown",
                         event_type,
                     )
@@ -8577,22 +8536,6 @@ def _derive_handler_entry_key(entry: ModelHandlerRoutingEntry) -> str:
     return f"{handler_name}.{safe_op}"
 
 
-def _required_handler_init_params(handler_cls: type) -> frozenset[str]:
-    """Return required constructor parameter names for a handler class."""
-    sig = inspect.signature(handler_cls)
-    return frozenset(
-        name
-        for name, param in sig.parameters.items()
-        if name != "self"
-        and param.kind
-        in {
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        }
-        and param.default is inspect.Parameter.empty
-    )
-
-
 def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
     """Return True when sync container resolution is unnecessary for handler_cls.
 
@@ -8601,7 +8544,7 @@ def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
     dependencies. In both cases, calling a sync container from runtime-managed
     async boot is unnecessary and can trip ``asyncio.run()`` crashes.
     """
-    required_params = _required_handler_init_params(handler_cls)
+    required_params = required_handler_init_params(handler_cls)
     return not required_params or required_params <= frozenset(
         {
             "event_bus",
@@ -8919,12 +8862,16 @@ def _contracts_root_for_runtime_dependencies() -> Path:
     return Path(__file__).resolve().parents[2] / "nodes"
 
 
-def _build_topic_migration_executor_dependencies() -> dict[str, object]:
+def _build_topic_migration_executor_dependencies(
+    provisioner: object | None = None,
+) -> dict[str, object]:
     """Build concrete collaborators for HandlerTopicMigrationExecutor.
 
     The handler declares these as required constructor services. Materializing
     them here keeps generic resolver Step 2 deterministic while preserving the
-    handler's strict constructor contract.
+    handler's strict constructor contract. A ``provisioner`` the caller already
+    holds (the kernel's, built once per boot, OMN-26359) is reused instead of
+    building a second one, which scanned every installed contract again.
     """
     from aiokafka import AIOKafkaConsumer
     from aiokafka.admin import AIOKafkaAdminClient
@@ -8944,7 +8891,8 @@ def _build_topic_migration_executor_dependencies() -> dict[str, object]:
     lag_admin = AdapterKafkaAdminLag(admin, consumer)
     observer = ServiceConsumerLagObserver(lag_admin)
     return {
-        "provisioner": TopicProvisioner(
+        "provisioner": provisioner
+        or TopicProvisioner(
             bootstrap_servers=bootstrap_servers,
             contracts_root=_contracts_root_for_runtime_dependencies(),
         ),
@@ -8975,7 +8923,7 @@ def _materialize_known_handler_dependencies(
     event_bus: object | None,
     container: object | None,
     ownership_query: object | None,
-    terminal_topics: frozenset[str] = frozenset(),
+    terminal_topics_for: Callable[[], frozenset[str]] = frozenset,
 ) -> dict[str, dict[str, object]] | None:
     """Materialize infra-known constructor deps for core resolver Step 2.
 
@@ -8996,7 +8944,7 @@ def _materialize_known_handler_dependencies(
         }
     )
     requires_delegation_port = _handler_requires_delegation_dispatch_port(handler_cls)
-    required_params = _required_handler_init_params(handler_cls)
+    required_params = required_handler_init_params(handler_cls)
     requires_event_publisher = "event_publisher" in constructor_params
     requires_event_consumer = "event_consumer" in constructor_params
     if (
@@ -9019,7 +8967,7 @@ def _materialize_known_handler_dependencies(
         available["event_publisher"] = _make_sync_event_publisher(
             event_bus=event_bus,
             handler_name=handler_name,
-            terminal_topics=terminal_topics,
+            terminal_topics=terminal_topics_for(),
         )
     if requires_event_consumer and event_bus is not None:
         available["event_consumer"] = _make_sync_event_consumer(
@@ -9028,14 +8976,20 @@ def _materialize_known_handler_dependencies(
         )
     # An empty set is a subset too. Optional runtime ports must not construct
     # migration services: the provisioner scans the installed contract tree.
-    if required_params and required_params <= _TOPIC_MIGRATION_EXECUTOR_DEPS:
-        available.update(_build_topic_migration_executor_dependencies())
+    if required_params and required_params <= TOPIC_MIGRATION_EXECUTOR_DEPS:
+        available.update(
+            _build_topic_migration_executor_dependencies(
+                (materialized_explicit_dependencies or {})
+                .get(handler_name, {})
+                .get("provisioner")
+            )
+        )
     if not (
         requires_event_publisher
         or requires_event_consumer
         or required_params & {"container", "ownership_query", "dispatch_port"}
         or ("dispatch_port" in constructor_params and requires_delegation_port)
-        or (required_params and required_params <= _TOPIC_MIGRATION_EXECUTOR_DEPS)
+        or (required_params and required_params <= TOPIC_MIGRATION_EXECUTOR_DEPS)
     ):
         return materialized_explicit_dependencies
     if "dispatch_port" in constructor_params and requires_delegation_port:
@@ -10018,6 +9972,11 @@ async def wire_from_manifest(
     dispatcher_coverage_failed_gaps: list[str] = []
     async for contract in yield_each(manifest.contracts):
         try:
+            await warm_topic_migration_scan(
+                contract,
+                _contracts_root_for_runtime_dependencies(),
+                materialized_explicit_dependencies,
+            )
             prepared = _prepare_contract_wiring(
                 contract=contract,
                 dispatch_engine=dispatch_engine,
@@ -11123,6 +11082,11 @@ def _prepare_contract_wiring(
     _check_fanout_publish_coverage(contract)
 
     prepared_wirings: list[PreparedWiring] = []
+    # OMN-26359: declared once per contract, and only read by an entry whose
+    # constructor takes an event_publisher.
+    terminal_topics_for = cache(
+        partial(load_terminal_event_topics, contract.contract_path)
+    )
     for entry in contract.handler_routing.handlers:
         try:
             prepared = _prepare_handler_wiring(
@@ -11138,6 +11102,7 @@ def _prepare_contract_wiring(
                 topology=topology,
                 catalog_binding_policy=catalog_binding_policy,
                 secret_resolver=secret_resolver,
+                terminal_topics_for=terminal_topics_for,
             )
             prepared_wirings.append(prepared)
         except TypeError:
@@ -11534,6 +11499,11 @@ async def _subscribe_contract_topics(
     declared_dlq_topics = contract.event_bus.dlq_topics or tuple(
         _read_dlq_topics(contract.contract_path)
     )
+    # OMN-26359: both are per-contract, so read them once, not once per topic.
+    propagate_publish_failures = _contract_declares_state_io(contract)
+    failure_terminal_topics = _declared_failure_terminal_topics(
+        contract, success_topic=output_topic or ""
+    )
     for topic in contract.event_bus.subscribe_topics:
         # OMN-14758 (S6) / OMN-14771 (S8 §D1=4b): the ONE core RuntimeDispatch owns this
         # topic's OWNER route. Skip the legacy push callback for the OWNER only, so
@@ -11592,7 +11562,7 @@ async def _subscribe_contract_topics(
                 # publish-from-row failure + conflict-retry exhaustion PROPAGATE
                 # (redeliver) instead of being log-and-discarded. Non-state_io
                 # contracts keep the historical swallow behavior unchanged.
-                propagate_publish_failures=_contract_declares_state_io(contract),
+                propagate_publish_failures=propagate_publish_failures,
                 allowed_dispatcher_ids=dispatcher_scope,
                 # OMN-16777: this is the only layer that holds BOTH the group id
                 # and the topic while a message is in flight, so it is where
@@ -11605,9 +11575,7 @@ async def _subscribe_contract_topics(
                 # so the applier guard can never fire for it -- the boundary is
                 # the only surface that can answer, and this is the address it
                 # answers at.
-                failure_terminal_topics=_declared_failure_terminal_topics(
-                    contract, success_topic=output_topic or ""
-                ),
+                failure_terminal_topics=failure_terminal_topics,
                 # OMN-17432: the address of last resort when the contract
                 # declares no separate failure terminal — its own declared
                 # terminal/output topic, which is where the caller is already
@@ -11926,6 +11894,7 @@ def _prepare_handler_wiring(
     topology: ModelDeploymentTopology | None = None,
     catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
     secret_resolver: SecretResolver | None = None,
+    terminal_topics_for: Callable[[], frozenset[str]] | None = None,
 ) -> PreparedWiring:
     """Prepare one handler entry — delegates construction to the resolver.
 
@@ -12016,7 +11985,8 @@ def _prepare_handler_wiring(
         # read through the same function route discovery uses, so the wiring's
         # notion of "this publish is a terminal" cannot drift from the set the
         # Pattern B broker subscribes to.
-        terminal_topics=load_terminal_event_topics(contract.contract_path),
+        terminal_topics_for=terminal_topics_for
+        or partial(load_terminal_event_topics, contract.contract_path),
     )
 
     def _quarantine_prepared(
@@ -12320,7 +12290,7 @@ def _prepare_handler_wiring(
             state_io,
             event_bus=event_bus,
             output_topic_map=_outbox_topic_map,
-            completion_bound=_read_completion_bound(contract.contract_path),
+            completion_bound=read_completion_bound(contract.contract_path),
             pre_dispatch_guard=_delegation_fault_pre_dispatch_guard(
                 contract=contract,
                 entry=entry,

@@ -300,19 +300,21 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
     if inputs.frozen_reason is not None:
         return refuse(EnumIdleConvergeVerdict.FROZEN, inputs.frozen_reason)
     repo = inputs.repository
-    if not inputs.routed_elsewhere:
-        return refuse(
-            EnumIdleConvergeVerdict.NOT_ROUTED_ELSEWHERE,
-            f"the routing table sends {repo} rebuilds to this instance",
-        )
-    if inputs.job_active:
-        return refuse(EnumIdleConvergeVerdict.JOB_ACTIVE, "a job is in flight")
     # OMN-21146: past the bound the lane no longer waits out the idle period
     # or an unreadable schedule; each overridden refusal is named. Reserved
     # C15/C16 windows still refuse (OMN-19175: deploys inside them made C16
     # and the chain canary reach their terminals after their probe budgets).
     overdue = inputs.overdue()
     overridden: list[str] = []
+    if not inputs.routed_elsewhere:
+        detail = f"the routing table sends {repo} rebuilds to this instance"
+        # OMN-26316: the instance's own repository waits for its merge trigger,
+        # which runs inside the runtime it rebuilds; past the bound it does not.
+        if not overdue:
+            return refuse(EnumIdleConvergeVerdict.NOT_ROUTED_ELSEWHERE, detail)
+        overridden.append(detail)
+    if inputs.job_active:
+        return refuse(EnumIdleConvergeVerdict.JOB_ACTIVE, "a job is in flight")
     idle = inputs.now - inputs.last_activity
     if idle < IDLE_AFTER:
         detail = (

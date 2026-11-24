@@ -15,7 +15,7 @@ Two properties of the in-use boot split, each with a falsifier:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from pathlib import Path
 from typing import Literal
 from unittest.mock import patch
@@ -473,3 +473,80 @@ def test_dev_effects_boot_policy_reaches_carrier(
         f"${{{key}:?runtime policy contract must set {key}}}"
     )
     assert rendered[key] == "2048M"
+
+
+GATEWAY_NODE = "node_github_repo_gateway_effect"
+GATEWAY_TOPIC = "onex.cmd.omnimarket.github-repo-gateway-read-requested.v1"
+
+
+def _priority_nodes_after_non_priority(
+    order: Sequence[str], priority: Collection[str]
+) -> list[str]:
+    """Priority contracts that subscribe after the first non-priority contract."""
+    first_other = next(
+        (index for index, name in enumerate(order) if name not in priority),
+        len(order),
+    )
+    return [name for name in order[first_other:] if name in priority]
+
+
+def test_a_priority_node_wired_after_a_non_priority_node_is_named() -> None:
+    priority = {"node_a", "node_b"}
+
+    assert (
+        _priority_nodes_after_non_priority(
+            ["node_a", "node_b", "node_filler"], priority
+        )
+        == []
+    )
+    assert _priority_nodes_after_non_priority(
+        ["node_a", "node_filler", "node_b"], priority
+    ) == ["node_b"]
+    assert _priority_nodes_after_non_priority(["node_filler", "node_a"], priority) == [
+        "node_a"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dev_main_wiring_order_puts_every_priority_node_before_the_backlog() -> (
+    None
+):
+    """The real dev main policy, a backlog discovered first, the gateway last.
+
+    The priority set is the declared list plus the nodes dev lanes ask by bus
+    request (the GitHub repo gateway, OMN-26356). Discovery lists a dozen
+    unlisted contracts first and the priority nodes after them; with the real
+    join limit and list, none of the priority nodes may subscribe after an
+    unlisted one.
+    """
+    policy = load_contract(ROOT / "contracts/services/runtime_policy.contract.yaml")
+    boot = policy.profiles["dev"].processes["main"].boot
+    assert boot is not None
+    priority = {*boot.priority_contracts, GATEWAY_NODE}
+    topic_to_node: dict[str, str] = {}
+    contracts: list[tuple[str, tuple[str, ...]]] = []
+    for index in range(12):
+        topic = f"onex.cmd.test.backlog-{index}.v1"
+        topic_to_node[topic] = f"node_backlog_{index:02d}"
+        contracts.append((f"node_backlog_{index:02d}", (topic,)))
+    for index, name in enumerate(boot.priority_contracts):
+        if name == GATEWAY_NODE:
+            continue
+        topic = f"onex.cmd.test.priority-{index}.v1"
+        topic_to_node[topic] = name
+        contracts.append((name, (topic,)))
+    topic_to_node[GATEWAY_TOPIC] = GATEWAY_NODE
+    contracts.append((GATEWAY_NODE, (GATEWAY_TOPIC,)))
+
+    bus, _manifest, _exclusions, _results, _roster = await _boot(
+        tuple(contracts),
+        in_use=None,
+        readiness_config=ModelTopicReadinessConfig(
+            max_concurrent_contract_attach=boot.max_concurrent_contract_attach,
+            priority_contracts=boot.priority_contracts,
+        ),
+    )
+
+    order = [topic_to_node[topic] for topic, _ in bus.joins]
+    assert set(order) == set(topic_to_node.values())
+    assert _priority_nodes_after_non_priority(order, priority) == []

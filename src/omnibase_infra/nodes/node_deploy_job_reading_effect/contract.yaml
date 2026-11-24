@@ -10,7 +10,7 @@ runtime_profiles: [main]
 contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 description: >-
-  Turns the terminal outcome of one deploy job (dev or stability lane, never prod) into one ledger reading row in the shape of the reading writer's rows, and appends it through the append command the reading writer's overlay already names. A successful job reads WORKING; a failed job reads NOT_WORKING with its failing step. The node declares no topic: the bus append command owns the ledger's topics.
+  Turns the terminal outcome of one deploy job (dev or stability lane, never prod) into one ledger reading row in the shape of the reading writer's rows, and appends it through the append command the reading writer's overlay already names. A successful job reads WORKING; a failed job reads NOT_WORKING with its failing step. It also writes one build-decision row per dev merge sha decision of the deploy agent (queued with the job id, deferred with its reason and earliest start, or refused with its reason), through the same append command, so a lane reads what became of a merge without a GitHub read. The node declares no topic: the bus append command owns the ledger's topics.
 input_model:
   name: ModelDeployJobReadingRequest
   module: omnibase_infra.models.model_deploy_job_reading_request
@@ -24,6 +24,14 @@ handler_routing:
   handlers:
     - operation: read_deploy_job
       handler: {name: HandlerDeployJobReading, module: omnibase_infra.handlers.handler_deploy_job_reading}
+    - operation: record_dev_merge_build_decision
+      handler: {name: HandlerDevMergeBuildDecision, module: omnibase_infra.handlers.handler_dev_merge_build_decision}
+    - operation: check_routing_key_checks
+      handler: {name: HandlerRoutingKeyCheck, module: omnibase_infra.handlers.handler_routing_key_check}
+    - operation: alarm_routed_commands_without_job_record
+      handler: {name: HandlerRoutedCommandAlarm, module: omnibase_infra.handlers.handler_routed_command_alarm}
+    - operation: request_overdue_dev_merge_build
+      handler: {name: HandlerDevMergeBuildOverdue, module: omnibase_infra.handlers.handler_dev_merge_build_overdue}
 # The reading writer's append route, by the names its overlay gives the two variables.
 settings:
   append_command_env: ONEX_LEDGER_BUS_APPEND_COMMAND
@@ -49,11 +57,61 @@ settings:
   alarm_owner: swarm-item-lane-OMN-24562
   alarm_job_owner_line: read the job's failing step on the deploy agent's host and open or hand the fix to the integrator lane that owns the pin
   alarm_pin_owner_line: the integrator lane that owns the pin lands or re-registers its unmerged fixes before expires_at; the orchestrator lands the open PRs
+  # OMN-26494: the alarm of an agent that restarted five times in ten minutes after adopting a code ref.
+  alarm_adoption_owner_line: the deploy-agent role reads the agent journal for the adopted ref's crash, fixes it on dev and lets the agent adopt the fix; the agent keeps refusing the adopted ref until dev moves on
+  # OMN-26431: the build-decision rows. One STATUS row per dev merge sha decision; its key
+  # (repository, sha, result, reason) is held in the agent's state directory, so a decision
+  # that repeats on every idle tick writes one row.
+  build_decision_src: build-decision
+  build_decision_actor: deploy-agent:build-decision
+  # The bound on the one git diff that reads a sha's changed paths for its class.
+  build_decision_git_diff_timeout_seconds: 30
+  # OMN-26485: a routed command with no job record on its instance after this many seconds
+  # writes one alarm row (ten minutes, the ticket's window). The row names the instance and
+  # the command; the append's request id is derived from them, so it is written once.
+  routed_command_no_job_window_seconds: 600
+  alarm_routed_command_owner: orchestrator-31d9-swarm
+  alarm_routed_command_owner_line: read the routed instance's job record and agent log for the command, then re-route it or hand the instance's key fix to the owner of that host's agent; the instance is never restarted or edited by hand from this alarm
+  # OMN-26524: the callers of the two routing operations. Each names the function of the host
+  # composition root (runtime_deploy_job_reading.py) that runs the operation; the deploy
+  # agent's idle tick reaches both through its one existing entry, check_pin, which is gated
+  # to agents that run the dev lane. Each runs on its own interval and writes one run line
+  # per run to the agent's journal.
+  operation_callers:
+    check_routing_key_checks: check_routing
+    alarm_routed_commands_without_job_record: check_routed_commands
+    request_overdue_dev_merge_build: check_overdue_dev_merges
+  routing_check_interval_seconds: 300
+  routing_health_timeout_seconds: 3
+  # The health URL of each peer instance's agent, by instance name, read by the key check.
+  # Empty on purpose: the table's own verify URLs name host.docker.internal, which a host
+  # agent cannot reach, and no reachable address is declared anywhere yet. A peer with no URL
+  # (or no answer) is read as unread, which the check reports as key-check-unread.
+  instance_health_urls: {}
+  routed_command_alarm_interval_seconds: 60
+  # OMN-26316: how long a dev runtime merge may wait for a dev build before one is requested
+  # (the operator's goal: every runtime merge on a dev build within an hour).
+  dev_merge_build_window_seconds: 3600
+  # How often the idle tick judges the checkout's recent dev merges, and how far back it reads them.
+  dev_merge_build_check_interval_seconds: 300
+  dev_merge_build_lookback_seconds: 86400
+  # The routed commands this instance's alarm polls: one JSON object per line
+  # (correlation_id, instance, runtime_lane, requested_by, routed_at) in the agent's state
+  # directory. The file is read when present; no writer exists yet.
+  routed_commands_file: routed-commands.jsonl
   # The deploy phases in pipeline order; the first one that failed is the failing step.
   phase_order: [preflight, git, compose_gen, seed, core, runtime, verification]
 capabilities:
+  - name: deploy.dev_merge_build_overdue
+    description: Judge whether a dev runtime merge has gone the window with no dev build, as SATISFIED, WAIT or REQUEST, with one request id per sha. A pure decision; it publishes nothing (OMN-26316).
+  - name: deploy.routing_key_check
+    description: Judge the deploy lane routing table against each available instance's agent key check and the lane runtime's, refuse a mismatched instance with a typed refusal naming both values, and fall back to the default instance (OMN-26485).
+  - name: deploy.routed_command_no_job_alarm
+    description: Write one alarm row naming the instance and the command when a routed command has no job record on its instance within the declared window (OMN-26485).
   - name: deploy.job_reading
     description: Publish each deploy job's terminal outcome as a ledger reading row, so a failed job reads NOT_WORKING with its failing step where an owner reads it, and write an alarm row with an owner line for a failed job and for a code-ref pin within six hours of its expiry.
+  - name: deploy.dev_merge_build_decision
+    description: Publish the deploy agent's decision about building each dev merge sha as one ledger row (queued with the job id, deferred with its reason and earliest start, refused with its reason, or NON_RUNTIME with no build), once per decision.
 metadata:
   ticket: OMN-24617
   author: OmniNode Team

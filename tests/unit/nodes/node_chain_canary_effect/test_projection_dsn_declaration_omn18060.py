@@ -87,6 +87,7 @@ pytestmark = pytest.mark.unit
 
 _PROBE_URL = "http://runtime.invalid:8085"
 _BOOTSTRAP = "broker.invalid:19092"
+_TENANT = "820272f9-4aaf-5add-a2df-0af942852ab2"
 _SUCCESS_TOPIC = "onex.evt.omnimarket.delegate-skill-completed.v1"
 _DSN_ENV = "CHAIN_CANARY_PROJECTION_DSN"
 # `.invalid` is RFC 2606 reserved, so a fixture that accidentally escaped its
@@ -128,6 +129,50 @@ def test_the_dev_lane_declaration_resolves_to_a_name(tmp_path: Path) -> None:
     assert declaration.lane == "dev"
     assert declaration.dsn_env == _DSN_ENV
     assert not looks_like_a_dsn(declaration.dsn_env)
+
+
+def test_a_non_dev_lane_resolves_when_its_block_names_its_authorization(
+    tmp_path: Path,
+) -> None:
+    """OMN-26121: the overlay authorizes a lane the canary is graded on.
+
+    The lane ids live in the overlay, never in this repository, so the lane here
+    is synthetic.
+    """
+    body = f"""
+lanes:
+  lane-a:
+    broker: "broker.example.internal:39092"
+    security_protocol: SASL_PLAINTEXT
+    sasl_mechanism: SCRAM-SHA-256
+    projection_readback:
+      dsn_env: {_DSN_ENV}
+      authorized_by: OMN-26121
+"""
+    declaration = load_lane_projection_readback(_overlay(tmp_path, body), "lane-a")
+
+    assert declaration.lane == "lane-a"
+    assert declaration.dsn_env == _DSN_ENV
+    assert "lane-a" not in PROJECTION_READBACK_LANES
+
+
+@pytest.mark.parametrize(
+    "authorized_by", ["''", "'   '", "[OMN-26121]", "true"], ids=str
+)
+def test_a_non_dev_lane_whose_authorization_is_not_a_ticket_name_is_refused(
+    tmp_path: Path, authorized_by: str
+) -> None:
+    body = f"""
+lanes:
+  lane-a:
+    broker: "broker.example.internal:39092"
+    security_protocol: SASL_PLAINTEXT
+    projection_readback:
+      dsn_env: {_DSN_ENV}
+      authorized_by: {authorized_by}
+"""
+    with pytest.raises(ValueError, match="may not declare a projection readback"):
+        load_lane_projection_readback(_overlay(tmp_path, body), "lane-a")
 
 
 def test_only_the_name_is_exported_to_the_workflow(tmp_path: Path) -> None:
@@ -520,9 +565,15 @@ async def test_an_unresolvable_identity_is_refused_not_assumed(
 # ---------------------------------------------------------------------------
 
 
-class _Ingress:
+class _Publisher:
+    """Injected bus publish (OMN-23566). ``response`` is the broker ACK."""
+
     async def __call__(
-        self, url: str, body: dict[str, object], timeout_s: float
+        self,
+        bootstrap: str,
+        topic: str,
+        envelope: dict[str, object],
+        timeout_s: float,
     ) -> tuple[dict[str, object] | None, str, int]:
         return {"ok": True}, "", 42
 
@@ -598,7 +649,7 @@ class _AnswersEverything(_ProjectionStore):
 
 def _handler(projection: _ProjectionStore) -> HandlerChainCanary:
     return HandlerChainCanary(
-        ingress=_Ingress(),
+        bus_publish=_Publisher(),
         quarantine_scan=_Quarantine(),
         terminal_readback=_TerminalReadback(),
         projection_readback=projection,
@@ -611,6 +662,7 @@ def _request(**overrides: object) -> ModelChainCanaryRequest:
         "correlation_id": uuid4(),
         "probe_url": _PROBE_URL,
         "budget_ms": 5_000,
+        "tenant_id": _TENANT,
         "terminal_bootstrap_servers": _BOOTSTRAP,
         "quarantine_bootstrap_servers": _BOOTSTRAP,
         "projection_dsn_env": _DSN_ENV,
