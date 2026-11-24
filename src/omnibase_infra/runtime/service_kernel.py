@@ -4124,7 +4124,7 @@ async def bootstrap() -> int:
         # --- Freeze dispatch engine ---
         # All plugins and auto-wired handlers have registered their dispatchers.
         # Freeze the engine to make it read-only and thread-safe for concurrent dispatch.
-        dispatch_engine.freeze()
+        dispatch_engine.freeze(freeze_gc_heap=True)
         logger.info(
             "MessageDispatchEngine frozen after all wire_dispatchers() "
             "and auto-wiring (correlation_id=%s)",
