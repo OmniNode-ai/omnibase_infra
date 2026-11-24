@@ -27,6 +27,7 @@ _NODE = _SRC / "omnibase_infra/nodes/node_deploy_job_reading_effect"
 _ROUTING_OPERATIONS = (
     "check_routing_key_checks",
     "alarm_routed_commands_without_job_record",
+    "request_overdue_dev_merge_build",
 )
 
 
