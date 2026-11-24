@@ -290,6 +290,28 @@ def _checked(
     )
 
 
+# The agent's own consumer transport declaration (the unit's ``KAFKA_SASL_MECHANISM``,
+# ``KAFKA_SECURITY_PROTOCOL`` and ``KAFKA_SASL_ENV_PREFIX``, OMN-18012). The agent's lane login
+# lives only under that prefix, so the unprefixed pair the append command's client config reads
+# is absent, and ``ModelKafkaEventBusConfig.default()`` rejects a SASL mechanism with no
+# credentials before the lane's stored identity is bound (OMN-26316). The append command takes
+# its broker, protocol, mechanism and login from the ``dev`` lane declaration and the machine's
+# lane store, so none of these three reaches it; the post-roll ledger proof reads the same client
+# config and met the same refusal (dev job 02059fe5, 2026-11-24T06:38Z).
+_LEDGER_CLIENT_UNINHERITED_ENV: Final = frozenset(
+    {"KAFKA_SASL_MECHANISM", "KAFKA_SECURITY_PROTOCOL", "KAFKA_SASL_ENV_PREFIX"}
+)
+
+
+def _ledger_client_environment() -> dict[str, str]:
+    """The agent's environment for a command that is a client of the dev work ledger."""
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name not in _LEDGER_CLIENT_UNINHERITED_ENV
+    }
+
+
 def _prove_work_ledger_answers(execution: ModuleType) -> None:
     """After a dev runtime recreate verified, prove one ledger read answers (OMN-25942).
 
@@ -317,7 +339,7 @@ def _prove_work_ledger_answers(execution: ModuleType) -> None:
         str(bound),
     ]
     try:
-        done = execution._run(command, timeout=bound)
+        done = execution._run(command, timeout=bound, env=_ledger_client_environment())
     except execution.subprocess.TimeoutExpired as exc:
         raise DevBootFailedError(f"work ledger: no answer within {bound}s") from exc
     except OSError as exc:
@@ -1613,18 +1635,6 @@ _APPEND_STATUS_SCRIPT: Final = (
 )
 
 
-# The agent's own consumer transport declaration (the unit's ``KAFKA_SASL_MECHANISM``,
-# ``KAFKA_SECURITY_PROTOCOL`` and ``KAFKA_SASL_ENV_PREFIX``, OMN-18012). The agent's lane login
-# lives only under that prefix, so the unprefixed pair the append command's client config reads
-# is absent, and ``ModelKafkaEventBusConfig.default()`` rejects a SASL mechanism with no
-# credentials before the lane's stored identity is bound (OMN-26316). The append command takes
-# its broker, protocol, mechanism and login from the ``dev`` lane declaration and the machine's
-# lane store, so none of these three reaches it.
-_APPEND_COMMAND_UNINHERITED_ENV: Final = frozenset(
-    {"KAFKA_SASL_MECHANISM", "KAFKA_SECURITY_PROTOCOL", "KAFKA_SASL_ENV_PREFIX"}
-)
-
-
 def _append_status_over_bus(
     execution: ModuleType, row: str, *, lane: str, request_id: str
 ) -> bool:
@@ -1647,11 +1657,7 @@ def _append_status_over_bus(
                 request_id,
             ],
             timeout=REPORT_SECONDS,
-            env={
-                name: value
-                for name, value in os.environ.items()
-                if name not in _APPEND_COMMAND_UNINHERITED_ENV
-            },
+            env=_ledger_client_environment(),
         )
     except (OSError, execution.subprocess.SubprocessError):
         logger.warning("Dev boot STATUS delivery still pending: append command failed")

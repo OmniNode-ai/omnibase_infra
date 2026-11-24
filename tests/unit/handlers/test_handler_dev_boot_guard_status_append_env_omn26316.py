@@ -61,6 +61,7 @@ class _FakeExecution(types.ModuleType):
     """The slice of ``deploy_agent.executor`` the append uses: ``_run`` and ``subprocess``."""
 
     subprocess = subprocess
+    REPO_DIR = ""
 
     @staticmethod
     def _run(
@@ -143,3 +144,36 @@ def test_refusal_log_names_the_commands_last_stderr_line(
     assert delivered is False
     assert "append command refused" in caplog.text
     assert "the host name the unit declares did not reach the command" in caplog.text
+
+
+def test_post_roll_ledger_proof_runs_without_the_agents_sasl_declaration(
+    agent_environment: None, tmp_path: Path
+) -> None:
+    """Dev job 02059fe5 (f296bb88, 2026-11-24T06:38Z) restored the previous image on this refusal.
+
+    ``onex ledger query`` under the agent's environment answered ``Work-ledger read refused
+    (ProtocolConfigurationError)`` and exited 1; with the three names unset it answered one
+    JSON object. The roll's proof reads the same client config the append does.
+    """
+    repo = tmp_path / "deploy-source"
+    (repo / "scripts").mkdir(parents=True)
+    contract = repo / guard.WORK_LEDGER_CONTRACT
+    contract.parent.mkdir(parents=True)
+    contract.write_text(
+        "post_roll_proof:\n  argv: [ledger, query]\n  timeout_s: 10\n", encoding="utf-8"
+    )
+    onex = repo / guard.ONEX_ENTRY
+    onex.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        "if os.environ.get('KAFKA_SASL_MECHANISM'):\n"
+        "    sys.stderr.write('Error: Work-ledger read refused (ProtocolConfigurationError)\\n')\n"
+        "    sys.exit(1)\n"
+        "print('{\"rows\": []}')\n",
+        encoding="utf-8",
+    )
+    onex.chmod(onex.stat().st_mode | stat.S_IXUSR)
+    execution = _FakeExecution("fake_execution")
+    execution.REPO_DIR = str(repo)
+
+    guard._prove_work_ledger_answers(execution)
