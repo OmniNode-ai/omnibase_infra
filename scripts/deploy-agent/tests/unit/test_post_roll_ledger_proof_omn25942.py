@@ -52,7 +52,7 @@ def _ledger_commands(docker: dict) -> list[list[str]]:
 def test_declaration_is_the_ticketed_command_and_bound() -> None:
     assert DECLARED == {
         "argv": ["ledger", "query", "--query", "rows", "--limit", "1"],
-        "timeout_s": 10,
+        "timeout_s": 30,
     }
 
 

@@ -85,6 +85,7 @@ TOPICS = {
     "dev_roll_incident": "onex.evt.omnimarket.dev-roll-incident.v1",
     "dev_recreate_announced": "onex.evt.omnimarket.dev-recreate-announced.v1",
     "dev_recreate_violation": "onex.evt.omnimarket.dev-recreate-violation.v1",
+    "dev_container_recreated": "onex.evt.omnimarket.dev-container-recreated.v1",
 }
 TOPIC_DEV_RUNTIME_STARTED = TOPICS["dev_runtime_started"]
 TOPIC_DEV_ROLL_MANIFEST = TOPICS["dev_roll_manifest"]

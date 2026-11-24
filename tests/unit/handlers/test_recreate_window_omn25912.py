@@ -312,7 +312,11 @@ def test_recreate_window_install_path_branch_install_reapply_waits(
     bus = _Bus()
 
     def build(
-        root: Path, last: datetime | None, announced: datetime | None
+        root: Path,
+        last: datetime | None,
+        announced: datetime | None,
+        *,
+        state_dir: Path,
     ) -> DevRecreateWindowGate:
         return DevRecreateWindowGate(
             _declared_policy(),
