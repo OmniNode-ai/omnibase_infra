@@ -33,7 +33,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import BaseModel, JsonValue, ValidationError
@@ -763,13 +763,9 @@ def runtime_unchanged(repository: str, head: str, running: str) -> bool:
     return _idle_class(_agent(), repository, head, running) == "NON_RUNTIME"
 
 
-class IdleRefsHost(Protocol):
-    _idle_read_running_ref: Callable[[str], str | None]
-    _idle_read_head_ref: Callable[[str], str | None]
-
-
 def lag_refs_reader(
-    host: IdleRefsHost,
+    read_running_ref: Callable[[str], str | None],
+    read_head_ref: Callable[[str], str | None],
 ) -> Callable[[str, bool], tuple[str | None, str | None]]:
     """The running and head revisions an idle converge judges the lane on (OMN-26316).
 
@@ -780,8 +776,8 @@ def lag_refs_reader(
     """
 
     def read(repository: str, routed_elsewhere: bool) -> tuple[str | None, str | None]:
-        running = host._idle_read_running_ref(repository)
-        head = host._idle_read_head_ref(repository)
+        running = read_running_ref(repository)
+        head = read_head_ref(repository)
         if routed_elsewhere or head is None or running is None or head == running:
             return running, head
         try:
