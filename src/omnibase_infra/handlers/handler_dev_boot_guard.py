@@ -17,7 +17,6 @@ import importlib.util
 import json
 import logging
 import math
-import os
 import re
 import subprocess
 import sys
@@ -305,13 +304,16 @@ _LEDGER_CLIENT_UNINHERITED_ENV: Final = frozenset(
 )
 
 
-def _ledger_client_environment() -> dict[str, str]:
-    """The agent's environment for a command that is a client of the dev work ledger."""
-    return {
-        name: value
-        for name, value in os.environ.items()
-        if name not in _LEDGER_CLIENT_UNINHERITED_ENV
-    }
+def _without_agent_broker_declaration(command: list[str]) -> list[str]:
+    """``command`` run under ``env -u`` for the agent's own broker declarations.
+
+    The unset is done by ``env`` in the child, so this handler never reads the process
+    environment (handlers take no direct environment access).
+    """
+    unset = [
+        arg for name in sorted(_LEDGER_CLIENT_UNINHERITED_ENV) for arg in ("-u", name)
+    ]
+    return ["env", *unset, *command]
 
 
 def _prove_work_ledger_answers(execution: ModuleType) -> None:
@@ -341,7 +343,7 @@ def _prove_work_ledger_answers(execution: ModuleType) -> None:
         str(bound),
     ]
     try:
-        done = execution._run(command, timeout=bound, env=_ledger_client_environment())
+        done = execution._run(_without_agent_broker_declaration(command), timeout=bound)
     except execution.subprocess.TimeoutExpired as exc:
         raise DevBootFailedError(f"work ledger: no answer within {bound}s") from exc
     except OSError as exc:
@@ -1651,17 +1653,18 @@ def _append_status_over_bus(
     """
     try:
         done = execution._run(
-            [
-                "bash",
-                "-c",
-                _APPEND_STATUS_SCRIPT,
-                "ledger-append",
-                row,
-                lane,
-                request_id,
-            ],
+            _without_agent_broker_declaration(
+                [
+                    "bash",
+                    "-c",
+                    _APPEND_STATUS_SCRIPT,
+                    "ledger-append",
+                    row,
+                    lane,
+                    request_id,
+                ]
+            ),
             timeout=REPORT_SECONDS,
-            env=_ledger_client_environment(),
         )
     except (OSError, execution.subprocess.SubprocessError):
         logger.warning("Dev boot STATUS delivery still pending: append command failed")
