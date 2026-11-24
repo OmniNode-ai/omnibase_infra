@@ -69,3 +69,19 @@ def test_adoption_refuses_ref_after_failing_self_check(tmp_path: Path) -> None:
 
     settings = adoption.settings_at(REPO_ROOT)
     assert adoption.refused_reason(tmp_path, settings, NEW) == "self-check-exit-1"
+
+
+def test_adoption_journals_a_passing_self_check(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    adoption = _load()
+    caplog.set_level("INFO", logger=adoption.logger.name)
+    agent_dir = str(REPO_ROOT / "scripts" / "deploy-agent")
+
+    assert adoption.adopts(agent_dir, tmp_path, (OLD, NEW), _runner(0), lambda _d: None)
+
+    assert [
+        r.getMessage() for r in caplog.records if "self-check" in r.getMessage()
+    ] == [
+        f"self_update: self-check of {NEW[:12]} exited 0, adopting it over {OLD[:12]}"
+    ]
