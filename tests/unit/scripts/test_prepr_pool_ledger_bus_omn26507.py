@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib.util
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -41,7 +43,8 @@ HOLD_ROW = (
 # The files of the OMN-26507 group whose ledger file reader or writer moved to the bus. The ledger
 # file census records every file that still holds one in config/ledger_file_census_ratchet.yaml (a
 # hook keeps that table equal to the census node's own count), so a moved file has no row there.
-MOVED_FILES = ("scripts/runtime_build/prepr_runtime_pool.py",)
+LAUNCH_SCRIPT = "scripts/deploy-agent/deploy/deploy-agent-launch.sh"
+MOVED_FILES = ("scripts/runtime_build/prepr_runtime_pool.py", LAUNCH_SCRIPT)
 CENSUS_RATCHET = REPO_ROOT / "config" / "ledger_file_census_ratchet.yaml"
 
 
@@ -158,3 +161,35 @@ def test_no_ledger_file_path_census_table_is_readable() -> None:
 def test_no_ledger_file_path_in_a_moved_file(relative: str) -> None:
     assert relative not in _census_rows()
     assert (REPO_ROOT / relative).is_file()
+
+
+def _launch_ledger_block() -> str:
+    """The launch script's own dev ledger transport block, as written in the file."""
+    text = (REPO_ROOT / LAUNCH_SCRIPT).read_text(encoding="utf-8")
+    start = text.index('if [[ "${DEPLOY_AGENT_ALLOWED_LANES:-}" == "dev"')
+    return text[start : text.index("\nfi\n", start) + 4]
+
+
+def test_ledger_bus_deploy_agent_launch_hands_over_the_append_command_only(
+    tmp_path: Path,
+) -> None:
+    registry = tmp_path / "registry"
+    done = subprocess.run(
+        ["bash", "-c", f"{_launch_ledger_block()}\nenv"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={
+            "PATH": os.environ["PATH"],
+            "DEPLOY_AGENT_ALLOWED_LANES": "dev",
+            "ONEX_LEDGER_WRITE_VIA": "bus",
+            "UNIT_DRIFT_REGISTRY_ROOT": str(registry),
+        },
+    )
+    handed_over = dict(
+        line.split("=", 1) for line in done.stdout.splitlines() if "=" in line
+    )
+    command = handed_over["ONEX_LEDGER_BUS_APPEND_COMMAND"]
+    assert "-m omnimarket.work_ledger_bus.cli append --bus-lane dev" in command
+    assert not [name for name in handed_over if name.startswith("ONEX_LEDGER_P")]
+    assert not list(registry.glob("**/*"))
