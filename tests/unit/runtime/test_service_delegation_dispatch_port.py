@@ -524,6 +524,29 @@ async def test_runtime_delegation_dispatch_port_rejects_unsupported_bus_features
         await _dispatch_with_fake_broker(monkeypatch, **dispatch_kwargs)
 
 
+@pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_refusal_names_only_unwired_feature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-15482: a wired field set beside an unwired one is not blamed.
+
+    system_prompt rides the bus command now, so a request that also sets the
+    unwired ``model`` is refused for ``model`` alone, and the refusal no longer
+    promises the field is coming.
+    """
+    with pytest.raises(NotImplementedError) as refusal:
+        await _dispatch_with_fake_broker(
+            monkeypatch,
+            system_prompt="Answer tersely.",
+            model="caller-chosen-model",
+        )
+
+    message = str(refusal.value)
+    assert "model is not supported" in message
+    assert "system_prompt" not in message
+    assert "not yet supported" not in message
+
+
 def test_normalize_result_payload_flattens_delegation_event_shape() -> None:
     payload = {
         "topic": "onex.evt.omnibase-infra.delegation-completed.v1",

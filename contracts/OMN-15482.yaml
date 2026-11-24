@@ -48,12 +48,12 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -k completion_shaping -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn15482-ac3-model-probe-ladder-refused
-    description: model and probe_ladder still raise NotImplementedError naming the field.
+    description: model and probe_ladder still raise NotImplementedError naming the field, and a request that also sets a now-wired field is refused for the unwired one alone.
     source: manual
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -k rejects_unsupported_bus_features -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -k "rejects_unsupported_bus_features or refusal_names_only_unwired_feature" -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn15482-deploy
     description: Hosted-runner probe that reads the committed dispatch port from GitHub at the checked-out commit and requires the three fields to be put on the bus command payload and no longer in the refusal tuple.
