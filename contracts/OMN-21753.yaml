@@ -43,6 +43,12 @@ requirements:
       - id: AC7
         statement: |-
           AC7: a composed boot with a start-only boot set wakes a handover-declaring contract through the front door and survives a failing second wake -- falsifier: uv run pytest tests/integration/runtime/test_lazy_start_composed_boot_handover_omn21753.py -q fails at f498ef20f and passes on the branch
+  - id: req-omn21753-prebuilt-stamp-source
+    statement: "The runtime's active package set is the policy's, so the prebuilt node manifest stamped at image build reads fresh at boot."
+    acceptance:
+      - id: AC8
+        statement: |-
+          AC8: the deploy agent's compose env carries the policy's ONEX_ACTIVE_RUNTIME_PACKAGES whatever the operator store or process env holds, so the stamp built from docker/runtime-policy.env equals the boot-time stamp, and a stamp missing a package is refused by field name -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_active_packages_policy_owned_omn21753.py fails at the merge base and passes on the branch
 evidence_requirements:
   - kind: tests
     description: "The handover scenario on the in-process group-offset substrate, and the moved consume-concurrency wiring tests."
@@ -123,5 +129,14 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/integration/runtime/test_lazy_start_composed_boot_handover_omn21753.py -q --no-cov -n 0 -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC7]
+  - id: dod-omn21753-ac8-stamp-source-policy-owned
+    description: >-
+      The compose env the deploy agent hands the runtime container takes ONEX_ACTIVE_RUNTIME_PACKAGES from docker/runtime-policy.env over an operator store or process value; the real stamp built under the policy value compares equal to the boot-time stamp, and the widened four-package set is named as an active_packages difference.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_active_packages_policy_owned_omn21753.py -q --no-cov -n 0 -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC8]
 context:
   remaining_after_this_change: "The five folded omnimarket writer contracts (live-events, registration, savings, tenant-credentials, tenant-registry) must declare consumer_group_handover with their retired groups before the fold's deploy retires their containers; that is an omnimarket change."
