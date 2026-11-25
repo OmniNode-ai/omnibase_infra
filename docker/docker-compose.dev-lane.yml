@@ -1181,6 +1181,10 @@ services:
       # longer contains its pin, a check run in the clone stays refused
       # PRODUCT_CLONE_NOT_FRESH.
       DOD_VERIFY_PRODUCT_CLONE_PIN_FILE: /etc/onex/product-clone-pin/pins.json
+      # OMN-25856: total time limit, in seconds, for one hosted dod-verify-start command. omnimarket
+      # has no code default and refuses to start a hosted run without it. Above 0 and below the 600 s
+      # dispatch deadline, so the verdict is written and published inside it.
+      DOD_VERIFY_START_BUDGET_S: "540"
     volumes:
       # Read-only; names OMNIDASH_ANALYTICS_DB_URL, rendered above as role_omnidash.
       - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
