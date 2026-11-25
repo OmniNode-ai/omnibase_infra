@@ -132,6 +132,11 @@ requirements:
     acceptance:
       - id: AC49
         statement: "AC49: the 18 queued overdue commands at f553b1d6 give zero builds and 18 superseded records, an operator's rollback to the same ref and an overdue command for a merge the running build lacks still build, and an unread lineage builds as before -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stale_overdue_refused_at_accept_omn26316.py -q fails at origin/dev (the verdict and the overdue_references input are absent) and passes on the PR branch"
+  - id: req-omn26316-deadline-expiry-not-replayed-in-a-loop
+    statement: A dead letter that ends a dispatch which outlived its deadline is replayed at most the replay policy's declared count across all dead letters of its correlation, then quarantined by name, so the abandoned handler it leaves running is not multiplied into orphans.
+    acceptance:
+      - id: AC50
+        statement: "AC50: four dispatch-deadline dead letters of one correlation (dod-verify-start, offsets 120620 to 120624, each with a fresh retry_count of 0) give at most deadline_exceeded_max_replays replays and quarantines naming dispatch_deadline_exceeded for the rest, the contract declares 0, and a consumer_error dead letter still replays -- falsifier: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_omn26316_deadline_replay_loop.py fails at origin/dev (the replay policy has no deadline_exceeded_max_replays and all four are replayed) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -181,6 +186,9 @@ evidence_requirements:
   - kind: tests
     description: The stale overdue command refusal at accept, driven through the consumer with 18 queued commands.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stale_overdue_refused_at_accept_omn26316.py -q -p no:cacheprovider
+  - kind: tests
+    description: The dispatch-deadline replay loop regression built from the four dod-verify-start dead letters of 2026-11-25.
+    command: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_omn26316_deadline_replay_loop.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -508,4 +516,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stale_overdue_refused_at_accept_omn26316.py -q -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26316-deadline-replay-loop
+    description: "Four dispatch-deadline dead letters of one correlation, each with retry_count 0, are replayed at most the declared deadline_exceeded_max_replays times together and quarantined by name after; the contract declares 0 and a consumer_error dead letter still replays. Four tests fail at origin/dev."
+    source: manual
+    binds_ac: [AC50]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_omn26316_deadline_replay_loop.py -q --no-cov -n 0 -p no:randomly
         cwd: .

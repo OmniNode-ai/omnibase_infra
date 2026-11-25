@@ -40,7 +40,11 @@ from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.dlq.models.enum_replay_status import EnumReplayStatus
 from omnibase_infra.dlq.models.model_dlq_replay_record import ModelDlqReplayRecord
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumDlqFailureClass,
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+)
 from omnibase_infra.errors import (
     DlqDependencyLifecycleTimeoutError,
     DlqTopicFixedPointError,
@@ -51,6 +55,7 @@ from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     DLQQuarantineProducer,
     ModelDlqReplayEngineConfig,
     generate_replay_correlation_id,
+    is_deadline_exceeded,
     should_replay,
     unwrap_nested_dlq_record,
 )
@@ -116,6 +121,7 @@ class DlqConsumerDrainState:
 
     __slots__ = (
         "clock",
+        "deadline_replays",
         "failed_attempts",
         "halted",
         "lock",
@@ -139,6 +145,11 @@ class DlqConsumerDrainState:
         # move time.
         self.target_replays: dict[tuple[str, str | None], deque[float]] = {}
         self.clock: Callable[[], float] = time.monotonic
+        # OMN-26316: correlation id -> replays of its dispatch-deadline dead
+        # letters, oldest first, bounded by _MAX_REPLAYED_SOURCES. Each expiry
+        # writes a NEW dead letter, so the lineage is the correlation id, not
+        # the copy's own retry_count.
+        self.deadline_replays: OrderedDict[UUID, int] = OrderedDict()
 
     def admit_replay(
         self, topic: str, group: str | None, bound: ModelDlqTargetReplayBound
@@ -173,6 +184,17 @@ class DlqConsumerDrainState:
             source,
             None,
         ) in self.replayed_sources
+
+    def deadline_replay_count(self, correlation_id: UUID) -> int:
+        return self.deadline_replays.get(correlation_id, 0)
+
+    def mark_deadline_replayed(self, correlation_id: UUID) -> None:
+        self.deadline_replays[correlation_id] = (
+            self.deadline_replays.get(correlation_id, 0) + 1
+        )
+        self.deadline_replays.move_to_end(correlation_id)
+        while len(self.deadline_replays) > _MAX_REPLAYED_SOURCES:
+            self.deadline_replays.popitem(last=False)
 
     def mark_replayed(
         self, source: tuple[str, int, str], group: str | None = None
@@ -1174,6 +1196,23 @@ class HandlerDlqReplay:
                 replay_correlation_id=replay_correlation_id,
             )
 
+        deadline_lineage = is_deadline_exceeded(message)
+        if (
+            deadline_lineage
+            and state.deadline_replay_count(message.correlation_id)
+            >= config.deadline_exceeded_max_replays
+        ):
+            return await self._quarantine(
+                message,
+                "Dispatch deadline exceeded: failure_class="
+                f"{EnumDlqFailureClass.DISPATCH_DEADLINE_EXCEEDED.value}, the "
+                "dead letters of this correlation were already replayed "
+                f"{state.deadline_replay_count(message.correlation_id)} times "
+                f"(at most {config.deadline_exceeded_max_replays}); each replay "
+                "of an expired dispatch leaves one more orphan running "
+                "(OMN-26316)",
+            )
+
         if self._config.dry_run:
             return ModelDlqReplayResult(
                 correlation_id=message.correlation_id,
@@ -1227,6 +1266,8 @@ class HandlerDlqReplay:
 
         if source is not None:
             state.mark_replayed(source, message.consumer_group)
+        if deadline_lineage:
+            state.mark_deadline_replayed(message.correlation_id)
         await self._record(message, EnumReplayStatus.COMPLETED, replay_correlation_id)
         return ModelDlqReplayResult(
             correlation_id=message.correlation_id,
