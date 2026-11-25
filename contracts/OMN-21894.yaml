@@ -114,4 +114,4 @@ dod_evidence:
     binds_ac: [AC5]
     checks:
       - check_type: test_passes
-        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_mcp_sdk_route_omn21894.py tests/unit/handlers/http_mount/test_asgi_mounts_dependencies_omn21894.py -q --no-cov"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_mcp_sdk_route_omn21894.py tests/unit/handlers/http_mount/test_asgi_mounts_dependencies_omn21894.py tests/integration/handlers/test_mcp_handler_integration.py -q --no-cov"

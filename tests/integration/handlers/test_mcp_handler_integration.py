@@ -463,11 +463,20 @@ class TestMcpHttpEndpoint:
         """
         import httpx
 
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=mcp_app),
-            base_url="http://testserver",
-        ) as client:
-            response = await client.get(f"{mcp_handler_config.path}")
+        # The SDK app owns its session manager's task group in its lifespan,
+        # which an ASGI transport does not run (OMN-21894).
+        async with (
+            mcp_app.router.lifespan_context(mcp_app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=mcp_app),
+                base_url="http://127.0.0.1:8090",
+            ) as client,
+        ):
+            # A GET that accepts an event stream opens one and never ends under
+            # an ASGI transport; ask for JSON so the route answers at once.
+            response = await client.get(
+                mcp_handler_config.path, headers={"Accept": "application/json"}
+            )
             # Broad assertion is intentional for this reachability test:
             # - 200: Success (endpoint fully operational)
             # - 307: Temporary redirect (mounted app requires trailing slash)
@@ -475,7 +484,7 @@ class TestMcpHttpEndpoint:
             # - 404: Route exists but specific path not found
             # - 405: Method not allowed (endpoint exists, wrong HTTP method)
             # All of these indicate the endpoint is reachable and responding.
-            assert response.status_code in (200, 307, 400, 404, 405)
+            assert response.status_code in (200, 307, 400, 404, 405, 406)
 
     async def test_mcp_post_endpoint(
         self, mcp_app: Starlette, mcp_handler_config: ModelMcpHandlerConfig
@@ -494,25 +503,36 @@ class TestMcpHttpEndpoint:
         """
         import httpx
 
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=mcp_app),
-            base_url="http://testserver",
-            follow_redirects=True,
-        ) as client:
-            # Send a minimal JSON-RPC request with trailing slash
-            # to avoid 307 redirect
+        # The SDK app owns its session manager's task group in its lifespan,
+        # which an ASGI transport does not run (OMN-21894).
+        async with (
+            mcp_app.router.lifespan_context(mcp_app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=mcp_app),
+                base_url="http://127.0.0.1:8090",
+                follow_redirects=True,
+            ) as client,
+        ):
             response = await client.post(
-                f"{mcp_handler_config.path}/",
-                json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
-                headers={"Content-Type": "application/json"},
+                mcp_handler_config.path,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-03-26",
+                        "capabilities": {},
+                        "clientInfo": {"name": "integration-test", "version": "0"},
+                    },
+                },
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
             )
-            # Broad assertion is intentional for this POST endpoint test:
-            # - 200: Success (JSON-RPC request processed)
-            # - 307: Redirect (path normalization)
-            # - 400: Bad request (JSON-RPC validation failed but endpoint works)
-            # - 404: Route configuration difference
-            # All indicate POST handling capability at the endpoint.
-            assert response.status_code in (200, 307, 400, 404)
+            # The route answers a real initialize on the declared path (OMN-21894).
+            assert response.status_code == 200
+            assert response.json()["result"]["serverInfo"]["name"]
 
 
 class TestOnexAdapterToolRegistration:
