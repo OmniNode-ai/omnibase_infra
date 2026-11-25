@@ -1,0 +1,38 @@
+schema_version: 1.0.0
+ticket_id: OMN-19034
+title: The census gate exits 0 on a non-zero drift count, and its lab-server reporting leg reads a path that does not exist
+summary: The merged OMN-18949 census gate did not assert drift_count == 0. omnibase_infra#3926 arms that assertion in scripts/check_lane_census_drift.py and points the reporting leg at the census the host writes. This contract records the acceptance-criterion bindings a second lane accepted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19034-ac1-accepted-20261124t2345z:
+      - label: AC1
+        criterion_hash: 3cd556039c21268ffa1f244055bab722c255e6cdb252d167fe45648343140e33
+        proposed_by: lane=dod-closeout-bind-2026-11-24T2345Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-24T2345Z-c1
+requirements:
+  - id: req-omn-19034-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC-1: a census snapshot with drift_count 1 exits non-zero and a drift-0 snapshot passes. Fails against the pre-fix gate, which did not assert drift_count == 0.'
+    command: uv run pytest -q -n 0 --no-cov "tests/unit/scripts/test_check_lane_census_drift_omn18949.py::test_drift_count_one_refuses_and_zero_passes"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19034-ac1-accepted-20261124t2345z
+    description: 'AC-1: a census snapshot with drift_count 1 exits non-zero and a drift-0 snapshot passes. Fails against the pre-fix gate, which did not assert drift_count == 0.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest -q -n 0 --no-cov "tests/unit/scripts/test_check_lane_census_drift_omn18949.py::test_drift_count_one_refuses_and_zero_passes"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
