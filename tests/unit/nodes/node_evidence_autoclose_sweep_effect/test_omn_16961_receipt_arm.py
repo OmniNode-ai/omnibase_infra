@@ -35,10 +35,10 @@ from pathlib import Path
 import pytest
 
 from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
-    DOD_VERIFY_STATE_RESULT_MODEL as _DOD_VERIFY_STATE_RESULT_MODEL,
+    RECEIPT_ARM_STATE as _RECEIPT_ARM_STATE,
 )
 from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
-    RECEIPT_SUMMARY_RESULT_MODEL as _RECEIPT_SUMMARY_RESULT_MODEL,
+    RECEIPT_ARM_SUMMARY as _RECEIPT_ARM_SUMMARY,
 )
 from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
     extract_dod_verify_verdict as _extract_dod_verify_verdict,
@@ -74,6 +74,18 @@ def _success_arm() -> dict[str, object]:
 
 def _summary_arm() -> dict[str, object]:
     return _captured("dod-verify-omn16865.summary-arm.skill-result.json.captured")
+
+
+# Core (OMN-26231) resolves the arm by the model's own type name, the last
+# segment of the dotted `result_model` the receipt declares. The dotted tags
+# below are the ones the captured receipts carry verbatim.
+_DOD_VERIFY_STATE_RESULT_MODEL = (
+    "omnimarket.nodes.node_dod_verify.models.model_dod_verify_state."
+    + _RECEIPT_ARM_STATE
+)
+_RECEIPT_SUMMARY_RESULT_MODEL = (
+    "omnibase_infra.cli.model_receipt_runtime_summary." + _RECEIPT_ARM_SUMMARY
+)
 
 
 @pytest.mark.unit
