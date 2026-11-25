@@ -1,0 +1,23 @@
+schema_version: '1.0.0'
+ticket_id: OMN-26043
+title: 'The C13 customer-local probe reads the routing attempts where a current delegate receipt records them'
+summary: 'grade_local_model read the routing attempts at receipt.result.attempts; a current delegate receipt carries them under receipt.result.terminal_payload.payload.attempts, so a real receipt graded as having no attempt.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: The C13 customer-local probe grading tests, including the known good and known bad receipts of the current shape
+    command: uv run pytest tests/ci/test_c13_customer_local_probe_omn19179.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26043-c13-attempts-path
+    description: A receipt in the current shape reads its attempts and grades the local_model clause (known good), a climbed attempt and a receipt with no attempt at either path each fail it (known bad). The known-good test fails on the base commit, where the reader looks only at receipt.result.attempts, and passes after the change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_c13_customer_local_probe_omn19179.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
