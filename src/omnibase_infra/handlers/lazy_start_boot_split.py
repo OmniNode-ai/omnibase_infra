@@ -42,6 +42,7 @@ __all__: list[str] = [
     "StoreLazyStartWaker",
     "boot_manifest",
     "boot_universe_warm_enabled",
+    "lazy_start_serving_detail",
     "lazy_start_policy_of_this_lane",
     "split_boot_manifest",
 ]
@@ -108,15 +109,8 @@ class StoreLazyStartDormant:
         cls._front_door = front_door
 
     @classmethod
-    def serving_detail(cls) -> dict[str, object]:
-        """The ``lazy_start`` block of the ``/ready`` detail, or nothing (OMN-26316).
-
-        Nothing before the policy and the front door exist.
-        """
-        if cls._policy is None or cls._front_door is None:
-            return {}
-        status = cls._front_door.serving_status()
-        return {"lazy_start": status.model_dump(mode="json")}
+    def front_door(cls) -> LazyStartFrontDoor | None:
+        return cls._front_door
 
     @classmethod
     def clear(cls) -> None:
@@ -128,6 +122,18 @@ class StoreLazyStartDormant:
         cls._topology = None
         StoreLazyStartHandlerDependencies.record(None)
         StoreLazyStartWaker.record(None)
+
+
+def lazy_start_serving_detail() -> dict[str, object]:
+    """The ``lazy_start`` block of the ``/ready`` detail, or nothing (OMN-26316).
+
+    Nothing before the policy and the front door exist.
+    """
+    front_door = StoreLazyStartDormant.front_door()
+    if StoreLazyStartDormant.policy() is None or front_door is None:
+        return {}
+    status = front_door.serving_status()
+    return {"lazy_start": status.model_dump(mode="json")}
 
 
 class StoreLazyStartHandlerDependencies:

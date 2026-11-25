@@ -22,9 +22,9 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
 HELD_BACK_REV_PREFIX = "1c9566e2c249"
-EXEMPTION_TAG = "dev-20261118030813-4f0a188ab62c"
-# Cut time of omnibase_core#2333 (dev-20261118030813-4f0a188ab62c): the exemption to 2026-11-24.
-EXTENDED_EXEMPTION_CUT_UTC = "20261118030813"
+EXEMPTION_TAG = "dev-20261125040409-050022962f2e"
+# Cut time of omnibase_core#2367 (dev-20261125040409-050022962f2e): the exemption to 2026-12-04.
+EXTENDED_EXEMPTION_CUT_UTC = "20261125040409"
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 
 

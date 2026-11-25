@@ -119,7 +119,7 @@ BACKSTOPS: dict[str, Backstop] = {
     "validate-spdx-headers": ShellBackstop(
         job_id="onex-validation",
         logical_lines=(
-            "uv run --frozen python -m omnibase_core.cli.cli_commands spdx validate src tests scripts",
+            "env ONEX_CLI_SHOW_ALL_COMMANDS=1 uv run --frozen python -m omnibase_core.cli.cli_commands spdx validate src tests scripts",
         ),
     ),
 }
