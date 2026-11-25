@@ -1,0 +1,30 @@
+schema_version: 1.0.0
+ticket_id: OMN-26026
+title: A publisher-malformed command of a contract that declares a failure topic emits that terminal failure
+summary: The dispatch engine answers a publisher-malformed command on the contract's declared failure topic with a typed terminal carrying the envelope's correlation and workflow ids, and keeps the DLQ address.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26026-malformed-command-terminal
+    statement: A command refused as publisher_malformed emits a typed failure terminal on its contract's declared failure topic, with the DLQ address kept, and valid commands and contracts with no failure topic are unchanged.
+    acceptance:
+      - id: AC5001
+        statement: 'AC5001: a malformed command on a topic bound to a failure topic returns one typed terminal with the envelope correlation id and workflow id, a valid command and a contract with no failure topic are unchanged -- falsifier: uv run pytest tests/unit/runtime/test_message_dispatch_engine_malformed_failure_terminal_omn26026.py -q fails at origin/dev'
+evidence_requirements:
+  - kind: tests
+    description: Engine and applier tests for the malformed-command failure terminal
+    command: uv run --frozen pytest tests/unit/runtime/test_message_dispatch_engine_malformed_failure_terminal_omn26026.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26026-malformed-command-terminal
+    description: The engine returns the typed failure terminal for a malformed command, leaves valid and no-failure-topic cases unchanged, and the applier publishes it to the declared topic.
+    source: manual
+    binds_ac: [AC5001]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_message_dispatch_engine_malformed_failure_terminal_omn26026.py -q -n 0 --no-cov
+        cwd: .
