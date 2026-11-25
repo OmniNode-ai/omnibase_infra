@@ -19,8 +19,11 @@ records); it reads no host and publishes nothing. In order:
 
 * ``NON_RUNTIME`` merge: ``SATISFIED``, ``non_runtime``.
 * A dev job accepted at or after the merge on ``origin/dev`` (or on the sha itself) that
-  succeeded: ``SATISFIED``, ``built_by_job``. A job accepted before the merge staged its
-  source before it, so it never carries it. A ``superseded`` job carries nothing.
+  succeeded and whose built sha the caller proved contains the merge: ``SATISFIED``,
+  ``built_by_job``. A job accepted before the merge staged its source before it, so it never
+  carries it. A ``superseded`` job carries nothing. A job whose built sha is unread, is not
+  among the proven descendants, or was requested by the stability follow carries nothing:
+  the doubt fails closed to ``WAIT`` or ``REQUEST``, never to ``SATISFIED``.
 * A dev job in flight, whatever it carries: ``WAIT``, ``job_in_flight`` (never a second
   build over a running one).
 * A dev job that carries the merge and failed: ``WAIT``, ``failed_head``; the failed-head
@@ -29,9 +32,10 @@ records); it reads no host and publishes nothing. In order:
 * Otherwise ``REQUEST``, ``overdue_no_build``, with a ``request_id`` that is a function of
   the repository and sha only.
 
-A job pinned to a sha other than the merge's is not counted as carrying it: whether that
-sha descends from the merge is a git read, which this decision does not make. The cost of
-the doubt is one request, which the agent dedups.
+Whether a job's built sha descends from the merge is a git read, which this decision does
+not make: the caller reads it (``descendant_shas``). The cost of the doubt is one request,
+which the agent dedups. A failed job whose built sha is unread still reads as the failed
+head's, because the failed-head gate owns a head the job may have carried.
 """
 
 from __future__ import annotations
@@ -53,6 +57,8 @@ from omnibase_infra.models.model_overdue_dev_merge_job import ModelOverdueDevMer
 
 _DEV_LANE: Final = "dev"
 _DEV_HEAD: Final = "origin/dev"
+#: ``requested_by`` of the stability lane's rebuild that follows dev's tag; it never builds a dev merge.
+_STABILITY_FOLLOW: Final = "agent/stability-follow-tag"
 #: Statuses that end a job. Any other status is a job still on the agent.
 _TERMINAL: Final = frozenset(
     {EnumJobStatus.SUCCESS, EnumJobStatus.FAILED, EnumJobStatus.SUPERSEDED}
@@ -66,12 +72,23 @@ def request_id_for(repository: str, merge_sha: str) -> UUID:
     return uuid.uuid5(_REQUEST_NAMESPACE, f"{repository}:{merge_sha}")
 
 
+def _may_carry(
+    job: ModelOverdueDevMergeJob, request: ModelOverdueDevMergeBuildRequest
+) -> bool:
+    return (
+        job.requested_by != _STABILITY_FOLLOW
+        and job.accepted_at >= request.merged_at
+        and job.git_ref in (_DEV_HEAD, request.merge_sha)
+    )
+
+
 def _carries(
     job: ModelOverdueDevMergeJob, request: ModelOverdueDevMergeBuildRequest
 ) -> bool:
-    return job.accepted_at >= request.merged_at and job.git_ref in (
-        _DEV_HEAD,
-        request.merge_sha,
+    return (
+        _may_carry(job, request)
+        and job.built_sha != ""
+        and job.built_sha in request.descendant_shas
     )
 
 
@@ -115,15 +132,18 @@ class HandlerDevMergeBuildOverdue:
             (job for job in request.jobs if job.runtime_lane == _DEV_LANE),
             key=lambda job: (job.accepted_at, job.job_id),
         )
-        carrying = [job for job in dev_jobs if _carries(job, request)]
-        for job in carrying:
-            if job.status == EnumJobStatus.SUCCESS:
+        for job in dev_jobs:
+            if job.status == EnumJobStatus.SUCCESS and _carries(job, request):
                 return decide("SATISFIED", "built_by_job", job.job_id)
         for job in dev_jobs:
             if job.status not in _TERMINAL:
                 return decide("WAIT", "job_in_flight", job.job_id)
-        for job in carrying:
-            if job.status == EnumJobStatus.FAILED:
+        for job in dev_jobs:
+            if (
+                job.status == EnumJobStatus.FAILED
+                and _may_carry(job, request)
+                and (job.built_sha == "" or job.built_sha in request.descendant_shas)
+            ):
                 return decide("WAIT", "failed_head", job.job_id)
         if request.now < due_at:
             return decide("WAIT", "within_window")
