@@ -475,7 +475,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # dev` to read the live work ledger and died with FileNotFoundError because this
 # image held no `onex`. The client is the published omnibase-infra package at an
 # exact version, in its own virtual environment so nothing a job installs can
-# change it. /usr/local/bin/onex is a shim (onex-ledger-reader.sh): for
+# change it. /opt/onex-ledger-client/shim/onex is a shim (onex-ledger-reader.sh): for
 # `onex ledger query` it loads the read-only login mounted at
 # /home/runner/.lab-credentials/ci-ledger-read.env and refuses with exit 2 when
 # that file is absent; every other command passes through untouched. The build
@@ -487,7 +487,7 @@ RUN uv venv --python /usr/local/bin/python3.12 /opt/onex-ledger-client \
 # The shim is a heredoc, not a file beside this one: a new code file outside a canonical
 # location is refused by the canonical-file-shape ratchet (OMN-20304), and the test
 # tests/ci/test_runner_image_onex_ledger_reader_omn24139.py runs this exact text.
-COPY --chmod=0755 <<'ONEX_LEDGER_SHIM' /usr/local/bin/onex
+COPY --chmod=0755 <<'ONEX_LEDGER_SHIM' /opt/onex-ledger-client/shim/onex
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
@@ -499,7 +499,7 @@ COPY --chmod=0755 <<'ONEX_LEDGER_SHIM' /usr/local/bin/onex
 # the build runners, which carried no `onex`. The client is the published
 # omnibase-infra package, installed at a pinned version into
 # /opt/onex-ledger-client (see the Dockerfile). This shim is installed as
-# /usr/local/bin/onex in front of it.
+# /opt/onex-ledger-client/shim/onex in front of it (OMN-24562: off the default PATH).
 #
 # WHAT IT DOES. For `onex ledger query ...` and nothing else it loads the
 # read-only ledger login mounted at /home/runner/.lab-credentials/ci-ledger-read.env
@@ -566,7 +566,32 @@ fi
 
 exec "${real}" "$@"
 ONEX_LEDGER_SHIM
-RUN onex --version
+# OMN-24562: the shim FILE lives off every default PATH directory, and the image sets no
+# PATH to its directory. Only /usr/local/bin/onex is a symlink to it, which is what every
+# pool but omnibase-verify keeps (the freeze step on omnibase-ci calls `onex` by bare name).
+RUN ln -s /opt/onex-ledger-client/shim/onex /usr/local/bin/onex \
+    && /opt/onex-ledger-client/shim/onex --version
+# C13, C14 and C29 run on the omnibase-verify pool and fail a job whose PATH finds `onex`
+# after the run. Every pool runs this one image and every entrypoint, including a mounted
+# one, starts as root and hands over with `gosu`, so gosu is the one place that sees each
+# container start: a runner whose RUNNER_LABELS carries omnibase-verify drops the link
+# before the runner process starts, every other pool leaves it. The wrapper is a heredoc,
+# not a file beside this one, for the same canonical-file-shape reason as the shim.
+RUN mkdir -p /usr/local/libexec \
+    && mv /usr/local/bin/gosu /usr/local/libexec/gosu-real
+COPY --chmod=0755 <<'GOSU_POOL_WRAPPER' /usr/local/bin/gosu
+#!/bin/bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# gosu -- OMN-24562: the verify pool runs with no onex on its PATH.
+set -eu
+case ",${RUNNER_LABELS:-}," in
+    *,omnibase-verify,*) rm -f "${ONEX_PATH_LINK:-/usr/local/bin/onex}" ;;
+esac
+exec "${GOSU_REAL:-/usr/local/libexec/gosu-real}" "$@"
+GOSU_POOL_WRAPPER
+RUN gosu nobody true
 
 # --- Bound identity contract + prebuilt shared CI env (OMN-12567) ----------
 # The bound identity lock is the authority for "runner image vN". It is copied

@@ -7,7 +7,8 @@ The operator repository's freeze step reads the live work ledger through
 the build runners because the image held no ``onex``. This pins three things:
 
 * the image installs the published ``omnibase-infra`` package at an exact version
-  into its own virtual environment, and puts a shim named ``onex`` on the PATH;
+  into its own virtual environment, and keeps a shim named ``onex`` in a directory that is not on the default PATH
+  (OMN-24562: the customer checks fail a job that finds ``onex`` on its PATH);
 * the shim hands the mounted read-only credential (``KAFKA_SASL_USERNAME`` and
   ``KAFKA_SASL_PASSWORD`` from ``ci-ledger-read.env``) to the reader command and
   to nothing else, parses the file as data rather than running it, never echoes a
@@ -32,13 +33,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNNERS = REPO_ROOT / "docker" / "runners"
 DOCKERFILE = RUNNERS / "Dockerfile"
 HEREDOC = re.compile(
-    r"^COPY --chmod=0755 <<'ONEX_LEDGER_SHIM' /usr/local/bin/onex\n(?P<body>.*?)^ONEX_LEDGER_SHIM$",
+    r"^COPY --chmod=0755 <<'ONEX_LEDGER_SHIM' /opt/onex-ledger-client/shim/onex\n(?P<body>.*?)^ONEX_LEDGER_SHIM$",
     re.DOTALL | re.MULTILINE,
 )
 
 
 def _shim_text() -> str:
-    """The shim exactly as the image's Dockerfile installs it as /usr/local/bin/onex."""
+    """The shim exactly as the image's Dockerfile installs it as /opt/onex-ledger-client/shim/onex."""
     found = HEREDOC.search(DOCKERFILE.read_text(encoding="utf-8"))
     assert found, "the Dockerfile must install the shim as a quoted COPY heredoc"
     return found.group("body")
@@ -232,7 +233,7 @@ def test_dockerfile_installs_published_client_pinned_and_ships_the_shim() -> Non
         "the image installs the published omnibase-infra at the pinned version"
     )
     assert "/opt/onex-ledger-client" in code
-    assert "/usr/local/bin/onex" in code, "the shim is the onex on the PATH"
+    assert "/opt/onex-ledger-client/shim/onex" in code
     assert "onex --version" in code, (
         "the build fails if the installed client does not run"
     )
@@ -244,3 +245,77 @@ def test_lock_image_version_carries_the_ledger_client() -> None:
     assert lock["image_version"] >= LEDGER_READER_IMAGE_VERSION, (
         "the onex ledger client is baked from image v15 (OMN-24139)"
     )
+
+
+def test_dockerfile_puts_no_onex_in_a_default_path_directory() -> None:
+    """OMN-24562: the shim file is off every default PATH dir; only a link to it is on one."""
+    code = "\n".join(
+        line
+        for line in DOCKERFILE.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    assert (
+        "COPY --chmod=0755 <<'ONEX_LEDGER_SHIM' /opt/onex-ledger-client/shim/onex"
+        in code
+    )
+    for default_dir in ("/usr/local/bin", "/usr/bin", "/bin", "/usr/local/sbin"):
+        for hit in re.finditer(rf"(?<![\w/.-]){re.escape(default_dir)}/onex\b", code):
+            line = code[
+                code.rfind("\n", 0, hit.start()) + 1 : code.find("\n", hit.end())
+            ]
+            assert default_dir == "/usr/local/bin" and line.strip().startswith(
+                "RUN ln -s /opt/onex-ledger-client/shim/onex "
+            ), line
+    assert not re.search(r"ENV PATH=[^\n]*onex-ledger-client", code), (
+        "the image-wide PATH must not carry the shim directory"
+    )
+
+
+# A bare ``onex`` word at the start of a command inside a workflow or composite action.
+# Off the default PATH it resolves to nothing on a runner, so every such caller must name
+# the shim path (/opt/onex-ledger-client/shim/onex), add its directory to its own PATH in
+# the job, or run the checkout's own entry point (``uv run onex``, ``.venv/bin/...``).
+_BARE_ONEX = re.compile(
+    r"(?:^|[|;&(]|\$\(|`)\s*(?:-\s+)?(?:run:\s*)?(?:sudo\s+)?onex(?:\s|$)", re.MULTILINE
+)
+
+
+def _bare_onex_lines(text: str) -> list[str]:
+    """Non-comment lines of a workflow or action that run ``onex`` by bare name."""
+    hits: list[str] = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        if _BARE_ONEX.search(line):
+            hits.append(line.strip())
+    return hits
+
+
+def test_bare_onex_scan_finds_a_caller_that_runs_onex_by_name() -> None:
+    """Positive control: the scan flags the shapes it must refuse and passes the sanctioned ones."""
+    assert _bare_onex_lines("      - run: onex ledger query --stdin --bus-lane dev")
+    assert _bare_onex_lines("        echo x | onex ledger query --stdin")
+    assert _bare_onex_lines("        out=$(onex --version)")
+    assert not _bare_onex_lines("        uv run onex ledger query")
+    assert not _bare_onex_lines(
+        "        /opt/onex-ledger-client/shim/onex ledger query"
+    )
+    assert not _bare_onex_lines(
+        '        PATH="/opt/onex-ledger-client/shim:$PATH" onex ledger query'
+    )
+    assert not _bare_onex_lines("      # onex ledger query is read here")
+
+
+def test_no_workflow_or_action_runs_onex_by_bare_name() -> None:
+    """With the shim off the default PATH, no caller in this repository may rely on it by name."""
+    offenders: list[str] = []
+    for root in (
+        REPO_ROOT / ".github" / "workflows",
+        REPO_ROOT / ".github" / "actions",
+    ):
+        for path in sorted(root.rglob("*.y*ml")):
+            for line in _bare_onex_lines(path.read_text(encoding="utf-8")):
+                if "/opt/onex-ledger-client/shim" in line:
+                    continue
+                offenders.append(f"{path.relative_to(REPO_ROOT)}: {line}")
+    assert not offenders, offenders

@@ -94,6 +94,16 @@ requirements:
     acceptance:
       - id: AC28
         statement: 'AC28: the canary publishes the delegate-skill command with correlation_id, message_id, timestamp, source and event_type Kafka headers taken from its envelope, and the ledger projection of that record carries the probe correlation id and envelope id -- falsifier: tests/integration/chain_canary/test_publish_command_headers_ledger_omn24562.py fails at the merge base'
+  - id: req-omn24562-runner-onex-off-path
+    statement: A runner job's default PATH carries no onex; the ledger-read shim sits in its own directory outside the default PATH.
+    acceptance:
+      - id: AC29
+        statement: 'AC29: the runner image installs the ledger-read shim outside every default PATH directory and puts no shim directory in the image PATH -- falsifier: uv run --frozen pytest tests/ci/test_runner_image_onex_ledger_reader_omn24139.py -q -k default_path fails at the merge base'
+  - id: req-omn24562-runner-onex-per-pool
+    statement: Only the verify pool runs without onex on its PATH; every other runner pool keeps /usr/local/bin/onex.
+    acceptance:
+      - id: AC30
+        statement: 'AC30: the runner image gosu wrapper removes /usr/local/bin/onex when RUNNER_LABELS carries omnibase-verify and leaves it for every other pool -- falsifier: uv run --frozen pytest tests/ci/test_runner_verify_pool_onex_path_omn24562.py -q fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -353,4 +363,22 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_chain_canary_effect/test_publish_command_headers_omn24562.py tests/integration/chain_canary/test_publish_command_headers_ledger_omn24562.py -q -p no:randomly --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac29-runner-onex-off-path
+    description: 'AC29: the image installs no onex in a default PATH directory and sets no image-wide PATH to it.'
+    source: manual
+    binds_ac:
+      - AC29
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_runner_image_onex_ledger_reader_omn24139.py tests/ci/test_runner_image_identity.py -q -p no:randomly --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac30-runner-onex-per-pool
+    description: 'AC30: the gosu wrapper drops the onex link for the verify pool and keeps it for every other pool.'
+    source: manual
+    binds_ac:
+      - AC30
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_runner_verify_pool_onex_path_omn24562.py -q -p no:randomly --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
