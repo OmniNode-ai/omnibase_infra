@@ -62,9 +62,7 @@ class CheckDelegationIdentity(DoctorCheckBase):
     category: ClassVar[EnumDoctorCategory] = EnumDoctorCategory.SERVICES
 
     def __init__(self, *, onex_home: Path | None = None) -> None:
-        self._onex_home = (
-            onex_home if onex_home is not None else default_onex_home()
-        )
+        self._onex_home = onex_home if onex_home is not None else default_onex_home()
 
     def _evaluate(self) -> tuple[ModelDelegationDiagnosis, bool]:
         return _evaluate_identity(self._onex_home)

@@ -28,8 +28,8 @@ class _IdentityError(Exception):
 
 def _install(monkeypatch: pytest.MonkeyPatch, reader: object) -> None:
     fake = types.ModuleType(_MODULE)
-    setattr(fake, "read_local_tenant_identity", reader)
-    setattr(fake, "LocalTenantIdentityError", _IdentityError)
+    fake.read_local_tenant_identity = reader
+    fake.LocalTenantIdentityError = _IdentityError
     monkeypatch.setitem(sys.modules, _MODULE, fake)
 
 
