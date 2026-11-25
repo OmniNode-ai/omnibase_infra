@@ -48,7 +48,7 @@ requirements:
     acceptance:
       - id: AC8
         statement: |-
-          AC8: the deploy agent's compose env carries the policy's ONEX_ACTIVE_RUNTIME_PACKAGES whatever the operator store or process env holds, so the stamp built from docker/runtime-policy.env equals the boot-time stamp, and a stamp missing a package is refused by field name -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_active_packages_policy_owned_omn21753.py fails at the merge base and passes on the branch
+          AC8: the deploy agent's compose env carries the policy's ONEX_ACTIVE_RUNTIME_PACKAGES whatever the operator store or process env holds, so the stamp built from docker/runtime-policy.env equals the boot-time stamp, and a stamp missing a package is refused by field name -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_active_packages_policy_owned_omn21753.py tests/unit/runtime/test_stamp_follows_policy_compose_env_omn21753.py fails at the merge base and passes on the branch
 evidence_requirements:
   - kind: tests
     description: "The handover scenario on the in-process group-offset substrate, and the moved consume-concurrency wiring tests."
@@ -135,7 +135,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_active_packages_policy_owned_omn21753.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_active_packages_policy_owned_omn21753.py tests/unit/runtime/test_stamp_follows_policy_compose_env_omn21753.py -q --no-cov -n 0 -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC8]
 context:
