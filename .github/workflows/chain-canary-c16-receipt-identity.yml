@@ -223,14 +223,16 @@ jobs:
       # runner's own machine identity, never from repository or environment
       # secrets. Each value is masked and exported to the job environment; a
       # missing one fails here naming the variable, the Infisical name and the
-      # store path. See .github/actions/fetch-stability-secrets.
+      # store path. OMN-26566: the gateway key is C16's own (the name the
+      # omnimarket secret store declares for node_stability_gateway_key_provision_effect
+      # --check c16), so provisioning it never touches the name C11 reads. See .github/actions/fetch-stability-secrets.
       - name: Fetch the stability probe credentials from the stability Infisical
         uses: ./.github/actions/fetch-stability-secrets
         with:
           secrets: |
             KAFKA_SASL_USERNAME=STABILITY_TEST_KAFKA_SASL_USERNAME_STABILITY_CHAIN_CANARY
             KAFKA_SASL_PASSWORD=STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_CHAIN_CANARY
-            CHAIN_CANARY_GATEWAY_API_KEY=STABILITY_TEST_CHAIN_CANARY_GATEWAY_API_KEY
+            CHAIN_CANARY_GATEWAY_API_KEY=STABILITY_TEST_C16_GATEWAY_API_KEY
 
       - name: Drive the healthy and the dying delegation and grade C16
         env:

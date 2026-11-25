@@ -44,6 +44,15 @@ _STORE_NAMES = {
     "CHAIN_CANARY_PROJECTION_DSN": "STABILITY_TEST_CHAIN_CANARY_PROJECTION_DSN",
     "CHAIN_CANARY_GATEWAY_API_KEY": "STABILITY_TEST_CHAIN_CANARY_GATEWAY_API_KEY",
 }
+# OMN-26566: C16 reads its own per-check gateway key, so a C16 provision never
+# touches the name C11 reads. The name is the omnimarket secret store contract's
+# `stability_gateway_api_key_c16` entry (node_secret_store_effect/contract.yaml,
+# omnimarket#6803); it is spelled here because a cross-repo read would skip on a
+# runner that has no omnimarket clone.
+_C16_GATEWAY_STORE_NAME = "STABILITY_TEST_C16_GATEWAY_API_KEY"
+_STORE_NAME_OVERRIDES = {
+    _C16: {"CHAIN_CANARY_GATEWAY_API_KEY": _C16_GATEWAY_STORE_NAME},
+}
 _NEEDS = {
     # OMN-23566: C15 submits over the bus; it carries no gateway credential.
     _C15: set(_STORE_NAMES) - {"CHAIN_CANARY_GATEWAY_API_KEY"},
@@ -118,7 +127,22 @@ def test_the_fetch_precedes_the_probe_and_names_exactly_what_the_workflow_needs(
         if str(s.get("name", "")).startswith(_PROBE_STEP_PREFIX[workflow])
     )
     assert index < probe_index, "the credentials are fetched before the probe runs"
-    assert _mapping(step) == {name: _STORE_NAMES[name] for name in _NEEDS[workflow]}
+    overrides = _STORE_NAME_OVERRIDES.get(workflow, {})
+    assert _mapping(step) == {
+        name: overrides.get(name, _STORE_NAMES[name]) for name in _NEEDS[workflow]
+    }
+
+
+def test_c16_reads_its_own_gateway_key_and_c11_keeps_the_default() -> None:
+    """OMN-26566: the C16 key has a name only C16 reads; C11 is untouched."""
+    c16 = _mapping(_fetch_step(_C16)[1])
+    c11 = _mapping(_fetch_step(_C11)[1])
+    default = _STORE_NAMES["CHAIN_CANARY_GATEWAY_API_KEY"]
+    assert c16["CHAIN_CANARY_GATEWAY_API_KEY"] == _C16_GATEWAY_STORE_NAME
+    assert c11["CHAIN_CANARY_GATEWAY_API_KEY"] == default
+    assert default != _C16_GATEWAY_STORE_NAME
+    assert _C16_GATEWAY_STORE_NAME not in (_WORKFLOWS / _C11).read_text()
+    assert default not in "\n".join(c16.values())
 
 
 @pytest.mark.parametrize("workflow", [_C15, _C16, _C11])

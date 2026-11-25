@@ -1,0 +1,31 @@
+schema_version: 1.0.0
+ticket_id: OMN-26566
+title: The C16 workflow reads the per-check stability gateway key name
+summary: >-
+  omnimarket#6803 declares the stability gateway key of check C16 under its own secret store name, STABILITY_TEST_C16_GATEWAY_API_KEY (node_secret_store_effect/contract.yaml, stability_gateway_api_key_c16), so a C16 provision never touches the name C11 reads. The C16 workflow fetches its gateway credential from the stability Infisical under that name; C11 and C15 are unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26566-c16-reads-own-key-name
+    statement: The C16 receipt-identity workflow fetches CHAIN_CANARY_GATEWAY_API_KEY from the stability Infisical under the name omnimarket#6803 declares for check C16, and the C11 workflow keeps the default name.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the C16 workflow's fetch step maps CHAIN_CANARY_GATEWAY_API_KEY to STABILITY_TEST_C16_GATEWAY_API_KEY, C11 still maps it to STABILITY_TEST_CHAIN_CANARY_GATEWAY_API_KEY, and the fetch action fails naming the variable, the store name and the path when the key is absent -- falsifier: `uv run --frozen pytest tests/ci/test_stability_probes_read_infisical_omn26121.py -q --no-cov` exits non-zero on the base"
+evidence_requirements:
+  - kind: tests
+    description: The three stability workflows' fetch wiring and the fetch action against a loopback store.
+    command: uv run --frozen pytest tests/ci/test_stability_probes_read_infisical_omn26121.py tests/ci/test_chain_canary_workflow.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26566-c16-key-name
+    description: The C16 workflow reads the per-check key name and C11 keeps the default; the test fails on the base, where C16 reads the default name.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_stability_probes_read_infisical_omn26121.py -k "c16_reads_its_own or fetch_precedes" -q --no-cov
+        cwd: .
