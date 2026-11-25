@@ -92,6 +92,21 @@ requirements:
         statement: "AC17: a delivery pass over 394 incidents that the bus append command refuses ends within the pass bound plus one append, the agent's startup and retry tick return at once while that pass runs, and a second tick starts no second pass -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k 'bounded or never_holds' -q fails at origin/dev (25.9 s for the 394 incidents against a 0.5 s bound)"
       - id: AC18
         statement: "AC18: an incident older than the declared abandon bound is marked delivered-abandoned with one log line and is not retried, and an incident inside it is retried with a row stamped at the delivery time so the ledger's clock guard does not refuse it -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k 'abandoned or delivery_stamp' -q fails at origin/dev"
+  - id: req-omn26316-dev-build-coalesce
+    statement: Dev merge build requests are coalesced inside a window declared in the node contract, so three dev rebuilds in 28 minutes (07:09Z, 07:23Z, 07:36Z on 2026-11-25) become one build per window while every runtime merge stays on a dev build within the hour.
+    acceptance:
+      - id: AC46
+        statement: "AC46: with dev_merge_build_coalesce_seconds declared in the deploy job reading contract, three merges in 30 minutes get one build, a merge just after a build waits for the next, and a merge 50 minutes before the hour is carried by the hourly build -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_coalesce_omn26316.py fails at origin/dev (the setting and the coalesced decision are absent) and passes on the PR branch"
+  - id: req-omn26316-overdue-queue-folds
+    statement: Queued overdue dev merge builds fold into the newest one in the deploy agent's queue supersede, so the dev lane runs one build for them; a rollback declared by anyone else and any other scope keep their refusals.
+    acceptance:
+      - id: AC47
+        statement: "AC47: three queued commands requested by agent/overdue-dev-merge-build (scope runtime, rollback actor the same) for dev run as one build with two superseded, while an operator's rollback still ends the group and an overdue command never folds into a full-scope build -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_overdue_requests_coalesce_omn26316.py fails at origin/dev (three builds run) and passes on the PR branch"
+  - id: req-omn26316-one-overdue-request-per-check
+    statement: One overdue check asks for one build of the current dev head, which carries every overdue merge, and never asks for a head the running build already contains.
+    acceptance:
+      - id: AC48
+        statement: "AC48: three overdue merges give one build command for the dev head in one check and none in the next, and a head contained in the newest successful dev job's built sha gives none -- falsifier: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_one_request_omn26316.py fails at origin/dev (a command per merge, none withheld for a contained head) and passes on the PR branch"
   - id: req-omn26316-boot-attach-join-limit
     statement: The dev main runtime's boot attach joins its 70 boot contracts with a declared limit that models at most half the 127 s the recorded 2026-11-24T20:01:04Z start spent on it at a limit of 4.
     acceptance:
@@ -102,6 +117,21 @@ requirements:
     acceptance:
       - id: AC42
         statement: "AC42: with a lazy-start front door recorded, a dormant projection no request has reached leaves projection_attachment HEALTHY and is named on its detail, a dormant projection that was woken without a consumer or whose wake failed and an eager unattached projection each read DEGRADED, and the log names every unattached and every dormant projection past the detail's 8-name cap -- falsifier: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_dormant_projections_omn26316.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (4 of 8 fail: the dormant projection reads unattached, and 4 of 12 unattached names appear nowhere) and passes on the PR branch"
+  - id: req-omn26316-orphan-names-group
+    statement: An abandoned consume-loop dispatch is listed on the health endpoint and in the dispatch_deadline_exceeded log line with the consumer group that holds it, so the handler that never returned can be named from the runtime alone.
+    acceptance:
+      - id: AC44
+        statement: "AC44: the health line and the dispatch_deadline_exceeded line of an abandoned dispatch carry group=<consumer group>, and the orphan count, the limit, the deadline and every health verdict are unchanged -- falsifier: uv run --frozen pytest tests/unit/event_bus/test_orphan_names_consumer_group_omn26316.py -q fails at origin/dev (no group= in either line) and passes on the PR branch"
+  - id: req-omn26316-dev-runtime-memory-limit
+    statement: The dev main runtime's declared memory limit clears twice the anonymous memory at which h201's kernel OOM-killed it at the join limit of 16, so its boot does not loop on the restart policy.
+    acceptance:
+      - id: AC43
+        statement: "AC43: the dev main runtime's declared memory_limit is at least twice the 3,044 MiB recorded at the 2026-11-25T02:42:21Z OOM kill, and the rendered runtime-policy.env carries it -- falsifier: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (3072M) and passes on the PR branch"
+  - id: req-omn26316-stale-overdue-refused-at-accept
+    statement: The deploy agent refuses at accept, with no build and a superseded record that gives the reason, a command requested by agent/overdue-dev-merge-build whose ref is at or behind the newest ref it built successfully or origin/dev's head and is in the running build; every other requester, a ref the running build lacks and a lineage the host cannot read keep their behaviour.
+    acceptance:
+      - id: AC49
+        statement: "AC49: the 18 queued overdue commands at f553b1d6 give zero builds and 18 superseded records, an operator's rollback to the same ref and an overdue command for a merge the running build lacks still build, and an unread lineage builds as before -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stale_overdue_refused_at_accept_omn26316.py -q fails at origin/dev (the verdict and the overdue_references input are absent) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -142,6 +172,15 @@ evidence_requirements:
   - kind: tests
     description: The monitor driven through the real boot split and a real front door (carried over from omnibase_infra#6198) reads a dormant projection HEALTHY, the same manifest without lazy start DEGRADED, and a woken projection that lost a subscription DEGRADED.
     command: uv run --frozen pytest tests/integration/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The abandoned dispatch names its consumer group on the health line and in the deadline log line, recorded from the 2026-11-25 lab runtime-tick orphans at offsets 744130 and 747729.
+    command: uv run --frozen pytest tests/unit/event_bus/test_orphan_names_consumer_group_omn26316.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The dev main memory limit against the recorded h201 OOM kill floor.
+    command: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The stale overdue command refusal at accept, driven through the consumer with 18 queued commands.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stale_overdue_refused_at_accept_omn26316.py -q -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ''
@@ -400,6 +439,30 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/handlers/test_dev_boot_report_pass_bound_omn26316.py -k "abandon_bound or clock_guard" -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26316-dev-build-coalesce
+    description: "Recorded 2026-11-25: hourly job 943bd20f (origin/dev, lineage unread) credited nothing, so overdue requests built f553b1d6 at 07:15:07Z (d844bdf1), 07:29:00Z (7d9991bf) and 07:42:13Z (7db4beaf), each pinned to a ref no other merge matched. 3 of the file's 5 tests fail with the handler change removed and pass on the branch."
+    source: manual
+    binds_ac: [AC46]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_coalesce_omn26316.py tests/unit/handlers/test_dev_merge_build_overdue_omn26316.py tests/unit/handlers/test_dev_merge_build_carried_omn26316.py tests/integration/handlers/test_dev_merge_build_overdue_contract_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-overdue-queue-folds
+    description: "Recorded 2026-11-25: jobs d844bdf1, 7d9991bf and 7db4beaf (requested_by agent/overdue-dev-merge-build, scope runtime, a rollback of that actor, git_ref f553b1d6) ran one after another because the coalescer refused a declared rollback and any scope but full. 1 of the file's 3 tests fails at origin/dev and passes on the branch; the existing coalesce rule table stays green."
+    source: manual
+    binds_ac: [AC47]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_overdue_requests_coalesce_omn26316.py scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26316-one-overdue-request-per-check
+    description: "Recorded 2026-11-25: the overdue check asked for 3a527226 (07:15:07Z), c0622a1d (07:28:59Z), 5be4cfa4 (07:42:13Z) and 4f27dcfa (07:54:36Z), each at ref f553b1d6. Both tests of the file fail at origin/dev and pass on the branch."
+    source: manual
+    binds_ac: [AC48]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_one_request_omn26316.py tests/unit/handlers/test_dev_merge_build_publish_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
   - id: dod-omn26316-boot-attach-join-limit
     description: "The recorded h201 start (first /health 200 at 210 s, boot attach 127 s for 70 contracts at a limit of 4) models 131 s at the origin/dev limit and 36 s at the declared 16; the control reproduces the measured 127 s at 4."
     source: manual
@@ -418,4 +481,31 @@ dod_evidence:
         cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-orphan-names-group
+    description: "The two runtime-tick orphans read on a lab runtime at 2026-11-25T01:33Z carried only a random subscription id (343315bd-7a23-4192-805f-8d212f7962f3), so the handler could not be named. The two new tests fail at origin/dev (no group= in the health line or the deadline log line) and pass on the branch together with the existing dispatch deadline tests."
+    source: manual
+    binds_ac: [AC44]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_orphan_names_consumer_group_omn26316.py tests/unit/event_bus/test_omn19355_dispatch_deadline.py tests/unit/event_bus/test_omn20464_orphan_degraded_grace.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/event_bus/test_orphan_names_group_consume_loop_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-dev-runtime-memory-limit
+    description: "The declared dev main memory limit is at least 2x the 3,044 MiB anonymous memory recorded at the kernel OOM kill on h201; the control shows the recorded 3 GiB limit sits under that floor."
+    source: manual
+    binds_ac: [AC43]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-stale-overdue-refused-at-accept
+    description: "Eighteen queued commands requested by agent/overdue-dev-merge-build at f553b1d6, with the running build and the newest successful job past it, give zero accepted commands and 18 superseded records naming the running ref; an operator rollback to the same ref, an overdue command the running build lacks, unanswered ancestry and an unread running build each build. Three tests fail at origin/dev."
+    source: manual
+    binds_ac: [AC49]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stale_overdue_refused_at_accept_omn26316.py -q -p no:cacheprovider
         cwd: .

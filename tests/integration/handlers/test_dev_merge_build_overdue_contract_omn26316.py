@@ -109,3 +109,33 @@ def test_the_dev_job_accepted_at_1900_satisfies_the_merge() -> None:
     decision = _handler().handle(_request("2026-11-23T20:00:00Z"))
     assert (decision.outcome, decision.reason) == ("SATISFIED", "built_by_job")
     assert str(decision.job_id).startswith("2098b18c")
+
+
+def test_contract_coalesce_window_makes_a_build_just_after_a_dev_job_wait() -> None:
+    contract = _contract()
+    assert contract["settings"]["dev_merge_build_coalesce_seconds"] == 3600
+    request = _request("2026-11-23T20:00:00Z", drop=("2098b18c",))
+    job = {
+        "job_id": "00000000-0000-5000-8000-0000000000aa",
+        "runtime_lane": "dev",
+        "accepted_at": "2026-11-23T19:30:00Z",
+        "status": "success",
+        "git_ref": "origin/dev",
+        "requested_by": "agent/idle-restore",
+    }
+    coalescing = request.model_copy(
+        update={
+            "coalesce_seconds": contract["settings"][
+                "dev_merge_build_coalesce_seconds"
+            ],
+            "jobs": (*request.jobs, type(request.jobs[0]).model_validate(job)),
+        }
+    )
+    # The job accepted before the merge carries nothing, but it is a recent dev build.
+    decision = _handler().handle(coalescing)
+    assert (decision.outcome, decision.reason) == ("WAIT", "coalesced")
+    later = coalescing.model_copy(
+        update={"now": datetime(2026, 11, 23, 20, 30, 1, tzinfo=UTC)}
+    )
+    decision = _handler().handle(later)
+    assert (decision.outcome, decision.reason) == ("REQUEST", "overdue_no_build")

@@ -513,6 +513,8 @@ migrations:
   forward/nodes/node_projection_overlay_store/0000_create_overlay_store.sql: forward-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the overlay store table
   forward/nodes/node_projection_overlay_store/0001_grant_omninode_runtime_overlay_store.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the overlay store table
   forward/nodes/node_projection_overlay_store/0002_add_operator_paths.sql: expand-only # ALTER TABLE ADD COLUMN IF NOT EXISTS operator_paths JSON NOT NULL DEFAULT, additive and defaulted
+  forward/nodes/node_projection_overlay_store/0003_overlay_store_revision_provenance_audit.sql: expand-only # ALTER TABLE ADD COLUMN IF NOT EXISTS revision NOT NULL DEFAULT and CREATE TABLE/INDEX IF NOT EXISTS for the revision, write, provenance and audit tables, additive
+  forward/nodes/node_projection_overlay_store/0004_grant_omninode_runtime_overlay_store_write.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on the overlay store write tables
   forward/nodes/node_view_seam_reading_reducer/0001_create_view_seam_readings.sql: forward-only # CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT EXISTS for the view seam readings table
   forward/nodes/node_view_seam_reading_reducer/0002_grant_tenant_projection_writer_view_seam_readings.sql: expand-only # GRANT SELECT, INSERT, UPDATE to tenant_projection_writer on the view seam readings table
   forward/nodes/node_projection_work_questions/0000_create_work_questions.sql: forward-only # CREATE TABLE IF NOT EXISTS and ADD COLUMN IF NOT EXISTS for the five work-question tables
