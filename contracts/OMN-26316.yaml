@@ -87,6 +87,11 @@ requirements:
     acceptance:
       - id: AC41
         statement: "AC41: the dev main runtime's declared max_concurrent_contract_attach models at most half of the 127 s boot attach recorded on h201 at 2026-11-24T20:01:04Z, and the rendered runtime-policy.env carries it -- falsifier: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly fails at origin/dev and passes on the PR branch"
+  - id: req-omn26316-dev-runtime-memory-limit
+    statement: The dev main runtime's declared memory limit clears twice the anonymous memory at which h201's kernel OOM-killed it at the join limit of 16, so its boot does not loop on the restart policy.
+    acceptance:
+      - id: AC42
+        statement: "AC42: the dev main runtime's declared memory_limit is at least twice the 3,044 MiB recorded at the 2026-11-25T02:42:21Z OOM kill, and the rendered runtime-policy.env carries it -- falsifier: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (3072M) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -118,6 +123,9 @@ evidence_requirements:
   - kind: tests
     description: The dev main boot attach join limit modeled from the recorded h201 start of 2026-11-24T20:01:04Z.
     command: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The dev main memory limit against the recorded h201 OOM kill floor.
+    command: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -367,4 +375,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-dev-runtime-memory-limit
+    description: "The declared dev main memory limit is at least 2x the 3,044 MiB anonymous memory recorded at the kernel OOM kill on h201; the control shows the recorded 3 GiB limit sits under that floor."
+    source: manual
+    binds_ac: [AC42]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
         cwd: .
