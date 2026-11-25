@@ -33,7 +33,7 @@ def test_recorded_real_tag_can_yield_to_a_release(
     assert isinstance(cases, list)
     real = next(case for case in cases if case["label"] == "real")
     tag = real["tag"]
-    assert tag == "dev-20261120075721-2a9efbda3548"
+    assert tag == "dev-20261125154033-214c1fa29b7b"
     remote = real["ls_remote"]
     assert remote["exit_code"] == 0
     refs = {

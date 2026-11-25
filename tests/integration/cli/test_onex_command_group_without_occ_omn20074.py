@@ -23,6 +23,17 @@ from omnibase_core.cli.cli_commands import cli
 
 pytestmark = pytest.mark.integration
 
+
+@pytest.fixture(autouse=True)
+def _show_every_command_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Core 0.47.80 hides INTERNAL groups (auth, kafka, ledger, profile) by default.
+
+    The operator switch lists and resolves every group, so the dangling-entry-point
+    and unknown-``occ`` checks below still see this distribution's full extension set.
+    """
+    monkeypatch.setenv("ONEX_CLI_SHOW_ALL_COMMANDS", "1")
+
+
 # Extensions this distribution contributes to the ``onex`` group that survive the
 # removal; a listing that renders them proves the group still resolves each one.
 _SURVIVING_INFRA_COMMANDS = ("auth", "delegate", "kafka", "ledger", "node", "profile")
