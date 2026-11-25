@@ -70,6 +70,7 @@ def _request(now: str, *, drop: tuple[str, ...] = ()) -> Any:
             "now": datetime.fromisoformat(now.replace("Z", "+00:00")).astimezone(UTC),
             "window_seconds": _contract()["settings"]["dev_merge_build_window_seconds"],
             "jobs": jobs,
+            "descendant_shas": merge["descendant_shas"],
         }
     )
 
