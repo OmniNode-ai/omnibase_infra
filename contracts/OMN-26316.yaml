@@ -384,3 +384,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/event_bus/test_orphan_names_consumer_group_omn26316.py tests/unit/event_bus/test_omn19355_dispatch_deadline.py tests/unit/event_bus/test_omn20464_orphan_degraded_grace.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/event_bus/test_orphan_names_group_consume_loop_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
