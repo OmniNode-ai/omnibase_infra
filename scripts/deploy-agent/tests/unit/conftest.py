@@ -53,6 +53,11 @@ def _no_recreate_window_gate(monkeypatch: pytest.MonkeyPatch) -> None:
                 if hasattr(agent, "_recreate_gate")
                 else True
             ),
+            lane_build_gate=lambda agent: (
+                module.lane_build_gate(agent)
+                if hasattr(agent, "_recreate_gate")
+                else getattr(agent, "_load_gate", None)
+            ),
             registered_installs=module.registered_installs,
         )
 

@@ -705,7 +705,7 @@ class DeployConsumer:
         # gate. Nothing is published, because nothing about the command is
         # wrong; it is taken, or coalesced past, once the host has room.
         if self.load_gate is not None:
-            gate = self.load_gate.check()
+            gate = self.load_gate.check(cmd)
             if gate.verdict is EnumLoadGateVerdict.DEFER:
                 topic_partition = TopicPartition(msg.topic, msg.partition)
                 self.consumer.seek(

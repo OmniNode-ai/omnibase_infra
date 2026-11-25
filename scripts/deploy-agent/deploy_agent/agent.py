@@ -919,7 +919,7 @@ class DeployAgent:
             host_slot=self._host_slot,
             host_slot_owner=self._host_slot_owner,
             # OMN-19507: defer, without refusing, while the host is loaded.
-            load_gate=self._load_gate,
+            load_gate=load_dev_boot_guard(DEV_ROLL_EVENTS).lane_build_gate(self),
             # Lane flags: refuse, as frozen, all but a promotion.
             lane_flags=self._lane_flags,
         )

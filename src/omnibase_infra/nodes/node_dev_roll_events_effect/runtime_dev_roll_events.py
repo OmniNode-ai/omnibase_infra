@@ -16,13 +16,14 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
 
 import yaml
@@ -448,6 +449,20 @@ def _runtime_merge_waiting(state_dir: Path) -> datetime | None:
     )
 
 
+def window_deferral(agent: object, requested_by: str) -> tuple[datetime, str] | None:
+    """When and why the recreate window holds ``requested_by``, ``None`` when it admits (OMN-25912)."""
+    if window_admits(agent, requested_by):
+        return None
+    decision = getattr(agent.__dict__.get("_recreate_gate"), "last_decision", None)
+    if decision is None:
+        return datetime.now(UTC) + timedelta(
+            seconds=60
+        ), "the window gate holds no decision"
+    return decision.next_recreate_at, (
+        f"{decision.reason.value}, next recreate at {decision.next_recreate_at.isoformat()}"
+    )
+
+
 def window_admits(agent: object, requested_by: str) -> bool:
     """Whether the dev recreate window admits ``requested_by`` now (OMN-25912).
 
@@ -487,6 +502,81 @@ def window_admits(agent: object, requested_by: str) -> bool:
             merged.isoformat(),
         )
     return admitted
+
+
+_DEV_TAG_REF = re.compile(r"(?:refs/tags/)?dev-[0-9]{14}-[0-9a-f]{7,40}")
+
+
+def is_lane_build(cmd: object) -> bool:
+    """A dev build a lane asked for under a rollback declaration (OMN-25912).
+
+    The declaration is how a lane gets past the lineage fence, so a lane's build of its
+    branch carries one. A real rollback goes to a pinned good build, a dev tag or an
+    image, and only the first kind recreates the runtime on a lane's own say-so.
+    """
+    return bool(
+        str(getattr(getattr(cmd, "runtime_lane", None), "value", "")) == "dev"
+        and getattr(cmd, "rollback", None) is not None
+        and not getattr(cmd, "image_ref", None)
+        and not getattr(cmd, "image_digest", None)
+        and not _DEV_TAG_REF.fullmatch(str(getattr(cmd, "git_ref", "")))
+    )
+
+
+class _LoadDecision(Protocol):
+    verdict: object
+
+    def describe(self) -> str: ...
+
+
+class _HostLoadGate(Protocol):
+    def check(self) -> _LoadDecision: ...
+
+    def recheck_due(self) -> bool: ...
+
+
+def lane_build_gate(agent: object) -> LaneBuildWindowGate:
+    """The consumer's gate for ``agent``: its load gate, if any, with the window folded in."""
+    return LaneBuildWindowGate(agent, getattr(agent, "_load_gate", None))
+
+
+class LaneBuildWindowGate:
+    """The consumer's load gate with the dev recreate window folded in (OMN-25912).
+
+    The consumer defers a command while ``check`` reads DEFER and resumes its partition
+    once a ``check`` with no command reads OPEN. This gate answers the host's own load
+    gate first, then asks the window for a lane's build request, which recreates the
+    runtime as the idle paths do. A real rollback never asks. A held request is named,
+    with the time of the next window, until that time passes.
+    """
+
+    def __init__(self, agent: object, inner: _HostLoadGate | None) -> None:
+        self._agent = agent
+        self._inner = inner
+        self._until: datetime | None = None
+        self.is_lane_build = is_lane_build
+
+    def recheck_due(self) -> bool:
+        return True if self._inner is None else bool(self._inner.recheck_due())
+
+    def check(self, cmd: object | None = None) -> object:
+        verdicts = importlib.import_module("deploy_agent.load_gate").EnumLoadGateVerdict
+        decision = self._inner.check() if self._inner is not None else None
+        if decision is not None and decision.verdict is verdicts.DEFER:
+            return decision
+        held: tuple[datetime, str] | None = None
+        if cmd is None:
+            if self._until is not None and datetime.now(UTC) < self._until:
+                held = (self._until, "the recreate window has not opened")
+        elif is_lane_build(cmd):
+            held = window_deferral(self._agent, str(getattr(cmd, "requested_by", "")))
+        self._until = held[0] if held else None
+        if held is None:
+            return decision or SimpleNamespace(
+                verdict=verdicts.OPEN, describe=lambda: "open"
+            )
+        text = f"deferred to the recreate window at {held[0].isoformat()}: {held[1]}"
+        return SimpleNamespace(verdict=verdicts.DEFER, describe=lambda: text)
 
 
 def announce_preflight_failure(
