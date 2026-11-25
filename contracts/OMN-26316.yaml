@@ -60,6 +60,16 @@ requirements:
     acceptance:
       - id: AC14
         statement: "AC14: a ledger proof whose stderr opens with the runpy RuntimeWarning and ends with an exception, including a stack longer than 2000 characters, fails the roll with a message that names that exception -- falsifier: uv run pytest tests/unit/handlers/test_handler_dev_boot_guard_proof_failure_tail_omn26316.py fails at origin/dev (the message ends at the warning, cut at unpredictabl) and passes on the PR branch"
+  - id: req-omn26316-overdue-dev-merge-built-by-carry
+    statement: A dev job counts as building a merge only when its built sha descends from the merge; the stability follow job and a job whose built sha is unread never count.
+    acceptance:
+      - id: AC19
+        statement: "AC19: the overdue dev merge build decision reads omnibase_infra#6191 (merged 17:46:52Z) as not built at 18:13Z and 18:50Z with the stability follow job b32e8022 recorded as a successful dev job, and as built only by job 2098b18c -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_carried_omn26316.py fails at the 6210 head (a dev-lane b32e8022 reads SATISFIED built_by_job at 18:13Z) and passes on the PR branch"
+  - id: req-omn26316-overdue-dev-merge-build-publish
+    statement: A runtime merge judged REQUEST gets one overdue event and one signed dev build request from the deploy agent's own tick, once per sha, on the dev lane only; a prod lane is refused with a typed error.
+    acceptance:
+      - id: AC20
+        statement: "AC20: an overdue merge publishes the event and sends one signed dev build request whose correlation id is the decision's request id, sends nothing for a job in flight, the failed head, an already requested sha or a lane other than dev (typed refusal) -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_publish_omn26316.py fails at the 6210 head (the publish handler is absent) and passes on the PR branch"
   - id: req-omn26316-image-build-cache-and-start-to-health
     statement: A dev build reuses the image layers that do not depend on the commit, so the per-deploy build arguments no longer rebuild the apt, node and venv layers.
     acceptance:
@@ -87,6 +97,11 @@ requirements:
     acceptance:
       - id: AC41
         statement: "AC41: the dev main runtime's declared max_concurrent_contract_attach models at most half of the 127 s boot attach recorded on h201 at 2026-11-24T20:01:04Z, and the rendered runtime-policy.env carries it -- falsifier: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly fails at origin/dev and passes on the PR branch"
+  - id: req-omn26316-dormant-projection-not-unattached
+    statement: A projection the lazy-start lane left dormant that no request has reached is not read as unattached by the runtime health check, a woken or failed-to-wake projection is judged by the live registry as before, and every unattached or dormant projection is named in full in the runtime log.
+    acceptance:
+      - id: AC42
+        statement: "AC42: with a lazy-start front door recorded, a dormant projection no request has reached leaves projection_attachment HEALTHY and is named on its detail, a dormant projection that was woken without a consumer or whose wake failed and an eager unattached projection each read DEGRADED, and the log names every unattached and every dormant projection past the detail's 8-name cap -- falsifier: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_dormant_projections_omn26316.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (4 of 8 fail: the dormant projection reads unattached, and 4 of 12 unattached names appear nowhere) and passes on the PR branch"
   - id: req-omn26316-orphan-names-group
     statement: An abandoned consume-loop dispatch is listed on the health endpoint and in the dispatch_deadline_exceeded log line with the consumer group that holds it, so the handler that never returned can be named from the runtime alone.
     acceptance:
@@ -109,6 +124,9 @@ evidence_requirements:
     description: The overdue dev merge build decision driven by the real job records of omnibase_infra#6191.
     command: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_omn26316.py -q --no-cov -n 0 -p no:randomly
   - kind: tests
+    description: The built-by-carry rule and the overdue publish of the dev merge build, driven by the records of omnibase_infra#6191 and a fake sender.
+    command: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_carried_omn26316.py tests/unit/handlers/test_dev_merge_build_publish_omn26316.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
     description: The runtime image build-argument order.
     command: uv run --frozen pytest tests/unit/docker/test_runtime_build_arg_cache_order_omn26316.py -q --no-cov -n 0 -p no:randomly
   - kind: tests
@@ -123,6 +141,12 @@ evidence_requirements:
   - kind: tests
     description: The dev main boot attach join limit modeled from the recorded h201 start of 2026-11-24T20:01:04Z.
     command: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: A dormant lazy-start projection is not read as unattached, a woken or failed-to-wake one is, and the log names every unattached and dormant projection.
+    command: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_dormant_projections_omn26316.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The monitor driven through the real boot split and a real front door (carried over from omnibase_infra#6198) reads a dormant projection HEALTHY, the same manifest without lazy start DEGRADED, and a woken projection that lost a subscription DEGRADED.
+    command: uv run --frozen pytest tests/integration/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q --no-cov -n 0 -p no:randomly
   - kind: tests
     description: The abandoned dispatch names its consumer group on the health line and in the deadline log line, recorded from the 2026-11-25 lab runtime-tick orphans at offsets 744130 and 747729.
     command: uv run --frozen pytest tests/unit/event_bus/test_orphan_names_consumer_group_omn26316.py -q --no-cov -n 0 -p no:randomly
@@ -322,6 +346,22 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_proof_failure_tail_omn26316.py tests/integration/handlers/test_dev_boot_guard_ledger_proof_omn25942.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26316-overdue-built-by-carry
+    description: "The stability follow job b32e8022 recorded as a successful dev job, a dev job with an unread built sha and one that built a head without the merge each leave 6191 unbuilt; job 2098b18c, whose built sha descends from the merge, reads it built; the caller proves ancestry with git merge-base."
+    source: manual
+    binds_ac: [AC19]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_carried_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-overdue-publish
+    description: "An overdue merge sends its event and one signed dev build request from a fake sender; a decision that is not a request, an already requested sha and a missing pull request number send nothing; a prod, stability or empty lane raises the typed configuration error; a refused or failed send leaves the sha unrecorded so the next tick tries again."
+    source: manual
+    binds_ac: [AC20]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_publish_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
   - id: dod-omn26316-image-build-arg-order
     description: "Dockerfile.runtime declares the per-deploy build arguments after every cacheable layer of both stages; the checker reports 13 violations on the origin/dev file and none on this branch, and flags the pre-fix layout in its own negative control."
     source: manual
@@ -375,6 +415,17 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-dormant-projection-not-unattached
+    description: "The dev runtime read at 2026-11-24T23:18Z: 39 of 95 projections unattached, named 8 and '+31 more'; of the 38 without a consumer group read from the broker in the same hour, 37 were dormant lazy-start contracts outside the 111-contract boot set with no retained record on their topic. 4 of the file's 8 tests fail at origin/dev (a dormant projection reads unattached; 4 of 12 names reach no log) and pass on the branch; the unattached eager, woken and failed-wake projections stay DEGRADED."
+    source: manual
+    binds_ac: [AC42]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_dormant_projections_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26316-orphan-names-group
     description: "The two runtime-tick orphans read on a lab runtime at 2026-11-25T01:33Z carried only a random subscription id (343315bd-7a23-4192-805f-8d212f7962f3), so the handler could not be named. The two new tests fail at origin/dev (no group= in the health line or the deadline log line) and pass on the branch together with the existing dispatch deadline tests."

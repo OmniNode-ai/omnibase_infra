@@ -18,7 +18,9 @@ class ModelOverdueDevMergeBuildRequest(BaseModel):
     ``runtime_class`` is the rebuild trigger's classification of the merge (``NON_RUNTIME``
     needs no build). ``window_seconds`` is how long a runtime merge may wait for a dev build
     before one is requested (the operator's goal is one hour). ``jobs`` are the agent's job
-    records of every lane; the decision keeps the ``dev`` lane's.
+    records of every lane; the decision keeps the ``dev`` lane's. ``descendant_shas`` are the
+    built shas, among the jobs', that the caller proved contain ``merge_sha`` by ancestry (a git
+    read the pure decision does not make); a job whose built sha is not in it carried nothing.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -30,3 +32,4 @@ class ModelOverdueDevMergeBuildRequest(BaseModel):
     now: datetime
     window_seconds: int = Field(gt=0)
     jobs: tuple[ModelOverdueDevMergeJob, ...] = ()
+    descendant_shas: tuple[str, ...] = ()

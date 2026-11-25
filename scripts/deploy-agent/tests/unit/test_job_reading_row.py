@@ -306,7 +306,20 @@ def test_declares_no_topic_beyond_what_the_reading_writer_and_agent_declare() ->
     assert not [text for text in literals if topic.search(text)]
     contract = runtime_mod.contract_path(agent_mod).read_text(encoding="utf-8")
     parsed = yaml.safe_load(contract)
-    assert not topic.search(contract)
+    # OMN-26316: the overdue dev merge build publish declares its two topics as settings, the one
+    # place the node reads values from; the reading writer's row still names no topic.
+    publish_settings = (
+        "dev_merge_build_overdue_topic",
+        "dev_merge_build_command_topic",
+    )
+    assert not topic.search(
+        "\n".join(
+            line
+            for line in contract.splitlines()
+            if not line.lstrip().startswith(publish_settings)
+        )
+    )
+    assert all(topic.search(str(parsed["settings"][key])) for key in publish_settings)
     assert "event_bus" not in parsed and "topics" not in parsed
     # the agent's own topic constants are unchanged, and none is a reading topic
     declared = {
