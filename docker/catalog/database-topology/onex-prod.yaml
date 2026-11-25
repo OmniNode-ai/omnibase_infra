@@ -502,5 +502,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: b428031a4d0c3f527614343e62aadb0b3a2864e7da66d0695eb6fcd7c9c9e3ad
+  sha256: 38fc5eb1c78d95deb5a6042e59117711f5c1da511d14e8ef9ef8157d46088652
 topology_instance: onex-prod
