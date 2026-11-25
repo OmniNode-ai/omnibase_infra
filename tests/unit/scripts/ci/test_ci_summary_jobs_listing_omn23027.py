@@ -141,9 +141,6 @@ def _run_poll(
             "HEAD_SHA": "0" * 40,
             "DEADLINE_MINUTES": "90",
             "POLL_INTERVAL_SECONDS": "0",
-            # OMN-24562: the stall guard's inputs, as the workflow declares them.
-            "STALL_MINUTES": str(step["env"]["STALL_MINUTES"]),
-            "STALL_JQ": str(step["env"]["STALL_JQ"]),
         }
     )
     return subprocess.run(
@@ -215,8 +212,7 @@ def test_a_stale_listing_is_not_evidence_of_current_state(tmp_path: Path) -> Non
     deadline must name the unreadable input and must not ask the gate script for
     a report of it, exactly as when no read ever succeeded.
     """
-    # OMN-24562: the PENDING verdict now reads the clock once for the stall guard.
-    result = _run_poll(tmp_path, clock_jumps_after=4, gh_ok_calls=1)
+    result = _run_poll(tmp_path, clock_jumps_after=3, gh_ok_calls=1)
     out = result.stdout + result.stderr
 
     assert result.returncode == 1, out

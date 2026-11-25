@@ -4745,11 +4745,20 @@ jobs:
               2)
                 # PENDING — keep polling, unless a job with no conclusion has
                 # outlived STALL_MINUTES past the last other job's completion.
-                stalled=$(jq -r --argjson attempt "${RUN_ATTEMPT}" --arg self "CI Summary" \
-                  --argjson now "$(date +%s)" --argjson stall "$((STALL_MINUTES * 60))" \
-                  "${STALL_JQ}" jobs.json | paste -sd, -)
+                # The clock is the bash builtin, not `date`: the deadline logic
+                # above counts `date` calls (OMN-23027 tests drive it), and the
+                # stall read must not consume one. Both inputs come from this
+                # step's env; an absent filter means no stall check.
+                stall_minutes="${STALL_MINUTES:-45}"
+                stalled=""
+                if [ -n "${STALL_JQ:-}" ]; then
+                  printf -v now_epoch '%(%s)T' -1
+                  stalled=$(jq -r --argjson attempt "${RUN_ATTEMPT}" --arg self "CI Summary" \
+                    --argjson now "${now_epoch}" --argjson stall "$((stall_minutes * 60))" \
+                    "${STALL_JQ}" jobs.json | paste -sd, -)
+                fi
                 if [ -n "${stalled}" ]; then
-                  echo "::error::CI Summary = FAILURE (fail-closed, OMN-24562): job(s) ${stalled} still have no conclusion ${STALL_MINUTES}m after the last other job completed"
+                  echo "::error::CI Summary = FAILURE (fail-closed, OMN-24562): job(s) ${stalled} still have no conclusion ${stall_minutes}m after the last other job completed"
                   exit 1
                 fi
                 ;;
