@@ -114,6 +114,7 @@ databases:
               - goal_traces
               - host_disk_class
               - host_disk_volume
+              - lab_alerts
               - lab_container_memory_window
               - lab_job_state
               - lab_job_transitions
@@ -502,5 +503,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 38fc5eb1c78d95deb5a6042e59117711f5c1da511d14e8ef9ef8157d46088652
+  sha256: 55d714b947fceae79e5890c1537b01ce4c44aae150ccd17c152481caa550f18c
 topology_instance: onex-prod
