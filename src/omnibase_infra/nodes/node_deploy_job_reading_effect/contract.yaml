@@ -95,6 +95,9 @@ settings:
   # OMN-26316: how long a dev runtime merge may wait for a dev build before one is requested
   # (the operator's goal: every runtime merge on a dev build within an hour).
   dev_merge_build_window_seconds: 3600
+  # OMN-26316: a build asked for within this many seconds of the last dev build waits for the next
+  # one instead of starting another (the hourly build carries every merge). Declared here, never in code.
+  dev_merge_build_coalesce_seconds: 3600
   # How often the idle tick judges the checkout's recent dev merges, and how far back it reads them.
   dev_merge_build_check_interval_seconds: 300
   dev_merge_build_lookback_seconds: 86400

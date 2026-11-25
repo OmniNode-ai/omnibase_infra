@@ -31,6 +31,7 @@ import time
 import urllib.parse
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from operator import attrgetter
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING
@@ -617,6 +618,19 @@ def built_shas_carrying(
     return carried
 
 
+def _running_built_sha(jobs: tuple[object, ...]) -> str:
+    """The built sha of the newest successful dev job that builds dev merges; empty when unread."""
+    built = [
+        job
+        for job in jobs
+        if getattr(job, "runtime_lane", "") == "dev"
+        and getattr(job, "status", "") == "success"
+        and getattr(job, "requested_by", "") != "agent/stability-follow-tag"
+    ]
+    built.sort(key=attrgetter("accepted_at"))
+    return str(getattr(built[-1], "built_sha", "")) if built else ""
+
+
 def _overdue_jobs(state_dir: Path) -> list[object]:
     """The agent's job records as the overdue decision reads them; a file that is none is skipped."""
     job_mod = sys.modules["omnibase_infra.models.model_overdue_dev_merge_job"]
@@ -730,8 +744,13 @@ def _request_overdue_builds(
     settings: dict[str, JsonValue],
     overdue: list[BaseModel],
     subjects: dict[str, str],
+    jobs: tuple[object, ...] = (),
 ) -> None:
-    """Publish the event and request the dev build of each overdue merge, once per sha (OMN-26316).
+    """Publish the event and request the one dev build that carries every overdue merge (OMN-26316).
+
+    One check sends one request: every overdue merge is built at the same dev head, so the
+    first request taken carries the rest, which are recorded as requested with it. A head the
+    newest successful dev job's built sha already contains is not requested at all.
 
     The lane, the event topic and the requester come from this node's contract settings, the
     store the node already reads. A merge is recorded as requested only after the send was
@@ -759,6 +778,16 @@ def _request_overdue_builds(
     if not _FULL_SHA.fullmatch(head):
         logger.warning("overdue dev merge build not requested: the dev head was unread")
         return
+    running = _running_built_sha(jobs)
+    if running and built_shas_carrying(
+        str(execution.REPO_DIR), head, {running}, timeout
+    ):
+        logger.warning(
+            "overdue dev merge build not requested: the running build %s contains head %s",
+            running,
+            head,
+        )
+        return
     handler_mod = sys.modules["omnibase_infra.handlers.handler_dev_merge_build_publish"]
     request_mod = sys.modules[
         "omnibase_infra.models.model_dev_merge_build_publish_request"
@@ -774,9 +803,18 @@ def _request_overdue_builds(
     )
     handler = handler_mod.HandlerDevMergeBuildPublish(container)
     store = Path(execution.STATE_DIR) / _REQUESTED_KEYS
+    carried_by = ""
     for decision in overdue:
         request_id = str(getattr(decision, "request_id", ""))
         merge_sha = str(getattr(decision, "merge_sha", ""))
+        if carried_by:
+            _mark(store, request_id)
+            logger.warning(
+                "overdue dev merge build sha=%s carried by request_id=%s",
+                merge_sha,
+                carried_by,
+            )
+            continue
         pull = re.search(r"\(#(\d+)\)\s*$", subjects.get(merge_sha, ""))
         result = handler.handle(
             request_mod.ModelDevMergeBuildPublishRequest(
@@ -790,6 +828,7 @@ def _request_overdue_builds(
         )
         if result.status == "requested":
             _mark(store, request_id)
+            carried_by = request_id
         logger.warning(
             "overdue dev merge build request sha=%s request_id=%s status=%s reason=%s",
             merge_sha,
@@ -828,6 +867,7 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
         execution = _agent()
         now = datetime.now(UTC)
         window = _seconds(settings, "dev_merge_build_window_seconds")
+        coalesce = _seconds(settings, "dev_merge_build_coalesce_seconds")
         jobs = tuple(_overdue_jobs(Path(execution.STATE_DIR)))
         handler = handler_mod.HandlerDevMergeBuildOverdue()
         decisions: list[BaseModel] = []
@@ -854,6 +894,7 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
                         runtime_class=runtime_class,
                         now=now,
                         window_seconds=window,
+                        coalesce_seconds=coalesce,
                         jobs=jobs,
                         descendant_shas=tuple(
                             sorted(built_shas_carrying(clone, sha, built, git_timeout))
@@ -879,7 +920,7 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
             )
         if overdue:
             try:
-                _request_overdue_builds(execution, settings, overdue, subjects)
+                _request_overdue_builds(execution, settings, overdue, subjects, jobs)
             except Exception:  # the publish never costs the tick its decisions
                 logger.exception("overdue dev merge build request was not made")
         return tuple(decisions)
