@@ -261,3 +261,53 @@ def test_dockerfile_puts_no_onex_in_a_default_path_directory() -> None:
     assert not re.search(r"ENV PATH=[^\n]*onex-ledger-client", code), (
         "the image-wide PATH must not carry the shim directory"
     )
+
+
+# A bare ``onex`` word at the start of a command inside a workflow or composite action.
+# Off the default PATH it resolves to nothing on a runner, so every such caller must name
+# the shim path (/opt/onex-ledger-client/shim/onex), add its directory to its own PATH in
+# the job, or run the checkout's own entry point (``uv run onex``, ``.venv/bin/...``).
+_BARE_ONEX = re.compile(
+    r"(?:^|[|;&(]|\$\(|`)\s*(?:-\s+)?(?:run:\s*)?(?:sudo\s+)?onex(?:\s|$)", re.MULTILINE
+)
+
+
+def _bare_onex_lines(text: str) -> list[str]:
+    """Non-comment lines of a workflow or action that run ``onex`` by bare name."""
+    hits: list[str] = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        if _BARE_ONEX.search(line):
+            hits.append(line.strip())
+    return hits
+
+
+def test_bare_onex_scan_finds_a_caller_that_runs_onex_by_name() -> None:
+    """Positive control: the scan flags the shapes it must refuse and passes the sanctioned ones."""
+    assert _bare_onex_lines("      - run: onex ledger query --stdin --bus-lane dev")
+    assert _bare_onex_lines("        echo x | onex ledger query --stdin")
+    assert _bare_onex_lines("        out=$(onex --version)")
+    assert not _bare_onex_lines("        uv run onex ledger query")
+    assert not _bare_onex_lines(
+        "        /opt/onex-ledger-client/shim/onex ledger query"
+    )
+    assert not _bare_onex_lines(
+        '        PATH="/opt/onex-ledger-client/shim:$PATH" onex ledger query'
+    )
+    assert not _bare_onex_lines("      # onex ledger query is read here")
+
+
+def test_no_workflow_or_action_runs_onex_by_bare_name() -> None:
+    """With the shim off the default PATH, no caller in this repository may rely on it by name."""
+    offenders: list[str] = []
+    for root in (
+        REPO_ROOT / ".github" / "workflows",
+        REPO_ROOT / ".github" / "actions",
+    ):
+        for path in sorted(root.rglob("*.y*ml")):
+            for line in _bare_onex_lines(path.read_text(encoding="utf-8")):
+                if "/opt/onex-ledger-client/shim" in line:
+                    continue
+                offenders.append(f"{path.relative_to(REPO_ROOT)}: {line}")
+    assert not offenders, offenders
