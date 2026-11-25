@@ -1,0 +1,41 @@
+schema_version: 1.0.0
+ticket_id: OMN-20317
+title: The nightly integration step exports the Kafka opt-in its Redpanda-backed suites require
+summary: >-
+  Run 45325746514 of nightly-integration.yml ended 13 failed, 10 errors, 5427 passed. Eleven of the 23 are one cause: four kafka-marked suites call require_service_env with KAFKA_INTEGRATION_TESTS, which fails in CI when it is absent, and the Run integration tests step never exported it although the e2e stack it boots provides a plaintext Redpanda. The step now exports the opt-in; a focused CI test pins it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20317-nightly-kafka-opt-in
+    statement: The nightly integration step opts the Redpanda-backed suites in, because the stack the job boots provides the broker they need.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the Run integration tests step of nightly-integration.yml carries KAFKA_INTEGRATION_TESTS set to 1 in its own env -- falsifier: uv run --frozen pytest tests/ci/test_nightly_integration_kafka_opt_in_omn20317.py -q fails at origin/dev and passes on the branch"
+      - id: AC2
+        statement: "AC2: the job's own Spin up e2e stack step starts redpanda and the workflow sets ONEX_EVENT_BUS_TYPE to kafka, so the opt-in names a service the job provisions -- falsifier: test_the_opt_in_is_backed_by_the_stack_the_job_boots fails when either is removed"
+evidence_requirements:
+  - kind: tests
+    description: The focused CI test over the nightly integration workflow's Kafka opt-in, and the two existing nightly workflow tests that read the same step.
+    command: uv run --frozen pytest tests/ci/test_nightly_integration_kafka_opt_in_omn20317.py tests/ci/test_nightly_integration_live_adapter_deselect_omn17427.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20317-ac1-step-env
+    description: The focused test reads the workflow and asserts the step's env exports the opt-in as 1.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_nightly_integration_kafka_opt_in_omn20317.py -k test_run_step_exports_the_kafka_opt_in -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn20317-ac2-stack-backs-opt-in
+    description: The focused test asserts the job boots redpanda and selects the kafka event bus.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_nightly_integration_kafka_opt_in_omn20317.py -k test_the_opt_in_is_backed_by_the_stack_the_job_boots -q --no-cov -n 0 -p no:randomly
+        cwd: .

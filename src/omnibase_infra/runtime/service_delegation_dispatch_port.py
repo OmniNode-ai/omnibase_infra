@@ -315,13 +315,11 @@ class RuntimeDelegationDispatchPort:
         named_tests_wire = named_tests and _named_tests_wire(named_tests)
 
         # OmniMarket's consumer-facing handler always supplies these optional
-        # arguments. The deployed bus model does not expose the completion-shaping
-        # fields yet, so None preserves the existing route while explicit requests
-        # fail closed instead of being silently dropped at this boundary.
+        # arguments. system_prompt, temperature and response_format are fields of
+        # the canonical delegation request wire and ride the command below
+        # (OMN-15482); the two features the wire does not carry fail closed
+        # instead of being silently dropped at this boundary.
         for feature_name, feature_value in (
-            ("system_prompt", system_prompt),
-            ("temperature", temperature),
-            ("response_format", response_format),
             # OMN-20844: the customer's model choice runs only on omnimarket's
             # in-process BYOK route; the bus wire does not carry it.
             ("model", model),
@@ -331,10 +329,9 @@ class RuntimeDelegationDispatchPort:
         ):
             if feature_value is not None:
                 raise NotImplementedError(
-                    f"{feature_name} is not yet supported on the deployed bus "
-                    "dispatch path (RuntimeDelegationDispatchPort); threading it "
-                    "requires the canonical delegation request wire to carry it "
-                    "end to end (OMN-15482)"
+                    f"{feature_name} is not supported on the deployed bus "
+                    "dispatch path (RuntimeDelegationDispatchPort); the "
+                    "canonical delegation request wire does not carry it"
                 )
         if backend_id is None and no_escalation:
             raise ValueError("no_escalation requires backend_id")
@@ -417,6 +414,12 @@ class RuntimeDelegationDispatchPort:
             "acceptance_criteria": list(acceptance_criteria),
             "tenant_id": tenant_id,
             "response_contract": response_contract,
+            # OMN-15482: completion-shaping fields of the canonical wire request.
+            # `None` falls out of the comprehension below, so an unset field
+            # publishes no key and the consumer keeps the task-class default.
+            "system_prompt": system_prompt,
+            "temperature": temperature,
+            "response_format": response_format,
             # The selected node_delegation_orchestrator contract validates this
             # payload as ModelDelegationRequest. Its request timeout is part of
             # that model; the terminal delivery margin only bounds this caller's

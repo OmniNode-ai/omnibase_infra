@@ -31,10 +31,12 @@ import importlib
 import importlib.resources
 import json
 import logging
+import os
 import sys
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping
 from functools import lru_cache
+from pathlib import Path
 from typing import cast
 
 import yaml
@@ -279,15 +281,84 @@ async def reap_timed_out_process(proc: asyncio.subprocess.Process) -> None:
         )
 
 
+def materialised_product_clone(contract_root: str, registry_root: str) -> str:
+    """The full product clone beside ``OMNI_HOME`` for a contract-reading root, or ``""``.
+
+    OMN-26650. The hosted sweep reads contracts from a sparse, contracts-only
+    clone (``contract-roots/<repo>``: ``git sparse-checkout set contracts``,
+    which in cone mode keeps the repository's root files such as ``conftest.py``
+    and ``pyproject.toml`` and nothing else). The verifier anchors a relative
+    check ``cwd`` at the repository that owns the contract file, so a contract
+    that says ``cwd: .`` ran ``uv run pytest`` inside that sparse tree: pytest
+    loaded the root ``conftest.py``, which imports ``scripts.hooks...``, and
+    died with ``ModuleNotFoundError: No module named 'scripts'`` (exit 4, no
+    test collected) on every such check. The checks' own code lives in the
+    clone the workflow materialises at ``${OMNI_HOME}/<repo>``; that is the
+    tree a relative ``cwd`` has to mean.
+
+    Returns that clone's path when ``contract_root`` is a different directory
+    with the same repository name under ``registry_root`` (the caller's
+    ``OMNI_HOME``) and it exists. Returns ``""`` (no override, the verifier's
+    own anchoring stands) when ``registry_root`` is empty, no such clone exists,
+    or the contract root already is it, which is every operator-machine run.
+    """
+    if not contract_root or not registry_root:
+        return ""
+    root = Path(contract_root).resolve()
+    clone = (Path(registry_root) / root.name).resolve()
+    if clone == root or not clone.is_dir():
+        return ""
+    return str(clone)
+
+
+def process_registry_root(environ: Mapping[str, str] | None = None) -> str:
+    """The registry root (``OMNI_HOME``) of the process, or ``""`` when it names none.
+
+    OMN-26650. The one place the product-clone anchor reads the environment:
+    handlers take the registry root as an injected value and fall back to this
+    reader only when none was injected, so a handler file never touches
+    ``os.environ`` itself. ``environ`` is injectable for the same reason.
+    """
+    source = os.environ if environ is None else environ
+    return source.get("OMNI_HOME", "")
+
+
+def product_clone_verifier_env(
+    contract_root: str,
+    registry_root: str,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, str] | None:
+    """The verifier's environment with ``CONTRACT_REPO_DIR`` at the product clone.
+
+    ``None`` (the subprocess inherits the process environment unchanged) when
+    ``materialised_product_clone`` finds no clone to anchor at.
+    """
+    clone = materialised_product_clone(contract_root, registry_root)
+    if not clone:
+        return None
+    source = os.environ if environ is None else environ
+    return {**source, "CONTRACT_REPO_DIR": clone}
+
+
 async def run_dod_verify_command(
-    ticket_id: str, cwd: str, timeout: float, *, contract_path: str = ""
+    ticket_id: str,
+    cwd: str,
+    timeout: float,
+    *,
+    contract_path: str = "",
+    env: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, object] | None, int, str]:
     # The verifier's payload and capture files live in a scratch directory of
     # this call, never under the cwd (OMN-25667): the verdict comes back on
     # stdout and no caller reads a file the verifier wrote.
     with tempfile.TemporaryDirectory(prefix="onex-dod-verify-") as state_root:
         return await _run_dod_verify_in(
-            ticket_id, cwd, timeout, contract_path=contract_path, state_root=state_root
+            ticket_id,
+            cwd,
+            timeout,
+            contract_path=contract_path,
+            state_root=state_root,
+            env=env,
         )
 
 
@@ -298,6 +369,7 @@ async def _run_dod_verify_in(
     *,
     contract_path: str,
     state_root: str,
+    env: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, object] | None, int, str]:
     # OMN-16846: resolved from THIS process's interpreter, not re-resolved
     # by `uv run` from the cwd. See `dod_verify_argv`.
@@ -308,6 +380,7 @@ async def _run_dod_verify_in(
         proc = await asyncio.create_subprocess_exec(
             *args,
             cwd=cwd or None,
+            env=dict(env) if env is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -452,6 +525,9 @@ __all__ = [
     "TypeRunDodVerifyCommand",
     "dod_verify_argv",
     "is_done_state",
+    "materialised_product_clone",
+    "process_registry_root",
+    "product_clone_verifier_env",
     "reap_timed_out_process",
     "run_dod_verify_command",
 ]

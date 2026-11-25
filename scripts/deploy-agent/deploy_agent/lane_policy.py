@@ -1,28 +1,28 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Lane fence for the deploy agent (OMN-16939).
-
-One deploy-agent process consumes ONE control bus, and the dev control bus
-deliberately carries commands for more than one runtime lane: the CI publisher
-(``omnibase_infra/.github/workflows/runtime-rebuild-trigger.yml``) routes both
-``dev`` and ``stability-test`` rebuild requests through the dev broker and lets
-``runtime_lane`` in the signed payload decide the deployment target.
-
-That means an agent attached to the dev broker will happily execute a
-``stability-test`` rebuild, and an agent attached to the prod broker will
-happily execute anything that lands there. The process itself carries no
-statement of which lanes it is allowed to touch, so its blast radius is
-whatever a publisher chooses to put on its topic.
-
-``DEPLOY_AGENT_ALLOWED_LANES`` makes that statement explicit and mechanical.
-It is REQUIRED and fail-closed: an unset, empty, or unparseable value aborts
-startup rather than defaulting to "every lane", because a silent default is
-exactly the failure this fence exists to remove.
-"""
+# Lane fence for the deploy agent (OMN-16939).
+#
+# One deploy-agent process consumes ONE control bus, and the dev control bus
+# deliberately carries commands for more than one runtime lane: the CI publisher
+# (``omnibase_infra/.github/workflows/runtime-rebuild-trigger.yml``) routes both
+# ``dev`` and the stability lane rebuild requests through the dev broker and lets
+# ``runtime_lane`` in the signed payload decide the deployment target.
+#
+# That means an agent attached to the dev broker will happily execute a
+# a stability lane rebuild, and an agent attached to the prod broker will
+# happily execute anything that lands there. The process itself carries no
+# statement of which lanes it is allowed to touch, so its blast radius is
+# whatever a publisher chooses to put on its topic.
+#
+# ``DEPLOY_AGENT_ALLOWED_LANES`` makes that statement explicit and mechanical.
+# It is REQUIRED and fail-closed: an unset, empty, or unparseable value aborts
+# startup rather than defaulting to "every lane", because a silent default is
+# exactly the failure this fence exists to remove.
 
 from __future__ import annotations
 
 import os
+from typing import Final
 
 from deploy_agent.events import EnumRuntimeLane
 from deploy_agent.tracking_ref import ENV_TRACKING_REF
@@ -33,6 +33,18 @@ ENV_ALLOWED_LANES = "DEPLOY_AGENT_ALLOWED_LANES"
 #: to the fence the allow-list names, so the unit declares the dev fence once and
 #: the lane id stays an enum value, not a literal in a tracked unit.
 ENV_FOLLOW_STABILITY = "DEPLOY_AGENT_FOLLOW_STABILITY"
+
+
+#: Lanes whose queue a newer build request supersedes outright (OMN-26637).
+#: Operator ruling 2026-11-24: when a new build comes out, every older queued
+#: build is cancelled, whatever git says about the pair. The consumer takes this
+#: as an injected default, so a test or another deployment names its own set.
+SUPERSEDING_LANES: Final = frozenset({EnumRuntimeLane.DEV})
+
+#: Lanes that build only a ref the tracking branch already contains (OMN-26637):
+#: a merged ref. A PR head is proven on a pre-PR slot, never on the shared lane.
+#: Injected into the consumer on the same terms as ``SUPERSEDING_LANES``.
+MERGED_REF_LANES: Final = frozenset({EnumRuntimeLane.DEV})
 
 
 class LaneNotAllowedError(RuntimeError):

@@ -66,6 +66,16 @@ def _containers(*, healthy: bool = True) -> list[dict]:
     ]
 
 
+def without_env_unset(argv: list[str]) -> list[str]:
+    """``argv`` without the ``env -u NAME ...`` prefix the guard runs its commands under (OMN-26316)."""
+    if argv[:1] != ["env"]:
+        return argv
+    rest = argv[1:]
+    while rest[:1] == ["-u"]:
+        rest = rest[2:]
+    return rest
+
+
 @pytest.fixture
 def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
     state = {
@@ -96,6 +106,7 @@ def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
     }
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        argv = without_env_unset(argv)
         state["commands"].append(argv)
         output = ""
         if argv[:2] == ["docker", "ps"]:
@@ -617,6 +628,7 @@ def test_reporting_outage_keeps_status_and_exception_pending_for_retry(
     run = Mock(return_value=subprocess.CompletedProcess([], 75, "", "bus unavailable"))
 
     def routed(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        argv = without_env_unset(argv)
         if argv[0] != "bash":
             return run(argv, **kwargs)
         return subprocess.run(
@@ -624,6 +636,12 @@ def test_reporting_outage_keeps_status_and_exception_pending_for_retry(
         )
 
     monkeypatch.setattr(executor_mod, "_run", routed)
+    # The row's stamp is read per delivery; a delivery pair that straddles a second
+    # boundary would otherwise differ in the stamp alone, so the retry-sends-the-same-row
+    # assertion below would fail by timing rather than by content.
+    monkeypatch.setattr(
+        executor_mod, "_dev_boot_timestamp", lambda: "2026-11-24T14:28:05Z"
+    )
     executor_mod.deliver_dev_boot_reports(root)
     assert json.loads(path.read_text())["ledger_pending"] is True
     assert json.loads(path.read_text())["exception_pending"] is True

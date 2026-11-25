@@ -5,6 +5,18 @@ summary: detect-changes and test-parallel stop listing lint in needs; Lint stays
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn22545-ac1-accepted-20261124t1945z:
+      - label: AC1
+        criterion_hash: 05c5d1b50d7eea3b2eb785fa1c8e200de0f54eb1cd19cd2c2630f964d74548e8
+        proposed_by: lane=dod-closeout-bind-2026-11-24T1945Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-24T1945Z-c3
+    dod-omn22545-ac2-accepted-20261124t1945z:
+      - label: AC2
+        criterion_hash: 84939c3210365ecad3d697a919bf14cf169498abb767bfa12028176f0ed07284
+        proposed_by: lane=dod-closeout-bind-2026-11-24T1945Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-24T1945Z-c3
 requirements:
   - id: req-omn22545-tests-not-behind-lint
     statement: The test matrix does not wait for Lint, and a red Lint still fails CI Summary.
@@ -36,3 +48,21 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_ci_summary_gate.py -q --no-cov -k lint_failure
+  - id: dod-omn22545-ac1-accepted-20261124t1945z
+    description: 'AC1: neither detect-changes nor test-parallel lists lint in needs and lint stays in STRICT_GATE_JOBS; the control in the test file names the offender when lint is added back. Re-run at origin/dev 99041f891: 8 passed. Fails with the ci.yml change of d98a8a5ca reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_ci_test_matrix_not_gated_on_lint.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn22545-ac2-accepted-20261124t1945z
+    description: 'AC2: with every gate green except Lint=failure the CI Summary gate returns FAILURE, and the test asserts the test matrix does not wait for lint. Re-run at origin/dev 99041f891: 1 passed. Fails with the ci.yml change of d98a8a5ca reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_ci_summary_gate.py::TestCiSummaryGate::test_lint_failure_alone_fails_ci_summary -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC2

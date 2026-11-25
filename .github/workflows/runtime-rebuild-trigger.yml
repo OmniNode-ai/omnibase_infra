@@ -220,6 +220,9 @@ jobs:
           # commit SHA is the exact ref node_redeploy rebuilds.
           PR_BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
           PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          # OMN-26637: the publisher refuses a PR head, which is not a merged ref.
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           # Runner class is forwarded so the publisher can refuse a LAN publish
           # from GitHub-hosted compute by name, rather than failing 30 seconds
           # later on an unresolvable bootstrap host (OMN-17888).
@@ -230,6 +233,8 @@ jobs:
             --labels "$PR_LABELS" \
             --base-branch "$PR_BASE_BRANCH" \
             --source-sha "$PR_MERGE_SHA" \
+            --pr-merged "$PR_MERGED" \
+            --pr-head-sha "$PR_HEAD_SHA" \
             --bus-lane "dev" \
             --bus-overlay ".lane-table/config/ci_bus_lanes.yaml" \
             --consumer-model ".ci-bus-overlay/src/omnimarket/nodes/node_redeploy_orchestrator/models/model_redeploy_start_command.py" \
