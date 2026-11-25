@@ -49,7 +49,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest "tests/ci/test_deploy_runners_add_idle_omn22478.py::test_a_target_that_may_be_mid_job_is_left_running_and_untouched" -q -n 0 --no-cov
-        cwd: .
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
   - id: dod-omn22604-ac2-accepted-20261125t0545z
@@ -58,7 +58,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest "tests/ci/test_deploy_runners_add_idle_omn22478.py::test_no_supplied_token_refuses_before_any_remote_action_and_mints_nothing" -q -n 0 --no-cov
-        cwd: .
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
   - id: dod-omn22604-ac3-accepted-20261125t0545z
@@ -67,7 +67,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: uv run pytest tests/ci/test_deploy_runners_registration_preflight.py -q -n 0 --no-cov
-        cwd: .
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
 context:
