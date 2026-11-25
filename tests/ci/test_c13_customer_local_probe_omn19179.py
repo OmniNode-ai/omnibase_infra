@@ -370,6 +370,39 @@ def test_a_receipt_with_no_attempts_anywhere_fails() -> None:
     assert "receipt records no routing attempt" in reasons
 
 
+@pytest.mark.live_contact(
+    "tests/fixtures/omn19179/recorded_delegate_receipt_terminal_payload.json"
+)
+@pytest.mark.unit
+def test_a_recorded_terminal_payload_attempt_is_read(
+    recorded_response: dict[str, object],
+) -> None:
+    """Known good and known bad on one recorded ``onex delegate`` receipt.
+
+    The recording carries its one routing attempt only under
+    ``receipt.result.terminal_payload.payload.attempts``. Known good: the grader
+    reads that attempt. Known bad: the old path, ``receipt.result.attempts``,
+    holds none of it, so a reader fixed to that path reads no attempt.
+    """
+    receipt = recorded_response["receipt"]
+    assert isinstance(receipt, dict)
+    result = receipt["receipt"]["result"]
+    assert result.get("attempts") is None  # the old path reads none
+    clause = probe.grade_local_model(
+        {"served_models": [receipt["model"]], "model_port": 8000}, receipt
+    )
+    assert clause.evidence["attempts"] == [
+        {
+            "tier": "local",
+            "backend_id": "local-coder",
+            "model_id": receipt["model"],
+            "acceptance_decision": "accept",
+        }
+    ]
+    assert "receipt records no routing attempt" not in clause.reasons
+    assert not any("accepted attempts" in r for r in clause.reasons)
+
+
 @pytest.mark.unit
 def test_a_non_local_routing_tier_fails() -> None:
     obs = _pass_observations()
