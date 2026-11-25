@@ -4498,12 +4498,13 @@ jobs:
   # (1c9566e2c249) from the 14-tag bound until 2026-11-24 and nothing else; the migration
   # ticket OMN-22867 bumps that rev and deletes this input in the same change.
   # OMN-25506 (RULING 2026-11-18T01:29:21Z): the one-week extension merged in
-  # omnibase_core#2333 (dev-20261118030813-4f0a188ab62c); the input names that tag so this
-  # job reads the extended date, because the tag it replaced still held the date 2026-11-16.
+  # omnibase_core#2333 (dev-20261118030813-4f0a188ab62c). The second extension, to 2026-12-04, merged in
+  # omnibase_core#2367 (dev-20261125040409-050022962f2e); the input names that tag so this
+  # job reads the extended date, because the tag it replaced still held the date 2026-11-24.
   dependency-pins:
     uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261110125852-e6bc5e13e9e7
     with:
-      omnibase-core-ref: dev-20261118030813-4f0a188ab62c
+      omnibase-core-ref: dev-20261125040409-050022962f2e
     permissions:
       contents: read
 
