@@ -32,6 +32,8 @@ handler_routing:
       handler: {name: HandlerRoutedCommandAlarm, module: omnibase_infra.handlers.handler_routed_command_alarm}
     - operation: request_overdue_dev_merge_build
       handler: {name: HandlerDevMergeBuildOverdue, module: omnibase_infra.handlers.handler_dev_merge_build_overdue}
+    - operation: publish_overdue_dev_merge_build
+      handler: {name: HandlerDevMergeBuildPublish, module: omnibase_infra.handlers.handler_dev_merge_build_publish}
 # The reading writer's append route, by the names its overlay gives the two variables.
 settings:
   append_command_env: ONEX_LEDGER_BUS_APPEND_COMMAND
@@ -81,6 +83,7 @@ settings:
     check_routing_key_checks: check_routing
     alarm_routed_commands_without_job_record: check_routed_commands
     request_overdue_dev_merge_build: check_overdue_dev_merges
+    publish_overdue_dev_merge_build: check_overdue_dev_merges
   routing_check_interval_seconds: 300
   routing_health_timeout_seconds: 3
   # The health URL of each peer instance's agent, by instance name, read by the key check.
@@ -95,6 +98,12 @@ settings:
   # How often the idle tick judges the checkout's recent dev merges, and how far back it reads them.
   dev_merge_build_check_interval_seconds: 300
   dev_merge_build_lookback_seconds: 86400
+  # The publish an overdue merge triggers (OMN-26316): the lane is dev only (the handler refuses any
+  # other value with a typed error), and the event states the merge went its window with no build.
+  dev_merge_build_runtime_lane: dev
+  dev_merge_build_overdue_topic: onex.evt.deploy.dev-merge-build-overdue.v1
+  # The signed build request path's command topic (node_branch_deploy_command_effect signs and publishes the agent's command).
+  dev_merge_build_command_topic: onex.cmd.omnimarket.branch-deploy-command-requested.v1
   # The routed commands this instance's alarm polls: one JSON object per line
   # (correlation_id, instance, runtime_lane, requested_by, routed_at) in the agent's state
   # directory. The file is read when present; no writer exists yet.
@@ -103,7 +112,9 @@ settings:
   phase_order: [preflight, git, compose_gen, seed, core, runtime, verification]
 capabilities:
   - name: deploy.dev_merge_build_overdue
-    description: Judge whether a dev runtime merge has gone the window with no dev build, as SATISFIED, WAIT or REQUEST, with one request id per sha. A pure decision; it publishes nothing (OMN-26316).
+    description: Judge whether a dev runtime merge has gone the window with no dev build, as SATISFIED, WAIT or REQUEST, with one request id per sha. A job counts as building the merge only when its built sha descends from it. A pure decision (OMN-26316).
+  - name: deploy.dev_merge_build_publish
+    description: Publish the overdue event and send one signed dev build request for a merge judged REQUEST, from the deploy agent's own tick; dev lane only, once per sha (OMN-26316).
   - name: deploy.routing_key_check
     description: Judge the deploy lane routing table against each available instance's agent key check and the lane runtime's, refuse a mismatched instance with a typed refusal naming both values, and fall back to the default instance (OMN-26485).
   - name: deploy.routed_command_no_job_alarm

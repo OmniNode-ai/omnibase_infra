@@ -146,6 +146,19 @@ class ModelProjectionLivenessVerdict(BaseModel):
             "``attachment_evaluated`` is True."
         ),
     )
+    dormant_projections: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "OMN-26316. Declared projections the lazy-start lane left dormant "
+            "(OMN-21592) that no message or request has reached yet and that "
+            "have no consumer on the bus registry. Their consumers are absent "
+            "by design until a first request wakes them, so they are counted in "
+            "``projection_count`` but not in ``unattached_projections``, and "
+            "they never degrade the dimension. They are carried and rendered so "
+            "the deferral is visible. A dormant projection whose wake completed "
+            "or failed is not listed: the live registry judges it like any other."
+        ),
+    )
 
 
 __all__: list[str] = ["ModelProjectionLivenessVerdict"]
