@@ -495,9 +495,10 @@ BROKER = "dev"
 
 # The machine supplement (OMN-21622): only trusted machine overlay rows receive
 # these grants. The hook-emit drainer publishes the twelve work-ledger row events and its credential
-# registration. Produce only.
+# registration and revocation. Produce only.
 MACHINE_PROFILE_TOPICS: tuple[str, ...] = (
     "onex.evt.omnimarket.credential-registered.v1",
+    "onex.evt.omnimarket.credential-revoked.v1",
     *(
         f"onex.evt.omnimarket.work-ledger-{kind}.v1"
         for kind in (
