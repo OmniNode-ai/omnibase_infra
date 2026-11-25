@@ -7,7 +7,8 @@ The operator repository's freeze step reads the live work ledger through
 the build runners because the image held no ``onex``. This pins three things:
 
 * the image installs the published ``omnibase-infra`` package at an exact version
-  into its own virtual environment, and puts a shim named ``onex`` on the PATH;
+  into its own virtual environment, and keeps a shim named ``onex`` in a directory that is not on the default PATH
+  (OMN-24562: the customer checks fail a job that finds ``onex`` on its PATH);
 * the shim hands the mounted read-only credential (``KAFKA_SASL_USERNAME`` and
   ``KAFKA_SASL_PASSWORD`` from ``ci-ledger-read.env``) to the reader command and
   to nothing else, parses the file as data rather than running it, never echoes a
@@ -32,13 +33,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNNERS = REPO_ROOT / "docker" / "runners"
 DOCKERFILE = RUNNERS / "Dockerfile"
 HEREDOC = re.compile(
-    r"^COPY --chmod=0755 <<'ONEX_LEDGER_SHIM' /usr/local/bin/onex\n(?P<body>.*?)^ONEX_LEDGER_SHIM$",
+    r"^COPY --chmod=0755 <<'ONEX_LEDGER_SHIM' /opt/onex-ledger-client/shim/onex\n(?P<body>.*?)^ONEX_LEDGER_SHIM$",
     re.DOTALL | re.MULTILINE,
 )
 
 
 def _shim_text() -> str:
-    """The shim exactly as the image's Dockerfile installs it as /usr/local/bin/onex."""
+    """The shim exactly as the image's Dockerfile installs it as /opt/onex-ledger-client/shim/onex."""
     found = HEREDOC.search(DOCKERFILE.read_text(encoding="utf-8"))
     assert found, "the Dockerfile must install the shim as a quoted COPY heredoc"
     return found.group("body")
@@ -232,7 +233,7 @@ def test_dockerfile_installs_published_client_pinned_and_ships_the_shim() -> Non
         "the image installs the published omnibase-infra at the pinned version"
     )
     assert "/opt/onex-ledger-client" in code
-    assert "/usr/local/bin/onex" in code, "the shim is the onex on the PATH"
+    assert "/opt/onex-ledger-client/shim/onex" in code
     assert "onex --version" in code, (
         "the build fails if the installed client does not run"
     )
@@ -243,4 +244,20 @@ def test_lock_image_version_carries_the_ledger_client() -> None:
     lock = json.loads(LOCK.read_text(encoding="utf-8"))
     assert lock["image_version"] >= LEDGER_READER_IMAGE_VERSION, (
         "the onex ledger client is baked from image v15 (OMN-24139)"
+    )
+
+
+def test_dockerfile_puts_no_onex_in_a_default_path_directory() -> None:
+    """OMN-24562: C13, C14 and C29 fail a job whose PATH finds ``onex`` after the run."""
+    code = "\n".join(
+        line
+        for line in DOCKERFILE.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    for default_dir in ("/usr/local/bin", "/usr/bin", "/bin", "/usr/local/sbin"):
+        assert not re.search(rf"(?<![\w/.-]){re.escape(default_dir)}/onex\b", code), (
+            default_dir
+        )
+    assert not re.search(r"ENV PATH=[^\n]*onex-ledger-client", code), (
+        "the image-wide PATH must not carry the shim directory"
     )

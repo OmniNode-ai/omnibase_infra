@@ -89,6 +89,11 @@ requirements:
     acceptance:
       - id: AC27
         statement: 'AC27: a dev agent whose stability fold policy cannot resolve starts, and its stability reader answers None without raising; the agent''s own stability reader reads the stability runtime container and reads an unhealthy one as the empty ref -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py -k "bad_stability_fold_policy or stability_reader_reads" fails at the merge base'
+  - id: req-omn24562-runner-onex-off-path
+    statement: A runner job's default PATH carries no onex; the ledger-read shim sits in its own directory outside the default PATH.
+    acceptance:
+      - id: AC28
+        statement: 'AC28: the runner image installs the ledger-read shim outside every default PATH directory and puts no shim directory in the image PATH -- falsifier: uv run --frozen pytest tests/ci/test_runner_image_onex_ledger_reader_omn24139.py -q -k default_path fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -339,4 +344,13 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py -q -p no:randomly --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac28-runner-onex-off-path
+    description: 'AC28: the image installs no onex in a default PATH directory and sets no image-wide PATH to it.'
+    source: manual
+    binds_ac:
+      - AC28
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_runner_image_onex_ledger_reader_omn24139.py tests/ci/test_runner_image_identity.py -q -p no:randomly --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
