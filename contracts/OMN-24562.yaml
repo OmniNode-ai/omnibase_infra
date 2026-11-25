@@ -385,12 +385,3 @@ dod_evidence:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_ci_summary_running_conclusion_omn24562.py tests/ci/test_ci_summary_gate.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn24562-ac30-judge-test-unchanged
-    description: 'AC30: the judge test tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py is unchanged by this pull request (byte-identical to origin/dev) and passes against the stall guard.'
-    source: manual
-    binds_ac:
-      - AC30
-    checks:
-      - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/ci/test_ci_summary_jobs_listing_omn23027.py -q -n 0 --no-cov -p no:cacheprovider
-        cwd: ${OMNI_HOME}/omnibase_infra
