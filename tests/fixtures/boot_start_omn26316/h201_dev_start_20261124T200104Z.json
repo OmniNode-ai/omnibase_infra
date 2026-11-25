@@ -1,0 +1,22 @@
+{
+  "source": "docker logs and docker inspect of omninode-runtime on h201, read 2026-11-24T20:37:52Z; container StartedAt 2026-11-24T20:01:04.496Z",
+  "first_200_seconds": 210,
+  "first_200_at": "2026-11-24T20:04:34Z",
+  "goal_seconds": 300,
+  "boot_attach": {
+    "begins_at": "2026-11-24T20:02:01Z",
+    "ends_at": "2026-11-24T20:04:08Z",
+    "seconds": 127,
+    "contracts_attached_at_boot": 70,
+    "join_limit_when_measured": 4
+  },
+  "phase_seconds": {
+    "entrypoint_to_kernel": 6,
+    "kernel_before_manifest": 3,
+    "manifest_rebuild_after_stale_prebuilt": 18,
+    "boot_set_wiring": 2,
+    "dormant_wake_before_consumers": 28,
+    "boot_attach_consumer_joins": 127,
+    "runtime_host_start_to_first_200": 26
+  }
+}

@@ -65,6 +65,11 @@ requirements:
     acceptance:
       - id: AC31
         statement: "AC31: Dockerfile.runtime declares BUILD_DATE, VCS_REF and RUNTIME_VERSION after every cache-mounted RUN, apt-get layer and builder-venv COPY that precedes the stage's COPY src, in both stages -- falsifier: uv run --frozen pytest tests/unit/docker/test_runtime_build_arg_cache_order_omn26316.py -q fails at origin/dev (13 violations) and passes on the PR branch"
+  - id: req-omn26316-status-append-ignores-agent-sasl
+    statement: The dev deploy agent's STATUS rows reach the work ledger, because the bus append command it runs, and the post-roll ledger proof, do not inherit the agent's own broker transport declaration, and a refusal in the journal names the command's last stderr line.
+    acceptance:
+      - id: AC32
+        statement: "AC32: the dev boot guard runs the bus append command and the post-roll ledger proof without the agent's KAFKA_SASL_MECHANISM, KAFKA_SECURITY_PROTOCOL and KAFKA_SASL_ENV_PREFIX, so the append and the proof are accepted where the agent's unit declares a SASL mechanism with the lane login held only under the DEV_ prefix, and a refusal is logged with the command's last stderr line -- falsifier: uv run pytest tests/unit/handlers/test_handler_dev_boot_guard_status_append_env_omn26316.py -q fails at origin/dev (the append and the proof are refused and the log names no cause) and passes on the PR branch"
   - id: req-omn26316-coalesce-newest-containing
     statement: The deploy agent's accept runs the newest queued command that contains every older command it passes over, including older refs that are not ancestors of one another, and records each passed-over command superseded by it with its own terminal record.
     acceptance:
@@ -77,6 +82,11 @@ requirements:
         statement: "AC17: a delivery pass over 394 incidents that the bus append command refuses ends within the pass bound plus one append, the agent's startup and retry tick return at once while that pass runs, and a second tick starts no second pass -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k 'bounded or never_holds' -q fails at origin/dev (25.9 s for the 394 incidents against a 0.5 s bound)"
       - id: AC18
         statement: "AC18: an incident older than the declared abandon bound is marked delivered-abandoned with one log line and is not retried, and an incident inside it is retried with a row stamped at the delivery time so the ledger's clock guard does not refuse it -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k 'abandoned or delivery_stamp' -q fails at origin/dev"
+  - id: req-omn26316-boot-attach-join-limit
+    statement: The dev main runtime's boot attach joins its 70 boot contracts with a declared limit that models at most half the 127 s the recorded 2026-11-24T20:01:04Z start spent on it at a limit of 4.
+    acceptance:
+      - id: AC41
+        statement: "AC41: the dev main runtime's declared max_concurrent_contract_attach models at most half of the 127 s boot attach recorded on h201 at 2026-11-24T20:01:04Z, and the rendered runtime-policy.env carries it -- falsifier: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly fails at origin/dev and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -105,6 +115,9 @@ evidence_requirements:
   - kind: tests
     description: The same pass against a real subprocess standing in for the bus append command with the ledger's clock guard.
     command: uv run --frozen pytest tests/integration/handlers/test_dev_boot_report_pass_bound_omn26316.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The dev main boot attach join limit modeled from the recorded h201 start of 2026-11-24T20:01:04Z.
+    command: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -309,6 +322,14 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/docker/test_runtime_build_arg_cache_order_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26316-status-append-ignores-agent-sasl
+    description: "The recorded refusal of omni-201 (about every 3 s from 2026-11-23T21:55 EST, 3176 lines by 2026-11-24T06:21Z): the append command and the proof (dev job 02059fe5, 2026-11-24T06:38Z, restored the previous image) exit 1 under the unit's SASL declaration with no unprefixed login and are accepted by the broker and the ledger without it. The stub fails the same way, the test fails at origin/dev and passes on the branch."
+    source: manual
+    binds_ac: [AC32]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_status_append_env_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
   - id: dod-omn26316-coalesce-newest-containing
     description: "Two stale queued refs on different branches and one newer ref that contains both: the accept runs the newer ref once and writes both older records superseded by it; a passed-over command the newer ref does not contain, an unproven containment, a command for another lane and a redelivered copy each stop the fold. Two of the file's new tests fail at origin/dev, where the group ends at the first unrelated pair."
     source: manual
@@ -338,4 +359,12 @@ dod_evidence:
         cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/handlers/test_dev_boot_report_pass_bound_omn26316.py -k "abandon_bound or clock_guard" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-boot-attach-join-limit
+    description: "The recorded h201 start (first /health 200 at 210 s, boot attach 127 s for 70 contracts at a limit of 4) models 131 s at the origin/dev limit and 36 s at the declared 16; the control reproduces the measured 127 s at 4."
+    source: manual
+    binds_ac: [AC41]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
         cwd: .
