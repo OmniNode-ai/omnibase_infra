@@ -298,6 +298,16 @@ class RuntimeLoopReadingPublisher:
                 reading.correlation_id,
                 exc_info=True,
             )
+            return
+        logger.info(
+            "Published runtime loop reading (topic=%s, runtime_member=%s, "
+            "max_loop_gap_ms=%s, abandoned_dispatches=%s, correlation_id=%s)",
+            _READING_TOPIC,
+            reading.runtime_member,
+            reading.max_loop_gap_ms,
+            reading.abandoned_dispatches,
+            reading.correlation_id,
+        )
 
     async def _publish_every_window(
         self,
