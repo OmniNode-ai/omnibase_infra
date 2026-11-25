@@ -622,6 +622,19 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: true
+        # OMN-26566: the BYOK credential READ on the stability lane. The canary
+        # tenant's key was found and the route chose byok-openrouter, but the
+        # registered ref could not be resolved: this lane's resolver config had
+        # no tenant_inference_credentials namespace and INFISICAL_PROJECT_ID was
+        # empty. Same rule and folder as the dev lane's process-level rule. It
+        # renders as STABILITY_TEST_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON;
+        # the lane's compose file binds it with the lane identity references
+        # (STABILITY_TEST_RUNTIME_INFISICAL_*), never a value.
+        secret_resolver_namespaces:
+          - namespace: tenant_inference_credentials
+            ref_pattern: "^cred_[A-Za-z0-9._:-]+_[A-Za-z0-9_-]+_[0-9a-f]{32}$"
+            source_type: infisical
+            source_path_template: "/tenant-inference-credentials/{ref}"
       effects:
         runtime_id: stability-test-effects
         runtime_address: runtime://omninode-pc/stability-test/effects
@@ -633,6 +646,19 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: false
+        # OMN-26566: the BYOK credential READ on the stability lane. The canary
+        # tenant's key was found and the route chose byok-openrouter, but the
+        # registered ref could not be resolved: this lane's resolver config had
+        # no tenant_inference_credentials namespace and INFISICAL_PROJECT_ID was
+        # empty. Same rule and folder as the dev lane's process-level rule. It
+        # renders as STABILITY_TEST_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON;
+        # the lane's compose file binds it with the lane identity references
+        # (STABILITY_TEST_RUNTIME_INFISICAL_*), never a value.
+        secret_resolver_namespaces:
+          - namespace: tenant_inference_credentials
+            ref_pattern: "^cred_[A-Za-z0-9._:-]+_[A-Za-z0-9_-]+_[0-9a-f]{32}$"
+            source_type: infisical
+            source_path_template: "/tenant-inference-credentials/{ref}"
       # OMN-18114: the TENANT-domain projection CARRIER. Optional per lane and
       # declared only by the two lab lanes that deploy it.
       #

@@ -29,3 +29,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_stability_probes_read_infisical_omn26121.py -k "c16_reads_its_own or fetch_precedes" -q --no-cov
         cwd: .
+  - id: dod-omn26566-stability-tenant-credentials
+    description: The stability runtime declares the tenant_inference_credentials namespace and the Infisical project id reference like the dev lane, and the dev render is unchanged; the test fails on the base, where the stability resolver config has no namespace and no project id.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_stability_tenant_credentials_omn26566.py -q --no-cov
+        cwd: .
