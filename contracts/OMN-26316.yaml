@@ -107,6 +107,11 @@ requirements:
     acceptance:
       - id: AC43
         statement: "AC43: with dev_merge_build_coalesce_seconds declared in the deploy job reading contract, three merges in 30 minutes get one build, a merge just after a build waits for the next, and a merge 50 minutes before the hour is carried by the hourly build -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_coalesce_omn26316.py fails at origin/dev (the setting and the coalesced decision are absent) and passes on the PR branch"
+  - id: req-omn26316-overdue-queue-folds
+    statement: Queued overdue dev merge builds fold into the newest one in the deploy agent's queue supersede, so the dev lane runs one build for them; a rollback declared by anyone else and any other scope keep their refusals.
+    acceptance:
+      - id: AC44
+        statement: "AC44: three queued commands requested by agent/overdue-dev-merge-build (scope runtime, rollback actor the same) for dev run as one build with two superseded, while an operator's rollback still ends the group and an overdue command never folds into a full-scope build -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_overdue_requests_coalesce_omn26316.py fails at origin/dev (three builds run) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -431,4 +436,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_coalesce_omn26316.py tests/unit/handlers/test_dev_merge_build_overdue_omn26316.py tests/unit/handlers/test_dev_merge_build_carried_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-overdue-queue-folds
+    description: "Recorded 2026-11-25: jobs d844bdf1, 7d9991bf and 7db4beaf (requested_by agent/overdue-dev-merge-build, scope runtime, a rollback of that actor, git_ref f553b1d6) ran one after another because the coalescer refused a declared rollback and any scope but full. 1 of the file's 3 tests fails at origin/dev and passes on the branch; the existing coalesce rule table stays green."
+    source: manual
+    binds_ac: [AC44]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_overdue_requests_coalesce_omn26316.py scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q -p no:cacheprovider
         cwd: .
