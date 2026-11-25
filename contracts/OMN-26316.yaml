@@ -107,6 +107,11 @@ requirements:
     acceptance:
       - id: AC44
         statement: "AC44: the health line and the dispatch_deadline_exceeded line of an abandoned dispatch carry group=<consumer group>, and the orphan count, the limit, the deadline and every health verdict are unchanged -- falsifier: uv run --frozen pytest tests/unit/event_bus/test_orphan_names_consumer_group_omn26316.py -q fails at origin/dev (no group= in either line) and passes on the PR branch"
+  - id: req-omn26316-dev-runtime-memory-limit
+    statement: The dev main runtime's declared memory limit clears twice the anonymous memory at which h201's kernel OOM-killed it at the join limit of 16, so its boot does not loop on the restart policy.
+    acceptance:
+      - id: AC43
+        statement: "AC43: the dev main runtime's declared memory_limit is at least twice the 3,044 MiB recorded at the 2026-11-25T02:42:21Z OOM kill, and the rendered runtime-policy.env carries it -- falsifier: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (3072M) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -150,6 +155,9 @@ evidence_requirements:
   - kind: tests
     description: The abandoned dispatch names its consumer group on the health line and in the deadline log line, recorded from the 2026-11-25 lab runtime-tick orphans at offsets 744130 and 747729.
     command: uv run --frozen pytest tests/unit/event_bus/test_orphan_names_consumer_group_omn26316.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The dev main memory limit against the recorded h201 OOM kill floor.
+    command: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -437,4 +445,12 @@ dod_evidence:
         cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/event_bus/test_orphan_names_group_consume_loop_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-dev-runtime-memory-limit
+    description: "The declared dev main memory limit is at least 2x the 3,044 MiB anonymous memory recorded at the kernel OOM kill on h201; the control shows the recorded 3 GiB limit sits under that floor."
+    source: manual
+    binds_ac: [AC43]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
         cwd: .
