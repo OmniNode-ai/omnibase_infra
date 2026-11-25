@@ -259,6 +259,8 @@ class DispatchResultApplier:
         self._projection_effect = projection_effect
         self._topic_router: dict[str, str] = topic_router or {}
         self._output_topic_map: dict[str, str] = output_topic_map or {}
+        # Exposed for health check introspection (OMN-5164).
+        self.published_events_map: dict[str, str] = self._output_topic_map
         self._output_event_handler = output_event_handler
         self._allowed_output_topic_set: set[str] = {
             topic.strip()
