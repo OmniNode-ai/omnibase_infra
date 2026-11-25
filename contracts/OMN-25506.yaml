@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-25506"
 title: "Move the omnibase_infra dependency-pins job to the omnibase_core tag that carries the extended hook-rev exemption"
-summary: "The required check dependency-pins / Dependency Pins read red on omnibase_infra PRs 5989, 6043 and 6052 with the same two lines: the exemption for omnibase_core hook rev 1c9566e2c249 at .pre-commit-config.yaml:321 expired after 2026-11-16, and that rev is 17 release tags behind against a bound of 14. The policy is read from the checkout named by the omnibase-core-ref input of the dependency-pins job in ci.yml, which named dev-20261109032923-9f0af2b9bd43, a tag cut before omnibase_core#2333 moved the exemption date to 2026-11-24. This change moves that one input to dev-20261118030813-4f0a188ab62c, the dev-merge tag of omnibase_core#2333. No check, bound or required-check list changes. The exemption still lapses 2026-11-24; OMN-22867 bumps the hook rev and deletes the input."
+summary: "The required check dependency-pins / Dependency Pins read red on omnibase_infra PRs 5989, 6043 and 6052 with the same two lines: the exemption for omnibase_core hook rev 1c9566e2c249 at .pre-commit-config.yaml:321 expired after 2026-11-16, and that rev is 17 release tags behind against a bound of 14. The policy is read from the checkout named by the omnibase-core-ref input of the dependency-pins job in ci.yml, which named dev-20261109032923-9f0af2b9bd43, a tag cut before omnibase_core#2333 moved the exemption date to 2026-11-24. This change moves that one input to dev-20261125040409-050022962f2e, the dev-merge tag of omnibase_core#2367, which moves the exemption date to 2026-12-04. No check, bound or required-check list changes. The exemption lapses 2026-12-04; OMN-22867 bumps the hook rev and deletes the input."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -16,18 +16,18 @@ requirements:
 evidence_requirements:
   - kind: "tests"
     description: "The input names the new tag at the head; on the merge base it names the old one."
-    command: "grep -q 'omnibase-core-ref: dev-20261118030813-4f0a188ab62c' .github/workflows/ci.yml"
+    command: "grep -q 'omnibase-core-ref: dev-20261125040409-050022962f2e' .github/workflows/ci.yml"
 emergency_bypass:
   enabled: false
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-omn25506-ac2-ref-moved"
-    description: "AC2 hosted probe. The dependency-pins job names the tag of omnibase_core#2333; the command fails on the merge base, where the input names dev-20261109032923-9f0af2b9bd43."
+    description: "AC2 hosted probe. The dependency-pins job names the tag of omnibase_core#2367; the command fails on the merge base, where the input names dev-20261109032923-9f0af2b9bd43."
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "grep -q 'omnibase-core-ref: dev-20261118030813-4f0a188ab62c' .github/workflows/ci.yml"
+        check_value: "grep -q 'omnibase-core-ref: dev-20261125040409-050022962f2e' .github/workflows/ci.yml"
         cwd: "."
     binds_ac: ["AC2"]
   - id: "dod-omn25506-ac3-old-ref-gone"
