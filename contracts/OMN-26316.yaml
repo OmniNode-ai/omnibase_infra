@@ -117,6 +117,11 @@ requirements:
     acceptance:
       - id: AC42
         statement: "AC42: with a lazy-start front door recorded, a dormant projection no request has reached leaves projection_attachment HEALTHY and is named on its detail, a dormant projection that was woken without a consumer or whose wake failed and an eager unattached projection each read DEGRADED, and the log names every unattached and every dormant projection past the detail's 8-name cap -- falsifier: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_dormant_projections_omn26316.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (4 of 8 fail: the dormant projection reads unattached, and 4 of 12 unattached names appear nowhere) and passes on the PR branch"
+  - id: req-omn26316-orphan-names-group
+    statement: An abandoned consume-loop dispatch is listed on the health endpoint and in the dispatch_deadline_exceeded log line with the consumer group that holds it, so the handler that never returned can be named from the runtime alone.
+    acceptance:
+      - id: AC44
+        statement: "AC44: the health line and the dispatch_deadline_exceeded line of an abandoned dispatch carry group=<consumer group>, and the orphan count, the limit, the deadline and every health verdict are unchanged -- falsifier: uv run --frozen pytest tests/unit/event_bus/test_orphan_names_consumer_group_omn26316.py -q fails at origin/dev (no group= in either line) and passes on the PR branch"
   - id: req-omn26316-dev-runtime-memory-limit
     statement: The dev main runtime's declared memory limit clears twice the anonymous memory at which h201's kernel OOM-killed it at the join limit of 16, so its boot does not loop on the restart policy.
     acceptance:
@@ -162,6 +167,9 @@ evidence_requirements:
   - kind: tests
     description: The monitor driven through the real boot split and a real front door (carried over from omnibase_infra#6198) reads a dormant projection HEALTHY, the same manifest without lazy start DEGRADED, and a woken projection that lost a subscription DEGRADED.
     command: uv run --frozen pytest tests/integration/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The abandoned dispatch names its consumer group on the health line and in the deadline log line, recorded from the 2026-11-25 lab runtime-tick orphans at offsets 744130 and 747729.
+    command: uv run --frozen pytest tests/unit/event_bus/test_orphan_names_consumer_group_omn26316.py -q --no-cov -n 0 -p no:randomly
   - kind: tests
     description: The dev main memory limit against the recorded h201 OOM kill floor.
     command: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
@@ -465,6 +473,17 @@ dod_evidence:
         cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-orphan-names-group
+    description: "The two runtime-tick orphans read on a lab runtime at 2026-11-25T01:33Z carried only a random subscription id (343315bd-7a23-4192-805f-8d212f7962f3), so the handler could not be named. The two new tests fail at origin/dev (no group= in the health line or the deadline log line) and pass on the branch together with the existing dispatch deadline tests."
+    source: manual
+    binds_ac: [AC44]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_orphan_names_consumer_group_omn26316.py tests/unit/event_bus/test_omn19355_dispatch_deadline.py tests/unit/event_bus/test_omn20464_orphan_degraded_grace.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/event_bus/test_orphan_names_group_consume_loop_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26316-dev-runtime-memory-limit
     description: "The declared dev main memory limit is at least 2x the 3,044 MiB anonymous memory recorded at the kernel OOM kill on h201; the control shows the recorded 3 GiB limit sits under that floor."
