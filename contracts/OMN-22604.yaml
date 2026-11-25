@@ -43,3 +43,50 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC3
+  - id: dod-omn22604-ac1-accepted-20261125t0545z
+    description: 'AC1: a job-worker target, an unfinished job in the listener log, an unreadable docker top and an offline target with a worker each exit non-zero, never reach compose up, and report left running and untouched. Accepted by a second lane from a re-run at omnibase_infra origin/dev 3a527226a (4 passed); the same selector fails 4 of 4 against the parent script 43b288699 and with the fix reverted at dev.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "tests/ci/test_deploy_runners_add_idle_omn22478.py::test_a_target_that_may_be_mid_job_is_left_running_and_untouched" -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn22604-ac2-accepted-20261125t0545z
+    description: 'AC2: with no supplied token --add exits non-zero naming DEPLOY_RUNNER_TOKEN and registration-token before any ssh or rsync, and no gh call carries --method POST, in both the normal and the dry run. Accepted by a second lane from a re-run at omnibase_infra origin/dev 3a527226a (2 passed); the normal case fails against the parent script 43b288699, which fetches a registration token.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "tests/ci/test_deploy_runners_add_idle_omn22478.py::test_no_supplied_token_refuses_before_any_remote_action_and_mints_nothing" -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC2
+  - id: dod-omn22604-ac3-accepted-20261125t0545z
+    description: 'AC3: every rolling preflight test passes. Accepted by a second lane from a re-run at omnibase_infra origin/dev 3a527226a (15 passed); with the fix reverted at dev the file errors on the tokenless CLI refusal replay.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_deploy_runners_registration_preflight.py -q -n 0 --no-cov
+        cwd: .
+    binds_ac:
+      - AC3
+context:
+  ac_binding_provenance:
+    dod-omn22604-ac1-accepted-20261125t0545z:
+      - label: AC1
+        criterion_hash: 356ed5594fbeac2fb1bfea0cf09947c25e25408415833d88e80de5223297142f
+        proposed_by: lane=dod-closeout-bind-2026-11-25T0545Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-25T0545Z-c3
+        accepted_at: '2026-11-25T06:12:42Z'
+    dod-omn22604-ac2-accepted-20261125t0545z:
+      - label: AC2
+        criterion_hash: 8e075fb0bad194ac40494243a6ee0603522a8ed5baee157da5193d575aba1058
+        proposed_by: lane=dod-closeout-bind-2026-11-25T0545Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-25T0545Z-c3
+        accepted_at: '2026-11-25T06:12:42Z'
+    dod-omn22604-ac3-accepted-20261125t0545z:
+      - label: AC3
+        criterion_hash: e594866f91da09fd8101ad91f3e942cef2b512fd4692655e8ad1880545804fd6
+        proposed_by: lane=dod-closeout-bind-2026-11-25T0545Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-25T0545Z-c3
+        accepted_at: '2026-11-25T06:12:42Z'
