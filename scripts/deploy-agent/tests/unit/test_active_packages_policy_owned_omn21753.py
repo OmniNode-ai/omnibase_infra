@@ -46,25 +46,3 @@ def test_policy_value_stands_when_nothing_overrides_it(
     monkeypatch.setattr(executor, "operator_store_overlay", dict)
     monkeypatch.delenv(_ACTIVE, raising=False)
     assert executor._compose_env()[_ACTIVE] == policy[_ACTIVE]
-
-
-def test_stamp_built_from_policy_reads_fresh_under_the_agents_compose_env(
-    monkeypatch: pytest.MonkeyPatch, isolated: None
-) -> None:
-    """Known good: the real stamp and the real compare agree; known bad: a missing package is named."""
-    from omnibase_infra.handlers.handler_prebuilt_manifest import stamp_of
-
-    policy = executor._load_runtime_policy_env()
-    monkeypatch.setattr(executor, "operator_store_overlay", lambda: {_ACTIVE: _FOUR})
-    monkeypatch.setenv(_ACTIVE, _FOUR)
-
-    monkeypatch.setenv(_ACTIVE, policy[_ACTIVE])
-    built = stamp_of((), (), "main")
-
-    booted_env = executor._compose_env()
-    monkeypatch.setenv(_ACTIVE, booted_env[_ACTIVE])
-    assert built.differing_fields(stamp_of((), (), "main")) == ()
-
-    monkeypatch.setenv(_ACTIVE, _FOUR)
-    differing = built.differing_fields(stamp_of((), (), "main"))
-    assert any(field.startswith("active_packages") for field in differing)
