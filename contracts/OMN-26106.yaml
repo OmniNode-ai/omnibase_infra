@@ -22,6 +22,11 @@ context:
         criterion_hash: c9e012f99e3a3b5fe8ba22844ef803683138ae9da73dc4b2a5289a0a78599760
         proposed_by: lane=dod-closeout-bind-2026-11-25T0545Z-c0
         accepted_by: lane=dod-closeout-accept-2026-11-25T0545Z-c0
+    dod-omn26106-ac3-accepted-hosted-20261125t0545z:
+      - label: AC3
+        criterion_hash: c9e012f99e3a3b5fe8ba22844ef803683138ae9da73dc4b2a5289a0a78599760
+        proposed_by: lane=dod-closeout-bind-2026-11-25T0545Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-25T0545Z-c0
 requirements:
   - id: req-omn26106-gate-requester
     statement: Every caller of the deploy agent's recreate window gate passes a non-empty requested_by, and a bare call cannot return.
@@ -123,6 +128,15 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: ssh omni-201 's=deploy-agent-dev.service; systemctl --user is-active $s && now=$(date +%s) && ent=$(date -d "$(systemctl --user show -p ActiveEnterTimestamp --value $s)" +%s) && echo active_for_s=$((now-ent)) nrestarts=$(systemctl --user show -p NRestarts --value $s) && test $((now-ent)) -ge 600 && curl -sS -m5 -o /dev/null -w '\''health_http=%{http_code}\n'\'' http://127.0.0.1:8098/health'
+        cwd: .
+    binds_ac:
+      - AC3
+  - id: dod-omn26106-ac3-accepted-hosted-20261125t0545z
+    description: 'AC3, hosted structural proof: the stability follow, which raised the journal ValidationError on every idle tick on the dev host, names its requester to the real recreate window and completes without raising. Fails with the product change of omnibase_infra#6100 reverted. The live read on h201 is the local-gate item above.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_idle_gate_requester_omn26106.py -q -k stability_follow_names_its_requester
         cwd: .
     binds_ac:
       - AC3
