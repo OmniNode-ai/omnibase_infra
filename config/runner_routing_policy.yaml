@@ -868,6 +868,38 @@ hosted_runner_allowlist:
     reason: "OMN-22867: a scheduled, dispatched and reusable workflow that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
   - path: .github/workflows/compose-config-lint.yml
     reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/omni-standards-compliance.yml
+    reason: "OMN-22867: the jobs ci-naming-convention, handler-contract-compliance, omni-standards-gate, type-safety and type-union-check are static gates that touch no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label."
+  - path: .github/workflows/auto-merge.yml
+    reason: "OMN-22867: the job(s) auto-merge touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/auto-tag-on-merge.yml
+    reason: "OMN-22867: the job(s) auto-tag touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/docker-build.yml
+    reason: "OMN-22867: the job(s) build-summary, dockerfile-pin-check, domain-adapter-proof, image-analysis, security-scan touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/hostile-reviewer.yml
+    reason: "OMN-22867: the job(s) hostile-review-gate, hostile-review-thread-gate touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/lane-census-parity.yml
+    reason: "OMN-22867: the job(s) lab-overlay-tests touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/lane-census-staleness.yml
+    reason: "OMN-22867: the job(s) lane-census-staleness touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/nightly-integration.yml
+    reason: "OMN-22867: the job(s) notify-on-failure touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/probe-placement-drift-reusable.yml
+    reason: "OMN-22867: the job(s) drift touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/product-readiness-shadow.yml
+    reason: "OMN-22867: the job(s) lint-shadow, reason-graph, tests-shadow, typecheck-shadow touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/release.yml
+    reason: "OMN-22867: the job(s) post-release-checks, post-release-dev-bump, release, sync-main, trigger-runtime-rebuild touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/release-train-nightly.yml
+    reason: "OMN-22867: the job(s) cut, decide touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/runner-image-build-smoke.yml
+    reason: "OMN-22867: the job(s) runner-image-multiarch-smoke touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/runtime-rebuild-trigger.yml
+    reason: "OMN-22867: the job(s) rerun-refused-deliveries touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/runtime-rebuild-trigger-reusable.yml
+    reason: "OMN-22867: the job(s) deliver-sibling-candidate touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
+  - path: .github/workflows/sibling-lock-refresh.yml
+    reason: "OMN-22867: the job(s) refresh touch no lab service (GitHub API, registry or release work only). This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so those jobs are pinned to a literal GitHub-hosted label; any other job in this file still routes through its selector."
   - path: .github/workflows/delegation-consumer-kwarg-parity.yml
     reason: "OMN-22867: a static gate that touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so every job is pinned to a literal GitHub-hosted label."
   - path: .github/workflows/dispatch-parity-gate.yml

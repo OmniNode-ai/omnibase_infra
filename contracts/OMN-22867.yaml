@@ -34,6 +34,13 @@ requirements:
         statement: 'AC6: Every job of the 9 static gate workflows selects the literal ubuntu-latest and each file is in hosted_runner_allowlist with a reason -- falsifier: uv run pytest tests/ci/test_public_runner_family_static_omn22867.py -q -o addopts='''''
       - id: AC7
         statement: 'AC7: The runner-routing audit stays green with the static gates hosted -- falsifier: uv run pytest tests/ci/test_public_runner_family_static_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts='''''
+  - id: req-omn22867-family4-hosted
+    statement: Each lab-free job of the listed workflows selects only the GitHub-hosted label and its file is allowlisted with a reason.
+    acceptance:
+      - id: AC8
+        statement: 'AC8: Each of the 34 named lab-free jobs selects the literal ubuntu-latest and each of their files is in hosted_runner_allowlist with a reason -- falsifier: uv run pytest tests/ci/test_public_runner_family_hosted_omn22867.py -q -o addopts='''''
+      - id: AC9
+        statement: 'AC9: The runner-routing audit stays green with those jobs hosted -- falsifier: uv run pytest tests/ci/test_public_runner_family_hosted_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts='''''
 evidence_requirements:
   - kind: tests
     description: Workflow shape test of the family and the routing audit tests.
@@ -44,6 +51,9 @@ evidence_requirements:
   - kind: tests
     description: Workflow shape test of family 3 and the routing audit tests.
     command: uv run pytest tests/ci/test_public_runner_family_static_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
+  - kind: tests
+    description: Workflow shape test of the lab-free jobs and the routing audit tests.
+    command: uv run pytest tests/ci/test_public_runner_family_hosted_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
 emergency_bypass:
   enabled: false
   justification: ''
@@ -138,4 +148,22 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/handlers/test_git_staged_paths_integration.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22867-ac8-family-hosted-jobs
+    description: Each of the 34 lab-free jobs selects ubuntu-latest and each of their files is allowlisted with a reason.
+    source: manual
+    binds_ac:
+      - AC8
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_hosted_omn22867.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22867-ac9-routing-audit-hosted-jobs
+    description: The routing audit controls pass beside the hosted-jobs test.
+    source: manual
+    binds_ac:
+      - AC9
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_family_hosted_omn22867.py tests/ci/test_runner_routing_audit.py -q -o addopts=''
         cwd: ${OMNI_HOME}/omnibase_infra
