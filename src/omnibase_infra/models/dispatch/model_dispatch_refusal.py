@@ -13,21 +13,24 @@ honors as the embedded output topic.
 
 from __future__ import annotations
 
-import threading
-from typing import Any, Literal
-from uuid import UUID
-
-from pydantic import BaseModel, ConfigDict, Field
+from typing import TYPE_CHECKING
 
 from omnibase_core.enums import EnumCoreErrorCode, EnumDispatchStatus
-from omnibase_core.models.errors import ModelOnexError
 from omnibase_infra.enums import EnumDlqFailureClass
+from omnibase_infra.models.dispatch.model_failure_terminal_bindings import (
+    ModelFailureTerminalBindings,
+)
+from omnibase_infra.models.dispatch.model_no_dispatcher_refusal import (
+    ModelNoDispatcherRefusal,
+)
 from omnibase_infra.utils import sanitize_error_message
 
+if TYPE_CHECKING:
+    from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import (
+        ModelDiscoveredContract,
+    )
+
 __all__ = [
-    "ModelFailureTerminalBindings",
-    "ModelMalformedCommandTerminal",
-    "ModelNoDispatcherRefusal",
     "PARTIAL_STATUSES",
     "bind_contract_failure_terminal",
     "select_dispatch_result_output_topic",
@@ -41,35 +44,6 @@ _VALIDATION_DETAIL_MAX_LENGTH = 500
 PARTIAL_STATUSES = frozenset(
     {EnumDispatchStatus.HANDLER_ERROR, EnumDispatchStatus.NO_DISPATCHER}
 )
-
-
-class ModelMalformedCommandTerminal(BaseModel):
-    """Typed terminal for a publisher-malformed command."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
-
-    topic: str = Field(..., min_length=1, description="Declared failure topic.")
-    correlation_id: UUID = Field(..., description="Correlation of the refused command.")
-    workflow_id: str = Field(
-        default="", description="Workflow id carried by the command; empty if none."
-    )
-    status: Literal["failed"] = Field(default="failed")
-    failure_class: Literal["publisher_malformed"] = Field(default="publisher_malformed")
-    failure_code: str | None = Field(default=None)
-    retryable: Literal[False] = Field(default=False)
-    failure_reason: str = Field(..., description="Sanitized validation detail.")
-    origin_topic: str = Field(..., description="Command topic that was refused.")
-
-
-class ModelNoDispatcherRefusal(BaseModel):
-    """Why the engine found no dispatcher for a message (OMN-14492)."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    failure_class: EnumDlqFailureClass
-    error_code: EnumCoreErrorCode
-    error_message: str
-    validation_detail: str | None = None
 
 
 def classify_no_dispatcher_refusal(
@@ -111,76 +85,9 @@ def classify_no_dispatcher_refusal(
     )
 
 
-class ModelFailureTerminalBindings:
-    """Injected command topic -> declared failure topic map (OMN-26026).
-
-    Bound at wiring time, before the engine freezes. A topic with no binding
-    keeps the DLQ-only behavior.
-    """
-
-    def __init__(self) -> None:
-        self._topics: dict[str, str] = {}
-        self._frozen = False
-        self._lock = threading.Lock()
-
-    def bind(self, *, command_topic: str, failure_topic: str) -> None:
-        """Bind one command topic to its failure topic; refused once frozen."""
-        if not command_topic.strip() or not failure_topic.strip():
-            raise ModelOnexError(
-                message="failure terminal binding requires non-empty topics",
-                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
-            )
-        with self._lock:
-            if self._frozen:
-                raise ModelOnexError(
-                    message="Cannot bind failure terminal: engine is frozen.",
-                    error_code=EnumCoreErrorCode.INVALID_STATE,
-                )
-            self._topics[command_topic] = failure_topic
-
-    @property
-    def is_frozen(self) -> bool:
-        """Whether further bindings are refused."""
-        return self._frozen
-
-    def freeze(self) -> None:
-        """Refuse further bindings."""
-        with self._lock:
-            self._frozen = True
-
-    def answer(
-        self,
-        *,
-        topic: str,
-        refusal: ModelNoDispatcherRefusal,
-        correlation_id: UUID,
-        payload: object,
-    ) -> list[BaseModel]:
-        """Return the typed terminal for a malformed command, else no events."""
-        failure_topic = self._topics.get(topic)
-        if (
-            failure_topic is None
-            or refusal.failure_class is not EnumDlqFailureClass.PUBLISHER_MALFORMED
-        ):
-            return []
-        raw = (
-            payload.get("workflow_id")
-            if isinstance(payload, dict)
-            else getattr(payload, "workflow_id", None)
-        )
-        return [
-            ModelMalformedCommandTerminal(
-                topic=failure_topic,
-                correlation_id=correlation_id,
-                workflow_id="" if raw is None else str(raw),
-                failure_code=refusal.error_code.value,
-                failure_reason=refusal.error_message,
-                origin_topic=topic,
-            )
-        ]
-
-
-def select_dispatch_result_output_topic(contract: Any) -> str | None:
+def select_dispatch_result_output_topic(
+    contract: ModelDiscoveredContract,
+) -> str | None:
     """Choose the fallback output topic for generic dispatch results.
 
     Prefer the contract's declared terminal_event when it is also publishable.
@@ -197,7 +104,9 @@ def select_dispatch_result_output_topic(contract: Any) -> str | None:
 
 
 def bind_contract_failure_terminal(
-    dispatch_engine: object, contract: Any, failure_topics: tuple[str, ...]
+    dispatch_engine: object,
+    contract: ModelDiscoveredContract,
+    failure_topics: tuple[str, ...],
 ) -> None:
     """Bind a contract's subscribe topics to its single declared failure topic.
 
@@ -208,7 +117,7 @@ def bind_contract_failure_terminal(
     bindings = getattr(dispatch_engine, "failure_terminals", None)
     if not isinstance(bindings, ModelFailureTerminalBindings) or bindings.is_frozen:
         return
-    if len(failure_topics) != 1:
+    if len(failure_topics) != 1 or contract.event_bus is None:
         return
     for command_topic in contract.event_bus.subscribe_topics:
         bindings.bind(command_topic=command_topic, failure_topic=failure_topics[0])

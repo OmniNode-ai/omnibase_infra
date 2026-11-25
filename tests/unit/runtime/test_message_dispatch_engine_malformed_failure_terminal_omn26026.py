@@ -22,7 +22,7 @@ from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRout
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.models.dispatch.model_dispatch_refusal import (
+from omnibase_infra.models.dispatch.model_malformed_command_terminal import (
     ModelMalformedCommandTerminal,
 )
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine

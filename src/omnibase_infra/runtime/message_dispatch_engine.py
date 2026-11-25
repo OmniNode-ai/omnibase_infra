@@ -179,12 +179,14 @@ from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchM
 from omnibase_infra.models.dispatch.model_dispatch_outcome import ModelDispatchOutcome
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
 from omnibase_infra.models.dispatch.model_dispatch_refusal import (
-    ModelFailureTerminalBindings,
     classify_no_dispatcher_refusal,
 )
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
     ModelDispatcherMetrics,
+)
+from omnibase_infra.models.dispatch.model_failure_terminal_bindings import (
+    ModelFailureTerminalBindings,
 )
 from omnibase_infra.models.dispatch.model_materialized_dispatch import (
     ModelMaterializedDispatch,
