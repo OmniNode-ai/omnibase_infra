@@ -112,6 +112,11 @@ requirements:
     acceptance:
       - id: AC44
         statement: "AC44: three queued commands requested by agent/overdue-dev-merge-build (scope runtime, rollback actor the same) for dev run as one build with two superseded, while an operator's rollback still ends the group and an overdue command never folds into a full-scope build -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_overdue_requests_coalesce_omn26316.py fails at origin/dev (three builds run) and passes on the PR branch"
+  - id: req-omn26316-one-overdue-request-per-check
+    statement: One overdue check asks for one build of the current dev head, which carries every overdue merge, and never asks for a head the running build already contains.
+    acceptance:
+      - id: AC45
+        statement: "AC45: three overdue merges give one build command for the dev head in one check and none in the next, and a head contained in the newest successful dev job's built sha gives none -- falsifier: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_one_request_omn26316.py fails at origin/dev (a command per merge, none withheld for a contained head) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -444,4 +449,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_overdue_requests_coalesce_omn26316.py scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26316-one-overdue-request-per-check
+    description: "Recorded 2026-11-25: the overdue check asked for 3a527226 (07:15:07Z), c0622a1d (07:28:59Z), 5be4cfa4 (07:42:13Z) and 4f27dcfa (07:54:36Z), each at ref f553b1d6. Both tests of the file fail at origin/dev and pass on the branch."
+    source: manual
+    binds_ac: [AC45]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_one_request_omn26316.py tests/unit/handlers/test_dev_merge_build_publish_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
