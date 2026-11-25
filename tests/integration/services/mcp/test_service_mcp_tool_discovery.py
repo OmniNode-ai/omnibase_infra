@@ -25,8 +25,11 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.models.contracts.model_contract_mcp_config import (
+    ModelContractMcpConfig,
+)
+from omnibase_core.models.contracts.model_contract_mcp_tool import ModelContractMcpTool
 from omnibase_infra.enums import EnumRegistrationState
-from omnibase_infra.models.mcp.model_mcp_contract_config import ModelMCPContractConfig
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
@@ -42,22 +45,36 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
+def _make_tool_entry(
+    tool_name: str, description: str, timeout: int
+) -> ModelContractMcpTool:
+    """Build one valid ``mcp.tools`` entry."""
+    return ModelContractMcpTool(
+        tool_name=tool_name,
+        description=description,
+        timeout_seconds=timeout,
+        input_model="pkg.models.ModelToolInput",
+        output_model="pkg.models.ModelToolOutput",
+        command_topic="onex.cmd.platform.tool-run.v1",
+        completed_topic="onex.evt.platform.tool-run-completed.v1",
+        failed_topic="onex.evt.platform.tool-run-failed.v1",
+    )
+
+
 def _make_projection(
     node_type: str = "orchestrator_generic",
     mcp_expose: bool = True,
-    tool_name: str | None = "test_tool",
-    description: str | None = "Test tool description",
+    tool_name: str = "test_tool",
+    description: str = "Test tool description",
     timeout: int = 30,
     state: EnumRegistrationState = EnumRegistrationState.ACTIVE,
 ) -> MagicMock:
     """Build a mock ModelRegistrationProjection with MCP metadata."""
 
     mcp_config = (
-        ModelMCPContractConfig(
-            expose=mcp_expose,
-            tool_name=tool_name,
-            description=description,
-            timeout_seconds=timeout,
+        ModelContractMcpConfig(
+            expose=True,
+            tools=[_make_tool_entry(tool_name, description, timeout)],
         )
         if mcp_expose
         else None
@@ -161,7 +178,7 @@ class TestDiscoverAll:
         """Should skip nodes where mcp.expose=False."""
         proj = _make_projection(node_type="orchestrator_generic", mcp_expose=False)
         proj.capabilities = ModelNodeCapabilities(
-            mcp=ModelMCPContractConfig(expose=False)
+            mcp=ModelContractMcpConfig(expose=False)
         )
         reader = MagicMock()
         reader.get_by_capability_tag = AsyncMock(return_value=[proj])
@@ -183,12 +200,17 @@ class TestDiscoverAll:
 
         assert tools == []
 
-    async def test_discover_all_falls_back_tool_name_to_entity_id(self) -> None:
-        """Should fall back to str(entity_id) when mcp.tool_name is None."""
-        proj = _make_projection(
-            node_type="orchestrator_generic",
-            mcp_expose=True,
-            tool_name=None,
+    async def test_discover_all_lists_one_tool_per_entry(self) -> None:
+        """Should list every ``mcp.tools`` entry of one node."""
+        proj = _make_projection(node_type="orchestrator_generic", tool_name="op_a")
+        proj.capabilities = ModelNodeCapabilities(
+            mcp=ModelContractMcpConfig(
+                expose=True,
+                tools=[
+                    _make_tool_entry("op_a", "First op.", 30),
+                    _make_tool_entry("op_b", "Second op.", 15),
+                ],
+            )
         )
         reader = MagicMock()
         reader.get_by_capability_tag = AsyncMock(return_value=[proj])
@@ -196,8 +218,7 @@ class TestDiscoverAll:
         svc = ServiceMCPToolDiscovery(reader)
         tools = await svc.discover_all()
 
-        assert len(tools) == 1
-        assert tools[0].name == str(proj.entity_id)
+        assert {t.name: t.timeout_seconds for t in tools} == {"op_a": 30, "op_b": 15}
 
     async def test_discover_all_warns_on_empty_registry(
         self,
@@ -335,33 +356,17 @@ class TestDiscoverAll:
 
 
 @pytest.mark.integration
-class TestProjectionToTool:
-    """Tests for ServiceMCPToolDiscovery._projection_to_tool() edge cases."""
+class TestProjectionToTools:
+    """Tests for ServiceMCPToolDiscovery._projection_to_tools() edge cases."""
 
-    def test_returns_none_for_non_projection_object(self) -> None:
-        """Should return None for non-ModelRegistrationProjection objects."""
+    def test_returns_empty_for_non_projection_object(self) -> None:
+        """Should return no tools for non-ModelRegistrationProjection objects."""
         reader = MagicMock()
         svc = ServiceMCPToolDiscovery(reader)
 
-        result = svc._projection_to_tool("not a projection", uuid4())
+        result = svc._projection_to_tools("not a projection", uuid4())
 
-        assert result is None
-
-    def test_description_falls_back_to_generated(self) -> None:
-        """Should generate description when mcp.description is None."""
-        proj = _make_projection(
-            node_type="orchestrator_generic",
-            mcp_expose=True,
-            tool_name="my_tool",
-            description=None,
-        )
-        reader = MagicMock()
-        svc = ServiceMCPToolDiscovery(reader)
-
-        tool = svc._projection_to_tool(proj, uuid4())
-
-        assert tool is not None
-        assert "ONEX orchestrator" in tool.description
+        assert result == []
 
 
 @pytest.mark.integration
@@ -388,9 +393,10 @@ class TestMCPWrapperOrchestratorSatisfiesGate:
         reader = MagicMock()
         svc = ServiceMCPToolDiscovery(reader)
 
-        tool = svc._projection_to_tool(proj, uuid4())
+        tools = svc._projection_to_tools(proj, uuid4())
 
-        assert tool is not None
+        assert len(tools) == 1
+        tool = tools[0]
         assert tool.name == "node_sentiment_classifier"
         assert tool.description == "Classify customer review sentiment."
 
@@ -405,6 +411,6 @@ class TestMCPWrapperOrchestratorSatisfiesGate:
         reader = MagicMock()
         svc = ServiceMCPToolDiscovery(reader)
 
-        tool = svc._projection_to_tool(proj, uuid4())
+        tools = svc._projection_to_tools(proj, uuid4())
 
-        assert tool is None
+        assert tools == []

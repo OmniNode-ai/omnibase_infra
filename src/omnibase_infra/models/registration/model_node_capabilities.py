@@ -16,9 +16,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.models.contracts.model_contract_mcp_config import (
+    ModelContractMcpConfig,
+)
 from omnibase_core.models.core.model_feature_flags import ModelFeatureFlags
 from omnibase_core.types import JsonType
-from omnibase_infra.models.mcp.model_mcp_contract_config import ModelMCPContractConfig
 
 
 class ModelNodeCapabilities(BaseModel):
@@ -106,7 +108,7 @@ class ModelNodeCapabilities(BaseModel):
 
     # MCP configuration for exposing node as AI agent tool
     # Only valid for ORCHESTRATOR nodes - ignored for other node types
-    mcp: ModelMCPContractConfig | None = Field(
+    mcp: ModelContractMcpConfig | None = Field(
         default=None,
         description="MCP configuration for exposing node as AI agent tool. "
         "Only valid for ORCHESTRATOR_GENERIC nodes.",

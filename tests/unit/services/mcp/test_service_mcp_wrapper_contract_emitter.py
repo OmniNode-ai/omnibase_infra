@@ -100,8 +100,22 @@ class TestWrapperContractEmitter:
         wrapper = yaml.safe_load(emission.wrapper_contract_yaml)
 
         assert wrapper["mcp"]["expose"] is True
-        assert wrapper["mcp"]["tool_name"] == "node_sentiment_classifier"
-        assert wrapper["mcp"]["description"] == "Classify customer review sentiment."
+        (entry,) = wrapper["mcp"]["tools"]
+        assert entry["tool_name"] == "node_sentiment_classifier"
+        assert entry["description"] == "Classify customer review sentiment."
+
+    def test_wrapper_mcp_block_validates_against_core_model(
+        self, spec: ModelGeneratedComputeNodeSpec
+    ) -> None:
+        from omnibase_core.models.contracts.model_contract_mcp_config import (
+            ModelContractMcpConfig,
+        )
+
+        emission = ServiceMCPWrapperContractEmitter().emit(spec)
+        wrapper = yaml.safe_load(emission.wrapper_contract_yaml)
+
+        config = ModelContractMcpConfig.model_validate(wrapper["mcp"])
+        assert [t.tool_name for t in config.tools] == ["node_sentiment_classifier"]
 
     def test_wrapper_routes_to_compute_handler(
         self, spec: ModelGeneratedComputeNodeSpec

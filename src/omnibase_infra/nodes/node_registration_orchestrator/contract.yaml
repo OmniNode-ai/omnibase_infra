@@ -52,9 +52,15 @@ description: "Registration workflow orchestrator that coordinates node lifecycle
 # Exposes this orchestrator as an AI-invocable tool via MCP server
 mcp:
   expose: true
-  tool_name: "register_node"
-  description: "Register a new ONEX node with the cluster. Handles Consul service registration and PostgreSQL metadata storage. Returns registration status and assigned service ID."
-  timeout_seconds: 30
+  tools:
+    - tool_name: "register_node"
+      description: "Register a new ONEX node with the cluster. Handles Consul service registration and PostgreSQL metadata storage. Returns registration status and assigned service ID."
+      timeout_seconds: 30
+      input_model: "omnibase_infra.nodes.node_registration_orchestrator.models.ModelOrchestratorInput"
+      output_model: "omnibase_infra.nodes.node_registration_orchestrator.models.ModelOrchestratorOutput"
+      command_topic: "onex.evt.platform.node-introspection.v1"
+      completed_topic: "onex.evt.platform.node-registration-result.v1"
+      failed_topic: "onex.evt.platform.node-registration-rejected.v1"
 # Event Bus Subcontract
 # =====================
 # Canonical runtime-enforced declaration of event subscriptions and publications.

@@ -25,9 +25,15 @@ Contract-driven discovery:
 
         mcp:
           expose: true
-          tool_name: "register_node"
-          description: "Register a new ONEX node with the cluster."
-          timeout_seconds: 30
+          tools:
+            - tool_name: "register_node"
+              description: "Register a new ONEX node with the cluster."
+              timeout_seconds: 30
+              input_model: "pkg.models.ModelRegisterInput"
+              output_model: "pkg.models.ModelRegisterOutput"
+              command_topic: "<canonical command topic suffix>"
+              completed_topic: "<canonical completed topic suffix>"
+              failed_topic: "<canonical failed topic suffix>"
 """
 
 from __future__ import annotations
@@ -41,7 +47,11 @@ from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID, uuid4
 
 import yaml
+from pydantic import ValidationError
 
+from omnibase_core.models.contracts.model_contract_mcp_config import (
+    ModelContractMcpConfig,
+)
 from omnibase_infra.adapters.adapter_onex_tool_execution import (
     PAYMENT_REFUSED_MESSAGE,
     AdapterONEXToolExecution,
@@ -60,6 +70,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+    from omnibase_core.models.contracts.model_contract_mcp_tool import (
+        ModelContractMcpTool,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -217,11 +230,13 @@ class ONEXToMCPAdapter:
 
         1. Load contract YAML; skip unparseable files with a warning.
         2. Skip contracts where ``mcp.expose`` is absent or falsy.
-        3. Resolve ``tool_name`` → ``mcp.tool_name`` or ``name`` or file stem.
-        4. Resolve ``description`` → ``mcp.description`` or top-level
-           ``description``.
-        5. Load the Pydantic input model declared in ``input_model.name`` +
-           ``input_model.module``; derive JSON schema via
+        3. Validate the ``mcp`` block against ``ModelContractMcpConfig``; a
+           block that fails (an old single-tool block included) is refused
+           with a warning.
+        4. Register one tool per ``mcp.tools`` entry, named by its
+           ``tool_name`` and described by its ``description``.
+        5. Load the Pydantic input model named by the entry's dotted
+           ``input_model`` path; derive JSON schema via
            :meth:`pydantic_to_json_schema`.  Falls back to
            ``{"type": "object"}`` on import errors.
         6. Derive ``endpoint`` from Consul registration metadata when available;
@@ -314,12 +329,30 @@ class ONEXToMCPAdapter:
             # mcp.expose absent or False — silently ignore
             return
 
-        # --- Derive tool name ---
-        tool_name: str = (
-            str(mcp_section["tool_name"])
-            if mcp_section.get("tool_name")
-            else str(raw.get("name", contract_path.parent.name))
-        )
+        # An old single-tool block fails here: the model forbids its keys.
+        try:
+            mcp_config = ModelContractMcpConfig.model_validate(mcp_section)
+        except ValidationError as exc:
+            logger.warning(
+                "Skipping contract: invalid mcp block",
+                extra={
+                    "contract_path": str(contract_path),
+                    "error": str(exc),
+                },
+            )
+            return
+
+        for entry in mcp_config.tools:
+            self._register_tool_entry(raw, entry, contract_path)
+
+    def _register_tool_entry(
+        self,
+        raw: dict[str, object],
+        entry: ModelContractMcpTool,
+        contract_path: Path,
+    ) -> None:
+        """Register one ``mcp.tools`` entry of a contract as a tool definition."""
+        tool_name = entry.tool_name
 
         # --- Skip if already in cache (manual registration wins) ---
         if tool_name in self._tool_cache:
@@ -332,25 +365,9 @@ class ONEXToMCPAdapter:
             )
             return
 
-        # --- Derive description ---
-        description: str = str(
-            mcp_section.get("description") or raw.get("description", "")
-        ).strip()
-
-        # --- Derive timeout ---
-        timeout_raw = mcp_section.get("timeout_seconds", 30)
-        timeout_seconds: int = int(timeout_raw) if isinstance(timeout_raw, int) else 30
-
-        # --- Derive input schema from Pydantic model ---
-        input_schema: dict[str, object] = {"type": "object"}
-        input_model_section = raw.get("input_model")
-        if isinstance(input_model_section, dict):
-            model_name = input_model_section.get("name")
-            model_module = input_model_section.get("module")
-            if model_name and model_module:
-                input_schema = self._resolve_input_schema(
-                    str(model_name), str(model_module)
-                )
+        # --- Derive input schema from the entry's Pydantic input model ---
+        model_module, _, model_name = entry.input_model.rpartition(".")
+        input_schema = self._resolve_input_schema(model_name, model_module)
 
         # --- Extract parameters from schema ---
         parameters = self.extract_parameters_from_schema(input_schema)
@@ -358,11 +375,11 @@ class ONEXToMCPAdapter:
         tool = MCPToolDefinition(
             name=tool_name,
             tool_type="function",
-            description=description,
+            description=entry.description.strip(),
             version=str(raw.get("node_version", "1.0.0")),
             parameters=parameters,
             execution_endpoint="",  # Consul endpoint resolved at invocation time
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=entry.timeout_seconds,
             metadata={
                 "contract_path": str(contract_path),
                 "node_name": str(raw.get("name", "")),
