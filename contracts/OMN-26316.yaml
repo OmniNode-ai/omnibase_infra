@@ -127,6 +127,11 @@ requirements:
     acceptance:
       - id: AC43
         statement: "AC43: the dev main runtime's declared memory_limit is at least twice the 3,044 MiB recorded at the 2026-11-25T02:42:21Z OOM kill, and the rendered runtime-policy.env carries it -- falsifier: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (3072M) and passes on the PR branch"
+  - id: req-omn26316-stale-overdue-refused-at-accept
+    statement: The deploy agent refuses at accept, with no build and a superseded record that gives the reason, a command requested by agent/overdue-dev-merge-build whose ref is at or behind the newest ref it built successfully or origin/dev's head and is in the running build; every other requester, a ref the running build lacks and a lineage the host cannot read keep their behaviour.
+    acceptance:
+      - id: AC49
+        statement: "AC49: the 18 queued overdue commands at f553b1d6 give zero builds and 18 superseded records, an operator's rollback to the same ref and an overdue command for a merge the running build lacks still build, and an unread lineage builds as before -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stale_overdue_refused_at_accept_omn26316.py -q fails at origin/dev (the verdict and the overdue_references input are absent) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -173,6 +178,9 @@ evidence_requirements:
   - kind: tests
     description: The dev main memory limit against the recorded h201 OOM kill floor.
     command: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The stale overdue command refusal at accept, driven through the consumer with 18 queued commands.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stale_overdue_refused_at_accept_omn26316.py -q -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ''
@@ -492,4 +500,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-stale-overdue-refused-at-accept
+    description: "Eighteen queued commands requested by agent/overdue-dev-merge-build at f553b1d6, with the running build and the newest successful job past it, give zero accepted commands and 18 superseded records naming the running ref; an operator rollback to the same ref, an overdue command the running build lacks, unanswered ancestry and an unread running build each build. Three tests fail at origin/dev."
+    source: manual
+    binds_ac: [AC49]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stale_overdue_refused_at_accept_omn26316.py -q -p no:cacheprovider
         cwd: .
