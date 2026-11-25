@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Doctor check for a configured delegation identity."""
 
+import importlib
 from pathlib import Path
 from typing import ClassVar
 
@@ -15,24 +16,42 @@ from omnibase_infra.cli.cli_delegate import (
     read_install_identity,
 )
 from omnibase_infra.doctor.delegation_doctor_support import (
-    GATEWAY_BLOCK_INVALID,
-    GATEWAY_BLOCK_MISSING,
     default_onex_home,
-    gateway_text,
     read_gateway_block,
     render_diagnosis,
     unknown_result,
-)
-from omnibase_infra.doctor.enum_delegation_doctor_fault import (
-    EnumDelegationDoctorFault,
 )
 from omnibase_infra.doctor.model_delegation_diagnosis import (
     ModelDelegationDiagnosis,
 )
 
-_LOCAL_IDENTITY_FIX = "onex local init"
+_NO_IDENTITY_FIX = "onex local init"
 
-_NO_IDENTITY_FIX = _LOCAL_IDENTITY_FIX
+
+def _evaluate_identity(onex_home: Path) -> tuple[ModelDelegationDiagnosis, bool]:
+    module = importlib.import_module(
+        "omnibase_infra.handlers.handler_check_delegation_identity"
+    )
+    try:
+        local_identity = read_install_identity()
+        refusal_cause: BaseException | None = None
+        refusal_detail = ""
+    except DelegateTenantRefusedError as exc:
+        cause: BaseException = exc.__cause__ or exc
+        local_identity = None
+        if isinstance(cause, (ImportError, AttributeError)):
+            refusal_cause = None
+            refusal_detail = ""
+        else:
+            refusal_cause = cause
+            refusal_detail = str(exc)
+    return module.evaluate_identity(
+        onex_home,
+        local_identity,
+        refusal_cause,
+        refusal_detail,
+        read_gateway_block,
+    )
 
 
 class CheckDelegationIdentity(DoctorCheckBase):
@@ -43,79 +62,12 @@ class CheckDelegationIdentity(DoctorCheckBase):
     category: ClassVar[EnumDoctorCategory] = EnumDoctorCategory.SERVICES
 
     def __init__(self, *, onex_home: Path | None = None) -> None:
-        self._onex_home = onex_home if onex_home is not None else default_onex_home()
+        self._onex_home = (
+            onex_home if onex_home is not None else default_onex_home()
+        )
 
     def _evaluate(self) -> tuple[ModelDelegationDiagnosis, bool]:
-        try:
-            local_identity = read_install_identity()
-        except DelegateTenantRefusedError as exc:
-            # The seam raises a refusal both for an unreadable recorded
-            # identity and when omnimarket itself cannot be imported. A missing
-            # module is a deployment detail, not a refusal of a recorded
-            # identity, so only that case collapses to "not configured".
-            if not isinstance(exc.__cause__, (ImportError, AttributeError)):
-                # A recorded-but-corrupt identity stays a refusal; it is not
-                # collapsed into no_identity.
-                return (
-                    ModelDelegationDiagnosis(
-                        fault=None,
-                        detail=str(exc),
-                        fix="",
-                    ),
-                    False,
-                )
-            local_identity = None
-
-        if local_identity is not None:
-            return (
-                ModelDelegationDiagnosis(
-                    fault=None,
-                    detail=f"Delegation identity '{local_identity}' is configured.",
-                    fix="",
-                ),
-                True,
-            )
-
-        # No local identity: keep the gateway identity check available for
-        # cloud setups (D3). Fall through to the legacy gateway block handling.
-        state, block = read_gateway_block(self._onex_home)
-        if state == GATEWAY_BLOCK_INVALID:
-            return (
-                ModelDelegationDiagnosis(
-                    fault=None,
-                    detail="Delegation identity was not judged because config.yaml is unreadable or invalid.",
-                    fix="",
-                ),
-                False,
-            )
-        if state == GATEWAY_BLOCK_MISSING or block is None:
-            return (
-                ModelDelegationDiagnosis(
-                    fault=EnumDelegationDoctorFault.NO_IDENTITY,
-                    detail="No delegation tenant identity is configured on this machine.",
-                    fix=_LOCAL_IDENTITY_FIX,
-                ),
-                True,
-            )
-        tenant_slug = gateway_text(block, "tenant_slug")
-        base_url = gateway_text(block, "base_url")
-        if tenant_slug is None or base_url is None:
-            return (
-                ModelDelegationDiagnosis(
-                    fault=EnumDelegationDoctorFault.NO_IDENTITY,
-                    detail="The gateway block does not declare both tenant_slug and base_url.",
-                    fix=_LOCAL_IDENTITY_FIX,
-                ),
-                True,
-            )
-        return (
-            ModelDelegationDiagnosis(
-                fault=None,
-                detail=f"Delegation identity '{tenant_slug}' is configured for {base_url}.",
-                fix="",
-            ),
-            True,
-        )
+        return _evaluate_identity(self._onex_home)
 
     def diagnose(self) -> ModelDelegationDiagnosis:
         """Return the identity diagnosis without raising."""
