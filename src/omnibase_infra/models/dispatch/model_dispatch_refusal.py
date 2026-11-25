@@ -30,7 +30,6 @@ __all__ = [
     "ModelNoDispatcherRefusal",
     "PARTIAL_STATUSES",
     "bind_contract_failure_terminal",
-    "declared_contract_failure_terminal_topics",
     "select_dispatch_result_output_topic",
     "classify_no_dispatcher_refusal",
 ]
@@ -197,29 +196,9 @@ def select_dispatch_result_output_topic(contract: Any) -> str | None:
     return str(contract.event_bus.publish_topics[0])
 
 
-def declared_contract_failure_terminal_topics(
-    contract: Any, *, success_topic: str
-) -> tuple[str, ...]:
-    """Return the contract's declared FAILURE terminal topics (OMN-15468 AC2).
-
-    A failure terminal is a contract-declared terminal topic that is not the
-    success terminal and is publishable by the contract. Read through the same
-    reader the Pattern B broker's subscription set is built from.
-    """
-    from omnibase_infra.runtime.contract_terminal_events import (
-        declared_failure_terminal_topics,
-    )
-
-    if contract.event_bus is None or not contract.event_bus.publish_topics:
-        return ()
-    return declared_failure_terminal_topics(
-        contract.contract_path,
-        success_topic=success_topic,
-        publishable_topics=contract.event_bus.publish_topics,
-    )
-
-
-def bind_contract_failure_terminal(dispatch_engine: object, contract: Any) -> None:
+def bind_contract_failure_terminal(
+    dispatch_engine: object, contract: Any, failure_topics: tuple[str, ...]
+) -> None:
     """Bind a contract's subscribe topics to its single declared failure topic.
 
     With two or more declared failure terminals there is no basis to choose, so
@@ -229,10 +208,6 @@ def bind_contract_failure_terminal(dispatch_engine: object, contract: Any) -> No
     bindings = getattr(dispatch_engine, "failure_terminals", None)
     if not isinstance(bindings, ModelFailureTerminalBindings) or bindings.is_frozen:
         return
-    failure_topics = declared_contract_failure_terminal_topics(
-        contract,
-        success_topic=select_dispatch_result_output_topic(contract) or "",
-    )
     if len(failure_topics) != 1:
         return
     for command_topic in contract.event_bus.subscribe_topics:

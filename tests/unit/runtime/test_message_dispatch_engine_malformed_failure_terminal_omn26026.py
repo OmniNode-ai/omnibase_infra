@@ -193,7 +193,19 @@ def _wired_engine(tmp_path: Path, text: str) -> MessageDispatchEngine:
         ),
     )
     engine = MessageDispatchEngine()
-    bind_contract_failure_terminal(engine, contract)
+    from omnibase_infra.runtime.contract_terminal_events import (
+        declared_failure_terminal_topics,
+    )
+
+    bind_contract_failure_terminal(
+        engine,
+        contract,
+        declared_failure_terminal_topics(
+            path,
+            success_topic=contract.terminal_event,
+            publishable_topics=contract.event_bus.publish_topics,
+        ),
+    )
     return engine
 
 
