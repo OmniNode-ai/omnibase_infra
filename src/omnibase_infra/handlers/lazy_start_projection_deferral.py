@@ -16,7 +16,7 @@ needs for that dimension: the deferral the boot subscription demand split alread
 grants (OMN-21629) and the complete name lists the capped detail cannot carry.
 
 A dormant projection is deferred only while the front door has neither woken it
-nor recorded a failed wake (``StoreLazyStartDormant.awaiting_first_request``): a
+nor recorded a failed wake (``LazyStartFrontDoor.awaiting_first_request``): a
 woken or failed-to-wake projection is judged by the registry again, like any other.
 """
 
@@ -48,7 +48,10 @@ def awaiting_first_request() -> frozenset[str]:
     # the liveness module that imports this one.
     from omnibase_infra.handlers.lazy_start_boot_split import StoreLazyStartDormant
 
-    return StoreLazyStartDormant.awaiting_first_request()
+    front_door = StoreLazyStartDormant.front_door()
+    # Nothing until the front door exists: a dormant contract nothing can wake yet
+    # is not one that waits by design, so it is never excused from the check.
+    return frozenset() if front_door is None else front_door.awaiting_first_request
 
 
 def without_idle(
