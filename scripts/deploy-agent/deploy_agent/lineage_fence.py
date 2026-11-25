@@ -260,17 +260,17 @@ def decide_lineage(
         ref = resolved = answer_sha
 
     if cmd.rollback is not None:
-        carried = _overdue_carried(
+        overdue = _overdue_carried(
             cmd, ref, read_running_build, contains, overdue_references
         )
-        if carried is not None:
+        if overdue is not None:
             return decision(
                 EnumLineageVerdict.CONTAINED,
                 f"overdue dev merge build at {ref} is in the running build and at or "
                 "behind a ref the lane built or tracks; nothing is left to build",
-                build=carried,
+                build=overdue,
                 resolved=resolved,
-                running=carried,
+                running=overdue,
             )
         return decision(
             EnumLineageVerdict.ROLLBACK_DECLARED,
