@@ -525,3 +525,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_omn26316_deadline_replay_loop.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26316-deadline-quarantine-on-scratch-bus
+    description: "Four dispatch-deadline dead letters of one correlation and one consumer_error dead letter, drained by the real handler over an in-memory scratch bus, give one replayed message (the consumer_error) and four quarantined messages each naming dispatch_deadline_exceeded."
+    source: manual
+    binds_ac: [AC50]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/dlq/test_dlq_deadline_quarantine_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
