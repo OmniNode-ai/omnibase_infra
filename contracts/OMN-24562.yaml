@@ -99,6 +99,11 @@ requirements:
     acceptance:
       - id: AC29
         statement: 'AC29: deploy/lab/machine-principal-bindings.yaml produces onex.evt.omnimarket.credential-revoked.v1 on the dev broker and the committed derived grants carry its WRITE and DESCRIBE rows -- falsifier: the machine supplement test in test_developer_principal_grants_omn19975.py fails without the binding'
+  - id: req-omn24562-summary-poll-running-conclusion
+    statement: CI Summary counts an in-run job whose conclusion is set as completed with that conclusion whatever its status says, and fails closed, naming the job, when a job still has no conclusion a declared time after the last other in-run job completed.
+    acceptance:
+      - id: AC30
+        statement: 'AC30: an in-run job with status in_progress and conclusion success is done and green, in_progress with failure is red, in_progress with no conclusion waits, and a job with no conclusion 45 minutes after the last other job completed is named by the poll step stall filter, and the jobs read pages at 30 then 10 -- falsifier: uv run --frozen pytest tests/ci/test_ci_summary_running_conclusion_omn24562.py -q -n 0 --no-cov fails on the merge-base ci_summary_gate.py'
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -370,4 +375,13 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -k machine_supplement -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac30-summary-poll-running-conclusion
+    description: 'AC30: the CI Summary gate treats an in-run job with a set conclusion as completed and bounds a job with none.'
+    source: manual
+    binds_ac:
+      - AC30
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_ci_summary_running_conclusion_omn24562.py tests/ci/test_ci_summary_gate.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
