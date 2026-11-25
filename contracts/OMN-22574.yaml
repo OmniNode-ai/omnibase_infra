@@ -5,6 +5,13 @@ summary: "The runner-label-exists caller pins the omniclaude reusable at the com
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn22574-ac1-accepted-20261125t0145z:
+      - label: AC1
+        criterion_hash: ad43c810c62ece84e6b512c6ee893ee608b3d01201bc0373caaeaf631e6b2a07
+        proposed_by: lane=dod-closeout-bind-2026-11-25T0145Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-25T0145Z-c3
 requirements:
   - id: req-omn22574-hosted-caller-pin
     statement: A public pull request or merge group in this repository must run the runner-label-exists gate on a GitHub-hosted runner.
@@ -28,3 +35,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_runner_label_exists_caller_hosted_omn22574.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22574-ac1-accepted-20261125t0145z
+    description: "AC1: the caller pins runner-label-exists-reusable.yml at 9a56b9fcee48e5221bfc2ae71b5a82bb9e11a751 (hosted runner). Fails with the caller at the pre-change pin ed4300f8a427ead7f099daf69cedc012907cdbd3 (self-hosted omnibase-ci label)."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_label_exists_caller_hosted_omn22574.py::test_the_caller_pins_the_reusable_commit_that_selects_a_hosted_runner -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
