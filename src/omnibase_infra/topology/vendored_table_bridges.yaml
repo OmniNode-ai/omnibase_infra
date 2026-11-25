@@ -73,3 +73,12 @@
   prefix: ""
   opts: {}
   tables: [lab_alerts]
+# OMN-26635: infra vendors the overlay store write tables (node_projection_overlay_store
+# 0003-0004) ahead of the omnimarket node contract; 0004 grants omninode_runtime
+# SELECT, INSERT, UPDATE. Retired when omnimarket#6761 reaches the pin.
+- ticket: OMN-26635 # omnimarket#6761
+  node: node_projection_overlay_store
+  create: 0003_overlay_store_revision_provenance_audit.sql
+  prefix: overlay_store_
+  opts: {}
+  tables: [revision, write, provenance, audit]

@@ -131,6 +131,10 @@ databases:
               - open_obligations
               - orchestration_style_outcomes
               - overlay_store
+              - overlay_store_audit
+              - overlay_store_provenance
+              - overlay_store_revision
+              - overlay_store_write
               - pr_landing_state
               - pr_landing_transitions
               - pr_state
@@ -499,5 +503,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 36dd679e4b3f25de7f80ff3b82ebac797b3d9a590fd4035ed50ebcf333561d34
+  sha256: 55d714b947fceae79e5890c1537b01ce4c44aae150ccd17c152481caa550f18c
 topology_instance: onex-prod

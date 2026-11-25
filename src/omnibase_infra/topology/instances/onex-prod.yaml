@@ -129,6 +129,10 @@ databases:
               - open_obligations
               - orchestration_style_outcomes
               - overlay_store
+              - overlay_store_audit
+              - overlay_store_provenance
+              - overlay_store_revision
+              - overlay_store_write
               - pr_landing_state
               - pr_landing_transitions
               - pr_state

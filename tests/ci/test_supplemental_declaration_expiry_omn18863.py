@@ -133,6 +133,10 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "lab_alerts": "omnimarket OMN-26663 (node_projection_lab_alerts)",
     "floor_integration_rows": "omnimarket OMN-25103 (node_projection_floor_integration)",
     "floor_integration_pass": "omnimarket OMN-25103 (node_projection_floor_integration)",
+    "overlay_store_revision": "omnimarket#6761 (node_projection_overlay_store)",
+    "overlay_store_write": "omnimarket#6761 (node_projection_overlay_store)",
+    "overlay_store_provenance": "omnimarket#6761 (node_projection_overlay_store)",
+    "overlay_store_audit": "omnimarket#6761 (node_projection_overlay_store)",
 }
 
 _SKIP_REASON = (

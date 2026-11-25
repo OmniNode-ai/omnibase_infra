@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, Literal
 from omnibase_infra.enums.enum_consumer_group_purpose import (
     EnumConsumerGroupPurpose,
 )
+from omnibase_infra.handlers import lazy_start_projection_deferral as deferral
 from omnibase_infra.models.health.model_flow_attribution import (
     ModelFlowAttribution,
 )
@@ -582,6 +583,7 @@ def evaluate_projection_liveness(
     kernel_nonwriting: tuple[ModelProjectionContractRef, ...] = (),
     projection_group_suffixes: Mapping[str, str] | None = None,
     nonprojection_group_infixes: Mapping[str, str] | None = None,
+    awaiting_first_request: frozenset[str] = frozenset(),
 ) -> ModelProjectionLivenessVerdict:
     """Compute the projection liveness verdict from injected observations.
 
@@ -616,6 +618,9 @@ def evaluate_projection_liveness(
             same conservative reading: nothing is excluded, so a reducer's flow
             falls through to UNATTRIBUTABLE exactly as it did before this
             argument existed.
+        awaiting_first_request: OMN-26316. Lazy-start contracts no request has
+            reached; a projection among them with no consumer is deferred, not
+            unattached (see ``lazy_start_projection_deferral``).
 
     Returns:
         The verdict. Names, counts, and two UNKNOWN flags; no status word.
@@ -624,12 +629,11 @@ def evaluate_projection_liveness(
 
     attachment_evaluated = bool(attached_topics)
     unattached: list[str] = []
+    dormant: list[str] = []
     if attachment_evaluated:
-        unattached = [
-            ref.name
-            for ref in projections
-            if any(topic not in attached_topics for topic in ref.subscribe_topics)
-        ]
+        unattached, dormant = deferral.split_unattached(
+            projections, attached_topics, awaiting_first_request
+        )
 
     saturation_evaluated = bool(windows)
     saturated: list[str] = []
@@ -764,6 +768,7 @@ def evaluate_projection_liveness(
         ),
         nonwriting_projections=nonwriting,
         nonwriting_attached_projections=nonwriting_attached,
+        dormant_projections=tuple(sorted(dormant)),
     )
 
 
@@ -783,13 +788,7 @@ def describe_projection_attachment(verdict: ModelProjectionLivenessVerdict) -> s
             "no live subscription registry available — projection attachment "
             "UNKNOWN (not asserted healthy)"
         )
-    if not verdict.unattached_projections:
-        return f"All {verdict.projection_count} declared projection(s) attached"
-    return (
-        f"{len(verdict.unattached_projections)}/{verdict.projection_count} declared "
-        f"projection(s) have no attached consumer and persist nothing: "
-        f"{_name_list(verdict.unattached_projections)}"
-    )
+    return deferral.describe_attachment(verdict, _name_list)
 
 
 #: The runtime health-dimension vocabulary, declared here so the saturation
