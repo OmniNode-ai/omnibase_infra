@@ -21,6 +21,8 @@ class ModelOverdueDevMergeBuildRequest(BaseModel):
     records of every lane; the decision keeps the ``dev`` lane's. ``descendant_shas`` are the
     built shas, among the jobs', that the caller proved contain ``merge_sha`` by ancestry (a git
     read the pure decision does not make); a job whose built sha is not in it carried nothing.
+    ``coalesce_seconds`` is the node contract's window inside which a dev build asked for
+    waits for the last one's successor; ``0`` coalesces nothing.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -31,5 +33,6 @@ class ModelOverdueDevMergeBuildRequest(BaseModel):
     runtime_class: Literal["RUNTIME", "NON_RUNTIME"]
     now: datetime
     window_seconds: int = Field(gt=0)
+    coalesce_seconds: int = Field(default=0, ge=0)
     jobs: tuple[ModelOverdueDevMergeJob, ...] = ()
     descendant_shas: tuple[str, ...] = ()

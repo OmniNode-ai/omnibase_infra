@@ -102,6 +102,11 @@ requirements:
     acceptance:
       - id: AC42
         statement: "AC42: with a lazy-start front door recorded, a dormant projection no request has reached leaves projection_attachment HEALTHY and is named on its detail, a dormant projection that was woken without a consumer or whose wake failed and an eager unattached projection each read DEGRADED, and the log names every unattached and every dormant projection past the detail's 8-name cap -- falsifier: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_dormant_projections_omn26316.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (4 of 8 fail: the dormant projection reads unattached, and 4 of 12 unattached names appear nowhere) and passes on the PR branch"
+  - id: req-omn26316-dev-build-coalesce
+    statement: Dev merge build requests are coalesced inside a window declared in the node contract, so three dev rebuilds in 28 minutes (07:09Z, 07:23Z, 07:36Z on 2026-11-25) become one build per window while every runtime merge stays on a dev build within the hour.
+    acceptance:
+      - id: AC43
+        statement: "AC43: with dev_merge_build_coalesce_seconds declared in the deploy job reading contract, three merges in 30 minutes get one build, a merge just after a build waits for the next, and a merge 50 minutes before the hour is carried by the hourly build -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_coalesce_omn26316.py fails at origin/dev (the setting and the coalesced decision are absent) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -418,4 +423,12 @@ dod_evidence:
         cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-dev-build-coalesce
+    description: "Recorded 2026-11-25: hourly job 943bd20f (origin/dev, lineage unread) credited nothing, so overdue requests built f553b1d6 at 07:15:07Z (d844bdf1), 07:29:00Z (7d9991bf) and 07:42:13Z (7db4beaf), each pinned to a ref no other merge matched. 3 of the file's 5 tests fail with the handler change removed and pass on the branch."
+    source: manual
+    binds_ac: [AC43]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_coalesce_omn26316.py tests/unit/handlers/test_dev_merge_build_overdue_omn26316.py tests/unit/handlers/test_dev_merge_build_carried_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .

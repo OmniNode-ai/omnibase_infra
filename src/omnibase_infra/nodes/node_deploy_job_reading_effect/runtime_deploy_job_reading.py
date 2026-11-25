@@ -828,6 +828,7 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
         execution = _agent()
         now = datetime.now(UTC)
         window = _seconds(settings, "dev_merge_build_window_seconds")
+        coalesce = _seconds(settings, "dev_merge_build_coalesce_seconds")
         jobs = tuple(_overdue_jobs(Path(execution.STATE_DIR)))
         handler = handler_mod.HandlerDevMergeBuildOverdue()
         decisions: list[BaseModel] = []
@@ -854,6 +855,7 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
                         runtime_class=runtime_class,
                         now=now,
                         window_seconds=window,
+                        coalesce_seconds=coalesce,
                         jobs=jobs,
                         descendant_shas=tuple(
                             sorted(built_shas_carrying(clone, sha, built, git_timeout))
