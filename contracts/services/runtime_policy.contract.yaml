@@ -422,7 +422,11 @@ profiles:
             - node_delegation_routing_order_compute
             - node_github_repo_gateway_effect
             - node_dev_roll_window_gate_effect
-          memory_limit: 3072M
+          # OMN-26316: 6144M. The join limit of 16 above joined the boot
+          # consumers four times as fast and the 3072M sized for a limit of 4 was
+          # OOM-killed at 3.10 to 3.12 GB on h201 (02:38:51Z, 02:42:21Z), 15
+          # restarts; 6144M is 2x the larger kill floor (tests/fixtures/dev_runtime_oom_omn26316).
+          memory_limit: 6144M
         # OMN-22930 (T8): the BYOK credential READ that only the separate
         # effects service resolved (OMN-20533) now happens in main, because the
         # provider call runs there once the role is folded. The rule is the
