@@ -126,6 +126,9 @@ evidence_requirements:
   - kind: tests
     description: A dormant lazy-start projection is not read as unattached, a woken or failed-to-wake one is, and the log names every unattached and dormant projection.
     command: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_dormant_projections_omn26316.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The monitor driven through the real boot split and a real front door (carried over from omnibase_infra#6198) reads a dormant projection HEALTHY, the same manifest without lazy start DEGRADED, and a woken projection that lost a subscription DEGRADED.
+    command: uv run --frozen pytest tests/integration/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -383,4 +386,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_dormant_projections_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/services/test_runtime_health_monitor_lazy_start_dormant_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
