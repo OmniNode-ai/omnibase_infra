@@ -248,16 +248,24 @@ def test_lock_image_version_carries_the_ledger_client() -> None:
 
 
 def test_dockerfile_puts_no_onex_in_a_default_path_directory() -> None:
-    """OMN-24562: C13, C14 and C29 fail a job whose PATH finds ``onex`` after the run."""
+    """OMN-24562: the shim file is off every default PATH dir; only a link to it is on one."""
     code = "\n".join(
         line
         for line in DOCKERFILE.read_text(encoding="utf-8").splitlines()
         if not line.lstrip().startswith("#")
     )
+    assert (
+        "COPY --chmod=0755 <<'ONEX_LEDGER_SHIM' /opt/onex-ledger-client/shim/onex"
+        in code
+    )
     for default_dir in ("/usr/local/bin", "/usr/bin", "/bin", "/usr/local/sbin"):
-        assert not re.search(rf"(?<![\w/.-]){re.escape(default_dir)}/onex\b", code), (
-            default_dir
-        )
+        for hit in re.finditer(rf"(?<![\w/.-]){re.escape(default_dir)}/onex\b", code):
+            line = code[
+                code.rfind("\n", 0, hit.start()) + 1 : code.find("\n", hit.end())
+            ]
+            assert default_dir == "/usr/local/bin" and line.strip().startswith(
+                "RUN ln -s /opt/onex-ledger-client/shim/onex "
+            ), line
     assert not re.search(r"ENV PATH=[^\n]*onex-ledger-client", code), (
         "the image-wide PATH must not carry the shim directory"
     )

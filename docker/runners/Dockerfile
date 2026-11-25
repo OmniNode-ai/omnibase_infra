@@ -566,10 +566,32 @@ fi
 
 exec "${real}" "$@"
 ONEX_LEDGER_SHIM
-# OMN-24562: the shim directory is NOT on the image's PATH. C13, C14 and C29 fail a
-# job whose PATH finds `onex` after the run. A step that reads the ledger calls this
-# path by name or adds this directory to its own PATH.
-RUN /opt/onex-ledger-client/shim/onex --version
+# OMN-24562: the shim FILE lives off every default PATH directory, and the image sets no
+# PATH to its directory. Only /usr/local/bin/onex is a symlink to it, which is what every
+# pool but omnibase-verify keeps (the freeze step on omnibase-ci calls `onex` by bare name).
+RUN ln -s /opt/onex-ledger-client/shim/onex /usr/local/bin/onex \
+    && /opt/onex-ledger-client/shim/onex --version
+# C13, C14 and C29 run on the omnibase-verify pool and fail a job whose PATH finds `onex`
+# after the run. Every pool runs this one image and every entrypoint, including a mounted
+# one, starts as root and hands over with `gosu`, so gosu is the one place that sees each
+# container start: a runner whose RUNNER_LABELS carries omnibase-verify drops the link
+# before the runner process starts, every other pool leaves it. The wrapper is a heredoc,
+# not a file beside this one, for the same canonical-file-shape reason as the shim.
+RUN mkdir -p /usr/local/libexec \
+    && mv /usr/local/bin/gosu /usr/local/libexec/gosu-real
+COPY --chmod=0755 <<'GOSU_POOL_WRAPPER' /usr/local/bin/gosu
+#!/bin/bash
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# gosu -- OMN-24562: the verify pool runs with no onex on its PATH.
+set -eu
+case ",${RUNNER_LABELS:-}," in
+    *,omnibase-verify,*) rm -f "${ONEX_PATH_LINK:-/usr/local/bin/onex}" ;;
+esac
+exec "${GOSU_REAL:-/usr/local/libexec/gosu-real}" "$@"
+GOSU_POOL_WRAPPER
+RUN gosu nobody true
 
 # --- Bound identity contract + prebuilt shared CI env (OMN-12567) ----------
 # The bound identity lock is the authority for "runner image vN". It is copied
