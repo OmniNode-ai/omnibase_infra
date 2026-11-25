@@ -43,8 +43,8 @@ DISTRIBUTIONS = shared.DISTRIBUTIONS
 OPEN_PR = CONTRACT.open_pr_context
 PR_HEAD = COMMITS["omnibase_infra"]
 DECLARED = f"omnibase_infra#5564@{PR_HEAD}"
-#: Every lane but dev: stability, judge, collaborator and prod keep refusing.
-REFUSING_LANES = ("stability", "judge", "collaborator", "prod")
+#: Every lane (OMN-26637: dev too): the shipped policy names none, so each refuses.
+REFUSING_LANES = ("dev", "stability", "judge", "collaborator", "prod")
 
 
 def _dev_lane_target(branch: str = "HEAD") -> dict[str, Any]:
@@ -72,11 +72,20 @@ def _audit(
 
 
 @pytest.mark.parametrize(("branch", "kind"), [("HEAD", "sha"), ("omn-18087", "branch")])
-def test_dev_lane_accepts_declared_open_pr_branch_for_its_own_repository(
+def test_a_lane_the_policy_opens_accepts_declared_open_pr_branch_for_its_own_repository(
     tmp_path: Path, branch: str, kind: str
 ) -> None:
-    """The dev lane's declared open PR builds; the image says branch build, PR and head."""
-    context, declared = fps.build_context_for_lane("dev", DECLARED)
+    """A lane the policy names builds a declared open PR; the image says branch build, PR and head.
+
+    OMN-26637: the shipped policy names no lane, so the mechanism is exercised
+    on a policy copy that opens dev.
+    """
+    opened = shared._write_policy(
+        tmp_path / "opened", lambda data: data.update(open_pr_lanes=["dev"])
+    )
+    context, declared = fps.build_context_for_lane(
+        "dev", DECLARED, contract_path=opened
+    )
     assert (context, declared) == (OPEN_PR, DECLARED)
     provenance = shared._provenance(omnibase_infra=_dev_lane_target(branch))
     found = _audit(tmp_path, provenance, context, declared)
@@ -180,7 +189,7 @@ def test_sibling_branch_still_refused_on_the_dev_lane_with_a_declared_open_pr(
 
 
 @pytest.mark.parametrize("lane", REFUSING_LANES)
-def test_stability_judge_collaborator_and_prod_paths_refuse_a_branch_build(
+def test_every_lane_refuses_a_declared_open_pr_branch_build(
     lane: str,
 ) -> None:
     with pytest.raises(ValueError, match="cannot build a declared open pull request"):
@@ -191,7 +200,7 @@ def test_stability_judge_collaborator_and_prod_paths_refuse_a_branch_build(
 
 
 def test_the_lanes_that_may_build_an_open_pr_come_from_the_data(tmp_path: Path) -> None:
-    assert CONTRACT.open_pr_lanes == ("dev",)
+    assert CONTRACT.open_pr_lanes == ()
 
     widened = shared._write_policy(
         tmp_path / "widened",

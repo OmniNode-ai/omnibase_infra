@@ -1030,12 +1030,11 @@ class EnumRejectionReason(StrEnum):
     build the lane runs already carries: its infra ``git_ref`` is in that build,
     and either it is an infra merge or that workspace build started after the
     command was requested. The command is recorded ``superseded`` and never
-    built. It is a token of its own rather
-    than ``SUPERSEDED`` because no newer COMMAND replaced it. The replacement
-    is the running build, which need not have come from a command this agent
-    recorded, so there is no correlation id to name. The second refuses a ref
-    that is neither an ancestor nor a descendant of the running build and is
-    not on the lane's tracking branch.
+    built. It is a token of its own rather than ``SUPERSEDED`` because no newer
+    COMMAND replaced it. The replacement is the running build, which need not
+    have come from a command this agent recorded, so there is no correlation
+    id to name. The second refuses a ref that is neither an ancestor nor a
+    descendant of the running build and is not on the lane's tracking branch.
     """
 
     BUSY = "busy"
@@ -1048,6 +1047,10 @@ class EnumRejectionReason(StrEnum):
     SUPERSEDED = "superseded"
     SUPERSEDED_BY_RUNNING_BUILD = "superseded_by_running_build"
     DIVERGENT_REF = "divergent_ref"
+    #: OMN-26637. A lane the policy names builds only refs that are on its
+    #: tracking branch. A pull request head, or any other ref the branch does
+    #: not contain, is refused with this token and never built.
+    NOT_A_MERGED_REF = "not_a_merged_ref"
     #: The instance's ``flags.freeze`` is in force and the command is not a
     #: promotion (``deploy_agent.lane_flags``).
     FROZEN = "frozen"

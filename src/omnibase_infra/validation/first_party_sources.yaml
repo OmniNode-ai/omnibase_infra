@@ -30,7 +30,10 @@
 # entrypoint (scripts/runtime_build/prepr_verify_lane.sh).
 #
 # open_pr_context (OMN-21928): the context of a deploy-agent build of a DECLARED
-# OPEN PULL REQUEST's branch. Only a lane named in open_pr_lanes may build in it;
+# OPEN PULL REQUEST's branch. OMN-26637: no lane is named in open_pr_lanes. The
+# dev lane builds only refs its tracking branch contains and a pull request head
+# is proved on a pre-PR slot (pre_pr_slot_context), so the context stays defined
+# and closed. Only a lane named in open_pr_lanes may build in it;
 # every other lane (stability, judge, collaborator, prod) builds in
 # default_context and so keeps refusing a branch build. The context sets
 # requires_declared_pr, so the target is accepted only when the signed command's
@@ -66,7 +69,7 @@ packages:
 default_context: dev-lane
 pre_pr_slot_context: pre-pr-slot
 open_pr_context: dev-lane-open-pr
-open_pr_lanes: [dev]
+open_pr_lanes: []
 build_contexts:
   - name: dev-lane
     target_accepts: []

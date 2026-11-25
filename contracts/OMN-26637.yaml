@@ -1,0 +1,60 @@
+schema_version: 1.0.0
+ticket_id: OMN-26637
+title: "dev deploy queue: a newer dev build request cancels every older queued request"
+summary: >-
+  The dev deploy agent folded a queue only where each ref was contained in a later one, so squash-merge refs published out of order were rebuilt one at a time at about 28 minutes a job. For the lanes lane_policy names, plan_coalesce now runs the newest queued request and supersedes every older one with a record that names the accepting request, asking git nothing. The same lanes accept only refs their tracking branch contains and refuse any other with the typed reason not_a_merged_ref. The first-party source policy names no lane for a declared open pull request build, so a pull request head is proved on a pre-PR slot and never on dev.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26637-supersede-dev-queue
+    statement: Accepting a dev build request supersedes every older queued dev request whatever git says about their refs, each with one record naming the accepting request.
+    acceptance:
+      - id: AC1
+        statement: "AC1: accepting a dev build request cancels every older queued dev request regardless of git ancestry, each recorded with one superseded reason naming the accepting request -- falsifier: uv run pytest tests -k supersede_dev_queue fails at origin/dev and passes on the PR branch"
+  - id: req-omn26637-dev-merged-refs-only
+    statement: The dev lane builds only refs its tracking branch contains and refuses any other with a typed reason.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the dev lane accepts only requests whose ref is a merged dev-branch ref, and a PR-head request is refused for dev with a typed reason -- falsifier: uv run pytest tests -k dev_accepts_only_merged_refs fails at origin/dev and passes on the PR branch"
+  - id: req-omn26637-no-pr-head-to-dev
+    statement: No workflow or policy in this repository sends a pull request head to a dev build.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the workflow or node that publishes PR-head build commands for the dev lane is named in the PR body and no longer targets dev -- falsifier: uv run pytest tests -k pr_head_not_published_to_dev fails at origin/dev and passes on the PR branch"
+evidence_requirements:
+  - kind: tests
+    description: The dev lane supersedes every older queued request and accepts only merged refs.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_queue_supersede_omn26637.py -q
+  - kind: tests
+    description: No lane builds a declared open pull request and the dev publishers send merge commits only.
+    command: uv run --frozen pytest tests/unit/validation/test_pr_head_not_published_to_dev_omn26637.py tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26637-ac1-supersede-dev-queue
+    description: "With every ancestry answer false or unprovable, the newest of four queued dev requests runs and the three older ones each get one superseded record that names it; the control with no lane named stops at not_a_descendant. Twelve of the file's fourteen tests fail at origin/dev."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_queue_supersede_omn26637.py -q -k supersede_dev_queue
+        cwd: .
+  - id: dod-omn26637-ac2-dev-accepts-only-merged-refs
+    description: "A dev request whose ref the tracking branch does not contain, a declared open pull request included, is refused with not_a_merged_ref and builds nothing; a merged ref builds, and so does a ref the clone cannot place. The test fails at origin/dev, where the rejection reason does not exist."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_queue_supersede_omn26637.py -q -k dev_accepts_only_merged_refs
+        cwd: .
+  - id: dod-omn26637-ac3-pr-head-not-published-to-dev
+    description: "The first-party source policy names no lane for a declared open pull request build and the dev publishers (runtime-rebuild-trigger and its sibling reusable) send a merge commit of a merged pull request, never a head. The policy test fails at origin/dev, where open_pr_lanes names dev."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_pr_head_not_published_to_dev_omn26637.py tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q --no-cov -n 0 -p no:randomly
+        cwd: .

@@ -91,6 +91,7 @@ from deploy_agent.host_slot import HostSlot
 from deploy_agent.job_state import JobStore
 from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
 from deploy_agent.lane_policy import (
+    TRACKING_BRANCH_LANES,
     LaneNotAllowedError,
     assert_lane_allowed,
 )
@@ -276,6 +277,11 @@ class DeployConsumer:
     #: Lane flags (``deploy_agent.routing`` lane flags): ``flags.freeze`` refuses every
     #: command of this instance's but a promotion, as ``frozen``.
     lane_flags: ModelLaneFlags | None = None
+    #: OMN-26637, on the same terms: a consumer built without it names no lane,
+    #: so it supersedes by ancestry only and builds any ref it is given. The
+    #: lanes it names run their newest queued request and build only refs on
+    #: the tracking branch. Injected from ``lane_policy``.
+    branch_lanes: frozenset[EnumRuntimeLane] = frozenset()
 
     def __init__(
         self,
@@ -344,6 +350,7 @@ class DeployConsumer:
         self.running_build = running_build
         self.ref_resolver = ref_resolver
         self.tracking_ref = tracking_ref
+        self.branch_lanes = TRACKING_BRANCH_LANES & allowed_lanes
         logger.info(
             "Deploy agent lane fence: %s",
             ",".join(sorted(lane.value for lane in self.allowed_lanes)),
@@ -352,9 +359,8 @@ class DeployConsumer:
     def poll_and_accept(self) -> tuple[ModelRebuildRequested | None, str | None]:
         """Poll for one command.
 
-        Returns (command, None) on accept.
-        Returns (None, reason) on reject.
-        Returns (None, None) on no message.
+        Returns (command, None) on accept, (None, reason) on reject and
+        (None, None) on no message.
 
         Protocol:
         1. Poll message — an undecodable batch is quarantined, not re-read
@@ -366,8 +372,9 @@ class DeployConsumer:
             owner, a prover, holds it
         5b. Load gate (OMN-19507) -> DEFER while the host's model servers need
             it: nothing committed or published, the partition paused until a
-            re-check at the top of a later poll opens the gate
+            later re-check opens the gate
         6. Check dedup (is_duplicate) -> reject "duplicate"
+        6a0. Merged refs only (OMN-26637) -> reject "not_a_merged_ref"
         6a. Lineage fence (OMN-19270) -> reject "superseded_by_running_build"
             or "divergent_ref"
         7. Self-update boundary (OMN-16442) -- may not return
@@ -419,11 +426,10 @@ class DeployConsumer:
     def _priority_message(self, ordered: list[Any]) -> Any | None:
         """Run an operator's signed dev-tag restore ahead of queued forwards.
 
-        The declaration attributes the operator's choice of a known-good tag;
-        a moving branch or an undeclared tag is not a recovery request. All
-        acceptance checks still run. Only one partition is scanned, and only
-        commands for the head's lane and this instance qualify. Durable dedup
-        prevents selecting the restore again when skipped forwards are replayed.
+        The declaration attributes the operator's choice of a known-good tag; a
+        moving branch or an undeclared tag is not a recovery request. Every
+        acceptance check still runs; one partition is scanned, only head-lane
+        commands for this instance qualify, and dedup stops a replay reselecting it.
         """
         head = self._decode_for_lookahead(ordered[0])
         if head is None or head.runtime_lane != EnumRuntimeLane.DEV or head.rollback:
@@ -499,12 +505,11 @@ class DeployConsumer:
         """Seek every partition but the head's back to its first returned record.
 
         A poll that returned records on more than one partition processes one
-        record of one partition, and the fetch position of every other
-        partition is already past everything it returned. Without this seek
-        those records are never fetched again by this process, and the next
-        commit on their partition skips them for good (OMN-19259). The control
-        topic has a single partition today; this refuses to depend on that
-        staying true, as ``_order_batch`` does.
+        record of one partition, and every other partition's fetch position is
+        already past everything it returned. Without this seek those records are
+        never fetched again by this process and the next commit on their
+        partition skips them for good (OMN-19259). The control topic has one
+        partition today; this refuses to depend on that, as ``_order_batch`` does.
         """
         for topic_partition, messages in records.items():
             if not messages:
@@ -526,16 +531,15 @@ class DeployConsumer:
         """Fire the rejection hook and return the reason token the caller returns.
 
         OMN-17079. Returning the token keeps every call site a one-liner
-        (``return None, self._reject(...)``), so a future refusal cannot be added as a
-        bare ``return None, "reason"`` without visibly departing from the shape its six
-        neighbours use.
+        (``return None, self._reject(...)``), so a refusal cannot be added as a
+        bare ``return None, "reason"`` without departing from its neighbours' shape.
 
-        THE IDENTIFIERS ARE RESOLVED, NEVER INVENTED. With a validated ``cmd`` both come
-        straight off it. Without one -- an undecodable record, a bad signature, a payload
-        the contract refuses -- this parses what the raw record still offers and records
-        ``None`` for whatever will not parse. A notice carrying ``None`` cannot become an
-        event, which is the intended outcome: a rejection published under a fabricated
-        correlation id is a durable record pointing at a command that never existed.
+        THE IDENTIFIERS ARE RESOLVED, NEVER INVENTED. With a validated ``cmd`` both
+        come straight off it. Without one -- an undecodable record, a bad signature,
+        a payload the contract refuses -- this parses what the raw record still
+        offers and records ``None`` for whatever will not parse. A notice carrying
+        ``None`` cannot become an event: a rejection published under a fabricated
+        correlation id points at a command that never existed.
 
         Never raises. A refusal whose notification fails is still a refusal, and the
         offset is already committed by the caller; losing the hook must not convert that
@@ -734,6 +738,14 @@ class DeployConsumer:
             self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(EnumRejectionReason.DUPLICATE, cmd=cmd)
 
+        # Step 6a0: Merged refs only (OMN-26637). A lane the policy names builds
+        # refs on its tracking branch and nothing else, so a pull request head
+        # never reaches a build there. A ref the clone cannot place is not
+        # refused, on the same terms as the lineage fence below.
+        if self._ref_not_merged(cmd):
+            self._commit_through(msg, replay_from=replay_from)
+            return None, self._reject(EnumRejectionReason.NOT_A_MERGED_REF, cmd=cmd)
+
         # Step 6a: Lineage fence (OMN-19270). Compared with the build the lane
         # already runs, by ancestry against its provenance. On 2026-09-23 a
         # command at an infra commit from 10:32Z was accepted at 14:32Z and
@@ -856,6 +868,16 @@ class DeployConsumer:
         )
         return runner_cmd, None
 
+    def _ref_not_merged(self, cmd: ModelRebuildRequested) -> bool:
+        # OMN-26637: True only when the clone PROVES the lane's tracking branch
+        # lacks the ref. A promotion builds no ref; an unanswered comparison
+        # builds, as the lineage fence's sixth rule has it.
+        lane, pinned = cmd.runtime_lane, cmd.image_ref or cmd.image_digest
+        if lane not in self.branch_lanes or pinned or not self.tracking_ref:
+            return False
+        resolve = self.ancestry_resolver
+        return resolve is not None and resolve(cmd.git_ref, self.tracking_ref) is False
+
     def _lineage_decision(
         self, cmd: ModelRebuildRequested, msg: Any
     ) -> ModelLineageDecision | None:
@@ -969,7 +991,11 @@ class DeployConsumer:
             )
             messages_by_offset[candidate.offset] = candidate
 
-        plan = plan_coalesce(queued, contains=self.ancestry_resolver)
+        plan = plan_coalesce(
+            queued,
+            contains=self.ancestry_resolver,
+            supersede_lanes=self.branch_lanes,
+        )
         logger.info("%s", plan.journal_line())
         if not plan.superseded:
             return cmd, msg, []
@@ -1054,21 +1080,22 @@ class DeployConsumer:
             mine, _decision = self.router.is_mine(cmd)
             if not mine:
                 return None
-        return cmd
+        # OMN-26637: a ref the lane would refuse never becomes its runner. It
+        # ends the group and the head path refuses it when its turn comes.
+        return None if self._ref_not_merged(cmd) else cmd
 
     def _sample_lag(self) -> None:
         """Record how many control-topic records this agent has not dealt with.
 
-        Measured against the COMMITTED offset, not the fetch position. Between
-        a poll that returned a batch and the processing of its first record,
-        the position is past records ``poll_and_accept`` has never looked at,
-        so a position-based lag reports zero while commands wait -- the same
-        off-by-a-batch OMN-18613 found in ``_commit_through``, from the other
-        side. Where this process has not committed anything yet the position is
-        used and the basis says so, because a first-poll under-report by one
-        batch is better than no number at all and the reader can see which it got.
+        Measured against the COMMITTED offset, not the fetch position: between a
+        poll that returned a batch and the processing of its first record the
+        position is past records never looked at, so a position-based lag reports
+        zero while commands wait (the off-by-a-batch of OMN-18613, from the other
+        side). Before this process has committed anything the position is used and
+        the basis says so, because a first-poll under-report by one batch beats no
+        number at all.
 
-        Never raises. A sampler that could fail a poll would trade the agent's
+        Never raises: a sampler that could fail a poll would trade the agent's
         actual job for an observation of it.
         """
         if self.lag_sampler is None:
@@ -1133,47 +1160,37 @@ class DeployConsumer:
         """Commit and seek past this record, or AT the skipped replay frontier.
 
         A bare ``self.consumer.commit()`` commits the consumer's POSITION for
-        every assigned partition. After a ``poll()`` that returned a batch the
-        position is past every record FETCHED, not past the one record
-        ``_process_message`` was handed -- ``poll_and_accept`` deliberately
+        every assigned partition: past every record FETCHED, not past the one
+        record ``_process_message`` was handed, because ``poll_and_accept``
         processes the first record and returns. So a bare commit silently marks
-        records the agent has never looked at as done.
+        unseen records as done. Measured 2026-09-17 (OMN-18613): accepting offset
+        262 committed 264, past an unprocessed 263 carrying the rebuild command
+        for omnimarket#2622, which was never delivered again -- no job record,
+        acceptance, rejection or quarantine line.
 
-        Measured 2026-09-17 (OMN-18613): accepting offset 262 committed 264,
-        past an unprocessed 263 carrying the rebuild command for omnimarket#2622.
-        That command was never delivered again -- no job record, no acceptance
-        line, no rejection line and no quarantine record.
+        THE COMMIT ALONE IS HALF THE FIX (OMN-19259). Bounding the commit leaves
+        263 uncommitted, but kafka-python's fetch position is still past it and
+        nothing holds 263 in memory: the next ``poll()`` starts at 264, and the
+        next record processed commits past 263 for good (measured against a real
+        broker with kafka-python 2.3.2: a dev command fetched behind a refused
+        head was never delivered). So the position is moved back to the same
+        place the commit names and the records behind this one are fetched again
+        by the next poll, a re-fetch of at most one batch per record processed,
+        on a topic of records a few hundred bytes each.
 
-        THE COMMIT ALONE IS HALF THE FIX (OMN-19259). Bounding the commit
-        leaves 263 uncommitted, but kafka-python's fetch position is still past
-        it: the next ``poll()`` in this process starts at 264, and nothing holds
-        263 in memory for it. Only a group rejoin or a re-exec read from the
-        committed offset again, and the next record this process processes
-        commits past 263 for good. Measured in a replay against a real broker
-        with the pinned kafka-python 2.3.2: a dev command fetched behind a
-        refused head was never delivered, the committed offset stayed at the
-        refused record plus one, and a later accepted command made the loss
-        permanent. So the position is moved back to the same place the commit
-        names, and the records behind this one are fetched again by the next
-        poll. That costs a re-fetch of at most one poll batch per record
-        processed, on a topic whose records are a few hundred bytes each.
+        Advancing past a record the agent REFUSES stays deliberate (re-reading it
+        forever "would stall every command behind it"): what is bounded is the
+        reach of the advance, not its direction.
 
-        Advancing past a record the agent REFUSES stays deliberate: step 4's own
-        comment notes that re-reading a refused command forever "would stall
-        every command behind it". What is bounded here is the reach of that
-        advance, not its direction.
-
-        A REFUSED COMMIT IS A REJOIN, NOT A CRASH (OMN-17427). The agent does
-        not poll while a job runs, so a job longer than kafka-python's
-        ``max_poll_interval_ms`` costs the group membership and the next commit
-        of any kind raises ``CommitFailedError``. On 2026-10-22T00:13Z that was
-        a routing skip right after a 12-minute job, and the agent exited 1.
-        kafka-python has already reset the generation and requested the rejoin
-        when it raises, so the next ``poll()`` rejoins and re-reads the fetch
-        position from the committed offset: this record is redelivered and
-        decided again. So the refusal is logged and returned, never raised, and
-        nothing is sought or sampled, because nothing was committed. Returns
-        ``None`` when the commit landed.
+        A REFUSED COMMIT IS A REJOIN, NOT A CRASH (OMN-17427). The agent does not
+        poll while a job runs, so a job longer than ``max_poll_interval_ms``
+        costs the group membership and the next commit raises
+        ``CommitFailedError`` (2026-10-22T00:13Z: a routing skip after a
+        12-minute job, exit 1). kafka-python has already requested the rejoin
+        when it raises, so the next ``poll()`` re-reads from the committed
+        offset: this record is redelivered and decided again. So the refusal is
+        logged and returned, never raised, and nothing is sought or sampled,
+        because nothing was committed. Returns ``None`` when the commit landed.
         """
         # A priority restore was processed out of order. Commit and seek AT
         # the earliest skipped forward, never past it. The accepted restore is
@@ -1210,19 +1227,16 @@ class DeployConsumer:
         """Commit this message's own offset so it is re-read, not skipped.
 
         Called immediately before the process image is replaced. Seeking to
-        ``msg.offset`` and committing the resulting position makes the
-        committed offset point AT this command rather than past it, so the
-        replacement process fetches the same command again.
-
-        Relying on the message simply being uncommitted is not enough: this
-        consumer is configured ``auto_offset_reset="latest"``, so a group with
-        no committed offset yet -- the first command a freshly created group
-        ever sees -- would resume past the message and lose it.
+        ``msg.offset`` and committing the resulting position makes the committed
+        offset point AT this command rather than past it, so the replacement
+        process fetches it again. Leaving the message uncommitted is not enough:
+        with ``auto_offset_reset="latest"`` a group with no committed offset yet
+        would resume past it and lose it.
 
         A refused rewind (OMN-17427) is logged and does not escape: the
-        replacement process then reads from the last committed offset, which is
-        this command's own offset when the record before it was committed, and
-        past it only for a group that has never committed one.
+        replacement reads from the last committed offset, this command's own
+        when the record before it was committed, past it only for a group that
+        has never committed one.
         """
         topic_partition = TopicPartition(msg.topic, msg.partition)
         self.consumer.seek(topic_partition, msg.offset)
@@ -1263,17 +1277,16 @@ class DeployConsumer:
     def _quarantine_undecodable_fetch(self, exc: BaseException) -> str:
         """Advance past a batch the client cannot decode, one offset at a time.
 
-        No record object exists, so the poison offset is read from the
-        consumer's own position. Only partitions with an unconsumed record
-        (``position < highwater``) are candidates: a caught-up partition has
-        nothing pending and advancing it would skip a future command.
+        No record object exists, so the poison offset is read from the consumer's
+        own position. Only partitions with an unconsumed record
+        (``position < highwater``) are candidates: advancing a caught-up one
+        would skip a future command.
 
-        Exactly ONE offset is skipped per candidate partition per event, never
-        a bulk seek to the end. On the single-partition control topic that is
-        precisely the poison record; were the topic ever repartitioned, the
-        worst case is one good command per extra candidate partition, and every
-        skipped coordinate is written to the quarantine record rather than
-        being lost silently.
+        Exactly ONE offset is skipped per candidate partition per event, never a
+        bulk seek to the end. On the single-partition control topic that is the
+        poison record; were the topic repartitioned, the worst case is one good
+        command per extra candidate partition, and every skipped coordinate is
+        written to the quarantine record.
         """
         advanced: list[dict[str, Any]] = []
         refused = False

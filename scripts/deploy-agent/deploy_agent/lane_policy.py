@@ -91,6 +91,14 @@ def load_allowed_lanes_from_env() -> frozenset[EnumRuntimeLane]:
 LAB_LANES = frozenset({EnumRuntimeLane.DEV, EnumRuntimeLane.STABILITY_TEST})
 
 
+#: OMN-26637: the lanes that follow their tracking branch. A new build request
+#: there cancels every older queued one whatever git says about their refs
+#: (operator, 2026-11-24 about 12:20Z), and only refs the branch contains are
+#: built: a pull request head is proved on a pre-PR slot, never on one of
+#: these. Injected into the consumer, never read from it by name.
+TRACKING_BRANCH_LANES = frozenset({EnumRuntimeLane.DEV})
+
+
 def is_lab_dev_fence(allowed: frozenset[EnumRuntimeLane]) -> bool:
     """Whether ``allowed`` is a lab dev agent's fence (OMN-19998).
 
@@ -98,8 +106,7 @@ def is_lab_dev_fence(allowed: frozenset[EnumRuntimeLane]) -> bool:
     (the lane env fragment, the lane mirror, the startup and forward-migration
     converges) keys on this, never on the fence being exactly ``{dev}``, so
     admitting the stability lane does not switch the dev lane's own behaviour
-    off.
-    Each of those still acts on the dev lane only.
+    off. Each of those still acts on the dev lane only.
     """
     return EnumRuntimeLane.DEV in allowed and allowed <= LAB_LANES
 

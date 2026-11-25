@@ -409,8 +409,8 @@ class JobStore:
             result_publish_pending=True,
             errors=[
                 f"superseded by {superseded_by_correlation_id} at "
-                f"{superseded_by_sha}, which contains this command's ref and "
-                "was already queued when the agent reached this one"
+                f"{superseded_by_sha}, a newer request that was already queued "
+                "when the agent reached this one"
             ],
         )
         self._save(job)

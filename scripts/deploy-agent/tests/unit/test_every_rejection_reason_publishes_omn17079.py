@@ -298,6 +298,7 @@ def test_every_reason_the_consumer_resolves_reaches_the_hook() -> None:
         "DUPLICATE",
         "SUPERSEDED_BY_RUNNING_BUILD",
         "DIVERGENT_REF",
+        "NOT_A_MERGED_REF",
         "FROZEN",
     }
     assert routed == expected, (
