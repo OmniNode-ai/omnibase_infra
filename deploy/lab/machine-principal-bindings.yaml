@@ -6,6 +6,7 @@
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.evt.omnimarket.credential-registered.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.credential-revoked.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-ack.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-claim.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-correction.v1, direction: produce}
