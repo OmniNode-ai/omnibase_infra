@@ -28,7 +28,7 @@ import asyncio
 import inspect
 import json
 import time
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -97,6 +97,32 @@ async def _longest_gap(work: Awaitable[object]) -> tuple[float, object]:
     return max(gaps, default=0.0), result
 
 
+_GAP_ROUNDS = 3
+
+
+async def _quietest_gap(
+    make_work: Callable[[], Awaitable[object]], rounds: int = _GAP_ROUNDS
+) -> tuple[float, object]:
+    """The smallest longest-heartbeat-gap over up to ``rounds`` runs of the same work.
+
+    Code that holds the loop holds it the same way in every run, so its gap is the
+    floor of every round. A stall of the runner (a noisy neighbour, a paused VM,
+    memory pressure) adds to one round only, so the first clean round settles it.
+    The hosted run of 2026-11-24T18:02Z read 1.63 s for the announcement fold in the
+    last test of a 3901-test shard; the same fold reads 0.06 s on a lab host, on one
+    CPU and under three busy loops (OMN-26316).
+    """
+    best: tuple[float, object] | None = None
+    for _ in range(rounds):
+        gap, result = await _longest_gap(make_work())
+        if best is None or gap < best[0]:
+            best = (gap, result)
+        if gap < _HOLD_LIMIT_S:
+            break
+    assert best is not None
+    return best
+
+
 def _small_inventory() -> ModelPackageInventory:
     inventory = read_package_inventory(frozenset({"omnibase_infra"}))
     assert inventory.records, "omnibase_infra declares onex.nodes entry points"
@@ -115,15 +141,15 @@ async def test_startup_loop_hold_under_one_second_announcer_inventory() -> None:
         time.sleep(replay)
         return inventory
 
-    bus = EventBusInmemory(environment="test", group="node-announce")
-    with patch.object(handler_package_announcer, "read_package_inventory", slow_read):
-        gap, result = await _longest_gap(
-            HandlerPackageAnnouncer().handle(
-                local_announce_request(frozenset({"omnibase_infra"})),
-                bus=bus,
-                settle_timeout_seconds=30.0,
-            )
+    def work() -> Awaitable[object]:
+        return HandlerPackageAnnouncer().handle(
+            local_announce_request(frozenset({"omnibase_infra"})),
+            bus=EventBusInmemory(environment="test", group="node-announce"),
+            settle_timeout_seconds=30.0,
         )
+
+    with patch.object(handler_package_announcer, "read_package_inventory", slow_read):
+        gap, result = await _quietest_gap(work)
     assert gap < _HOLD_LIMIT_S, (
         f"boot step 0 held the loop {gap:.2f}s replaying the recorded "
         f"{recorded}s inventory read"
@@ -152,7 +178,14 @@ async def test_startup_loop_hold_under_one_second_announcer_fold() -> None:
         calls.append(1)
         return original(*args, **kwargs)
 
-    bus = EventBusInmemory(environment="test", group="node-announce")
+    def work() -> Awaitable[object]:
+        calls.clear()  # every round replays the recorded single admission first
+        return HandlerPackageAnnouncer().handle(
+            local_announce_request(frozenset({"omnibase_infra"})),
+            bus=EventBusInmemory(environment="test", group="node-announce"),
+            settle_timeout_seconds=60.0,
+        )
+
     with (
         patch.object(
             handler_package_announcer,
@@ -161,19 +194,45 @@ async def test_startup_loop_hold_under_one_second_announcer_fold() -> None:
         ),
         patch.object(handler_package_announcer, "apply_announcement", slow_apply),
     ):
-        gap, result = await _longest_gap(
-            HandlerPackageAnnouncer().handle(
-                local_announce_request(frozenset({"omnibase_infra"})),
-                bus=bus,
-                settle_timeout_seconds=60.0,
-            )
-        )
+        gap, result = await _quietest_gap(work)
     assert per_call * count > _HOLD_LIMIT_S
     assert single > _HOLD_LIMIT_S
     assert gap < _HOLD_LIMIT_S, (
         f"the announcement fold held the loop {gap:.2f}s over {count} items"
     )
     assert len(result.outcomes) == count
+
+
+@pytest.mark.asyncio
+async def test_a_one_off_runner_stall_is_not_read_as_a_hold() -> None:
+    """Positive control: a stall in one round only, the work itself holding nothing."""
+    rounds: list[int] = []
+
+    async def work() -> None:
+        rounds.append(1)
+        if len(rounds) == 1:
+            time.sleep(_HOLD_LIMIT_S + 0.2)  # the runner stalls the loop once
+        await asyncio.sleep(0.2)
+
+    gap, _ = await _quietest_gap(lambda: work())
+    assert len(rounds) == 2, "the first round was stalled, the second was clean"
+    assert gap < _HOLD_LIMIT_S
+
+
+@pytest.mark.asyncio
+async def test_a_hold_that_repeats_every_round_is_read_as_a_hold() -> None:
+    """Known bad: code that holds the loop holds it in every round."""
+    rounds: list[int] = []
+
+    async def work() -> None:
+        rounds.append(1)
+        time.sleep(
+            _HOLD_LIMIT_S + 0.1
+        )  # the work blocks the loop, as a sync call would
+
+    gap, _ = await _quietest_gap(lambda: work())
+    assert len(rounds) == _GAP_ROUNDS
+    assert gap >= _HOLD_LIMIT_S
 
 
 def test_startup_loop_hold_under_one_second_topic_provisioner() -> None:
