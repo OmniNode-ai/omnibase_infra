@@ -35,7 +35,7 @@ _TABLES = (
 )
 # name -> checksum of the omnimarket source the file is copied from.
 _SOURCES = {
-    "0003_overlay_store_revision_provenance_audit.sql": "e8e65fcf9f3c713e3a16b369bf04b4ace4a7f56da38fc36c73dc4c272199abdc",
+    "0003_overlay_store_revision_provenance_audit.sql": "eeebfc5609cdfb899c879077705cf5efe62dae64a59fcae857440faac69962e4",
     "0004_grant_omninode_runtime_overlay_store_write.sql": "d8a04194aa51bcd8fff39eee79ff4191b970812183b269df97a07b864018f78c",
 }
 
