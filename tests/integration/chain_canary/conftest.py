@@ -53,6 +53,8 @@ from tests.integration.migrations.test_application_migration_ledger_omn15413 imp
 
 __all__ = [
     "ONE_TICK_SECONDS",
+    "LIVE_CHAIN_FIXTURE",
+    "LIVE_RUNNER_VARIABLES",
     "SETTLE_CEILING_SECONDS",
     "LiveDeployAgentChain",
     "chain_from_environment",
@@ -60,6 +62,7 @@ __all__ = [
     "live_deploy_agent_chain",
     "pg16",
     "reading_problems",
+    "split_live_chain_items",
 ]
 
 #: Read once at collection, from a variable of this module's own: the suite-wide fixture
@@ -76,6 +79,15 @@ _LEDGER_IS_CURRENT = os.environ.get("CHAIN_CANARY_LEDGER_IS_CURRENT", "") == "1"
 _AGENT_LEDGER_HOST = os.environ.get("CHAIN_CANARY_AGENT_LEDGER_HOST", "")
 _DEFAULT_WINDOW_SECONDS = 6 * 3600.0
 _WINDOW_VARIABLE = "CHAIN_CANARY_WINDOW_SECONDS"
+#: The variables only a live-chain runner exports. A runner that exports none of them has no
+#: deploy agent and no ledger of record to read, so the live tests are not its to run.
+LIVE_RUNNER_VARIABLES = (
+    "CHAIN_CANARY_DEPLOY_AGENT_URL",
+    "CHAIN_CANARY_LEDGER_FILE",
+    "CHAIN_CANARY_AGENT_LEDGER_HOST",
+    "CHAIN_CANARY_LEDGER_IS_CURRENT",
+)
+LIVE_CHAIN_FIXTURE = "live_deploy_agent_chain"
 
 _CONTRACT = (
     Path(__file__).resolve().parents[3]
@@ -325,3 +337,36 @@ def chain_from_environment(environ: Mapping[str, str]) -> LiveDeployAgentChain:
 def live_deploy_agent_chain() -> LiveDeployAgentChain:
     """The live chain's read side, from the variables as the shell exported them."""
     return chain_from_environment(os.environ)
+
+
+def split_live_chain_items[ItemT: pytest.Item](
+    items: list[ItemT], environ: Mapping[str, str]
+) -> tuple[list[ItemT], list[ItemT]]:
+    """Split ``items`` into the ones to run and the live-chain ones this runner cannot run.
+
+    A test that asks for ``live_deploy_agent_chain`` reads one agent's HTTP surface and the
+    ledger of record, and fails closed without them. The nightly integration sweep selects it
+    by marker on a hosted runner that has neither, so it could only ever be red there
+    (run 45325746514). It is deselected, never skipped, when the runner exports none of
+    ``LIVE_RUNNER_VARIABLES``; the skip-count baseline only shrinks, and a skip would read as a
+    pass. A runner that exports any one of them keeps every live test, and a variable it forgot
+    still fails the test that needs it, so the live runner stays fail-closed.
+    """
+    if any(environ.get(name) for name in LIVE_RUNNER_VARIABLES):
+        return list(items), []
+    live = [
+        item
+        for item in items
+        if LIVE_CHAIN_FIXTURE in getattr(item, "fixturenames", ())
+    ]
+    return [item for item in items if item not in live], live
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Deselect the live chain tests on a runner that is not a live-chain runner."""
+    kept, deselected = split_live_chain_items(items, os.environ)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = kept

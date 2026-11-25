@@ -424,6 +424,23 @@ async def _publish_to_bus_via_aiokafka(
     namespaced = apply_topic_namespace_all((topic,))[0]
     key = str(envelope.get("correlation_id", "")).encode()
     value = json.dumps(envelope, sort_keys=True).encode()
+    # OMN-24562: the ledger writer reads correlation_id and envelope_id for
+    # public.event_ledger from the record's Kafka HEADERS, not its body. A
+    # record with none is recorded under a freshly minted correlation id, so
+    # this command hop never joined the probe's chain and link 5 read
+    # ledger_chain_incomplete. Stamp the same identity the body carries.
+    header_fields = (
+        ("correlation_id", "correlation_id"),
+        ("message_id", "envelope_id"),
+        ("timestamp", "envelope_timestamp"),
+        ("source", "source_tool"),
+        ("event_type", "event_type"),
+    )
+    kafka_headers = [
+        (header, str(envelope[field]).encode())
+        for header, field in header_fields
+        if envelope.get(field)
+    ]
     producer = AIOKafkaProducer(
         bootstrap_servers=bootstrap,
         **build_aiokafka_auth_kwargs_from_env(),
@@ -431,7 +448,9 @@ async def _publish_to_bus_via_aiokafka(
     try:
         await asyncio.wait_for(producer.start(), timeout=timeout_s)
         metadata = await asyncio.wait_for(
-            producer.send_and_wait(namespaced, value=value, key=key),
+            producer.send_and_wait(
+                namespaced, value=value, key=key, headers=kafka_headers
+            ),
             timeout=timeout_s,
         )
     except Exception as exc:  # noqa: BLE001 - a broker failure is a verdict

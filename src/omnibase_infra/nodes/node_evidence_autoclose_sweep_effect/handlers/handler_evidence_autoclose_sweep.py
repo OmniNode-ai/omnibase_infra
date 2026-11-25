@@ -179,11 +179,13 @@ from omnibase_infra.gate_binding import (
     resolve_gate_binding,
 )
 from omnibase_infra.handlers.done_write_receipt_guard import (
-    reap_timed_out_process as _reap_timed_out_process,
-)
-from omnibase_infra.handlers.done_write_receipt_guard import (
+    process_registry_root,
+    product_clone_verifier_env,
     resolve_done_write_receipt_gate,
     run_dod_verify_command,
+)
+from omnibase_infra.handlers.done_write_receipt_guard import (
+    reap_timed_out_process as _reap_timed_out_process,
 )
 from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect import (
@@ -2941,7 +2943,15 @@ class HandlerEvidenceAutocloseSweep:
         run_gateway_command: offer_companion_sources.TypeRunGateway | None = None,
         *,
         gate: ProtocolDoneWriteReceiptGate | None = None,
+        registry_root: str | None = None,
     ) -> None:
+        # OMN-26650. ``registry_root`` is the directory holding the materialised
+        # product clones (the caller's ``OMNI_HOME``); injected, with the
+        # process's own reader as the default so zero-arg contract-driven
+        # construction still anchors a relative check cwd in the product clone.
+        self._registry_root = (
+            registry_root if registry_root is not None else process_registry_root()
+        )
         # ``autoclose_disabled`` mirrors GitHubTransport's env-fallback-in-
         # __init__ precedent: read at construction time, override injectable
         # for tests. Re-checked defensively at the top of handle() too so a
@@ -3062,8 +3072,16 @@ class HandlerEvidenceAutocloseSweep:
             contract = Path(cwd).resolve() / "contracts" / f"{ticket_id}.yaml"
             if not contract.is_file():
                 return None, -1, f"Product contract is unreadable: {contract}"
+            # OMN-26650: the contract was read from a sparse contracts-only
+            # clone; a relative check cwd must mean the materialised product
+            # clone, not that tree (see `materialised_product_clone`). The
+            # verifier takes it as its explicit `CONTRACT_REPO_DIR` anchor.
             return await run_dod_verify_command(
-                ticket_id, cwd, timeout, contract_path=str(contract)
+                ticket_id,
+                cwd,
+                timeout,
+                contract_path=str(contract),
+                env=product_clone_verifier_env(cwd, self._registry_root),
             )
         return await run_dod_verify_command(ticket_id, cwd, timeout)
 

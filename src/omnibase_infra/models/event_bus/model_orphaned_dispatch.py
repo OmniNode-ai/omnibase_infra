@@ -30,5 +30,6 @@ class ModelOrphanedDispatch(BaseModel):
         partition, offset = self.record_coordinate or (None, None)
         return (
             f"{self.topic} partition={partition} offset={offset} "
+            f"group={self.consumer_group} "
             f"subscription={self.subscription_key} age={now - self.started_at:.0f}s"
         )

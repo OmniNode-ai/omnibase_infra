@@ -14,6 +14,13 @@ requirements:
         statement: 'AC1: the deploy agent builds the newest declared web development branch revision before recreating the estimator page, reusing an image only when its source labels match that revision.'
       - id: AC2
         statement: 'AC2: the deploy agent builds an absent estimator page image before recreation, and a failed source checkout, build or revision readback refuses recreation.'
+  - id: req-omn21487-nightly-test-seams
+    statement: The nightly integration sweep (run 45325746514) fails ten tests of this ticket's delivery proof and its chain canary for two test-seam faults, and neither is a defect of the delivery. The estimator delivery proof drives the deploy agent's real executor module instead of a hand-typed stand-in, and the three live chain tests are deselected, never skipped, where the runner exports no CHAIN_CANARY variable.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: the estimator build-delivery integration tests pass against the deploy agent real executor module, so a name the delivery starts reading from it can no longer be missing from a stand-in -- falsifier: uv run --frozen pytest tests/integration/docker/test_cost_estimator_build_delivery_omn21487.py -q fails at the merge base with AttributeError on STABILITY_TEST'
+      - id: AC4
+        statement: 'AC4: the nightly marker selection collects none of the three live chain-canary tests when no CHAIN_CANARY live variable is exported, and every one of them when any is exported -- falsifier: uv run --frozen pytest tests/integration/chain_canary/test_chain_canary_live_selection_omn21487.py -q fails at the merge base, where the file is absent'
 evidence_requirements:
   - kind: tests
     description: Exercise the real deploy-agent build boundary with controlled Git and Docker responses, including absent images, advanced source revisions and refusal controls.
@@ -21,6 +28,9 @@ evidence_requirements:
   - kind: tests
     description: Drive the delivery from the shipped node contract against a real Git source repository and a stand-in container engine on PATH.
     command: uv run --frozen pytest tests/integration/docker/test_cost_estimator_build_delivery_omn21487.py -q --no-cov -p no:randomly
+  - kind: tests
+    description: The nightly integration selection of the chain-canary directory with and without a live-chain runner variable.
+    command: uv run --frozen pytest tests/integration/chain_canary/test_chain_canary_live_selection_omn21487.py -q --no-cov -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -68,3 +78,19 @@ dod_evidence:
         check_value: >-
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_cost_estimator_build.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'class HandlerCostEstimatorBuild' > /dev/null && gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'ESTIMATOR_GATE_PASSWORD' > /dev/null
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21487-ac3-real-executor-seam
+    description: >-
+      The seven estimator build-delivery integration tests run build_dev_lane_services against the deploy agent's real executor module, replacing only its lane configuration and compose environment, so the lane enum, the scope enum and the stability overlay path are the real ones. At the merge base all seven fail on a stand-in that lacks STABILITY_TEST.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/docker/test_cost_estimator_build_delivery_omn21487.py -q --no-cov -p no:randomly
+  - id: dod-omn21487-ac4-live-chain-selection
+    description: >-
+      A real pytest collection with the nightly's marker expression collects none of the three live chain-canary tests when the runner exports no CHAIN_CANARY live variable, collects all three when one is exported, and the split function keeps every live test for each of the four variables.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/chain_canary/test_chain_canary_live_selection_omn21487.py -q --no-cov -p no:randomly

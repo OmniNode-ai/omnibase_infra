@@ -6,7 +6,7 @@
     "PR #2312 added tenant_id. Nothing mechanically held that surface afterwards, so",
     "a rename, a reordering into positional, or a dropped default silently breaks the",
     "cross-repo call site with no local test failure. This fixture is that mechanism.",
-    "Note: several of these fail closed with NotImplementedError when non-None. The",
+    "OMN-15482: system_prompt, temperature and response_format are published onto the bus command; only model and probe_ladder still fail closed with NotImplementedError when non-None. The",
     "CALLABLE contract (name + kind + annotation + default) is what is frozen here;",
     "the accept/reject behavior is asserted by the existing dispatch-port tests.",
     "OMN-18321 added provenance. That keyword reached the consumer protocol and its call site in OMN-18172 (omnimarket#2494) and NOT this repo, which took every dev-lane delegation to a failed terminal with no FSM row for a day. Note what this fixture could not do: it freezes keywords somebody already knew about, so it cannot notice one the consumer has newly STARTED sending. The check that can is tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py, which reads the consumer's own declaration as its input."

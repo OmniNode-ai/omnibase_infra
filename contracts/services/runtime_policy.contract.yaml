@@ -383,7 +383,11 @@ profiles:
         # 2,367 MiB, so 3072M is that figure plus ~30% headroom.
         boot:
           ready_bound_seconds: 600
-          max_concurrent_contract_attach: 4
+          # OMN-26316: 16 contracts in flight. The 2026-11-24T20:01:04Z start on h201 joined
+          # 70 contracts at boot in 127 s of its 210 s to the first /health 200, with 4
+          # in flight and about 7.3 s per contract slot (tests/fixtures/boot_start_omn26316).
+          # Sixteen in flight models 5 waves, about 36 s.
+          max_concurrent_contract_attach: 16
           # Delegation and hook-event consumers subscribe before every other
           # contract's, in this order. The work-ledger query node answers the
           # board's readings and the seam probe by bus request, with a 30 s
@@ -418,7 +422,11 @@ profiles:
             - node_delegation_routing_order_compute
             - node_github_repo_gateway_effect
             - node_dev_roll_window_gate_effect
-          memory_limit: 3072M
+          # OMN-26316: 6144M. The join limit of 16 above joined the boot
+          # consumers four times as fast and the 3072M sized for a limit of 4 was
+          # OOM-killed at 3.10 to 3.12 GB on h201 (02:38:51Z, 02:42:21Z), 15
+          # restarts; 6144M is 2x the larger kill floor (tests/fixtures/dev_runtime_oom_omn26316).
+          memory_limit: 6144M
         # OMN-22930 (T8): the BYOK credential READ that only the separate
         # effects service resolved (OMN-20533) now happens in main, because the
         # provider call runs there once the role is folded. The rule is the

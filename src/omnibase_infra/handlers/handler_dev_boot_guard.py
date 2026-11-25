@@ -292,6 +292,31 @@ def _checked(
     )
 
 
+# The agent's own consumer transport declaration (the unit's ``KAFKA_SASL_MECHANISM``,
+# ``KAFKA_SECURITY_PROTOCOL`` and ``KAFKA_SASL_ENV_PREFIX``, OMN-18012). The agent's lane login
+# lives only under that prefix, so the unprefixed pair the append command's client config reads
+# is absent, and ``ModelKafkaEventBusConfig.default()`` rejects a SASL mechanism with no
+# credentials before the lane's stored identity is bound (OMN-26316). The append command takes
+# its broker, protocol, mechanism and login from the ``dev`` lane declaration and the machine's
+# lane store, so none of these three reaches it; the post-roll ledger proof reads the same client
+# config and met the same refusal (dev job 02059fe5, 2026-11-24T06:38Z).
+_LEDGER_CLIENT_UNINHERITED_ENV: Final = frozenset(
+    {"KAFKA_SASL_MECHANISM", "KAFKA_SECURITY_PROTOCOL", "KAFKA_SASL_ENV_PREFIX"}
+)
+
+
+def _without_agent_broker_declaration(command: list[str]) -> list[str]:
+    """``command`` run under ``env -u`` for the agent's own broker declarations.
+
+    The unset is done by ``env`` in the child, so this handler never reads the process
+    environment (handlers take no direct environment access).
+    """
+    unset = [
+        arg for name in sorted(_LEDGER_CLIENT_UNINHERITED_ENV) for arg in ("-u", name)
+    ]
+    return ["env", *unset, *command]
+
+
 def _prove_work_ledger_answers(execution: ModuleType) -> None:
     """After a dev runtime recreate verified, prove one ledger read answers (OMN-25942).
 
@@ -319,7 +344,7 @@ def _prove_work_ledger_answers(execution: ModuleType) -> None:
         str(bound),
     ]
     try:
-        done = execution._run(command, timeout=bound)
+        done = execution._run(_without_agent_broker_declaration(command), timeout=bound)
     except execution.subprocess.TimeoutExpired as exc:
         raise DevBootFailedError(f"work ledger: no answer within {bound}s") from exc
     except OSError as exc:
@@ -1629,22 +1654,28 @@ def _append_status_over_bus(
     """
     try:
         done = execution._run(
-            [
-                "bash",
-                "-c",
-                _APPEND_STATUS_SCRIPT,
-                "ledger-append",
-                row,
-                lane,
-                request_id,
-            ],
+            _without_agent_broker_declaration(
+                [
+                    "bash",
+                    "-c",
+                    _APPEND_STATUS_SCRIPT,
+                    "ledger-append",
+                    row,
+                    lane,
+                    request_id,
+                ]
+            ),
             timeout=REPORT_SECONDS,
         )
     except (OSError, execution.subprocess.SubprocessError):
         logger.warning("Dev boot STATUS delivery still pending: append command failed")
         return False
     if done.returncode != 0:
-        logger.warning("Dev boot STATUS delivery still pending: append command refused")
+        answer = done.stderr.strip().splitlines()[-1:]
+        logger.warning(
+            "Dev boot STATUS delivery still pending: append command refused: %s",
+            _safe(answer[0]) if answer else f"exit {done.returncode}, no stderr",
+        )
         return False
     try:
         receipt = json.loads(done.stdout.strip().splitlines()[-1])

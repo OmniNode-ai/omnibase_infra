@@ -1,0 +1,187 @@
+{
+  "source": "evidence-autoclose-sweep.yml run 44672842883, job 136077602971, step 'Run evidence autoclose sweep', head e952143d3, schedule tick 2026-11-20T04:12:23Z (OmniNode-ai/omnibase_infra); check_results of every outcome whose message_excerpt carries the scripts import fault; the runner's temp directory is written <RUNNER_TEMP> and its tool cache <TOOLCACHE>, nothing else is changed",
+  "failed_checks": [
+    {
+      "ticket_id": "OMN-26106",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn26106-ac1-requester",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (1304ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omnib…"
+    },
+    {
+      "ticket_id": "OMN-26106",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn26106-ac2-journal",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (460ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-26106",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn26106-ac3-wiring",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (451ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-26106",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn26106-ac4-prod-untouched",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (457ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-26122",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn26122-ac1-cause-named",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (1226ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omnib…"
+    },
+    {
+      "ticket_id": "OMN-26122",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn26122-ac2-resolves-and-keeps-clauses",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (437ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-26122",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn26122-ac3-status-row",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (433ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-26102",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn26102-ac1",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (1213ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omnib…"
+    },
+    {
+      "ticket_id": "OMN-26102",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn26102-ac2",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (434ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-26102",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn26102-ac3",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (434ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-26102",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn26102-ac4",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (430ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-25548",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn25548-ac11-extractor",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (1223ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omnib…"
+    },
+    {
+      "ticket_id": "OMN-25548",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn25548-ac11-boot",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (439ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-25548",
+      "decision": "gap_posted",
+      "evidence_check": "dod-omn25548-ac11-integration",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (442ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-21717",
+      "decision": "skipped_duplicate_comment",
+      "evidence_check": "dod-001",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (1207ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omnib…"
+    },
+    {
+      "ticket_id": "OMN-21717",
+      "decision": "skipped_duplicate_comment",
+      "evidence_check": "dod-002",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (431ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-26093",
+      "decision": "skipped_duplicate_comment",
+      "evidence_check": "dod-omn26093-ac1-declaration-tests",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (1394ms): Using CPython 3.12.16 interpreter at: <TOOLCACHE>/Python/3.12.16/x64/bi…"
+    },
+    {
+      "ticket_id": "OMN-26093",
+      "decision": "skipped_duplicate_comment",
+      "evidence_check": "dod-omn26093-ac1-prepare-effect",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (495ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-25912",
+      "decision": "skipped_duplicate_comment",
+      "evidence_check": "dod-omn25912-ac1-four-starts",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (1185ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omnib…"
+    },
+    {
+      "ticket_id": "OMN-25912",
+      "decision": "skipped_duplicate_comment",
+      "evidence_check": "dod-omn25912-ac2-window",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (425ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-25912",
+      "decision": "skipped_duplicate_comment",
+      "evidence_check": "dod-omn25912-ac3-regression",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (424ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-25912",
+      "decision": "skipped_duplicate_comment",
+      "evidence_check": "dod-omn25912-ac4-announce",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (425ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-25912",
+      "decision": "skipped_duplicate_comment",
+      "evidence_check": "dod-omn25912-ac5-wiring",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (429ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-25912",
+      "decision": "skipped_duplicate_comment",
+      "evidence_check": "dod-omn25912-integration-gate-readback",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (429ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    },
+    {
+      "ticket_id": "OMN-23368",
+      "decision": "skipped_duplicate_comment",
+      "evidence_check": "dod-001",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (1196ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omnib…"
+    },
+    {
+      "ticket_id": "OMN-23368",
+      "decision": "skipped_duplicate_comment",
+      "evidence_check": "dod-002",
+      "status": "failed",
+      "message_excerpt": "FAILED exit_code=4; tests=<no test ids reported>; first_error=ModuleNotFoundError: No module named 'scripts' (435ms): ImportError while loading conftest '<RUNNER_TEMP>/contract-roots/omniba…"
+    }
+  ]
+}
