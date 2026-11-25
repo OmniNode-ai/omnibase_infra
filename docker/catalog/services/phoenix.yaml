@@ -5,7 +5,11 @@ layer: observability
 container_name: omnibase-infra-phoenix
 required_env: []
 hardcoded_env:
-  PHOENIX_WORKING_DIR: /data
+  # OMN-22097: the 63.7 GB sqlite at /data/phoenix.db (about 71.7M traces) cannot be
+  # queried inside a minute. It stays untouched; a new store starts below it and
+  # spans expire after the declared days.
+  PHOENIX_WORKING_DIR: /data/store-7d
+  PHOENIX_DEFAULT_RETENTION_POLICY_DAYS: "7"
 operational_defaults: {}
 ports:
   external: 6006
