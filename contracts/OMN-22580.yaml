@@ -5,6 +5,18 @@ summary: A pull request that adds a node no longer edits corpus counts by hand; 
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn22580-ac1-accepted-20261125t0545z:
+      - label: AC1
+        criterion_hash: ae61f751000dff7ac09dd47a8f641f45b8ab10de681d6757cc6f2384ea426e4b
+        proposed_by: lane=dod-closeout-bind-2026-11-25T0545Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-25T0545Z-c1
+    dod-omn22580-ac3-accepted-20261125t0545z:
+      - label: AC3
+        criterion_hash: 7f9ea66ec782c5767fe7c1e0af7230b5d09492891c16ba820bc4ab93aa81c26f
+        proposed_by: lane=dod-closeout-bind-2026-11-25T0545Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-25T0545Z-c1
 requirements:
   - id: req-omn22580-dispatch-parity-refresh
     statement: The dispatch-parity fixtures are refreshed by one harness command and checked by another, and no test or probe pins a corpus count.
@@ -46,3 +58,21 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC2
+  - id: dod-omn22580-ac1-accepted-20261125t0545z
+    description: 'AC1: a refresh on matching fixtures writes nothing, and a planted stale count, probe or readback digest is refused by the check and repaired by the refresh. Fails when any of the four tests fails.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest -q -p no:cacheprovider tests/unit/runtime/test_dispatch_parity_refresh_omn22478.py::test_refresh_on_matching_fixtures_writes_nothing tests/unit/runtime/test_dispatch_parity_refresh_omn22478.py::test_planted_stale_count_is_refused_then_refreshed tests/unit/runtime/test_dispatch_parity_refresh_omn22478.py::test_planted_stale_probe_is_refused_then_refreshed tests/unit/runtime/test_dispatch_parity_refresh_omn22478.py::test_planted_stale_readback_digest_is_refused_then_refreshed
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22580-ac3-accepted-20261125t0545z
+    description: 'AC3: the stale-report message names --refresh-fixtures and the gate step runs the check and never tells authors to regenerate with --out. Fails against the gate workflow at the parent of omnibase_infra#5725.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest -q -p no:cacheprovider tests/unit/runtime/test_dispatch_parity_refresh_omn22478.py -k "message or gate_step"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
