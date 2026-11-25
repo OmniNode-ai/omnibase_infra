@@ -61,7 +61,7 @@ _SUPPLEMENTAL_EXPIRY_TEST = (
 )
 _EXPECTED_SHAS: dict[str, str] = {
     "0000_create_lab_alerts.sql": (
-        "bfe9f7a055846905ef7e0f1d98fc421ff4fd03e1a98772d091bc7329fa4d5afd"
+        "44c5c19190ce625ca3a61d83cba968a6dfdb99e328ccc40448cb5502c72cf719"
     ),
     "0001_grant_omninode_runtime_lab_alerts.sql": (
         "bf8b57593eeff04d13d1710eba4af8c8baea1ffddf94359ba6e6d1b65c1c7484"
