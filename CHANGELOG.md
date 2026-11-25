@@ -1,3 +1,25 @@
+## v0.38.84 (2026-11-25)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.84 by the scheduled release train.
+- 13 release-relevant commit(s) merged since v0.38.83.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.83
+- : an abandoned dispatch names its consumer group on the health line and in the deadline log (#6261)
+- : Coalesce dev merge build requests inside a declared window (#6276)
+- : Vendor overlay store write tables and grant them in the database topologies (#6274)
+- : chain canary command carries the headers the ledger chain reads (#6264)
+- : overdue renumber ac17 ac18 (#6238)
+- : stop judging lazy-start dormant projections as unattached (#6259)
+- : the dead letter replay never replays an unsequenced live row (#6252)
+- : the sweep verifier anchors a relative check cwd at the product clone (#6246)
+- : dev deploy agent STATUS append runs without the agent's SASL declaration (#6234)
+- : refuse publisher_malformed dead letters in node_dlq_replay_effect (#6253)
+- : the delegation dispatch port publishes system prompt, temperature and response format (#6247)
+- : bound dev boot report delivery and abandon stale incidents (#6240)
+- : dispatch engine writes no INFO line and builds no log context for a successful dispatch (#6236)
+
 ## v0.38.83 (2026-11-24)
 
 ### Release
