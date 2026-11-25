@@ -383,7 +383,11 @@ profiles:
         # 2,367 MiB, so 3072M is that figure plus ~30% headroom.
         boot:
           ready_bound_seconds: 600
-          max_concurrent_contract_attach: 4
+          # OMN-26316: 16 contracts in flight. The 2026-11-24T20:01:04Z start on h201 joined
+          # 70 contracts at boot in 127 s of its 210 s to the first /health 200, with 4
+          # in flight and about 7.3 s per contract slot (tests/fixtures/boot_start_omn26316).
+          # Sixteen in flight models 5 waves, about 36 s.
+          max_concurrent_contract_attach: 16
           # Delegation and hook-event consumers subscribe before every other
           # contract's, in this order. The work-ledger query node answers the
           # board's readings and the seam probe by bus request, with a 30 s

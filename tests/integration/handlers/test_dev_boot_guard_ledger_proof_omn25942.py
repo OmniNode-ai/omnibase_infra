@@ -34,9 +34,16 @@ def _checkout(tmp_path: Path, script_body: str) -> types.SimpleNamespace:
     entry.write_text("#!/bin/sh\n" + script_body, encoding="utf-8")
     entry.chmod(0o755)
 
-    def run(command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+    def run(
+        command: list[str], timeout: int, *, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            command, capture_output=True, text=True, timeout=timeout, check=False
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env=env,
         )
 
     return types.SimpleNamespace(
