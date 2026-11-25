@@ -114,6 +114,7 @@ databases:
               - goal_traces
               - host_disk_class
               - host_disk_volume
+              - lab_alerts
               - lab_container_memory_window
               - lab_job_state
               - lab_job_transitions
@@ -130,6 +131,10 @@ databases:
               - open_obligations
               - orchestration_style_outcomes
               - overlay_store
+              - overlay_store_audit
+              - overlay_store_provenance
+              - overlay_store_revision
+              - overlay_store_write
               - pr_landing_state
               - pr_landing_transitions
               - pr_state
@@ -498,5 +503,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: c95f96c75108b8475de186a000b03ea8f9805e9e011b87e19e6a35f7a3d17928
+  sha256: 496d25b2f5909564059091c2f903d1da6b36a0cec2aa3cd1cda600117e2da72c
 topology_instance: onex-dev

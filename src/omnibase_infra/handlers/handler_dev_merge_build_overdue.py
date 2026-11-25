@@ -29,6 +29,12 @@ records); it reads no host and publishes nothing. In order:
 * A dev job that carries the merge and failed: ``WAIT``, ``failed_head``; the failed-head
   gate owns that head, and asking again would only be refused.
 * Inside the window: ``WAIT``, ``within_window``.
+* A dev job (not superseded, not the stability follow's) accepted less than the declared
+  coalesce window ago: ``WAIT``, ``coalesced`` (the hourly build carries every merge, so a
+  build asked for just after one waits for the next). The coalesce window is declared in the
+  node contract; ``0`` coalesces nothing.
+* A job pinned to a descendant of the merge (the ref an overdue request itself builds) carries
+  it like a job on ``origin/dev``, so one build asked for one merge carries the merges before it.
 * Otherwise ``REQUEST``, ``overdue_no_build``, with a ``request_id`` that is a function of
   the repository and sha only.
 
@@ -78,7 +84,10 @@ def _may_carry(
     return (
         job.requested_by != _STABILITY_FOLLOW
         and job.accepted_at >= request.merged_at
-        and job.git_ref in (_DEV_HEAD, request.merge_sha)
+        and (
+            job.git_ref in (_DEV_HEAD, request.merge_sha)
+            or job.git_ref in request.descendant_shas
+        )
     )
 
 
@@ -147,6 +156,14 @@ class HandlerDevMergeBuildOverdue:
                 return decide("WAIT", "failed_head", job.job_id)
         if request.now < due_at:
             return decide("WAIT", "within_window")
+        coalesce = timedelta(seconds=request.coalesce_seconds)
+        for job in reversed(dev_jobs):
+            if (
+                job.requested_by != _STABILITY_FOLLOW
+                and job.status != EnumJobStatus.SUPERSEDED
+                and request.now - job.accepted_at < coalesce
+            ):
+                return decide("WAIT", "coalesced", job.job_id)
         return decide(
             "REQUEST",
             "overdue_no_build",

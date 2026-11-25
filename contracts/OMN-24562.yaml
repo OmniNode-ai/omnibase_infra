@@ -94,16 +94,26 @@ requirements:
     acceptance:
       - id: AC28
         statement: 'AC28: the canary publishes the delegate-skill command with correlation_id, message_id, timestamp, source and event_type Kafka headers taken from its envelope, and the ledger projection of that record carries the probe correlation id and envelope id -- falsifier: tests/integration/chain_canary/test_publish_command_headers_ledger_omn24562.py fails at the merge base'
+  - id: req-omn24562-credential-revoked-machine-binding
+    statement: The machine principal profile may write the credential-revoked event on the dev broker, declared in the bindings and the derived grants.
+    acceptance:
+      - id: AC29
+        statement: 'AC29: deploy/lab/machine-principal-bindings.yaml produces onex.evt.omnimarket.credential-revoked.v1 on the dev broker and the committed derived grants carry its WRITE and DESCRIBE rows -- falsifier: the machine supplement test in test_developer_principal_grants_omn19975.py fails without the binding'
+  - id: req-omn24562-summary-poll-running-conclusion
+    statement: CI Summary counts an in-run job whose conclusion is set as completed with that conclusion whatever its status says, and fails closed, naming the job, when a job still has no conclusion a declared time after the last other in-run job completed.
+    acceptance:
+      - id: AC30
+        statement: 'AC30: an in-run job with status in_progress and conclusion success is done and green, in_progress with failure is red, in_progress with no conclusion waits, and a job with no conclusion 45 minutes after the last other job completed is named by the poll step stall filter, and the jobs read pages at 30 then 10 -- falsifier: uv run --frozen pytest tests/ci/test_ci_summary_running_conclusion_omn24562.py -q -n 0 --no-cov fails on the merge-base ci_summary_gate.py'
   - id: req-omn24562-runner-onex-off-path
     statement: A runner job's default PATH carries no onex; the ledger-read shim sits in its own directory outside the default PATH.
     acceptance:
-      - id: AC29
-        statement: 'AC29: the runner image installs the ledger-read shim outside every default PATH directory and puts no shim directory in the image PATH -- falsifier: uv run --frozen pytest tests/ci/test_runner_image_onex_ledger_reader_omn24139.py -q -k default_path fails at the merge base'
+      - id: AC31
+        statement: 'AC31: the runner image installs the ledger-read shim outside every default PATH directory and puts no shim directory in the image PATH -- falsifier: uv run --frozen pytest tests/ci/test_runner_image_onex_ledger_reader_omn24139.py -q -k default_path fails at the merge base'
   - id: req-omn24562-runner-onex-per-pool
     statement: Only the verify pool runs without onex on its PATH; every other runner pool keeps /usr/local/bin/onex.
     acceptance:
-      - id: AC30
-        statement: 'AC30: the runner image gosu wrapper removes /usr/local/bin/onex when RUNNER_LABELS carries omnibase-verify and leaves it for every other pool -- falsifier: uv run --frozen pytest tests/ci/test_runner_verify_pool_onex_path_omn24562.py -q fails at the merge base'
+      - id: AC32
+        statement: 'AC32: the runner image gosu wrapper removes /usr/local/bin/onex when RUNNER_LABELS carries omnibase-verify and leaves it for every other pool -- falsifier: uv run --frozen pytest tests/ci/test_runner_verify_pool_onex_path_omn24562.py -q fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -120,6 +130,9 @@ evidence_requirements:
   - kind: tests
     description: Stability start wait within and past the declared budget, with the dev lookup, the two fences and prod unchanged.
     command: cd scripts/deploy-agent && uv run --frozen --extra dev python -m pytest tests/unit/test_verify_stability_start_wait_omn24562.py -q -p no:cacheprovider
+  - kind: tests
+    description: The machine supplement binds credential-revoked and the derived grants match.
+    command: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q --no-cov -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ""
@@ -364,20 +377,38 @@ dod_evidence:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_chain_canary_effect/test_publish_command_headers_omn24562.py tests/integration/chain_canary/test_publish_command_headers_ledger_omn24562.py -q -p no:randomly --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn24562-ac29-runner-onex-off-path
-    description: 'AC29: the image installs no onex in a default PATH directory and sets no image-wide PATH to it.'
+  - id: dod-omn24562-ac29-credential-revoked-binding
+    description: The machine supplement produces credential-revoked on the dev broker and the derived grants match the derivation.
     source: manual
     binds_ac:
       - AC29
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_runner_image_onex_ledger_reader_omn24139.py tests/ci/test_runner_image_identity.py -q -p no:randomly --no-cov -p no:cacheprovider
+        check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -k machine_supplement -q --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn24562-ac30-runner-onex-per-pool
-    description: 'AC30: the gosu wrapper drops the onex link for the verify pool and keeps it for every other pool.'
+  - id: dod-omn24562-ac30-summary-poll-running-conclusion
+    description: 'AC30: the CI Summary gate treats an in-run job with a set conclusion as completed and bounds a job with none.'
     source: manual
     binds_ac:
       - AC30
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_ci_summary_running_conclusion_omn24562.py tests/ci/test_ci_summary_gate.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac31-runner-onex-off-path
+    description: 'AC31: the image installs no onex in a default PATH directory and sets no image-wide PATH to it.'
+    source: manual
+    binds_ac:
+      - AC31
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_runner_image_onex_ledger_reader_omn24139.py tests/ci/test_runner_image_identity.py -q -p no:randomly --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac32-runner-onex-per-pool
+    description: 'AC32: the gosu wrapper drops the onex link for the verify pool and keeps it for every other pool.'
+    source: manual
+    binds_ac:
+      - AC32
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_runner_verify_pool_onex_path_omn24562.py -q -p no:randomly --no-cov -p no:cacheprovider
