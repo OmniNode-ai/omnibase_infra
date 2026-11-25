@@ -165,6 +165,7 @@ class AsgiMounts:
         """Dormant contract name to the mount it declares, served once it wakes (OMN-26316)."""
         self._dormant_locks: dict[str, asyncio.Lock] = {}
         self._dormant_index_task: asyncio.Task[None] | None = None
+        self._dependencies: dict[str, object] = {}
         self.failure = ""
         """Why the mounts failed to start; empty while none has failed."""
 
@@ -180,12 +181,20 @@ class AsgiMounts:
             context=context,
         )
 
-    @staticmethod
-    def _build(mount: ModelHttpMount) -> _AsgiApp:
+    def provide_dependency(self, name: str, dependency: object) -> None:
+        """Hold ``dependency`` for the mounts whose block names ``name`` (OMN-21894)."""
+        self._dependencies[name] = dependency
+
+    def _build(self, mount: ModelHttpMount) -> _AsgiApp:
+        missing = [n for n in mount.dependencies if n not in self._dependencies]
+        if missing:
+            raise self._failure(
+                mount, f"dependencies not provided by the runtime: {', '.join(missing)}"
+            )
         module_name, _, attribute = mount.factory.partition(":")
         try:
             factory = getattr(importlib.import_module(module_name), attribute)
-            app = factory()
+            app = factory(**{n: self._dependencies[n] for n in mount.dependencies})
         except Exception as exc:
             raise AsgiMounts._failure(mount, f"factory raised {exc!r}") from exc
         if not callable(app):

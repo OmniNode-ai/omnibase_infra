@@ -342,26 +342,20 @@ class TransportMCPStreamableHttp:
         """
         mcp_server_class = _load_mcp_server_class()
 
-        from starlette.applications import Starlette
-        from starlette.routing import Mount
-
         mcp = mcp_server_class("ONEX MCP Server")
 
         # Register tools from the provided definitions
         for tool_def in tools:
             self._register_tool(mcp, tool_def, tool_executor)
 
-        # Create Starlette app with MCP server mounted
-        self._app = Starlette(
-            routes=[
-                Mount(
-                    self._config.path,
-                    app=mcp.streamable_http_app(
-                        stateless_http=self._config.stateless,
-                        json_response=self._config.json_response,
-                    ),
-                ),
-            ],
+        # The SDK app owns its route at the declared path and its own lifespan
+        # (the session manager's task group). Nesting it under a Starlette Mount
+        # doubled the path and never ran that lifespan, so initialize answered
+        # 404 (OMN-21894).
+        self._app = mcp.streamable_http_app(
+            streamable_http_path=self._config.path,
+            stateless_http=self._config.stateless,
+            json_response=self._config.json_response,
         )
 
         # Apply authentication middleware (R1, R3 — OMN-2701; multi-key — OMN-1419)

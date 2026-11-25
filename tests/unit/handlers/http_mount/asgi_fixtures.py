@@ -109,3 +109,12 @@ def create_receive_probe(
 def create_unread_probe() -> Callable[[_Scope, _Receive, _Send], Awaitable[None]]:
     """A raw ASGI app that never reads its request body."""
     return create_receive_probe([], [], read_body=False)
+
+
+DEPENDENCY_LOG: list[dict[str, object]] = []
+
+
+def create_app_with_dependencies(*, bus: object, reader: object) -> FastAPI:
+    """Factory that declares two dependencies and records what it was handed (OMN-21894)."""
+    DEPENDENCY_LOG.append({"bus": bus, "reader": reader})
+    return FastAPI()

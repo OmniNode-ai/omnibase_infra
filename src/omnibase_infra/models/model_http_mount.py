@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 _FACTORY_PATTERN = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*:[A-Za-z_][A-Za-z0-9_]*$"
 )
+_DEPENDENCY_PATTERN = re.compile(r"^[a-z_][a-z0-9_]*$")
 _PREFIX_PATTERN = re.compile(r"^/[A-Za-z0-9._~\-]+(/[A-Za-z0-9._~\-]+)*$")
 
 
@@ -23,8 +24,11 @@ class ModelHttpMount(BaseModel):
           factory: "package.module:create_app"
           path_prefix: "/api/v1"
           max_body_bytes: 1048576
+          dependencies: [bus, reader]
 
-    The runtime calls ``factory`` with no arguments, expects an ASGI3 application
+    The runtime calls ``factory`` with no arguments, or, when ``dependencies``
+    names some, with exactly those names as keyword arguments (OMN-21894);
+    a dependency the runtime does not hold refuses the mount by name. It expects an ASGI3 application
     back, runs its lifespan, and serves every request whose path is
     ``path_prefix`` or below it on the runtime's existing HTTP port. The
     application sees the request path unchanged and an empty ``root_path``, so
@@ -56,6 +60,29 @@ class ModelHttpMount(BaseModel):
         strict=True,
         description="Maximum request body bytes delivered to the app, if declared.",
     )
+
+    dependencies: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Names of runtime-held dependencies passed to the factory as keyword "
+            "arguments of the same name. Each name is a lowercase identifier, "
+            "listed once."
+        ),
+    )
+
+    @field_validator("dependencies")
+    @classmethod
+    def validate_dependencies(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """Require unique lowercase identifiers."""
+        for name in value:
+            if not _DEPENDENCY_PATTERN.match(name):
+                raise ValueError(
+                    f"http_mount.dependencies entries must be lowercase "
+                    f"identifiers, got {name!r}"
+                )
+        if len(set(value)) != len(value):
+            raise ValueError("http_mount.dependencies must not repeat a name")
+        return value
 
     @field_validator("factory")
     @classmethod
