@@ -1,0 +1,50 @@
+schema_version: "1.0.0"
+ticket_id: OMN-26635
+title: "The overlay store's revision, provenance and audit migrations are vendored, ledgered, classed and granted in omnibase_infra"
+summary: >-
+  omnimarket's node_projection_overlay_store adds 0003 (revision column and the overlay_store_revision, _write, _provenance and _audit tables) and 0004 (the runtime write grant on them). This repository vendors both byte for byte, ledgers and classes them, and lists the four tables for the runtime principal in the database topology, so a later release carries them and omnimarket's Sibling Release Compatibility Gate and projection-binding grant check pass.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26635-overlay-store-write-tables-vendored
+    statement: The overlay store 0003 and 0004 migrations are vendored byte for byte, ledgered and classed, and the topology grants the runtime the four tables.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the vendored 0003/0004 bytes, ledger bindings, migration classes and topology table lists are exact -- falsifier: uv run --frozen pytest tests/unit/migrations/test_omn26635_overlay_store_write_tables_vendored.py -q -n 0 --no-cov fails when a file or topology entry is absent and passes with them'
+evidence_requirements:
+  - kind: tests
+    description: The vendor tests for the overlay store.
+    command: uv run --frozen pytest tests/unit/migrations/test_omn26635_overlay_store_write_tables_vendored.py tests/unit/migrations/test_omn22478_overlay_store_vendor.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26635-write-tables-vendor
+    description: The vendored 0003 and 0004 files match their pinned bytes, ledger rows and migration classes, and the topologies list the four tables.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn26635_overlay_store_write_tables_vendored.py -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn26635-overlay-store-directory
+    description: The overlay store vendor directory holds exactly the five vendored files.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn22478_overlay_store_vendor.py -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn26635-interim-bridge-expiry
+    description: The four overlay store tables are bridged and named in the interim map, so the supplemental expiry gate retires them once omnimarket#6761 reaches the pin.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py -q -n 0 --no-cov
+        cwd: .
