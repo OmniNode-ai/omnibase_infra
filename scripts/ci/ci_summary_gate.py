@@ -1453,7 +1453,7 @@ def dedup_latest(
         steps = raw.get("steps")
         current = JobState(
             name=name,
-            status=str(raw.get("status") or ""),
+            status=str(raw.get("status") or "") if conclusion is None else "completed",
             conclusion=None if conclusion is None else str(conclusion),
             run_attempt=attempt,
             infrastructure_error=(
