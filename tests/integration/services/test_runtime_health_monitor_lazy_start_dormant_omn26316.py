@@ -107,7 +107,7 @@ def _full_manifest() -> ModelAutoWiringManifest:
 @pytest.fixture
 def lazy_start_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     """The lane's hot-load row: on_demand, boot set = the ingress only."""
-    root = tmp_path / "overlays"
+    root = tmp_path / "hotload_roots"
     (root / "runtime_contract_hotload").mkdir(parents=True)
     (root / "runtime_contract_hotload" / "overlay.yaml").write_text(
         "schema_version: 1\nlanes:\n  dogfood:\n    enabled: true\n"
