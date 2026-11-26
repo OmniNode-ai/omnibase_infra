@@ -31,12 +31,6 @@ requirements:
       - id: "AC6"
         statement: >-
           AC6: the pinned topology resolves omninode_cloud after the core pin raise (omnibase_core#2378) -- falsifier: `uv run --frozen pytest tests/unit/topology/test_omninode_cloud_topology_omn26471.py -q -n 0 --no-cov` fails at the head, or passes at the base commit
-  - id: "req-omn26471-bare-sequence-ownership"
-    statement: "The application database SQL gate's ownership lookup resolves a sequence the manifest declares as a bare name under its domain, for the schema its table occupies."
-    acceptance:
-      - id: "AC8"
-        statement: >-
-          AC8: public.tenant_event_outbox_id_seq resolves to its declared owner through load_application_database_ownership_identities when the manifest lists it as a bare name (kind sequence, domain OMNINODE_INTERNAL, no schema), a sequence with no owning table in the manifest stays unowned, and a duplicate declaration still fails -- falsifier: `uv run pytest tests/unit/validation/test_bare_sequence_ownership_omn26471.py -q -n 0` fails at the head, or passes at the base commit
 evidence_requirements:
   - kind: "tests"
     description: "The seam grants exactly the declared set, the readback raises on any difference, and the compose and runner wiring is pinned."
@@ -104,6 +98,21 @@ dod_evidence:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/validation/test_bare_sequence_ownership_omn26471.py -q -n 0 --no-cov"
         cwd: "."
+  - id: "dod-omn26471-ac8-retired-label"
+    description: "The contract declares only the ticket's AC1 to AC6 as criteria, AC8 is retired through typed entries, every retirement names an item that binds the label, and a re-declared AC8 is caught."
+    source: "manual"
+    binds_ac: ["AC5"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_contract_retired_labels_omn26471.py -q -n 0 --no-cov"
+        cwd: "."
+    supersedes_ac_binding:
+      - item: "dod-omn26471-ac8-bare-sequence-ownership"
+        label: "AC8"
+        reason_kind: "no_longer_applicable"
+        reason: "OMN-26471 carries only AC1 to AC6 on the live ticket (read 2026-11-26), so AC8 was never on it: it is a criterion this repository's contract declared on its own for the bare-sequence ownership change. Its test keeps running under the item that binds it."
+        retired_by: "dod26471-76600"
+        retired_at: "2026-11-26T13:50:00Z"
   - id: "dod-omn26471-ac6-cloud-topology-entry"
     description: "AC6: all nine profiles resolve omninode_cloud with ledger shape version_checksum (relation public.schema_migrations, version and checksum columns, no stream or domain column) and the tenant_identity_writer LOGIN binding on TENANT_IDENTITY_DATABASE_DSN; the test cannot import at the base commit because the core pin there lacks the shape enum."
     source: "manual"
