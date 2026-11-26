@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# This handler is compute-side (pure decision, OMN-26718). Its nearer declaration
+# keeps K4 active beneath the shared handlers package's effect boundary.
+node_type: "COMPUTE_GENERIC"
+descriptor:
+  node_archetype: compute
+handler:
+  name: HandlerQueuedRequestPriority
+  module: omnibase_infra.handlers.queued_request_priority.handler_queued_request_priority
