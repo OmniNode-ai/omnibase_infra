@@ -105,7 +105,7 @@ class HandlerDevMergeBuildPublish:
                 correlation_id=request_id,
                 repo=request.repository,
                 pr_number=request.pr_number,
-                git_ref=request.head_sha,
+                git_ref=request.build_ref,
                 rollback_actor=_REQUESTER,
                 rollback_reason=f"merge {decision.merge_sha} had no dev build by {decision.due_at.isoformat()}",
                 requested_by=_REQUESTER,
