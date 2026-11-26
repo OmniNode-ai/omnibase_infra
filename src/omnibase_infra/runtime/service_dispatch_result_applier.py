@@ -676,7 +676,7 @@ class DispatchResultApplier:
                     output_intents,
                     correlation_id=effective_correlation_id,
                 )
-                logger.info(
+                logger.debug(
                     "Delegated %d intents from dispatcher=%s (correlation_id=%s)",
                     len(output_intents),
                     result.dispatcher_id,
@@ -860,7 +860,7 @@ class DispatchResultApplier:
                     # tell STARVED from IDLE without ever polling the broker).
                     _record_flow_output(resolved_topic)
 
-                    logger.info(
+                    logger.debug(
                         "Published output event to %s (correlation_id=%s)",
                         resolved_topic,
                         str(effective_correlation_id),

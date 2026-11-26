@@ -1,0 +1,17 @@
+{
+  "source": "ssh read-only: docker logs --since 30m omninode-runtime on the dev host (OMN-26152 lane lt26152-53600)",
+  "window_start": "2026-11-26T05:37:19Z",
+  "window_end": "2026-11-26T06:07:19Z",
+  "total_lines": 36161,
+  "applier_published_output_event_info_lines": 5842,
+  "applier_delegated_intents_info_lines": 2026,
+  "intent_executor_intent_executed_info_lines": 2026,
+  "log_gaps_4s_or_more_in_window": 65,
+  "gap_command": "awk '{split($2,t,\":\"); s=t[1]*3600+t[2]*60+t[3]; if(NR>1 && s-p>=4) g++; p=s} END{print g+0}'",
+  "other_top_lines": {
+    "asyncpg_pool_connected_and_closed_each": 2629,
+    "aiokafka_authenticated_scram": 4659,
+    "secret_resolver_config_issue_warnings": 2639,
+    "topic_resubscription": 260
+  }
+}
