@@ -2081,7 +2081,10 @@ services:
     container_name: omnibase-infra-phoenix
     profiles: ["runtime", "full"]
     environment:
-      PHOENIX_WORKING_DIR: /data
+      # OMN-22097: new store below the volume root (old phoenix.db left untouched),
+      # spans expire after 7 days.
+      PHOENIX_WORKING_DIR: /data/store-7d
+      PHOENIX_DEFAULT_RETENTION_POLICY_DAYS: "7"
     ports:
       - "${PHOENIX_PORT:-6006}:6006"
     volumes:
