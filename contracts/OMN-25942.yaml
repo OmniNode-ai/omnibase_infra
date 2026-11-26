@@ -28,6 +28,11 @@ requirements:
     acceptance:
       - id: AC5
         statement: 'AC5: job 7dfb1bc9 (agent/idle-restore, 2026-11-24T02:46:16Z, head 5cafc841f7de, tag cut by run 45314704581 at 02:48:12Z) replays from its fixture; the idle restore and idle converge start no job for a head no dev tag names, write one build-decision ledger row per head (reason=untagged_head), start the job on the first check after the tag exists, and leave signed requests and the audit untouched -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_untagged_head_idle_build_omn25942.py -q exits non-zero on the fix branch, or exits zero at the merge base'
+  - id: req-omn25942-overdue-names-newest-unbuilt
+    statement: The overdue dev merge build names the newest runtime merge the running build lacks once the merge it would name is contained in that build, and the build repository's newer dev head is routed to the dev build by an instance that declares a lag bound instead of refused not_routed_elsewhere.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: the rows recorded at 2026-11-26T23:10Z (fixture tests/fixtures/overdue_build_oldest_contained_omn25942/build_decision_rows.json: 9f77818e contained in the 22:01Z build, heads 48ccf8bc, b04b1de3, 02a88529, 2a442a5b, 06ca1e58 refused not_routed_elsewhere) replay; the publisher requests the newest unbuilt runtime merge in place of the contained one and the idle converge of the build repository converges on a newer head inside its bound -- falsifier: uv run --frozen pytest tests/unit/handlers/test_overdue_names_newest_unbuilt_merge_omn25942.py scripts/deploy-agent/tests/unit/test_own_repo_lag_bound_omn26316.py -q exits non-zero on the fix branch, or exits zero at the merge base'
 evidence_requirements:
   - kind: tests
     description: Dev boot guard settings-drift tests.
@@ -119,4 +124,21 @@ dod_evidence:
       - check_type: command
         check_value: >-
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_deploy_job_reading_effect/runtime_untagged_head_gate.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "class UntaggedHeadGate" in src; assert "_idle_read_dev_tags" in src'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn25942-ac6-overdue-names-newest-unbuilt
+    description: The recorded rows replay; the overdue build names the newest unbuilt runtime merge when the oldest is contained in the running build, and the build repository's newer head converges inside the declared lag bound.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_overdue_names_newest_unbuilt_merge_omn25942.py scripts/deploy-agent/tests/unit/test_own_repo_lag_bound_omn26316.py -q --no-header -p no:cacheprovider --no-cov -n 0
+        cwd: .
+  - id: dod-omn25942-ac6-deploy
+    description: Hosted-runner probe that reads the committed publisher and idle converge at the checked-out commit and requires the newest-unbuilt selection and the lag-bound routing.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_deploy_job_reading_effect/runtime_deploy_job_reading.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); assert "def _newest_unbuilt_decision" in src'
         cwd: ${OMNI_HOME}/omnibase_infra

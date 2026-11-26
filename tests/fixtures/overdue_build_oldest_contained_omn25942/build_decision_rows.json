@@ -1,0 +1,19 @@
+{
+  "source": "lane q-devroll2-103800 reading of the h201 agent's build-decision-rows.txt at 2026-11-26T23:10Z, as recorded in the brief of lane q-overdue2-105800 (OMN-25942)",
+  "running_build": {"pinned_at": "2026-11-26T22:01Z", "contains": ["9f77818e"]},
+  "overdue_publisher": {
+    "names": "9f77818e",
+    "pull_request": "omnibase_infra#6317",
+    "reason": "no dev build by 17:56Z",
+    "window_end": "superseded, lineage contained, nothing built"
+  },
+  "omnibase_infra_heads": [
+    {"sha": "9f77818e", "result": "contained in the running build"},
+    {"sha": "48ccf8bc", "result": "refused", "reason": "not_routed_elsewhere"},
+    {"sha": "b04b1de3", "result": "refused", "reason": "not_routed_elsewhere"},
+    {"sha": "02a88529", "result": "refused", "reason": "not_routed_elsewhere"},
+    {"sha": "2a442a5b", "result": "refused", "reason": "not_routed_elsewhere"},
+    {"sha": "06ca1e58", "result": "refused", "reason": "not_routed_elsewhere"}
+  ],
+  "omnimarket_heads_deferred": ["idle_gate", "probe_window"]
+}
