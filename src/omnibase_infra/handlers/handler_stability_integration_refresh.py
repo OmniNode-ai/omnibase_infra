@@ -10,15 +10,22 @@ test runtime, so the release-tag-only rule of ``refresh_stability_lane.sh``
    branch refuses, nothing is built);
 2. record the image every service runs now as the rollback target, on disk,
    before anything changes;
-3. build the image from the heads (a build failure leaves the lane untouched);
-4. recreate the services on it, keeping every volume;
-5. read /health until 200 or the window ends; at the window's end the recorded
+3. cut a ``deploy-<UTC stamp>-<sha12>`` tag on each head (RULING
+   2026-11-18T15:28:49Z, separation plan S10: the lab deploys from a private
+   integration branch and a node-made deploy-* tag is admitted on a declared lab
+   path). The tag lives in the host's own clone and is never pushed;
+4. build the image from the tags, in the ``stability-integration`` first-party
+   audit context that admits a deploy-* tag and nothing else (a build failure
+   leaves the lane untouched);
+5. recreate the services on it, keeping every volume;
+6. read /health until 200 or the window ends; at the window's end the recorded
    images are restored and the result reads ``rolled_back``.
 """
 
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import time
 from collections.abc import Sequence
@@ -43,6 +50,7 @@ if TYPE_CHECKING:
     )
 
 
+_AUDIT_CONTEXT = "stability-integration"
 _STAGE_SCRIPT = "scripts/runtime_build/stage_workspace.sh"
 _RECREATE_SH = (
     'set -euo pipefail; set -a; source "$1/docker/runtime-policy.env"; '
@@ -96,31 +104,45 @@ class DockerStabilityIntegrationHost:
         )
         return done.stdout.strip() if done.returncode == 0 else ""
 
-    def build_image(self, heads: Sequence[tuple[str, str]]) -> str:
+    def cut_deploy_tags(
+        self, heads: Sequence[tuple[str, str]]
+    ) -> tuple[tuple[str, str], ...]:
+        stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+        tags = tuple((repo, f"deploy-{stamp}-{sha[:12]}") for repo, sha in heads)
+        for (repo, sha), (_, tag) in zip(heads, tags, strict=True):
+            _run(
+                ["git", "-C", str(self._registry_root / repo), "tag", tag, sha],
+            )
+        return tags
+
+    def build_image(
+        self, heads: Sequence[tuple[str, str]], tags: Sequence[tuple[str, str]]
+    ) -> str:
         by_repo = dict(heads)
+        tag_of = dict(tags)
         self._work.mkdir(parents=True, exist_ok=True)
         env = [
             f"OMNI_HOME={self._registry_root}",
             f"DEPLOY_REF={by_repo['omnibase_infra']}",
             "DEPLOY_SIBLING_REFS="
             + " ".join(
-                f"{repo}={sha}" for repo, sha in heads if repo != "omnibase_infra"
+                f"{repo}={tag}" for repo, tag in tags if repo != "omnibase_infra"
             ),
             f"DEPLOY_SOURCE_REFS_OUT={self._work / 'refs.json'}",
             f"DEPLOY_SOURCE_WORKTREE_ROOT={self._work / 'trees'}",
         ]
         tree = self._work / "infra-tree"
-        if not tree.exists():
-            _run(
-                [
-                    "git",
-                    "clone",
-                    "-q",
-                    "--no-checkout",
-                    str(self._registry_root / "omnibase_infra"),
-                    str(tree),
-                ]
-            )
+        shutil.rmtree(tree, ignore_errors=True)
+        _run(
+            [
+                "git",
+                "clone",
+                "-q",
+                "--no-checkout",
+                str(self._registry_root / "omnibase_infra"),
+                str(tree),
+            ]
+        )
         _run(
             [
                 "git",
@@ -129,7 +151,7 @@ class DockerStabilityIntegrationHost:
                 "checkout",
                 "-q",
                 "--detach",
-                by_repo["omnibase_infra"],
+                tag_of["omnibase_infra"],
             ]
         )
         _run(["env", *env, "bash", _STAGE_SCRIPT], cwd=tree)
@@ -156,6 +178,8 @@ class DockerStabilityIntegrationHost:
                 "PROMOTION_CLASS=stability-candidate",
                 "--build-arg",
                 "NON_MAIN_LINEAGE=true",
+                "--build-arg",
+                f"FIRST_PARTY_BUILD_CONTEXT={_AUDIT_CONTEXT}",
                 ".",
             ],
             cwd=tree,
@@ -306,7 +330,8 @@ class HandlerStabilityIntegrationRefresh:
         self._record(request, heads, target)
 
         try:
-            image_id = self._host.build_image(heads)
+            tags = self._host.cut_deploy_tags(heads)
+            image_id = self._host.build_image(heads, tags)
         except RuntimeError as exc:
             return ModelStabilityIntegrationRefreshResult(
                 outcome="build_failed",
@@ -324,6 +349,7 @@ class HandlerStabilityIntegrationRefresh:
                 return ModelStabilityIntegrationRefreshResult(
                     outcome="refreshed",
                     heads=heads,
+                    deploy_tags=tags,
                     built_image_id=image_id,
                     rollback_target=target,
                     seconds_to_healthy=self.clock() - started,
@@ -336,6 +362,7 @@ class HandlerStabilityIntegrationRefresh:
         return ModelStabilityIntegrationRefreshResult(
             outcome="rolled_back",
             heads=heads,
+            deploy_tags=tags,
             built_image_id=image_id,
             rollback_target=target,
             detail=f"/health not 200 within {request.health_window_seconds}s",

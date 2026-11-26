@@ -59,8 +59,17 @@ class _Host:
         assert branch == "integration/launch-20261126"
         return self._heads.get(repository, "")
 
-    def build_image(self, heads: Sequence[tuple[str, str]]) -> str:
+    def cut_deploy_tags(
+        self, heads: Sequence[tuple[str, str]]
+    ) -> tuple[tuple[str, str], ...]:
+        self.calls.append("tag")
+        return tuple((repo, f"deploy-20261126213000-{sha[:12]}") for repo, sha in heads)
+
+    def build_image(
+        self, heads: Sequence[tuple[str, str]], tags: Sequence[tuple[str, str]]
+    ) -> str:
         self.calls.append("build")
+        self.built_with = tuple(tags)
         if self._build_error:
             raise RuntimeError(self._build_error)
         return "sha256:new"
@@ -120,7 +129,11 @@ def test_healthy_build_runs_on_the_new_image_and_records_the_rollback_target(
     assert dict(result.rollback_target)["omninode-runtime"] == "sha256:old-rt"
     record = json.loads(next(tmp_path.glob("rollback-*.json")).read_text())
     assert record["rollback_target"]["projection-api"] == "sha256:old-pa"
-    assert host.calls == ["build", "recreate"]
+    assert host.calls == ["tag", "build", "recreate"]
+    assert dict(result.deploy_tags) == {
+        repo: f"deploy-20261126213000-{sha[:12]}" for repo, sha in _HEADS.items()
+    }
+    assert host.built_with == result.deploy_tags
 
 
 def test_health_past_five_minutes_restores_the_recorded_images(tmp_path: Path) -> None:
