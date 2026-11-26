@@ -30,6 +30,10 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.kafka_transport import create_offset_consumer
+from omnibase_infra.handlers.kafka_demand_measure import (
+    log_demand_measure,
+    split_in_use,
+)
 from omnibase_infra.handlers.kafka_idle_topic_watches import (
     IdleTopicWatch,
     nothing_to_stop,
@@ -42,25 +46,6 @@ logger = logging.getLogger(__name__)
 # Partitions per offset request; one request across a whole broker timed out on
 # the lab (measured by the topic-activity sampler, 2026-09-26).
 _OFFSET_CHUNK = 100
-
-
-def _log_demand_measure(
-    topics: Collection[str], retained: Collection[str], readable: Collection[str]
-) -> None:
-    """Log the split's counts in one line (OMN-24223).
-
-    A topic is retained (holds a record), unreadable (missing or not visible) or
-    idle and watched; ``retained + unreadable`` is the number in use. The line
-    starts with the words the boot log is searched for.
-    """
-    logger.info(
-        "Boot subscription demand measure: topics=%d retained=%d unreadable=%d "
-        "idle_watched=%d (OMN-24223)",
-        len(topics),
-        len(retained),
-        len(set(topics) - set(readable)),
-        len(set(readable) - set(retained)),
-    )
 
 
 class HandlerKafkaTopicDemandSource:
@@ -88,9 +73,18 @@ class HandlerKafkaTopicDemandSource:
         self,
         topics: Collection[str],
         on_first_record: Callable[[str], Awaitable[None]],
+        *,
+        watch_retained: Collection[str] = (),
     ) -> tuple[frozenset[str], Callable[[], Awaitable[None]]]:
+        """Measure *topics* and watch the idle ones.
+
+        A topic in *watch_retained* (OMN-25856) is watched even when it holds a
+        retained record, from its high watermark, and does not count as in use.
+        """
         try:
-            return await self._measure_and_watch(topics, on_first_record)
+            return await self._measure_and_watch(
+                topics, on_first_record, frozenset(watch_retained)
+            )
         except Exception:  # boundary: an unmeasurable broker keeps the boot path
             logger.exception(
                 "Boot subscription demand measure failed; every contract joins "
@@ -102,6 +96,7 @@ class HandlerKafkaTopicDemandSource:
         self,
         topics: Collection[str],
         on_first_record: Callable[[str], Awaitable[None]],
+        watch_retained: frozenset[str],
     ) -> tuple[frozenset[str], Callable[[], Awaitable[None]]]:
         auth = build_aiokafka_auth_kwargs(self._config)
         # The bus addresses a lane-namespaced physical topic for each contract
@@ -134,7 +129,7 @@ class HandlerKafkaTopicDemandSource:
             # CancelledError out of this call, past the boundary above, and ends
             # the kernel (tenant-projection-writer restart loop on the laptop
             # profile, run 40881579955).
-            _log_demand_measure(logical_of, (), ())
+            log_demand_measure(logger, logical_of, (), ())
             return frozenset(logical_of.values()), nothing_to_stop
         consumer = create_offset_consumer(self._config)
         await consumer.start()
@@ -158,13 +153,10 @@ class HandlerKafkaTopicDemandSource:
         measured = [tp for tp in partitions if tp in low and tp in high]
         with_records = {tp.topic for tp in measured if high[tp] > low[tp]}
         readable = {tp.topic for tp in measured}
-        in_use = frozenset(
-            logical
-            for physical, logical in logical_of.items()
-            if physical in with_records or physical not in readable
+        in_use, watched = split_in_use(
+            logical_of, with_records, readable, watch_retained, measured
         )
-        watched = [tp for tp in measured if tp.topic not in with_records]
-        _log_demand_measure(logical_of, with_records, readable)
+        log_demand_measure(logger, logical_of, with_records, readable)
         if not watched:
             await consumer.stop()
             return in_use, nothing_to_stop
