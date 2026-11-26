@@ -175,3 +175,21 @@ def test_a_missing_integration_branch_refuses_before_any_build(tmp_path: Path) -
     assert "omnimarket" in result.detail
     assert host.calls == []
     assert not list(tmp_path.glob("rollback-*.json"))
+
+
+def test_runtime_version_is_read_from_the_built_trees_pyproject(
+    tmp_path: Path,
+) -> None:
+    from omnibase_infra.handlers.handler_stability_integration_refresh import (
+        runtime_version_of,
+    )
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "omnibase-infra"\nversion = "0.58.3"\n', encoding="utf-8"
+    )
+    assert runtime_version_of(tmp_path) == "0.58.3"
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "omnibase-infra"\n', encoding="utf-8"
+    )
+    with pytest.raises(RuntimeError, match="RUNTIME_VERSION"):
+        runtime_version_of(tmp_path)
