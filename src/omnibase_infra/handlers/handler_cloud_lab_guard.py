@@ -19,6 +19,7 @@ from ipaddress import ip_address
 from pathlib import Path
 
 from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
@@ -89,6 +90,14 @@ def is_cloud_mode(profile: str) -> bool:
 
 class HandlerCloudLabGuard:
     """Raises :class:`CloudModeLabAddressError` for a lab address in cloud mode."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.EFFECT
 
     def handle(
         self, request: ModelCloudModeLabAddressRequest
