@@ -80,3 +80,12 @@ dod_evidence:
       - check_type: command
         check_value: grep 'env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT' docker/docker-compose.dev-lane.yml > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=omn-26227-core-0-47-80-pin' --jq .content | base64 -d | grep 'env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT' > /dev/null
         cwd: .
+  - id: dod-omn26227-ac4-merge-carried
+    description: 'The merge of omnibase_infra#6289 (commit 63db0ebc1cf0, carried by dev tag dev-20261125225639-63db0ebc1cf0) is an ancestor of this tree, and uv.lock records omnibase-core 0.47.80; the check reads the tree, so a tree without the merge or with another core release fails.'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: git merge-base --is-ancestor 63db0ebc1cf0 HEAD && python3 -c "import tomllib,sys; d=tomllib.load(open('uv.lock','rb')); v=[p['version'] for p in d['package'] if p['name']=='omnibase-core']; sys.exit(0 if v==['0.47.80'] else 1)"
+        cwd: .
