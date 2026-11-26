@@ -31,6 +31,7 @@ _REQUIRED_NODES = (
     "node_gateway_workflow_terminal_effect",
     "node_delegate_skill_orchestrator",
     "node_delegation_orchestrator",
+    "node_tenant_provision_effect",
 )
 _SHA40 = re.compile(r"[0-9a-f]{40}")
 _IMAGE_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
@@ -79,6 +80,11 @@ def _readback_problems(readback: dict[str, Any]) -> list[str]:
         problems.append("health did not answer 200")
     if health.get("restart_count") != 0:
         problems.append("the container restarted before the health reading")
+    tenant = readback.get("tenant_provision_call", {})
+    if tenant.get("outcome") != "failed_store_unavailable":
+        problems.append("the tenant provisioning call did not answer a typed outcome")
+    if not _SHA40.fullmatch(str(readback.get("siblings", {}).get("omnimarket", ""))):
+        problems.append("the omnimarket commit is not a 40-character commit")
     if readback.get("known_bad", {}).get("http_status") == 200:
         problems.append("the known-bad run answered 200")
     return problems
@@ -97,6 +103,14 @@ def test_readback_check_refuses_a_missing_gateway_node() -> None:
     ]
     assert _readback_problems(bad) == [
         "node_workflow_gateway_effect is not recorded present"
+    ]
+
+
+def test_readback_check_refuses_a_tenant_call_that_did_not_answer() -> None:
+    bad = _load_readback()
+    bad["tenant_provision_call"]["outcome"] = "none"
+    assert _readback_problems(bad) == [
+        "the tenant provisioning call did not answer a typed outcome"
     ]
 
 

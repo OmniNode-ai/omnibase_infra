@@ -52,3 +52,15 @@ dod_evidence:
       - check_type: command
         check_value: 'grep -c "^build_commit: 9f77818ea0c96bc05ecffcbbfb621204bed0e6fa$" docs/readbacks/OMN-26713_runtime_image_proof.yaml'
         cwd: .
+  - id: dod-omn26713-ac3-rebuilt-digest-tenant-fix
+    description: The readback names the rebuilt image digest that carries the tenant provisioning fix (omnimarket#6894 head) and the typed answer of a tenant provisioning call with no overlay, replacing the earlier digest.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: 'grep -c "^local_image_digest: sha256:dd093bb658b2898c4ec1209794dd53f50e0400593dcd8abf60f7f1e7ca4c34fd$" docs/readbacks/OMN-26713_runtime_image_proof.yaml'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_runtime_image_proof_readback_omn26713.py -k "tenant" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .

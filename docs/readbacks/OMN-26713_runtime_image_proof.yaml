@@ -9,25 +9,31 @@
 # separate documents repository.
 ticket_id: OMN-26713
 host: h202
-measured_by_lane: q-aws5b-90000
+measured_by_lane: q-awsimg2-92800
+superseded_build:
+  lane: q-aws5b-90000
+  local_image_digest: sha256:5e94f949adc7e1bc83bc4aacd7967759a01c7eeebef6a9ea15e1daf0e40a3a1e
+  omnimarket: 7d6112036bb863a749fc8e01e46e765a95a03a4e
+  reason: built before the tenant provisioning fix (omnimarket#6894), so a missing overlay left a tenant provisioning call unanswered
 build_commit: 9f77818ea0c96bc05ecffcbbfb621204bed0e6fa
 build_source: workspace
 siblings:
-  omnimarket: 7d6112036bb863a749fc8e01e46e765a95a03a4e
+  omnimarket: 7b6573ec6b380b6de7b773b79c9f5461faf51d2e
   omnibase_core: 801c2557fa43146e472fafbc46b23cf2e2d9543e
   omnibase_spi: 7291f76b0d89fe38906a9b76b25a50d310d66ac0
   omniintelligence: c4880008c37387df28f7aaf106e0f3cde34b9928
-local_image: omn26713-runtime:9f77818ea0c9
-local_image_digest: sha256:5e94f949adc7e1bc83bc4aacd7967759a01c7eeebef6a9ea15e1daf0e40a3a1e
-infra_layer_image_digest: sha256:099210a26cc9b34f5a85ccc924305c1dacf04d6585175b8b11c1ebcbdd645557
+local_image: omn26713b-runtime:9f77818ea0c9-7b6573ec
+local_image_digest: sha256:dd093bb658b2898c4ec1209794dd53f50e0400593dcd8abf60f7f1e7ca4c34fd
+infra_layer_image_digest: sha256:266ad669e9abca44a2fd03f24c8dab077c6dfaf09cbc6e651c096c7229b0d9b1
 node_registry:
   entry_point_group: onex.nodes
-  entry_points: 1513
+  entry_points: 1514
   required_present:
     - node_workflow_gateway_effect
     - node_gateway_workflow_terminal_effect
     - node_delegate_skill_orchestrator
     - node_delegation_orchestrator
+    - node_tenant_provision_effect
   gateway_or_delegation_names: 99
   absent_name_control: node_NOPE_zzz
   absent_name_control_matches: 0
@@ -36,13 +42,20 @@ health:
   http_status: 200
   docker_health: healthy
   restart_count: 0
-  contracts_auto_wired: 1422
-  auto_wiring_errors: 0
+  seconds_to_200: 64
+  note: the throwaway Redpanda needs a raised open-file limit and about 8 GB; at 512 MB per core it refused partitions past 512 and the runtime stayed at 503
+tenant_provision_call:
+  how: onex node node_tenant_provision_effect on the built image, in-process bus, ONEX_SKILL_OVERLAY_ROOTS naming a directory with no overlay
+  outcome: failed_store_unavailable
+  detail: overlay not loaded, node_tenant_provision_effect overlay file not configured
+  seconds_to_answer: 3
+  finding: the same run reports result=failed because HandlerTenantOutboxFlushOnProvisioned fails validating the flush answer (published and failed fields, no command_id) as ModelTenantProvisionResult when the local runtime feeds it back on the provision completed topic
 known_bad:
   change: KAFKA_BOOTSTRAP_SERVERS pointing at a host that does not exist
   http_status: none
   container_exit_code: 1
 not_proved:
+  - the tenant provisioning call dispatched over the bus (the effects-profile runtime never reached /health 200 against the throwaway broker; the call was proved through the node's own CLI in-process)
   - MSK IAM authentication (the broker was a throwaway plaintext Redpanda)
   - Infisical, Keycloak and the data-plane services (config prefetch read skipped)
   - a writable /run/onex-runtime under readOnlyRootFilesystem (the lab mounted a tmpfs there)
