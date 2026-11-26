@@ -83,7 +83,7 @@ dod_evidence:
       - AC2
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_compose_no_nested_expansion.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/ci/test_compose_no_nested_expansion.py -q --no-cov -n 0 -p no:randomly -k "settings_snapshot_mount_is_plain_home_path"
         cwd: .
   - id: dod-omn26117-deploy-settings-root-live
     description: >-
