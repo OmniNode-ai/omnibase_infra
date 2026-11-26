@@ -390,7 +390,7 @@ pattern_exemptions:
   # The generated-COMPUTE -> MCP wrapper emitter deals in literal contract
   # identifiers (node names, the MCP tool_name, and Pydantic model class names),
   # NOT foreign-key references to entities with separate ID + display_name.
-  # tool_name mirrors the existing ModelMCPContractConfig.tool_name domain term
+  # tool_name mirrors the existing ModelContractMcpTool.tool_name domain term
   # (the stable MCP tool name); *_node_name / *_model_name are literal contract
   # name strings the emitter writes verbatim into the generated contract YAML.
   - file_pattern: 'model_generated_compute_node_spec\.py'
@@ -402,7 +402,7 @@ pattern_exemptions:
   - file_pattern: 'model_generated_compute_node_spec\.py'
     violation_pattern: "Field 'tool_name' might reference an entity"
     reason: >
-      tool_name is the stable MCP tool name (same domain term as ModelMCPContractConfig.tool_name); it IS the identifier surfaced to MCP clients, not a foreign key to a separate entity.
+      tool_name is the stable MCP tool name (same domain term as ModelContractMcpTool.tool_name); it IS the identifier surfaced to MCP clients, not a foreign key to a separate entity.
 
     ticket: OMN-12841
   - file_pattern: 'model_generated_compute_node_spec\.py'
@@ -432,7 +432,7 @@ pattern_exemptions:
   - file_pattern: 'model_mcp_wrapper_emission\.py'
     violation_pattern: "Field 'tool_name' might reference an entity"
     reason: >
-      tool_name is the stable MCP tool name carried by the wrapper (same domain term as ModelMCPContractConfig.tool_name), not a foreign key to a separate entity.
+      tool_name is the stable MCP tool name carried by the wrapper (same domain term as ModelContractMcpTool.tool_name), not a foreign key to a separate entity.
 
     ticket: OMN-12841
   # ==========================================================================

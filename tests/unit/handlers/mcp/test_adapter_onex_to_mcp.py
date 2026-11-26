@@ -110,9 +110,15 @@ def mcp_contract_yaml() -> str:
         node_version: "1.0.0"
         mcp:
           expose: true
-          tool_name: "example_tool"
-          description: "Execute the example orchestrator."
-          timeout_seconds: 45
+          tools:
+            - tool_name: "example_tool"
+              description: "Execute the example orchestrator."
+              timeout_seconds: 45
+              input_model: "tests.unit.handlers.mcp.test_adapter_onex_to_mcp.ModelExampleInput"
+              output_model: "tests.unit.handlers.mcp.test_adapter_onex_to_mcp.ModelExampleOutput"
+              command_topic: "onex.cmd.platform.example-run.v1"
+              completed_topic: "onex.evt.platform.example-run-completed.v1"
+              failed_topic: "onex.evt.platform.example-run-failed.v1"
         input_model:
           name: "ModelExampleInput"
           module: "tests.unit.handlers.mcp.test_adapter_onex_to_mcp"
@@ -149,15 +155,18 @@ def contract_mcp_expose_false_yaml() -> str:
 
 
 @pytest.fixture
-def contract_no_tool_name_yaml() -> str:
-    """Contract with mcp.expose: true but no tool_name — falls back to name."""
+def contract_old_single_tool_yaml() -> str:
+    """Contract with the old single-tool mcp block — refused."""
     return textwrap.dedent(
         """\
-        name: "node_fallback_name"
+        name: "node_old_block"
         node_type: "ORCHESTRATOR_GENERIC"
-        description: "Orchestrator with fallback tool name."
+        description: "Orchestrator with the old single-tool mcp block."
         mcp:
           expose: true
+          tool_name: "old_block_tool"
+          description: "Old block."
+          timeout_seconds: 30
         """
     )
 
@@ -165,6 +174,12 @@ def contract_no_tool_name_yaml() -> str:
 # ---------------------------------------------------------------------------
 # Inline Pydantic model for test_contract_with_pydantic_input_schema
 # ---------------------------------------------------------------------------
+
+
+class ModelExampleOutput(BaseModel):
+    """Minimal Pydantic output model named by the fixture tool entries."""
+
+    status: str = ""
 
 
 class ModelExampleInput(BaseModel):
@@ -646,16 +661,41 @@ class TestDiscoverToolsWithContractsRoot:
         assert list(tools) == []
 
     @pytest.mark.asyncio
-    async def test_fallback_to_node_name_when_no_tool_name(
+    async def test_old_single_tool_block_refused(
         self,
         adapter: ONEXToMCPAdapter,
         tmp_path: Path,
-        contract_no_tool_name_yaml: str,
+        contract_old_single_tool_yaml: str,
     ) -> None:
-        """When mcp.tool_name absent, falls back to contract name field."""
-        (tmp_path / "contract.yaml").write_text(contract_no_tool_name_yaml)
+        """The old single-tool mcp block (OMN-15920) registers no tool."""
+        (tmp_path / "contract.yaml").write_text(contract_old_single_tool_yaml)
         tools = await adapter.discover_tools(contracts_root=tmp_path)
-        assert any(t.name == "node_fallback_name" for t in tools)
+        assert list(tools) == []
+
+    @pytest.mark.asyncio
+    async def test_two_entry_block_registers_both_tools(
+        self,
+        adapter: ONEXToMCPAdapter,
+        tmp_path: Path,
+        mcp_contract_yaml: str,
+    ) -> None:
+        """One tool per mcp.tools entry."""
+        entry = (
+            '    - tool_name: "second_tool"\n'
+            '      description: "Second op."\n'
+            "      timeout_seconds: 15\n"
+            f'      input_model: "{__name__}.ModelExampleInput"\n'
+            f'      output_model: "{__name__}.ModelExampleOutput"\n'
+            '      command_topic: "onex.cmd.platform.example-two.v1"\n'
+            '      completed_topic: "onex.evt.platform.example-two-completed.v1"\n'
+            '      failed_topic: "onex.evt.platform.example-two-failed.v1"\n'
+        )
+        marker = "input_model:\n  name:"
+        text = mcp_contract_yaml.replace(marker, entry + marker, 1)
+        (tmp_path / "contract.yaml").write_text(text)
+        tools = await adapter.discover_tools(contracts_root=tmp_path)
+        timeouts = {t.name: t.timeout_seconds for t in tools}
+        assert timeouts == {"example_tool": 45, "second_tool": 15}
 
     @pytest.mark.asyncio
     async def test_manual_registration_takes_precedence(
@@ -735,7 +775,15 @@ class TestContractPydanticInputSchema:
             description: "Schema test."
             mcp:
               expose: true
-              tool_name: "schema_test_tool"
+              tools:
+                - tool_name: "schema_test_tool"
+                  description: "Schema test tool."
+                  timeout_seconds: 30
+                  input_model: "tests.unit.handlers.mcp.test_adapter_onex_to_mcp.ModelExampleInput"
+                  output_model: "tests.unit.handlers.mcp.test_adapter_onex_to_mcp.ModelExampleOutput"
+                  command_topic: "onex.cmd.platform.example-run.v1"
+                  completed_topic: "onex.evt.platform.example-run-completed.v1"
+                  failed_topic: "onex.evt.platform.example-run-failed.v1"
             input_model:
               name: "ModelExampleInput"
               module: "tests.unit.handlers.mcp.test_adapter_onex_to_mcp"
@@ -763,7 +811,15 @@ class TestContractPydanticInputSchema:
             description: "Unknown model test."
             mcp:
               expose: true
-              tool_name: "unknown_model_tool"
+              tools:
+                - tool_name: "unknown_model_tool"
+                  description: "Unknown model tool."
+                  timeout_seconds: 30
+                  input_model: "no.such.module.ModelDoesNotExist"
+                  output_model: "tests.unit.handlers.mcp.test_adapter_onex_to_mcp.ModelExampleOutput"
+                  command_topic: "onex.cmd.platform.example-run.v1"
+                  completed_topic: "onex.evt.platform.example-run-completed.v1"
+                  failed_topic: "onex.evt.platform.example-run-failed.v1"
             input_model:
               name: "ModelDoesNotExist"
               module: "no.such.module"

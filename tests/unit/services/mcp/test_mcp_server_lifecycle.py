@@ -52,9 +52,15 @@ node_type: ORCHESTRATOR_GENERIC
 
 mcp:
   expose: true
-  tool_name: test_tool
-  description: AI-friendly tool description
-  timeout_seconds: 45
+  tools:
+    - tool_name: test_tool
+      description: AI-friendly tool description
+      timeout_seconds: 45
+      input_model: pkg.models.ModelToolInput
+      output_model: pkg.models.ModelToolOutput
+      command_topic: onex.cmd.platform.tool-run.v1
+      completed_topic: onex.evt.platform.tool-run-completed.v1
+      failed_topic: onex.evt.platform.tool-run-failed.v1
 """
 
 MCP_ENABLED_ORCHESTRATOR_MINIMAL = """\
@@ -63,6 +69,15 @@ node_type: ORCHESTRATOR_GENERIC
 
 mcp:
   expose: true
+  tools:
+    - tool_name: minimal_tool
+      description: Tool description.
+      timeout_seconds: 30
+      input_model: pkg.models.ModelToolInput
+      output_model: pkg.models.ModelToolOutput
+      command_topic: onex.cmd.platform.tool-run.v1
+      completed_topic: onex.evt.platform.tool-run-completed.v1
+      failed_topic: onex.evt.platform.tool-run-failed.v1
 """
 
 MCP_DISABLED_CONTRACT = """\
@@ -88,7 +103,15 @@ node_type: EFFECT_GENERIC
 
 mcp:
   expose: true
-  tool_name: effect_tool
+  tools:
+    - tool_name: effect_tool
+      description: Tool description.
+      timeout_seconds: 30
+      input_model: pkg.models.ModelToolInput
+      output_model: pkg.models.ModelToolOutput
+      command_topic: onex.cmd.platform.tool-run.v1
+      completed_topic: onex.evt.platform.tool-run-completed.v1
+      failed_topic: onex.evt.platform.tool-run-failed.v1
 """
 
 COMPUTE_WITH_MCP = """\
@@ -97,6 +120,15 @@ node_type: COMPUTE_GENERIC
 
 mcp:
   expose: true
+  tools:
+    - tool_name: compute_tool
+      description: Tool description.
+      timeout_seconds: 30
+      input_model: pkg.models.ModelToolInput
+      output_model: pkg.models.ModelToolOutput
+      command_topic: onex.cmd.platform.tool-run.v1
+      completed_topic: onex.evt.platform.tool-run-completed.v1
+      failed_topic: onex.evt.platform.tool-run-failed.v1
 """
 
 REDUCER_WITH_MCP = """\
@@ -105,6 +137,15 @@ node_type: REDUCER_GENERIC
 
 mcp:
   expose: true
+  tools:
+    - tool_name: reducer_tool
+      description: Tool description.
+      timeout_seconds: 30
+      input_model: pkg.models.ModelToolInput
+      output_model: pkg.models.ModelToolOutput
+      command_topic: onex.cmd.platform.tool-run.v1
+      completed_topic: onex.evt.platform.tool-run-completed.v1
+      failed_topic: onex.evt.platform.tool-run-failed.v1
 """
 
 INVALID_YAML_CONTRACT = """\
@@ -116,6 +157,17 @@ invalid_indentation_here
 """
 
 EMPTY_CONTRACT = ""
+
+OLD_SINGLE_TOOL_MCP_CONTRACT = """\
+name: old-block-orchestrator
+node_type: ORCHESTRATOR_GENERIC
+
+mcp:
+  expose: true
+  tool_name: old_block_tool
+  description: Old single-tool block
+  timeout_seconds: 30
+"""
 
 CONTRACT_WITH_PARTIAL_MCP = """\
 name: partial-mcp
@@ -349,17 +401,17 @@ class TestMCPServerLifecycleDevModeStart:
 
         await lifecycle.shutdown()
 
-    async def test_start_uses_fallback_values_for_minimal_contract(
+    async def test_start_registers_minimal_contract_entry(
         self,
         mock_container: MagicMock,
         dev_mode_config: ModelMCPServerConfig,
         tmp_contracts_dir: Path,
     ) -> None:
-        """Should use fallback values when MCP config is minimal.
+        """Should register the single tools entry of a minimal contract.
 
-        Given: A contract.yaml with minimal MCP config (just expose=true)
+        Given: A contract.yaml whose mcp block has one tools entry
         When: start() is called in dev mode
-        Then: Tool is registered with fallback values
+        Then: The tool carries the entry's name, description and timeout
         """
         create_contract_file(
             tmp_contracts_dir,
@@ -372,16 +424,33 @@ class TestMCPServerLifecycleDevModeStart:
 
         assert lifecycle.registry is not None
         assert lifecycle.registry.tool_count == 1
-        # Tool name should fall back to contract name
-        tool = await lifecycle.registry.get_tool("minimal-orchestrator")
+        tool = await lifecycle.registry.get_tool("minimal_tool")
         assert tool is not None
-        assert tool.name == "minimal-orchestrator"
-        # Description should fall back to "ONEX: {name}"
-        assert "ONEX: minimal-orchestrator" in tool.description
-        # Default timeout
+        assert tool.description == "Tool description."
         assert tool.timeout_seconds == 30
         # Default version
         assert tool.version == "1.0.0"
+
+        await lifecycle.shutdown()
+
+    async def test_start_refuses_old_single_tool_block(
+        self,
+        mock_container: MagicMock,
+        dev_mode_config: ModelMCPServerConfig,
+        tmp_contracts_dir: Path,
+    ) -> None:
+        """An old single-tool mcp block (OMN-15920) registers no tool."""
+        create_contract_file(
+            tmp_contracts_dir,
+            "old-block-node",
+            OLD_SINGLE_TOOL_MCP_CONTRACT,
+        )
+        lifecycle = MCPServerLifecycle(mock_container, dev_mode_config)
+
+        await lifecycle.start()
+
+        assert lifecycle.registry is not None
+        assert lifecycle.registry.tool_count == 0
 
         await lifecycle.shutdown()
 

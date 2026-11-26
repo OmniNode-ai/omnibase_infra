@@ -290,6 +290,9 @@ class MCPServerLifecycle:
 
         import yaml
 
+        from omnibase_core.models.contracts.model_contract_mcp_config import (
+            ModelContractMcpConfig,
+        )
         from omnibase_infra.models.mcp.model_mcp_tool_definition import (
             ModelMCPToolDefinition,
         )
@@ -325,9 +328,12 @@ class MCPServerLifecycle:
                     continue
 
                 # Check for MCP configuration
-                mcp_config = contract.get("mcp", {})
-                if not mcp_config.get("expose", False):
+                raw_mcp = contract.get("mcp")
+                if not isinstance(raw_mcp, dict) or not raw_mcp.get("expose", False):
                     continue
+
+                # An old single-tool block fails here: the model forbids its keys.
+                mcp_config = ModelContractMcpConfig.model_validate(raw_mcp)
 
                 # Only orchestrators can be exposed
                 node_type = contract.get("node_type", "")
@@ -342,41 +348,36 @@ class MCPServerLifecycle:
                     )
                     continue
 
-                # Build tool definition
                 name = contract.get("name", contract_file.parent.name)
-                tool_name = mcp_config.get("tool_name", name)
-                description = mcp_config.get(
-                    "description", contract.get("description", f"ONEX: {name}")
-                )
-                timeout = mcp_config.get("timeout_seconds", 30)
                 version = contract.get("node_version", "1.0.0")
 
-                tool = ModelMCPToolDefinition(
-                    name=tool_name,
-                    description=description,
-                    version=version,
-                    parameters=[],  # Will be populated from input_model
-                    input_schema={"type": "object", "properties": {}},
-                    orchestrator_node_id=name,
-                    orchestrator_service_id=None,
-                    endpoint=None,  # Local dev mode - no endpoint
-                    timeout_seconds=timeout,
-                    metadata={
-                        "contract_path": str(contract_file),
-                        "node_type": node_type,
-                        "source": "local_contract",
-                    },
-                )
-                tools.append(tool)
+                for entry in mcp_config.tools:
+                    tool = ModelMCPToolDefinition(
+                        name=entry.tool_name,
+                        description=entry.description,
+                        version=version,
+                        parameters=[],  # Will be populated from input_model
+                        input_schema={"type": "object", "properties": {}},
+                        orchestrator_node_id=name,
+                        orchestrator_service_id=None,
+                        endpoint=None,  # Local dev mode - no endpoint
+                        timeout_seconds=entry.timeout_seconds,
+                        metadata={
+                            "contract_path": str(contract_file),
+                            "node_type": node_type,
+                            "source": "local_contract",
+                        },
+                    )
+                    tools.append(tool)
 
-                logger.info(
-                    "Discovered MCP tool from contract",
-                    extra={
-                        "tool_name": tool_name,
-                        "contract": str(contract_file),
-                        "correlation_id": str(correlation_id),
-                    },
-                )
+                    logger.info(
+                        "Discovered MCP tool from contract",
+                        extra={
+                            "tool_name": entry.tool_name,
+                            "contract": str(contract_file),
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
 
             except yaml.YAMLError as e:
                 logger.warning(

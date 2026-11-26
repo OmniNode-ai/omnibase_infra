@@ -146,9 +146,7 @@ class ServiceMCPToolDiscovery:
         tools: list[ModelMCPToolDefinition] = []
 
         for proj in projections:
-            tool = self._projection_to_tool(proj, correlation_id)
-            if tool is not None:
-                tools.append(tool)
+            tools.extend(self._projection_to_tools(proj, correlation_id))
 
         if not tools:
             logger.warning(
@@ -172,12 +170,12 @@ class ServiceMCPToolDiscovery:
 
         return tools
 
-    def _projection_to_tool(
+    def _projection_to_tools(
         self,
         proj: object,
         correlation_id: object,
-    ) -> ModelMCPToolDefinition | None:
-        """Convert a registration projection to an MCP tool definition.
+    ) -> list[ModelMCPToolDefinition]:
+        """Convert a registration projection to its MCP tool definitions.
 
         Validates that the projection represents an ORCHESTRATOR node with
         ``mcp.expose: true`` in its capabilities.
@@ -187,12 +185,13 @@ class ServiceMCPToolDiscovery:
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            ModelMCPToolDefinition if the projection is eligible, else None.
+            One definition per ``mcp.tools`` entry when the projection is
+            eligible, else an empty list.
         """
         from omnibase_infra.models.projection import ModelRegistrationProjection
 
         if not isinstance(proj, ModelRegistrationProjection):
-            return None
+            return []
 
         # Only orchestrators may be exposed as MCP tools.
         node_type_str = (
@@ -209,7 +208,7 @@ class ServiceMCPToolDiscovery:
                     "correlation_id": str(correlation_id),
                 },
             )
-            return None
+            return []
 
         # Require mcp.expose=True in capabilities.
         mcp_config = proj.capabilities.mcp
@@ -223,45 +222,41 @@ class ServiceMCPToolDiscovery:
                     "correlation_id": str(correlation_id),
                 },
             )
-            return None
+            return []
 
-        # Derive tool name: prefer mcp.tool_name, fall back to entity_id string.
-        tool_name = mcp_config.tool_name or str(proj.entity_id)
-
-        # Derive description from mcp config or generate one.
-        description = mcp_config.description or f"ONEX orchestrator: {tool_name}"
-
-        # Derive version from projection.
         version = str(proj.node_version) if proj.node_version else "1.0.0"
 
-        tool = ModelMCPToolDefinition(
-            name=tool_name,
-            description=description,
-            version=version,
-            parameters=[],
-            input_schema={"type": "object", "properties": {}},
-            orchestrator_node_id=str(proj.entity_id),
-            orchestrator_service_id=None,  # Not applicable; Consul removed
-            endpoint=None,  # Endpoint resolved at invocation time via registry
-            timeout_seconds=mcp_config.timeout_seconds,
-            metadata={
-                "entity_id": str(proj.entity_id),
-                "node_type": node_type_str,
-                "source": "event_bus_registry",
-            },
-        )
+        tools: list[ModelMCPToolDefinition] = []
+        for entry in mcp_config.tools:
+            tool = ModelMCPToolDefinition(
+                name=entry.tool_name,
+                description=entry.description,
+                version=version,
+                parameters=[],
+                input_schema={"type": "object", "properties": {}},
+                orchestrator_node_id=str(proj.entity_id),
+                orchestrator_service_id=None,  # Not applicable; Consul removed
+                endpoint=None,  # Endpoint resolved at invocation time via registry
+                timeout_seconds=entry.timeout_seconds,
+                metadata={
+                    "entity_id": str(proj.entity_id),
+                    "node_type": node_type_str,
+                    "source": "event_bus_registry",
+                },
+            )
+            tools.append(tool)
 
-        logger.info(
-            "Discovered MCP tool from event bus registry",
-            extra={
-                "tool_name": tool_name,
-                "entity_id": str(proj.entity_id),
-                "node_type": node_type_str,
-                "correlation_id": str(correlation_id),
-            },
-        )
+            logger.info(
+                "Discovered MCP tool from event bus registry",
+                extra={
+                    "tool_name": entry.tool_name,
+                    "entity_id": str(proj.entity_id),
+                    "node_type": node_type_str,
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
-        return tool
+        return tools
 
     def describe(self) -> dict[str, object]:
         """Return service metadata for observability."""
