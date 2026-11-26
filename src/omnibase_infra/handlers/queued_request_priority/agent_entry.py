@@ -14,7 +14,10 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
-from typing import Protocol
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from omnibase_infra.protocols.protocol_queued_deploy import ProtocolQueuedDeploy
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 _MODULES = (
@@ -23,31 +26,6 @@ _MODULES = (
     "models/model_queued_request_priority_decision.py",
     "handlers/queued_request_priority/handler_queued_request_priority.py",
 )
-
-
-class ProtocolValued(Protocol):
-    @property
-    def value(self) -> str: ...
-
-
-class ProtocolQueuedCommand(Protocol):
-    """The fields of a queued deploy command the priority request reads."""
-
-    correlation_id: str
-    runtime_lane: ProtocolValued
-    requested_by: str
-    git_ref: str
-    scope: ProtocolValued
-    build_source: ProtocolValued
-    services: Sequence[str]
-    rollback: object | None
-    image_ref: str | None
-    image_digest: str | None
-
-
-class ProtocolQueuedDeploy(Protocol):
-    @property
-    def command(self) -> ProtocolQueuedCommand: ...
 
 
 def _load() -> ModuleType:
