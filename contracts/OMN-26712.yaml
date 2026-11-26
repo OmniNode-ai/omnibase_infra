@@ -57,5 +57,5 @@ dod_evidence:
     execution_scope: "local_done_gate"
     checks:
       - check_type: "command"
-        check_value: "env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --bus-lane dev --repo OmniNode-ai/omnibase_infra --sha \"$(git rev-parse HEAD)\" --lane dod-integration-proof-26712 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/migrations/test_cloud_database_migration_omn26712.py -k second_run_changes_nothing -q -n 0 --no-cov"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --bus-lane dev --repo OmniNode-ai/omnibase_infra --sha \"$(git rev-parse HEAD)\" --lane dod-integration-proof-26712 --kind test -- uv run --frozen pytest tests/integration/migrations/test_cloud_database_migration_omn26712.py -k second_run_changes_nothing -q -n 0 --no-cov"
         cwd: "."
