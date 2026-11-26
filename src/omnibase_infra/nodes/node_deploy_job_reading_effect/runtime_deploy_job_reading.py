@@ -678,6 +678,19 @@ def _repository_clone(execution: ModuleType, repository: str) -> Path | None:
     return clone
 
 
+def _tracked_head(clone: Path | None, timeout: float) -> str:
+    """The clone's tracked dev head, or an empty string when it is unread."""
+    if clone is None:
+        return ""
+    return subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", _TRACKED_HEAD],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+    ).stdout.strip()
+
+
 def _carrying_shas(
     repository: str,
     clone: Path | None,
@@ -850,17 +863,7 @@ def _request_overdue_builds(
         for d in overdue
     ):
         clone = _repository_clone(execution, repository)
-        head = (
-            subprocess.run(
-                ["git", "-C", str(clone), "rev-parse", _TRACKED_HEAD],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=timeout,
-            ).stdout.strip()
-            if clone is not None
-            else ""
-        )
+        head = _tracked_head(clone, timeout)
         if not _FULL_SHA.fullmatch(head):
             logger.warning(
                 "overdue dev merge build not requested: the %s dev head was unread",
@@ -881,6 +884,16 @@ def _request_overdue_builds(
             continue
         heads[repository] = head
     if not heads:
+        return
+    # The command's git_ref is always a commit of the agent's own clone: the agent resets
+    # that clone to it, whatever repository the merge was in (a sibling's sha names no
+    # commit there and failed every sibling request at the git phase).
+    build_ref = _tracked_head(_repository_clone(execution, _OWN_REPOSITORY), timeout)
+    if not _FULL_SHA.fullmatch(build_ref):
+        logger.warning(
+            "overdue dev merge build not requested: the %s dev head was unread",
+            _OWN_REPOSITORY,
+        )
         return
     handler_mod = sys.modules["omnibase_infra.handlers.handler_dev_merge_build_publish"]
     request_mod = sys.modules[
@@ -918,7 +931,7 @@ def _request_overdue_builds(
                 decision=decision,
                 repository=repository,
                 pr_number=int(pull.group(1)) if pull else None,
-                head_sha=heads[repository],
+                build_ref=build_ref,
                 runtime_lane=lane,
                 already_requested=request_id in _decision_keys(store),
             )
