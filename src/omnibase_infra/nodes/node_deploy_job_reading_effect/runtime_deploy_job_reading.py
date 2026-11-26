@@ -805,6 +805,11 @@ class AgentDevMergeSender:
     def publish_event(self, event: BaseModel) -> None:
         payload = event.model_dump(mode="json")
         key = f"dev-merge-build-overdue/{payload['request_id']}"
+        # The agent is the only producer of this contract-declared topic, and a broker the
+        # provisioner has not run against lacks it: ensure it before the send (once per process).
+        self._publisher._ensure_topic(
+            self._publisher.apply_topic_namespace(self._event_topic), self._config
+        )
         self._publisher._produce(self._event_topic, key, payload, self._config)
 
     def send_command(self, command: BaseModel) -> str:
