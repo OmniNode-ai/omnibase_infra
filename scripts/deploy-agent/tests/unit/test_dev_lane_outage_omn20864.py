@@ -47,6 +47,7 @@ from deploy_agent.executor import (
     VerificationFailedError,
     finish_recreate_renames,
     lane_config_for,
+    load_dev_boot_guard,
     monitor_settled_degraded,
     remove_recreate_leftovers,
     run_compose_recreate,
@@ -63,14 +64,6 @@ from deploy_agent.idle_converge import (
 )
 from deploy_agent.job_state import JobStore
 from deploy_agent.routing import ModelLaneFlags, ModelLaneFreeze
-
-from omnibase_infra.handlers.handler_runtime_health_reading import (
-    HandlerRuntimeHealthReading,
-)
-from omnibase_infra.models.model_answering_degraded import ModelAnsweringDegraded
-from omnibase_infra.models.model_runtime_health_reading import (
-    ModelRuntimeHealthReading,
-)
 
 pytestmark = pytest.mark.unit
 
@@ -128,13 +121,16 @@ def _phase(_phase: Phase, _status: object) -> None:
 # --- rule 1: what counts as "answering, monitor degraded" ---------------------
 
 
-def _answering_degraded(
-    result: subprocess.CompletedProcess[str],
-) -> ModelAnsweringDegraded | None:
-    reading = ModelRuntimeHealthReading(
+_HEALTH_NODE = load_dev_boot_guard("handler_runtime_health_reading")
+ModelAnsweringDegraded = _HEALTH_NODE.ModelAnsweringDegraded
+
+
+def _answering_degraded(result: subprocess.CompletedProcess[str]) -> Any:
+    reading = _HEALTH_NODE.ModelRuntimeHealthReading(
         returncode=result.returncode, stdout=result.stdout, stderr=result.stderr
     )
-    return HandlerRuntimeHealthReading().handle(reading).answering_degraded
+    handler = _HEALTH_NODE.HandlerRuntimeHealthReading()
+    return handler.handle(reading).answering_degraded
 
 
 def _curl(stdout: str, returncode: int = 0) -> subprocess.CompletedProcess[str]:
@@ -195,7 +191,7 @@ def test_everything_else_is_not_answering_degraded(
 
 
 def test_settled_means_two_cycles_on_the_same_dimensions() -> None:
-    def r(at: str, *dims: str) -> ModelAnsweringDegraded:
+    def r(at: str, *dims: str) -> Any:
         return ModelAnsweringDegraded(observed_at=at, dimensions=frozenset(dims))
 
     dlq = "projection_dlq_saturation"
