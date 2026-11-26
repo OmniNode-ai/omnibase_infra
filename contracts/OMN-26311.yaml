@@ -1,0 +1,49 @@
+schema_version: 1.0.0
+ticket_id: OMN-26311
+title: The secret resolver warns once per unmapped logical name, not once per call
+summary: >-
+  The dev runtime logged secret_resolver GITHUB_TOKEN no_mapping warnings about 2,639 times in 30 minutes. A poller asks for the ref GITHUB_TOKEN on every tick and the dev resolver holds no mapping for it, so every call logged a WARNING. The resolver now warns once per logical name and reason and logs later misses at DEBUG; each miss is still counted and still returns None.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26311-warn-once-per-unmapped-name
+    statement: The secret resolver emits one WARNING per unmapped logical name, however many times it is asked.
+    acceptance:
+      - id: AC5
+        statement: "AC5: fifty calls for one unmapped name produce one WARNING, sync and async -- falsifier: the test file fails at origin/dev with fifty warnings and passes on the PR branch"
+      - id: AC6
+        statement: "AC6: two distinct unmapped names each still warn once -- falsifier: the distinct-names test reads fewer than one warning for either name"
+evidence_requirements:
+  - kind: tests
+    description: The log-once regression and the existing secret resolver tests.
+    command: uv run --frozen pytest tests/unit/runtime/test_secret_resolver_no_mapping_log_once_omn26311.py tests/unit/runtime/test_secret_resolver.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26311-ac5-warn-once
+    description: Fifty sync and fifty async calls for one unmapped name emit one WARNING each.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_secret_resolver_no_mapping_log_once_omn26311.py -k warns_once_across_many_calls -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26311-ac6-distinct-names
+    description: Each distinct unmapped name still warns once.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_secret_resolver_no_mapping_log_once_omn26311.py -k each_distinct_unmapped_name -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26311-ac5-deploy-scope
+    description: The merged dev source of the secret resolver carries the warn-once guard.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: command_succeeds
+        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/secret_resolver.py?ref=dev' --jq .content | base64 -d | grep -q 'first_config_failure'
+        cwd: .
