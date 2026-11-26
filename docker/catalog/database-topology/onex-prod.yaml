@@ -24,6 +24,7 @@ databases:
         domain_column: domain
         relation: schema_migrations
         schema: platform_catalog
+        shape: stream_domain_version_checksum
         stream_column: migration_stream
         version_column: version
     migration_stream: omnibase_infra.application
@@ -409,6 +410,7 @@ databases:
         domain_column: domain
         relation: schema_migrations
         schema: public
+        shape: stream_domain_version_checksum
         stream_column: migration_stream
         version_column: version
     migration_stream: omnibase_infra.service
@@ -462,6 +464,7 @@ databases:
         domain_column: domain
         relation: schema_migrations
         schema: public
+        shape: stream_domain_version_checksum
         stream_column: migration_stream
         version_column: version
     migration_stream: omniintelligence.service
@@ -496,6 +499,46 @@ databases:
       public:
         domain: OMNINODE_INTERNAL
         owner: owner_omniintelligence
+  omninode_cloud:
+    bindings:
+      tenant_identity_writer:
+        database_ref: omninode_cloud
+        dsn_env: TENANT_IDENTITY_DATABASE_DSN
+        principal: tenant_identity_writer
+    checksum_ledger: schema_migrations
+    checksum_ledgers:
+      schema_migrations:
+        checksum_column: checksum
+        domain_column: null
+        relation: schema_migrations
+        schema: public
+        shape: version_checksum
+        stream_column: null
+        version_column: version
+    migration_stream: omnibase_infra.cloud
+    owners:
+      owner_omninode_cloud:
+        login: false
+    physical_name: omninode_cloud
+    principals:
+      tenant_identity_writer:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            objects: []
+            privileges:
+              - CONNECT
+            schema: null
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: public
+        login: true
+    schemas:
+      public:
+        domain: TENANT
+        owner: owner_omninode_cloud
 environment: onex-prod
 schema_version: '1.0'
 source:
@@ -503,5 +546,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 55d714b947fceae79e5890c1537b01ce4c44aae150ccd17c152481caa550f18c
+  sha256: c82aa2b0fa60248446c188cfff27d8bb21218c1f26511c8483987521ba2a77dc
 topology_instance: onex-prod

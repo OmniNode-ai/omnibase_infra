@@ -157,7 +157,6 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import JsonType, PrimitiveValue
 from omnibase_infra.enums import (
     EnumDispatchStatus,
-    EnumDlqFailureClass,
     EnumInfraTransportType,
     EnumMessageCategory,
 )
@@ -179,9 +178,15 @@ from omnibase_infra.models.dispatch.model_dispatch_log_context import (
 from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
 from omnibase_infra.models.dispatch.model_dispatch_outcome import ModelDispatchOutcome
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
+from omnibase_infra.models.dispatch.model_dispatch_refusal import (
+    classify_no_dispatcher_refusal,
+)
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
     ModelDispatcherMetrics,
+)
+from omnibase_infra.models.dispatch.model_failure_terminal_bindings import (
+    ModelFailureTerminalBindings,
 )
 from omnibase_infra.models.dispatch.model_materialized_dispatch import (
     ModelMaterializedDispatch,
@@ -191,16 +196,6 @@ from omnibase_infra.runtime.binding_resolver import OperationBindingResolver
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.runtime.dispatch_envelope_context import bind_dispatch_envelope
 from omnibase_infra.utils import sanitize_error_message
-
-_VALIDATION_DETAIL_MAX_LENGTH = 500
-
-
-def _sanitize_validation_detail(detail: str) -> str:
-    """Sanitize validation detail before it reaches logs, results, or DLQ metadata."""
-    return sanitize_error_message(
-        ValueError(detail), max_length=_VALIDATION_DETAIL_MAX_LENGTH
-    )
-
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -653,6 +648,9 @@ class MessageDispatchEngine:
         # Freeze state
         self._frozen: bool = False
         self._registration_lock: threading.Lock = threading.Lock()
+        self.failure_terminals: ModelFailureTerminalBindings = (
+            ModelFailureTerminalBindings()
+        )
 
         # Metrics lock for TOCTOU-safe structured metrics updates
         # This lock protects the entire read-modify-write sequence on _structured_metrics:
@@ -1042,6 +1040,7 @@ class MessageDispatchEngine:
                     )
 
             self._frozen = True
+            self.failure_terminals.freeze()
             self._logger.info(
                 "MessageDispatchEngine frozen with %d routes and %d dispatchers",
                 len(self._routes),
@@ -1465,34 +1464,19 @@ class MessageDispatchEngine:
                 original_topic=topic,
             )
 
-            # OMN-14492: classify WHY no dispatcher matched instead of
-            # collapsing every empty-result case into the same unclassifiable
-            # "No dispatcher found" signal. When the type-scoping pass (OMN-12416)
-            # rejected at least one real candidate, a dispatcher IS registered
-            # for this event_type — the payload just failed that dispatcher's
-            # event_model validation. That is a publisher/producer defect, not
-            # a wiring gap, and gets the real pydantic ValidationError detail
-            # attached instead of a generic message.
-            if scoping_outcome.type_scoped_candidate_rejected:
-                failure_class = EnumDlqFailureClass.PUBLISHER_MALFORMED
-                error_code = EnumCoreErrorCode.ENVELOPE_VALIDATION_FAILED
-                validation_detail = _sanitize_validation_detail(
-                    scoping_outcome.validation_detail or "validation detail unavailable"
-                )
-                error_message = (
-                    f"Publisher-malformed payload for message type '{message_type}' "
-                    f"on topic '{topic}': a dispatcher IS registered for this "
-                    f"event_model, but the payload failed model_validate: "
-                    f"{validation_detail}"
-                )
-            else:
-                failure_class = EnumDlqFailureClass.NO_DISPATCHER
-                error_code = EnumCoreErrorCode.ITEM_NOT_REGISTERED
-                validation_detail = None
-                error_message = (
-                    f"No dispatcher registered for category '{topic_category}' "
-                    f"and message type '{message_type}' matching topic '{topic}'."
-                )
+            # OMN-14492: classify WHY no dispatcher matched (payload refused by a
+            # registered dispatcher's event_model, or a true wiring gap).
+            refusal = classify_no_dispatcher_refusal(
+                type_scoped_candidate_rejected=scoping_outcome.type_scoped_candidate_rejected,
+                raw_validation_detail=scoping_outcome.validation_detail,
+                message_type=message_type,
+                topic=topic,
+                topic_category=topic_category,
+            )
+            failure_class = refusal.failure_class
+            error_code = refusal.error_code
+            error_message = refusal.error_message
+            validation_detail = refusal.validation_detail
 
             # Log warning with DLQ routing info + real classification/detail
             self._logger.warning(
@@ -1533,7 +1517,14 @@ class MessageDispatchEngine:
                 error_code=error_code,
                 error_details=error_details,
                 correlation_id=correlation_id,
-                output_events=[],
+                # OMN-26026: a malformed command whose contract declares a failure
+                # topic is answered there; the DLQ address stays on the result.
+                output_events=self.failure_terminals.answer(
+                    topic=topic,
+                    refusal=refusal,
+                    correlation_id=correlation_id,
+                    payload=envelope_payload,
+                ),
             )
 
         # Step 5: Execute dispatchers and collect outputs

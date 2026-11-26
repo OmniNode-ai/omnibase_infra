@@ -90,6 +90,13 @@ class JobState(BaseModel):
     #: OMN-18124: why no phase ran; ``None`` also loads older-agent records.
     not_started: EnumJobNotStarted | None = None
     result_publish_pending: bool = False
+    #: OMN-26678. The commit ``git_pull`` resolved for this job, empty until it did.
+    #:
+    #: Durable on the record because the publish retry rebuilds the completion event
+    #: from the record alone: the agent's own per-job sha is reset by the next job, and
+    #: a replayed event with an empty ``git_sha`` is refused by the delegation checks
+    #: node. Defaults to empty so a record written by an older agent still loads.
+    git_sha: str = ""
     completed_at: datetime | None = None
     #: OMN-18636 AC5. Post-terminal work still executing for this job, or
     #: ``None`` when there is none.
@@ -537,6 +544,19 @@ class JobStore:
         self._save(job)
         return job
 
+    def _set_field(self, correlation_id: UUID, **fields: Any) -> JobState | None:
+        """Write one field of a record; ``None`` for an unknown job, never a raise."""
+        job = self.load(correlation_id)
+        if job is None:
+            return None
+        job = job.model_copy(update=fields)
+        self._save(job)
+        return job
+
+    def record_git_sha(self, correlation_id: UUID, git_sha: str) -> JobState | None:
+        """Keep the commit this job resolved, for an event replayed after the job."""
+        return self._set_field(correlation_id, git_sha=git_sha)
+
     def set_settling(
         self, correlation_id: UUID, stage: EnumJobSettlingStage
     ) -> JobState | None:
@@ -548,12 +568,7 @@ class JobStore:
         skip the terminal publish that follows. Losing the settling field is a
         degraded record; losing the publish is a lost result.
         """
-        job = self.load(correlation_id)
-        if job is None:
-            return None
-        job.settling_stage = stage
-        self._save(job)
-        return job
+        return self._set_field(correlation_id, settling_stage=stage)
 
     def record_onex_api_delivery(
         self, correlation_id: UUID, delivery: ModelOnexApiDelivery
@@ -565,12 +580,7 @@ class JobStore:
         where an exception would cost the terminal publish, and a degraded
         record is cheaper than a lost result.
         """
-        job = self.load(correlation_id)
-        if job is None:
-            return None
-        job.onex_api_delivery = delivery
-        self._save(job)
-        return job
+        return self._set_field(correlation_id, onex_api_delivery=delivery)
 
     def clear_settling(self, correlation_id: UUID) -> JobState | None:
         """Declare the job fully settled: nothing further runs for it.
@@ -578,12 +588,7 @@ class JobStore:
         A field that is only ever set turns every finished job into a
         permanently-settling one, which distinguishes nothing.
         """
-        job = self.load(correlation_id)
-        if job is None:
-            return None
-        job.settling_stage = None
-        self._save(job)
-        return job
+        return self._set_field(correlation_id, settling_stage=None)
 
     def recover_crashed_jobs(self) -> list[JobState]:
         recovered = []
