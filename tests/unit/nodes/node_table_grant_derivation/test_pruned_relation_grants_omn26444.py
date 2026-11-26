@@ -100,8 +100,8 @@ def test_handler_answers_from_the_contract() -> None:
 
     pruned = handler.handle(
         ModelTableGrantPruneQuery(
-            schema_name="public",
-            table_name="savings_priced_models",
+            namespace="public",
+            table="savings_priced_models",
         )
     )
     assert {privilege.value for privilege in pruned.privileges} == {
@@ -111,8 +111,8 @@ def test_handler_answers_from_the_contract() -> None:
 
     unpruned = handler.handle(
         ModelTableGrantPruneQuery(
-            schema_name="omninode_internal",
-            table_name="savings_priced_models",
+            namespace="omninode_internal",
+            table="savings_priced_models",
         )
     )
     assert unpruned.privileges == ()

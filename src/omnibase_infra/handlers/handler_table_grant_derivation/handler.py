@@ -51,7 +51,7 @@ class HandlerTableGrantDerivation:
         self, request: ModelTableGrantPruneQuery
     ) -> ModelTableGrantPrunePrivileges:
         """Return prune privileges for the requested relation."""
-        if self.needs_delete(request.schema_name, request.table_name):
+        if self.needs_delete(request.namespace, request.table):
             return ModelTableGrantPrunePrivileges(
                 privileges=tuple(
                     sorted(PRUNE_PRIVILEGES, key=lambda privilege: privilege.value)

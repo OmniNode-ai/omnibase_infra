@@ -11,5 +11,5 @@ class ModelTableGrantPruneQuery(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_name: str = Field(min_length=1)
-    table_name: str = Field(min_length=1)
+    namespace: str = Field(min_length=1)
+    table: str = Field(min_length=1)

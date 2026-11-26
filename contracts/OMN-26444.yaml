@@ -22,7 +22,7 @@ emergency_bypass:
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-omn26444-ac1-infra-declare-and-vendor-102"
-    description: "Infra half only. Pins the tenant projection writer's declared grant on savings_priced_models in every instance that declares it, and 102's source bytes (omnimarket#6629 at cc8329235c228c1e7c4624cc71e1791ba2b7414a), its exact tenant ledger checksum and forward-only class; at the merge base the grant and the file are absent, so it fails there. It does not prove the view's counts, which omnimarket#6629's real-Postgres tests prove."
+    description: "Infra half only. Pins the tenant projection writer's declared grant on savings_priced_models in every instance that declares it, and 102's source bytes (omnimarket#6629 at d2b838adf7968ef57a097adc91b65cc5aa46c933), its exact tenant ledger checksum and forward-only class; at the merge base the grant and the file are absent, so it fails there. It does not prove the view's counts, which omnimarket#6629's real-Postgres tests prove."
     source: "manual"
     binds_ac: ["AC1"]
     checks:
