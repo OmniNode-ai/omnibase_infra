@@ -120,6 +120,7 @@ class DevRecreateWindowGate:
         self._handler = HandlerDevRecreateWindow()
         self.last_recreate_at = last_recreate_at
         self._last_announced_for: datetime | None = announced_for
+        self.last_decision: ModelDevRecreateDecision | None = None
 
     @property
     def announced_for(self) -> datetime | None:
@@ -141,6 +142,7 @@ class DevRecreateWindowGate:
                 last_recreate_at=self.last_recreate_at,
             )
         )
+        self.last_decision = decision
         immediate = decision.verdict is EnumDevRecreateVerdict.RECREATE
         if immediate or decision.next_recreate_at != self._last_announced_for:
             accepted = self._publish(decision, requested_by, now, immediate)

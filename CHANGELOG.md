@@ -1,3 +1,20 @@
+## v0.38.85 (2026-11-26)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.85 by the scheduled release train.
+- 8 release-relevant commit(s) merged since v0.38.84.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.84
+- : the cloud database joins the deployment topology with its version_checksum ledger (#6295)
+- : quarantine dispatch-deadline dead letters instead of replaying them in a loop (#6288)
+- : a publisher_malformed command emits its contract's declared failure terminal (#6277)
+- : the dev boot guard's ledger proof runs with the operator command switch (#6293)
+- : price Inkling-2-Mini at zero marginal API cost in the pricing manifest (#6285)
+- : log one run line per published runtime loop reading (#6291)
+- : move omnibase-core to 0.47.80 (#6289)
+- : grant the runtime account the lab_alerts table in the topology profiles (#6258)
+
 ## v0.38.84 (2026-11-25)
 
 ### Release
