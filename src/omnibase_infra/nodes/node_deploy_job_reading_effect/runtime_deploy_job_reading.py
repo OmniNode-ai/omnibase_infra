@@ -34,7 +34,7 @@ from datetime import UTC, datetime, timedelta
 from operator import attrgetter
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import yaml
 from pydantic import BaseModel, JsonValue, ValidationError
@@ -681,8 +681,7 @@ def _repository_clone(execution: ModuleType, repository: str) -> Path | None:
 def _carrying_shas(
     repository: str,
     clone: Path | None,
-    merge_sha: str,
-    merged_at: datetime,
+    merge: tuple[str, datetime],
     jobs: tuple[object, ...],
     timeout: float,
 ) -> tuple[str, ...]:
@@ -694,6 +693,7 @@ def _carrying_shas(
     dev head at that moment (the build stages it then) and its built sha counts; a job
     accepted before the merge never does.
     """
+    merge_sha, merged_at = merge
     built = {sha for job in jobs if (sha := getattr(job, "built_sha", ""))}
     if repository == _OWN_REPOSITORY:
         if clone is None:
@@ -803,13 +803,19 @@ class AgentDevMergeSender:
         return "published" if taken else "failed"
 
 
+class _OverdueContext(NamedTuple):
+    """The job records and the merge-sha to repository map an overdue build request reads."""
+
+    jobs: tuple[object, ...]
+    repositories: dict[str, str]
+
+
 def _request_overdue_builds(
     execution: ModuleType,
     settings: dict[str, JsonValue],
     overdue: list[BaseModel],
     subjects: dict[str, str],
-    jobs: tuple[object, ...] = (),
-    repositories: dict[str, str] | None = None,
+    context: _OverdueContext | None = None,
 ) -> None:
     """Publish the event and request the one dev build that carries every overdue merge (OMN-26316).
 
@@ -836,7 +842,8 @@ def _request_overdue_builds(
             "the deploy job reading contract's publish settings are not strings"
         )
     timeout = float(_seconds(settings, "build_decision_git_diff_timeout_seconds"))
-    repository_of = repositories or {}
+    jobs = context.jobs if context else ()
+    repository_of = context.repositories if context else {}
     heads: dict[str, str] = {}
     for repository in dict.fromkeys(
         repository_of.get(str(getattr(d, "merge_sha", "")), _OWN_REPOSITORY)
@@ -995,7 +1002,11 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
                             coalesce_seconds=coalesce,
                             jobs=jobs,
                             descendant_shas=_carrying_shas(
-                                repository, clone, sha, merged_at, jobs, git_timeout
+                                repository,
+                                clone,
+                                (sha, merged_at),
+                                jobs,
+                                git_timeout,
                             ),
                         )
                     )
@@ -1021,7 +1032,11 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
         if overdue:
             try:
                 _request_overdue_builds(
-                    execution, settings, overdue, subjects, jobs, repositories
+                    execution,
+                    settings,
+                    overdue,
+                    subjects,
+                    _OverdueContext(jobs, repositories),
                 )
             except Exception:  # the publish never costs the tick its decisions
                 logger.exception("overdue dev merge build request was not made")
