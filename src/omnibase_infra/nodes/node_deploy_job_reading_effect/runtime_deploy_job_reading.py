@@ -968,13 +968,16 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
         lookback = _seconds(settings, "dev_merge_build_lookback_seconds")
         subjects: dict[str, str] = {}
         repositories: dict[str, str] = {}
-        for repository in _composed_repositories(execution):
+        composed = _composed_repositories(execution)
+        unread = 0
+        for repository in composed:
             try:
                 merges = _dev_merges(execution, repository, now, lookback, git_timeout)
             except (RuntimeError, OSError, subprocess.SubprocessError):
                 logger.exception(
                     "overdue dev merge builds: the %s merges were unread", repository
                 )
+                unread += 1
                 continue
             clone = _repository_clone(execution, repository)
             for sha, merged_at, runtime_class, subject in merges:
@@ -997,6 +1000,8 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
                         )
                     )
                 )
+        if composed and unread == len(composed):
+            raise RuntimeError("no composed repository's dev log was read")
         overdue = [d for d in decisions if getattr(d, "outcome", "") == "REQUEST"]
         logger.log(
             logging.WARNING if overdue else logging.INFO,
