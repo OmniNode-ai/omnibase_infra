@@ -461,3 +461,46 @@ def test_committed_policy_env_equals_a_fresh_render_and_carries_the_mapping() ->
     assert carrying <= committed
     for name in carrying:
         assert f"{name}=" in POLICY_ENV.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# AC1 and AC3: the intent is a lab database, so the cloud-only reading does not hold
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("profile", ["dev", STABILITY])
+def test_policy_cites_the_overlay_key_and_the_lab_role_at_the_mapping(
+    profile: str,
+) -> None:
+    lines = POLICY_CONTRACT.read_text(encoding="utf-8").splitlines()
+    # Walk to this profile's mapping line, then read the comment block above it.
+    start = next(i for i, ln in enumerate(lines) if ln.startswith(f"  {profile}:"))
+    at = next(
+        i
+        for i in range(start, len(lines))
+        if lines[i].strip() == f"- logical_name: {LOGICAL_NAME}"
+    )
+    comment: list[str] = []
+    j = at - 1
+    while lines[j].lstrip().startswith("#"):
+        comment.insert(0, lines[j])
+        j -= 1
+    block = " ".join(comment)
+    assert "database.dsn_secret" in block, "the overlay key is not named"
+    assert f"role {ROLE} on this lane's own {DATABASE}" in block.replace("  ", " ")
+
+
+@pytest.mark.parametrize(
+    "compose", [COMPOSE_DEV_LANE, COMPOSE_STABILITY], ids=["dev-lane", STABILITY]
+)
+def test_gateway_dsn_points_at_the_lanes_own_postgres_service_never_a_cloud_host(
+    compose: Path,
+) -> None:
+    dsn_lines = [
+        ln
+        for ln in compose.read_text(encoding="utf-8").splitlines()
+        if ln.lstrip().startswith(f"{DSN_VAR}:")
+    ]
+    assert len(dsn_lines) == 1
+    hosts = re.findall(r"@([A-Za-z0-9_.\-]+):\d+/", dsn_lines[0])
+    assert hosts == ["postgres"], f"{compose.name}: gateway DSN host is {hosts}"
