@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_table_grant_derivation
+contract_name: node_table_grant_derivation
+node_name: node_table_grant_derivation
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: COMPUTE_GENERIC
+descriptor:
+  node_archetype: compute
+description: "Name the relations whose writer also needs DELETE, without I/O."
+input_model:
+  name: ModelTableGrantPruneQuery
+  module: omnibase_infra.models.model_table_grant_prune_query
+  description: "Relation to evaluate for prune privileges."
+output_model:
+  name: ModelTableGrantPrunePrivileges
+  module: omnibase_infra.models.model_table_grant_prune_privileges
+  description: "Privileges needed when the relation is pruned; empty otherwise."
+capabilities:
+  - name: table.grant.prune
+    description: "Name the extra privileges a pruned relation needs."
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: table.grant.prune
+      handler:
+        name: HandlerTableGrantDerivation
+        module: omnibase_infra.handlers.handler_table_grant_derivation.handler
+      description: "Derive the extra privileges a pruned relation needs."
+      supported_operations:
+        - table.grant.prune
+      input_model:
+        name: ModelTableGrantPruneQuery
+        module: omnibase_infra.models.model_table_grant_prune_query
+        description: "Relation to evaluate for prune privileges."
+error_handling:
+  retry_policy:
+    max_retries: 0
+    backoff_multiplier: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+  retry_on: []
+metadata:
+  description: "Compute node that names pruned relations for table grants."
+  author: OmniNode Team
+  license: MIT
+  tags:
+    - compute
+    - topology
+    - grants
+  related_tickets:
+    - OMN-26444
+    - OMN-23055
+    - OMN-25103
+config:
+  pruned_relations:
+    - schema: omninode_internal
+      table: gate_store_reservations
+      reason: "reservations are released or expired by deleting their rows (OMN-23055, node_gate_store_effect/0001)"
+    - schema: omninode_internal
+      table: floor_integration_rows
+      reason: "the writer deletes the rows of an older integration pass that the newest no longer names (OMN-25103, node_projection_floor_integration/0001)"
+    - schema: public
+      table: savings_priced_models
+      reason: "the shared metering writer's priced-models fill deletes the rows the pricing manifest no longer names (OMN-26444, node_projection_savings/102)"

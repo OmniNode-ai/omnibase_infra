@@ -296,6 +296,13 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - savings_priced_models
+            privileges:
+              - DELETE
+              - SELECT
+            schema: public
+          - object_type: TABLE
+            objects:
               - agent_actions
               - agent_detection_failures
               - agent_execution_logs

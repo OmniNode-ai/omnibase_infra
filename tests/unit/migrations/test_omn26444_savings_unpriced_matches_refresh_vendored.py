@@ -5,7 +5,7 @@
 Failure modes this delivery check catches:
 - the migration is absent from the infrastructure forward tree;
 - the vendored SQL file differs by even one byte from its approved source,
-  omnimarket#6629 at cc8329235c228c1e7c4624cc71e1791ba2b7414a;
+  omnimarket#6629 at d2b838adf7968ef57a097adc91b65cc5aa46c933;
 - its exact tenant ledger row is missing, duplicated, or has a wrong field;
 - its forward-only migration classification is missing or changed;
 - it stops granting tenant_projection_writer the table the topology declares.
@@ -29,7 +29,7 @@ RELATIVE = (
 )
 NODE = "node:node_projection_savings"
 # SHA-256 digest of the approved omnimarket source migration.
-DIGEST = "547d4f3d0e17c8bc86f163973ed28fa45e053b0fc1efd03d4aeaf7204af986de"
+DIGEST = "00050853bba63893152676adafe3d2a3ffe31136d13016661ced5ea2cc7edd4d"
 
 
 def test_migration_102_is_byte_identical_ledgered_and_forward_only() -> None:
@@ -66,4 +66,10 @@ def test_migration_102_delivers_the_writer_grant_on_savings_priced_models() -> N
     assert (
         "GRANT SELECT, INSERT, UPDATE, DELETE ON public.savings_priced_models "
         "TO tenant_projection_writer;" in sql
+    )
+    # One grant to the writer: a second, narrower one without DELETE would
+    # contradict the fill, which deletes rows the manifest no longer names.
+    assert (
+        "GRANT SELECT, INSERT, UPDATE ON public.savings_priced_models "
+        "TO tenant_projection_writer;" not in sql
     )

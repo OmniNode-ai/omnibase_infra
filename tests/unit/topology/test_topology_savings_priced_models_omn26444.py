@@ -4,7 +4,8 @@
 ``public.savings_priced_models`` in every deployment topology instance.
 
 omnimarket's metering summary refresh refills that table (migration 102 grants
-the writer SELECT, INSERT, UPDATE, DELETE on it) before it reads runs. The
+the writer SELECT, INSERT, UPDATE, DELETE on it) before it reads runs; the fill
+deletes the rows the pricing manifest no longer names, so DELETE is declared. The
 runtime resolver proves a projection binding against the topology's declared
 grants, not the database's, so without this declaration the binding raises
 "lacks declared read privileges: SELECT on table public.savings_priced_models"
@@ -22,7 +23,7 @@ _INSTANCES = (
     Path(__file__).resolve().parents[3] / "src/omnibase_infra/topology/instances"
 )
 _TABLE = "savings_priced_models"
-_REQUIRED = {"SELECT", "INSERT", "UPDATE"}
+_REQUIRED = {"SELECT", "INSERT", "UPDATE", "DELETE"}
 
 
 def _writer_table_privileges(instance: str) -> set[str]:
