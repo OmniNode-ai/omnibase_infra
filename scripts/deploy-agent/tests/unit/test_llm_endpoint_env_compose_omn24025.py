@@ -28,6 +28,9 @@ pytestmark = [pytest.mark.unit, pytest.mark.llm_endpoint_env_render]
 REPO_ROOT = Path(__file__).resolve().parents[4]
 STALE_ADDRESS = "http://192.0.2.50:8002"
 OVERLAY_ADDRESS = "http://192.0.2.50:8100"
+# the coder slot is also overlay-addressed (OMN-26709), so every overlay names it
+CODER_SLOT_ID = "coder-5090"
+CODER_ADDRESS = "http://192.0.2.50:8000"
 EMBEDDING_PATH = "/v1/embeddings"
 SLOT_ID = "embeddings-201"
 ENV_STATE_DIR = "DEPLOY_AGENT_STATE_DIR"
@@ -52,7 +55,12 @@ def _overlay_home(root: Path, endpoint_urls: dict[str, str]) -> Path:
     overlay = repo / "overlays" / "llm_endpoints" / "overlay.yaml"
     overlay.parent.mkdir(parents=True)
     overlay.write_text(
-        yaml.safe_dump({"schema_version": 1, "endpoint_urls": endpoint_urls}),
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "endpoint_urls": {CODER_SLOT_ID: CODER_ADDRESS, **endpoint_urls},
+            }
+        ),
         encoding="utf-8",
     )
     _git(repo, "add", str(overlay.relative_to(repo)))
@@ -477,7 +485,8 @@ def test_golden_guard_checks_the_rendered_environment_and_skips_the_stores_value
     file_commands = [cmd for cmd, _ in seen if "--env-file" in cmd]
     assert file_commands
     for cmd in file_commands:
-        assert cmd[cmd.index("--skip-env-var") + 1] == "LLM_EMBEDDING_URL"
+        skipped = {cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--skip-env-var"}
+        assert {"LLM_CODER_URL", "LLM_EMBEDDING_URL"} <= skipped
 
 
 def test_golden_guard_of_a_stability_job_checks_the_rendered_environment(
@@ -498,7 +507,10 @@ def test_golden_guard_of_a_stability_job_checks_the_rendered_environment(
     assert process_env["LLM_EMBEDDING_URL"] == OVERLAY_ADDRESS
     for cmd, _ in seen:
         if "--env-file" in cmd:
-            assert cmd[cmd.index("--skip-env-var") + 1] == "LLM_EMBEDDING_URL"
+            skipped = {
+                cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--skip-env-var"
+            }
+            assert {"LLM_CODER_URL", "LLM_EMBEDDING_URL"} <= skipped
 
 
 def test_control_guard_outside_the_dev_fence_skips_nothing(
