@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# This handler is compute-side (pure decision, OMN-26316). Its nearer declaration
+# keeps K4 active beneath the shared handlers package's effect boundary.
+node_type: "COMPUTE_GENERIC"
+descriptor:
+  node_archetype: compute
+handler:
+  name: HandlerRuntimeHealthReading
+  module: omnibase_infra.handlers.runtime_health_reading.handler_runtime_health_reading
