@@ -65,3 +65,13 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_c11_negative_paths_probe_omn19175.py -q --no-cov -n 0 -p no:randomly -k "answers_403_is_refused_as_an_existence_leak"
         cwd: .
+  - id: dod-omn26117-ac2-dev-reads-settings-snapshot
+    description: >-
+      The rendered dev compose (runtime-effects and the folded omninode-runtime) mounts the host's settings-store snapshot read-only as an overlay root ahead of the overlays-repository store, and the root walk over that render finds delegation_check_responders and delegation_check_gateway, which exist only in the settings store; a row the snapshot lacks resolves to nothing. The observed dev run of the deployed delegation checks after the roll is posted as a pull request comment naming the head and is not claimed by a static check.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/infra/test_dev_runtime_compose_render.py -q --no-cov -n 0 -p no:randomly -k "delegation_check_rows_in_the_settings_snapshot"
+        cwd: .
