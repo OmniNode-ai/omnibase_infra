@@ -93,3 +93,48 @@ dod_evidence:
         check_value: |-
           curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/scripts/deploy-agent/deploy_agent/instance_lanes.py" | grep -c '^            "ONEX_RUNTIME_NODE_EXCLUSION",$' >/dev/null
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26232-ac1-live-criterion
+    description: 'AC1: a typed model parses ONEX_RUNTIME_NODE_EXCLUSION as a comma list and refuses a name that is not a known node contract name, naming the unknown name in the error, and accepts known names and the empty value -- falsifier: uv run pytest tests/unit/models/runtime/test_node_exclusion_lane_env_omn26218.py -q fails at origin/dev, which has no such file -- bound to the test that already proves it.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/models/runtime/test_node_exclusion_lane_env_omn26218.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26232-ac2-live-criterion
+    description: 'AC2: the deploy agent''s runtime_lane_env.v1 allowlist carries ONEX_RUNTIME_NODE_EXCLUSION, a fragment for the dev lane that sets a known name reaches the runtime env, and a fragment that sets a mistyped name fails with LaneEnvFragmentError before any container is recreated -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_lane_env_fragment_node_exclusion_omn26218.py -q fails at origin/dev -- bound to the test that already proves it.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_env_fragment_node_exclusion_omn26218.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26232-ac3-live-criterion
+    description: 'AC3: the omninode-runtime service in the compose passthrough env carries ONEX_RUNTIME_NODE_EXCLUSION from the lane env, and with no value set the rendered stack holds no non-empty exclusion on any service -- falsifier: uv run pytest tests/ci/test_runtime_env_anchor.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/integration/infra/test_dev_runtime_compose_render.py -q fails with the passthrough added and a default value set -- bound to the test that already proves it.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runtime_env_anchor.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/integration/infra/test_dev_runtime_compose_render.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26232-ac4-live-criterion
+    description: 'AC4: no overlay or default sets a value on prod or stability lanes in this change -- falsifier: uv run pytest tests/unit/docker -q fails if any prod or stability compose file or lane entry renders a non-empty ONEX_RUNTIME_NODE_EXCLUSION -- bound to the test that already proves it.'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_node_exclusion_passthrough_omn26218.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26232-ac5-live-criterion
+    description: 'AC5: integrated: the deploy agent''s own lane env reader, run on a lab host from the installed branch against a scratch fragment for the dev lane, accepts a fragment naming a known node and refuses a fragment naming a mistyped one with the typo in the message, and touches no running container -- falsifier: the read-back on a lab host from the installed branch shows the mistyped name accepted, the known name refused, or a running container on that host restarting during the read -- bound to the test that already proves it.'
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_lane_env_fragment_node_exclusion_omn26218.py -q --no-cov -n 0 -p no:cacheprovider -k "clone_reader or compose_env"
+        cwd: .
