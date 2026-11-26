@@ -81,3 +81,18 @@ def test_failing_ledger_message_names_the_exception_last_on_stderr(
     )
     with pytest.raises(guard.DevBootFailedError, match="ProtocolConfigurationError"):
         guard._prove_work_ledger_answers(execution)
+
+
+def test_hidden_ledger_group_is_reached_through_the_operator_switch(
+    tmp_path: Path,
+) -> None:
+    """A real process that hides ``ledger`` unless the switch is set still answers (OMN-26316)."""
+    execution = _checkout(
+        tmp_path,
+        'if [ "${ONEX_CLI_SHOW_ALL_COMMANDS:-}" != "1" ]; then\n'
+        "  echo \"Error: No such command 'ledger'\" >&2\n"
+        "  exit 2\n"
+        "fi\n"
+        "echo '{\"rows\": []}'\n",
+    )
+    guard._prove_work_ledger_answers(execution)
