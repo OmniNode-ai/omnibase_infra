@@ -94,3 +94,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/runtime/test_result_applier_log_volume_omn26152.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
+  - id: dod-omn26152-integration-proof-applier-stream
+    description: 'AC26152005: a real applier driving a real executor into a real INFO stream handler renders no success line; the test file is absent at the merge base so the check fails there (must-fail control).'
+    source: manual
+    binds_ac:
+      - AC26152005
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_result_applier_log_volume_integration_omn26152.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
