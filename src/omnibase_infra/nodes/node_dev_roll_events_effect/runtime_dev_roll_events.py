@@ -1034,18 +1034,6 @@ def observe_dev_container(
                 events.FRICTION,
             )
 
-    if reading is not None:
-        git_timeout = float(_setting_int(settings, "build_health_git_timeout_seconds"))
-        _publish_build_health(
-            reading,
-            state,
-            publisher,
-            settings,
-            lambda previous, current: revision_order(
-                repo_root, previous, current, git_timeout, run
-            ),
-        )
-
     journal_size = _journal_size(journal_dir)
     audited: object | None = None
     if journal_size != state.get("journal_size"):
