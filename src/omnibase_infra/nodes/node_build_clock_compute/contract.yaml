@@ -37,7 +37,7 @@ handler_routing:
     - operation: "build.clock.measure"
       handler:
         name: "HandlerBuildClock"
-        module: "omnibase_infra.handlers.handler_build_clock"
+        module: "omnibase_infra.handlers.build_clock.handler_build_clock"
       description: "Compute the build clock and verdict"
       supported_operations:
         - "build.clock.measure"
@@ -48,7 +48,7 @@ handler_routing:
     - operation: "runtime.health.judge"
       handler:
         name: "HandlerRuntimeHealthReading"
-        module: "omnibase_infra.handlers.handler_runtime_health_reading"
+        module: "omnibase_infra.handlers.runtime_health_reading.handler_runtime_health_reading"
       description: "Judge one runtime /health reading"
       supported_operations:
         - "runtime.health.judge"

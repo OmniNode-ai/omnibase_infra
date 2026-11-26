@@ -121,7 +121,9 @@ def _phase(_phase: Phase, _status: object) -> None:
 # --- rule 1: what counts as "answering, monitor degraded" ---------------------
 
 
-_HEALTH_NODE = load_dev_boot_guard("handler_runtime_health_reading")
+_HEALTH_NODE = load_dev_boot_guard(
+    "handlers.runtime_health_reading.handler_runtime_health_reading"
+)
 ModelAnsweringDegraded = _HEALTH_NODE.ModelAnsweringDegraded
 
 

@@ -189,10 +189,10 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/model_answering_degraded.py",
         "models/model_runtime_health_reading.py",
         "models/model_runtime_health_judgement.py",
-        "handlers/handler_runtime_health_reading.py",
+        "handlers/runtime_health_reading/handler_runtime_health_reading.py",
         "models/model_build_clock.py",
         "models/model_build_clock_request.py",
-        "handlers/handler_build_clock.py",
+        "handlers/build_clock/handler_build_clock.py",
         "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",
         "nodes/node_dev_roll_events_effect/runtime_dev_agent_adoption.py",
         "models/model_dev_lane_code_ref_pin.py",
@@ -7080,7 +7080,9 @@ class DeployExecutor:
         self, result: subprocess.CompletedProcess[str]
     ) -> ModelRuntimeHealthJudgement:
         """OMN-18640, OMN-20864: the health reading node judges one /health probe."""
-        node = load_dev_boot_guard("handler_runtime_health_reading")
+        node = load_dev_boot_guard(
+            "handlers.runtime_health_reading.handler_runtime_health_reading"
+        )
         reading = node.ModelRuntimeHealthReading(
             returncode=result.returncode, stdout=result.stdout, stderr=result.stderr
         )
@@ -7096,7 +7098,7 @@ class DeployExecutor:
         began = _runtime_health_helper("runtime_started_at", box) if box else ""
         if port not in self._first_pass_at or not began:
             return []
-        node = load_dev_boot_guard("handler_build_clock")
+        node = load_dev_boot_guard("handlers.build_clock.handler_build_clock")
         handler = node.HandlerBuildClock()
         clock = handler.handle(
             node.ModelBuildClockRequest(

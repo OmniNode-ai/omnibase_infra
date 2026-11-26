@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from omnibase_infra.handlers.handler_build_clock import HandlerBuildClock
+from omnibase_infra.handlers.build_clock.handler_build_clock import HandlerBuildClock
 from omnibase_infra.models.model_build_clock import ModelBuildClock
 from omnibase_infra.models.model_build_clock_request import ModelBuildClockRequest
 
