@@ -7,7 +7,7 @@ interface_change: false
 interfaces_touched: []
 context:
   ac_binding_provenance:
-    dod-omn22815-compose-provisioning-test:
+    dod-omn22815-ac1-accepted-20261126t2145z:
       - label: AC1
         criterion_hash: 433bf6d45c887dd6ce66944085348ff3d18f3f929ebc6f55d4bcb8a358ae2478
         proposed_by: lane=dod-closeout-bind-2026-11-26T2145Z-c3
@@ -62,3 +62,12 @@ dod_evidence:
       - check_type: command
         check_value: ssh "$DEPLOY_PROBE_HOST" docker exec omninode-runtime printenv ONEX_BOOT_UNIVERSE_PROVISION | grep -qx 0
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22815-ac1-accepted-20261126t2145z
+    description: 'AC1: the dev compose sets ONEX_BOOT_UNIVERSE_PROVISION to 0 in the runtime anchor. The test fails when the dev anchor leaves the warm on.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest "tests/ci/test_boot_universe_provision_omn22815.py::test_dev_boot_does_not_run_the_universe_warm" -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
