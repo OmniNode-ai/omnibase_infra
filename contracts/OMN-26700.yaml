@@ -1,0 +1,61 @@
+schema_version: 1.0.0
+ticket_id: OMN-26700
+title: The lane work loop model, a TLA+ model of the lane work loop with nine properties and eight mutations in omnibase_infra formal
+summary: >-
+  Task 2 of the lane work orchestrator plan. formal/lane_work_loop holds LaneWorkLoop.tla, Model.cfg, one mutation cfg per property and the committed TLC output. Each mutation cfg removes one guard through a constant of the spec and must fail TLC on its own property.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26700-lane-work-loop-model
+    statement: The lane work loop has a TLA+ model whose nine properties pass on the real model and whose eight mutations each break their own property.
+    acceptance:
+      - id: AC1
+        statement: "AC1: Model.cfg passes all nine properties at bounds of 4 inputs per state, 2 head moves and 2 crashes -- falsifier: results/Model.out contains No error has been found"
+      - id: AC2
+        statement: "AC2: each of the eight mutations breaks exactly its property -- falsifier: each results/mut_*.out names its property as violated and no other"
+      - id: AC3
+        statement: "AC3: the committed results match the model files -- falsifier: shasum -a 256 -c results/model.sha256 exits 0"
+      - id: AC4
+        statement: "AC4: the design-review verdict is in the pull request body, one line per property with its mutation -- falsifier: the pull request body read shows nine property lines"
+evidence_requirements:
+  - kind: tests
+    description: The committed TLC output for Model.cfg and the eight mutation cfgs.
+    command: shasum -a 256 -c results/model.sha256
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26700-ac1-model-passes
+    description: Model.cfg output holds the TLC pass line.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: grep -q "No error has been found" results/Model.out
+        cwd: formal/lane_work_loop
+  - id: dod-omn26700-ac2-mutations-break
+    description: Each of the seven invariant mutations names its own invariant as violated.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: bash -c 'grep -q "Invariant OneTerminal is violated" results/mut_terminal_twice.out && grep -q "Invariant OneLiveWorkflowPerChange is violated" results/mut_random_workflow_id.out && grep -q "Invariant HandoffAtProvenHead is violated" results/mut_skip_confirmation.out && grep -q "Invariant NoLostOutput is violated" results/mut_commit_before_outputs.out && grep -q "Invariant NoDuplicateEffect is violated" results/mut_resend_without_readback.out && grep -q "Invariant RetryBound is violated" results/mut_count_refused_input.out && grep -q "Invariant AnswerInContract is violated" results/mut_answer_any_state.out && grep -q "Temporal properties were violated" results/mut_no_tick.out'
+        cwd: formal/lane_work_loop
+  - id: dod-omn26700-ac3-sha-matches
+    description: The digest file matches the spec and cfg files.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: shasum -a 256 -c results/model.sha256
+        cwd: formal/lane_work_loop
+  - id: dod-omn26700-ac4-nine-properties
+    description: The spec defines the nine named properties, one per line of the verdict.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: bash -c 'test "$(grep -cE "^(OneTerminal|OneLiveWorkflowPerChange|HandoffAtProvenHead|NoLostOutput|NoDuplicateEffect|RetryBound|AnswerInContract|DeadlineFires|Terminates) ==" LaneWorkLoop.tla)" -eq 9'
+        cwd: formal/lane_work_loop
