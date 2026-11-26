@@ -1,0 +1,48 @@
+schema_version: 1.0.0
+ticket_id: OMN-26512
+title: The runtime loop reading publisher writes one run line per published window, so the node's merged change (omnibase_infra 6121) reads as running in the dev runtime log
+summary: >-
+  The dev runtime of omni-201 (container omninode-runtime, started 2026-11-25T20:07:31Z on the 20:00:14Z build, infra c1b207ed630d) carries the loop reading publisher of OMN-26249; its start precedes the RuntimeHostProcess started line at 20:10:12 and its publish-failure warning never appears in 73 minutes of log, yet no line of the log says a reading was published, because the publisher logged only a failure. The publisher now writes one INFO line after each reading is published, naming the contracted topic, the member, the maximum loop gap, the abandoned count and the reading's correlation id. A refused publish still logs the warning and no run line.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26512-run-line
+    statement: A runtime member that publishes a loop reading leaves one run line in its log for that window.
+    acceptance:
+      - id: AC1
+        statement: "AC1: omnibase_infra 6121 ends in one state with a live read: one run line from its node in the dev runtime log -- falsifier: a grep of the dev runtime log since the install for 'Published runtime loop reading' finds no line"
+      - id: AC2
+        statement: "AC2: the change has a test built from the real node contract that fails at the merge base and passes at the change head -- falsifier: uv run pytest on that test at the merge base exits 0"
+evidence_requirements:
+  - kind: tests
+    description: The run-line test of the publisher against the topic the on-disk node contract declares, and the OMN-26249 publisher and sampler tests that must stay green.
+    command: uv run --frozen pytest tests/unit/runtime/test_runtime_loop_reading_run_line_omn26512.py tests/unit/runtime/test_runtime_loop_reading_wiring_omn26249.py tests/unit/runtime/test_loop_lag_sampler.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26512-ac2-run-line-test
+    description: >-
+      The real publisher publishes one reading to a bus and the log carries exactly one INFO line starting 'Published runtime loop reading' that names the topic read from the on-disk node contract and the member; at the merge base the line is absent and the test fails on the line count.
+    source: manual
+    binds_ac:
+      - AC1
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_runtime_loop_reading_run_line_omn26512.py -k published -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26512-integration-proof-run-line
+    description: >-
+      Post-deploy probe: after the deploy agent rebuilds the dev runtime from this change, the running container's log holds the run line. It reads the live container, which carries the line only after the rebuild, so a pull request runner cannot pass it; only the local Done gate runs it.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_runtime_loop_reading_run_line_integration_omn26512.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+      - check_type: command
+        check_value: bash -c 'docker logs omninode-runtime --since 10m 2>&1 | grep -q "Published runtime loop reading"'
+        cwd: .
