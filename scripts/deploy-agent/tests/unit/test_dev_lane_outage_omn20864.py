@@ -44,9 +44,7 @@ from deploy_agent.agent import DeployAgent
 from deploy_agent.events import EnumRuntimeLane, EnumVerifyRecreateOutcome, Phase, Scope
 from deploy_agent.executor import (
     DeployExecutor,
-    ModelAnsweringDegraded,
     VerificationFailedError,
-    _answering_degraded,
     finish_recreate_renames,
     lane_config_for,
     monitor_settled_degraded,
@@ -65,6 +63,14 @@ from deploy_agent.idle_converge import (
 )
 from deploy_agent.job_state import JobStore
 from deploy_agent.routing import ModelLaneFlags, ModelLaneFreeze
+
+from omnibase_infra.handlers.handler_runtime_health_reading import (
+    HandlerRuntimeHealthReading,
+)
+from omnibase_infra.models.model_answering_degraded import ModelAnsweringDegraded
+from omnibase_infra.models.model_runtime_health_reading import (
+    ModelRuntimeHealthReading,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -120,6 +126,15 @@ def _phase(_phase: Phase, _status: object) -> None:
 
 
 # --- rule 1: what counts as "answering, monitor degraded" ---------------------
+
+
+def _answering_degraded(
+    result: subprocess.CompletedProcess[str],
+) -> ModelAnsweringDegraded | None:
+    reading = ModelRuntimeHealthReading(
+        returncode=result.returncode, stdout=result.stdout, stderr=result.stderr
+    )
+    return HandlerRuntimeHealthReading().handle(reading).answering_degraded
 
 
 def _curl(stdout: str, returncode: int = 0) -> subprocess.CompletedProcess[str]:
