@@ -29,3 +29,11 @@ dod_evidence:
       - check_type: "test_passes"
         check_value: "uv run pytest tests/unit/topology/test_topology_savings_priced_models_omn26444.py tests/unit/migrations/test_omn26444_savings_unpriced_matches_refresh_vendored.py -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn26444-deploy-writer-delete-grant"
+    description: "Deploy probe for the local Done gate, after the omnibase_infra release that carries this change is deployed. It asks the running infra Postgres whether tenant_projection_writer holds DELETE on public.savings_priced_models, the privilege the shared metering writer's priced-models fill needs to remove rows the pricing manifest no longer names. Its exit status depends on the deployed database, not on files this PR authors. It is unbound, and runs only in the local Done gate because hosted CI cannot reach a deployed lane."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec omnibase-infra-postgres psql -U postgres -d omnibase_infra -tAc \"select has_table_privilege('tenant_projection_writer', 'public.savings_priced_models', 'DELETE')\" | grep -qx t"
+        cwd: "${OMNI_HOME}/omnibase_infra"
