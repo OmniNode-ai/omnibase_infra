@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-19349
+title: The deploy agent recreates onex-api on every dev-lane job, because a re-stamped image of the same source commit counts as a pin advance
+summary: omnibase_infra#4029 makes deliver_onex_api_pin treat a newer stamp of the pinned source commit as no pin advance, so it does not recreate onex-api, while a descendant commit still advances the pin and recreates only onex-api. This contract records the acceptance-criterion bindings a second lane accepted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19349-ac1-accepted-20261126t1545z:
+      - label: AC1
+        criterion_hash: 04b27a9831ef6ab238327d29d83500bb4fd1dcd947d4588c6c7d8a74b54bded5
+        proposed_by: lane=dod-closeout-bind-2026-11-26T1545Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-26T1545Z-c0
+    dod-omn19349-ac2-accepted-20261126t1545z:
+      - label: AC2
+        criterion_hash: be76f5c3a9f84146e8b405fa86de4729babd996eabd12c412ac6098af4a150f7
+        proposed_by: lane=dod-closeout-bind-2026-11-26T1545Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-26T1545Z-c0
+requirements:
+  - id: req-omn-19349-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+      - id: AC2
+        statement: 'AC2: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC1: a newer-stamped resident image of the pinned sha8 driven through deliver_onex_api_pin records tag_advanced false and recreated false. Fails with scripts/runtime_build/repoint_dev_lane_onex_api.py restored from the parent of omnibase_infra#4029.'
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_same_commit_restamp_omn19349.py::test_a_newer_stamp_of_the_pinned_commit_does_not_recreate_onex_api -q -p no:cacheprovider
+  - kind: tests
+    description: 'AC2: a descendant sha8 driven through deliver_onex_api_pin records tag_advanced true and recreated true, through a --no-deps --force-recreate of the onex-api service only. A preservation check: the behaviour predates omnibase_infra#4029 and also passes with its product file reverted.'
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_same_commit_restamp_omn19349.py::test_a_descendant_commit_still_advances_and_recreates_only_onex_api -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19349-ac1-accepted-20261126t1545z
+    description: 'AC1: a newer-stamped resident image of the pinned sha8 driven through deliver_onex_api_pin records tag_advanced false and recreated false. Fails with scripts/runtime_build/repoint_dev_lane_onex_api.py restored from the parent of omnibase_infra#4029.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_same_commit_restamp_omn19349.py::test_a_newer_stamp_of_the_pinned_commit_does_not_recreate_onex_api -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn19349-ac2-accepted-20261126t1545z
+    description: 'AC2: a descendant sha8 driven through deliver_onex_api_pin records tag_advanced true and recreated true, through a --no-deps --force-recreate of the onex-api service only. A preservation check: the behaviour predates omnibase_infra#4029 and also passes with its product file reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_onex_api_same_commit_restamp_omn19349.py::test_a_descendant_commit_still_advances_and_recreates_only_onex_api -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
