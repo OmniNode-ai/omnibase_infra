@@ -71,14 +71,14 @@ dod_evidence:
       - check_type: command
         check_value: uv lock --check && uv run --frozen python -m omnibase_core.nodes.node_dependency_pins_check_effect.runtime_dependency_pins_check .
         cwd: .
-  - id: dod-omn26227-ac2-ledger
-    description: 'The dev-lane and dev-tenant-fold compose files set ONEX_CLI_SHOW_ALL_COMMANDS=1 on the ledger read command, so core 0.47.80 resolves the internal ledger group; the check reads the tree and the pull request branch, because the landing branch does not carry the change before the merge.'
+  - id: dod-omn26227-ac2-ledger-local
+    description: 'The dev-lane and dev-tenant-fold compose files in this tree both set ONEX_CLI_SHOW_ALL_COMMANDS=1 on the ledger read command, so core 0.47.80 resolves the internal ledger group; the check reads the checked-out tree only, with no GitHub read.'
     source: manual
     binds_ac:
       - AC2
     checks:
       - check_type: command
-        check_value: grep 'env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT' docker/docker-compose.dev-lane.yml > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=omn-26227-core-0-47-80-pin' --jq .content | base64 -d | grep 'env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT' > /dev/null
+        check_value: grep -q 'ONEX_LEDGER_BUS_READ_COMMAND.*env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT' docker/docker-compose.dev-lane.yml && grep -q 'ONEX_LEDGER_BUS_READ_COMMAND.*env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT' docker/docker-compose.dev-tenant-fold.yml
         cwd: .
   - id: dod-omn26227-ac1-core-dev-20261126
     description: 'The omnibase-core pin names dev tag dev-20261126024324-05fa7e557a73 (commit 05fa7e557a73, core 0.47.81.dev2 with the migration ledger shape), the lock agrees, and the pin and lineage tests pass.'
