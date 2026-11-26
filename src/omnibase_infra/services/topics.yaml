@@ -65,6 +65,7 @@ topics:
   # (OMN-21146) and TOPIC_DEPLOY_COMMAND_DLQ (OMN-16442).
   - onex.evt.deploy.dev-tag-heartbeat.v1
   - onex.evt.deploy.dev-lane-drift.v1
+  - onex.evt.deploy.dev-merge-build-overdue.v1
   - onex.dlq.omnibase-infra.deploy-command.v1
   # --- Provisioned topics that no node contract declares (OMN-21689) ---
   # ALL_PROVISIONED_SUFFIXES registers these, and platform_topic_suffixes.py

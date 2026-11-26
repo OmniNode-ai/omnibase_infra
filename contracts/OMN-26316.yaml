@@ -142,6 +142,11 @@ requirements:
     acceptance:
       - id: AC51
         statement: "AC51: four dispatch-deadline dead letters of one correlation (dod-verify-start, offsets 120620 to 120624, each with a fresh retry_count of 0) give at most deadline_exceeded_max_replays replays and quarantines naming dispatch_deadline_exceeded for the rest, the contract declares 0, and a consumer_error dead letter still replays -- falsifier: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_omn26316_deadline_replay_loop.py fails at origin/dev (the replay policy has no deadline_exceeded_max_replays and all four are replayed) and passes on the PR branch"
+  - id: req-omn26316-overdue-topic-ensured
+    statement: The deploy agent creates the overdue dev merge build event topic before its first publish, so the publish does not fail with the topic not found in cluster metadata.
+    acceptance:
+      - id: AC52
+        statement: "AC52: publishing the overdue dev merge build event on a broker without its topic creates the topic once first -- falsifier: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_topic_ensured_omn26316.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (no topic is created) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -194,6 +199,9 @@ evidence_requirements:
   - kind: tests
     description: The dispatch-deadline replay loop regression built from the four dod-verify-start dead letters of 2026-11-25.
     command: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_omn26316_deadline_replay_loop.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The overdue dev merge build event topic is created by the agent before its first publish.
+    command: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_topic_ensured_omn26316.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -548,4 +556,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/dlq/test_dlq_deadline_quarantine_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-overdue-topic-ensured
+    description: "The sender creates the overdue dev merge build event topic once before the first publish to it; the test fails at origin/dev (no topic is created)."
+    source: manual
+    binds_ac: [AC52]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_topic_ensured_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
