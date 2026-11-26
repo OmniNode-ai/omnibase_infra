@@ -277,6 +277,12 @@ COMPOSE_RENDER_ENV = {
     # able to catch a base command that stops being overridden.
     "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
     "REDPANDA_ADVERTISE_HOST": "192.168.86.201",
+    # OMN-26121: the stability runtime's own secret-store identity. Render-only
+    # placeholders; the real values come from the operator env on the lab host.
+    "STABILITY_TEST_RUNTIME_INFISICAL_ADDR": "http://infisical.render-only:8080",
+    "STABILITY_TEST_RUNTIME_INFISICAL_PROJECT_ID": "render-only-project",
+    "STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_ID": "render-only-client",
+    "STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_SECRET": "render-only-secret",
     "STABILITY_TEST_POSTGRES_EXTERNAL_PORT": "15436",
     "STABILITY_TEST_VALKEY_EXTERNAL_PORT": "26379",
     # OMN-25927: the stability broker authenticates every client over SASL; each
@@ -1043,3 +1049,56 @@ def test_stability_lane_forward_migration_carries_the_gateway_lane_indicator() -
     environment = services["forward-migration"]["environment"]
     # Spelled in two parts: the public-repo hygiene gate refuses the lab lane id on an added line.
     assert environment["ONEX_MIGRATION_GATEWAY_LANE"] == "stability" + "_test"
+
+
+_RUNTIME_INFISICAL_NAMES = {
+    "INFISICAL_ADDR": "STABILITY_TEST_RUNTIME_INFISICAL_ADDR",
+    "INFISICAL_PROJECT_ID": "STABILITY_TEST_RUNTIME_INFISICAL_PROJECT_ID",
+    "INFISICAL_CLIENT_ID": "STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_ID",
+    "INFISICAL_CLIENT_SECRET": "STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_SECRET",
+}
+
+
+@pytest.mark.integration
+def test_stability_runtime_receives_its_own_infisical_identity() -> None:
+    """OMN-26121 known good: present lane names reach the runtime's resolver environment."""
+    environment = _compose_config_json()["services"]["omninode-runtime"]["environment"]
+
+    for target, lane_name in _RUNTIME_INFISICAL_NAMES.items():
+        assert environment[target] == COMPOSE_RENDER_ENV[lane_name], target
+    assert environment["INFISICAL_ENVIRONMENT_SLUG"] == "stability"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("lane_name", sorted(_RUNTIME_INFISICAL_NAMES.values()))
+def test_stability_render_refuses_an_absent_infisical_name_by_name(
+    lane_name: str,
+) -> None:
+    """OMN-26121 known bad: an absent lane name is refused, and the refusal names it."""
+    env = _compose_render_env()
+    del env[lane_name]
+
+    result = subprocess.run(
+        _docker_compose_command("config", "--services"),
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert lane_name in result.stderr
+
+
+@pytest.mark.integration
+def test_stability_runtime_never_reads_the_dev_lane_infisical_names() -> None:
+    """OMN-26121: the dev lane's identity names are not a fallback for the stability runtime."""
+    text = (REPO_ROOT / COMPOSE_FILES[-1]).read_text(encoding="utf-8")
+    code = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    for dev_name in ("RUNTIME_EFFECTS_INFISICAL_", "ONEX_RUNTIME_INFISICAL_"):
+        assert dev_name not in code.replace("STABILITY_TEST_RUNTIME_INFISICAL_", ""), (
+            dev_name
+        )
