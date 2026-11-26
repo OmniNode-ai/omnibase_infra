@@ -5,6 +5,13 @@ summary: 'The dev compose runtime-env anchor sets ONEX_BOOT_UNIVERSE_PROVISION t
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn22815-compose-provisioning-test:
+      - label: AC1
+        criterion_hash: 433bf6d45c887dd6ce66944085348ff3d18f3f929ebc6f55d4bcb8a358ae2478
+        proposed_by: lane=dod-closeout-bind-2026-11-26T2145Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-26T2145Z-c3
 requirements:
   - id: req-omn22815-dev-boot-provisions-wired-topics-only
     statement: The dev compose anchor turns the universe warm off, and a runtime booted with it still has every topic its wired nodes subscribe to or publish; the lab read from the branch is in the pull request body.
