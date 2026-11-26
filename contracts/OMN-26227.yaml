@@ -89,3 +89,12 @@ dod_evidence:
       - check_type: command
         check_value: uv lock --check && uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_runner_image_identity.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
+  - id: dod-omn26227-ac2-topology-shape
+    description: 'The checked-in database topology projections carry the migration ledger shape key that core 0.47.81.dev2 renders, so the projection drift and rendered catalog tests pass on this tree.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_application_database_topology.py tests/unit/topology/test_omn21934_context_audit_grants.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .

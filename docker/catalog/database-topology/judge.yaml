@@ -24,6 +24,7 @@ databases:
         domain_column: domain
         relation: schema_migrations
         schema: platform_catalog
+        shape: stream_domain_version_checksum
         stream_column: migration_stream
         version_column: version
     migration_stream: omnibase_infra.application
@@ -409,6 +410,7 @@ databases:
         domain_column: domain
         relation: schema_migrations
         schema: public
+        shape: stream_domain_version_checksum
         stream_column: migration_stream
         version_column: version
     migration_stream: omnibase_infra.service
@@ -462,6 +464,7 @@ databases:
         domain_column: domain
         relation: schema_migrations
         schema: public
+        shape: stream_domain_version_checksum
         stream_column: migration_stream
         version_column: version
     migration_stream: omniintelligence.service
