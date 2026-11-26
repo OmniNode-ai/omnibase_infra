@@ -52,10 +52,10 @@ dod_evidence:
         check_value: "uv run --frozen pytest tests/integration/migrations/test_cloud_database_migration_omn26712.py -q -n 0 --no-cov"
         cwd: "."
   - id: "dod-omn26712-ac3-deploy-probe"
-    description: "Deploy-scope probe: against a live Docker daemon, the migration command that Dockerfile.migrate carries runs twice on a throwaway postgres:16-alpine and the second run leaves the database unchanged."
+    description: "Deploy-scope probe on a lab host at the pushed head: the migration command that Dockerfile.migrate carries runs twice on a throwaway postgres:16-alpine and the second run leaves the database unchanged. It needs the lab's Docker daemon, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion; AC3 stays bound by dod-omn26712-ac3-migration-idempotent."
     source: "manual"
-    binds_ac: ["AC3"]
+    execution_scope: "local_done_gate"
     checks:
       - check_type: "command"
-        check_value: "docker info --format '{{.ServerVersion}}' && uv run --frozen pytest tests/integration/migrations/test_cloud_database_migration_omn26712.py -k second_run_changes_nothing -q -n 0 --no-cov"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha \"$(git rev-parse HEAD)\" --lane dod-integration-proof-26712 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/migrations/test_cloud_database_migration_omn26712.py -k second_run_changes_nothing -q -n 0 --no-cov"
         cwd: "."
