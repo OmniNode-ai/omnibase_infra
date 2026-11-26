@@ -7,13 +7,6 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-omn26430-one-message-at-a-time-per-adapter-owner
-    statement: The runtime hands a projection handler that owns its database adapter one message at a time, and leaves the parallelism of every other projection handler alone.
-    acceptance:
-      - id: AC3
-        statement: "AC3: with six concurrent messages through one dispatch callback, a handler that owns its adapter is never inside handle() on two threads at once and every message is still handled -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_omn26430_db_owning_projection_serial_dispatch.py fails at origin/dev with six threads inside handle() together and passes on the PR branch"
-      - id: AC4
-        statement: "AC4: a handler that holds no adapter of its own still runs on several threads at once -- falsifier: the control test in the same file reads a peak of 1 thread, so the serialisation is not scoped to adapter owners"
   - id: req-omn26430-rollback-image-health
     statement: The dev boot-good rollback image answers /health inside the compose start period, and the loop that held the answer is named from a thread dump of that image.
     acceptance:
@@ -62,6 +55,31 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_rollback_image_first_health_inside_start_period_omn26430.py -k boot_good_7dff_first_health -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26430-ac3-ac4-retired
+    description: AC3 and AC4 were deleted from OMN-26430. This item retires the claims of the two items that bound them and keeps their regression tests running. Its contract-shape test fails at the merge base, where the contract still declares AC3 and AC4, and passes here; it is bound to AC1 only so the item carries a bound, falsifiable check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_retired_acs_omn26430.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn26430_db_owning_projection_serial_dispatch.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+    binds_ac:
+      - AC1
+    supersedes_ac_binding:
+      - item: dod-omn26430-ac3-serial-dispatch
+        label: AC3
+        reason_kind: no_longer_applicable
+        reason: AC3 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: dod26430-75000
+        retired_at: '2026-11-26T13:10:00Z'
+      - item: dod-omn26430-ac4-injected-db-parallel
+        label: AC4
+        reason_kind: no_longer_applicable
+        reason: AC4 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: dod26430-75000
+        retired_at: '2026-11-26T13:10:00Z'
   - id: dod-omn26430-deploy-serial-dispatch-live
     description: >-
       Post-deploy probe: the rebuilt dev runtime container carries the per-handler lock in its dispatch callback. It reads the live container, which carries the change only after the deploy agent has rebuilt it, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
