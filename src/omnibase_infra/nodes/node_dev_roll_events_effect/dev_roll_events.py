@@ -180,6 +180,21 @@ class DevRollEventsPublisher:
             logger.exception("dev container recreate event failed %s", FRICTION)
             return False
 
+    def build_health(self, event: BaseModel) -> bool:
+        """Publish one dev build's health clock and revision order; True only when the bus accepted it."""
+        try:
+            payload = event.model_dump(mode="json")
+            return bool(
+                self._send(
+                    self._topics["dev_build_health"],
+                    f"dev-build-health/{payload['event_id']}",
+                    payload,
+                )
+            )
+        except Exception:
+            logger.exception("dev build health event failed %s", FRICTION)
+            return False
+
     def recreate_violation(self, violation: BaseModel) -> bool:
         """Publish one dev recreate violation; True only when the bus accepted it."""
         try:

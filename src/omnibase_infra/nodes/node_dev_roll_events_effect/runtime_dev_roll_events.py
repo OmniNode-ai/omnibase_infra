@@ -25,7 +25,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import yaml
 from pydantic import BaseModel, JsonValue
@@ -618,6 +618,9 @@ _OBSERVER_MODULES = (
     "models/model_dev_recreate_audit_request.py",
     "protocols/protocol_dev_roll_events.py",
     "handlers/dev_container_recreate/handler_dev_container_recreate.py",
+    "models/model_dev_build_health.py",
+    "models/model_dev_build_health_request.py",
+    "handlers/dev_build_health/handler_dev_build_health.py",
 )
 _WINDOW_MODULES = (
     "enums/enum_dev_recreate_verdict.py",
@@ -663,6 +666,100 @@ def _setting_str(settings: Mapping[str, JsonValue], name: str) -> str:
     if not isinstance(value, str) or not value:
         raise RuntimeError(f"the dev roll events contract declares no {name}")
     return value
+
+
+#: The image label that names the omnibase_infra commit an image was built from.
+_REVISION_LABEL = "org.opencontainers.image.revision"
+
+
+def _image_revision(
+    image: str, run: Callable[..., subprocess.CompletedProcess[str]]
+) -> str:
+    """The image's revision label, or empty when docker cannot say (OMN-26703)."""
+    try:
+        answer = run(
+            [
+                "docker",
+                "image",
+                "inspect",
+                "--format",
+                '{{index .Config.Labels "' + _REVISION_LABEL + '"}}',
+                image,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return ""
+    text = str(answer.stdout).strip()
+    return (
+        text if answer.returncode == 0 and re.fullmatch(r"[0-9a-f]{7,40}", text) else ""
+    )
+
+
+def _health_reading(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Docker's health status and the end of the first passing check in its log (OMN-26703)."""
+    health = state.get("Health")
+    if not isinstance(health, dict):
+        return {}
+    sentinel = datetime(1, 1, 1, tzinfo=UTC)
+    first: datetime | None = None
+    for entry in health.get("Log") or []:
+        if isinstance(entry, dict) and entry.get("ExitCode") == 0:
+            stamp = docker_started_at(entry.get("End"), fallback=sentinel)
+            if stamp.year >= _DOCKER_NEVER_STARTED_YEAR:
+                first = stamp
+                break
+    return {"health_status": str(health.get("Status", "")), "first_healthy_at": first}
+
+
+def revision_order(
+    repo_root: Path,
+    previous: str,
+    current: str,
+    timeout: float,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> str:
+    """How ``current`` stands against ``previous`` in the checkout's history (OMN-26703).
+
+    ``first`` with no previous revision, ``same``, ``forward`` (previous is an ancestor),
+    ``back`` (current is an ancestor of previous), ``unrelated`` (neither) and ``unread``
+    when a revision is unknown to the checkout or git fails: never a guess.
+    """
+    if not previous:
+        return "first"
+    if not current:
+        return "unread"
+    if previous == current:
+        return "same"
+
+    def ancestor(older: str, newer: str) -> bool | None:
+        try:
+            answer = run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_root),
+                    "merge-base",
+                    "--is-ancestor",
+                    older,
+                    newer,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return {0: True, 1: False}.get(answer.returncode)
+
+    forward = ancestor(previous, current)
+    back = ancestor(current, previous)
+    if forward is None or back is None:
+        return "unread"
+    return "forward" if forward else "back" if back else "unrelated"
 
 
 def read_container(
@@ -719,6 +816,8 @@ def read_container(
             exit_code=exit_code if isinstance(exit_code, int) else None,
             image_digest=str(raw.get("Image", "")),
             image_ref=str(raw.get("Config", {}).get("Image", "")),
+            image_revision=_image_revision(str(raw.get("Image", "")), run),
+            **_health_reading(state),
         )
     except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError):
         logger.exception(
@@ -793,6 +892,62 @@ class NewViolationsOnly:
         else:
             self.refused += 1
         return accepted
+
+
+_BUILD_HEALTH = "handlers/dev_build_health/handler_dev_build_health.py"
+
+
+def _publish_build_health(
+    reading: ModelDevContainerReading,
+    state: dict[str, Any],
+    publisher: ProtocolDevRollEvents,
+    settings: Mapping[str, JsonValue],
+    repo_root: Path,
+    run: Callable[..., subprocess.CompletedProcess[str]],
+    handler_module: ModuleType,
+) -> None:
+    """Publish the container start's health clock and revision order once its health settles (OMN-26703).
+
+    The judged start, the revision it ran and the start of the no-rollback clock are kept in
+    ``state["build_health"]``; a start the bus did not accept is not marked, so it is retried.
+    """
+    judged: dict[str, Any] = state.get("build_health") or {}
+    key = f"{reading.container_digest}:{reading.started_at.isoformat()}"
+    if judged.get("judged") == key:
+        return
+    previous_revision = str(judged.get("image_revision", ""))
+    since = judged.get("no_rollback_since")
+    request_module = _module("models/model_dev_build_health_request.py")
+    health_handler = handler_module.HandlerDevBuildHealth()
+    event = health_handler.handle(
+        request_module.ModelDevBuildHealthRequest(
+            reading=reading,
+            previous_image_revision=previous_revision,
+            revision_order=revision_order(
+                repo_root,
+                previous_revision,
+                reading.image_revision,
+                float(_setting_int(settings, "build_health_git_timeout_seconds")),
+                run,
+            ),
+            previous_no_rollback_since=datetime.fromisoformat(since) if since else None,
+            limit_seconds=_setting_int(settings, "build_health_limit_seconds"),
+        )
+    )
+    if event is None:
+        return
+    if not publisher.build_health(event):
+        logger.error(
+            "dev build health %s was not accepted by the bus %s",
+            event.event_id,
+            events.FRICTION,
+        )
+        return
+    state["build_health"] = {
+        "judged": key,
+        "image_revision": reading.image_revision or previous_revision,
+        "no_rollback_since": event.no_rollback_since.isoformat(),
+    }
 
 
 def observe_dev_container(
@@ -877,6 +1032,11 @@ def observe_dev_container(
                 result.event.event_id,
                 events.FRICTION,
             )
+
+    if reading is not None:
+        _publish_build_health(
+            reading, state, publisher, settings, repo_root, run, _module(_BUILD_HEALTH)
+        )
 
     journal_size = _journal_size(journal_dir)
     audited: object | None = None
