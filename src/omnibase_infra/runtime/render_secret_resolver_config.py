@@ -22,6 +22,7 @@ import yaml
 from pydantic import ValidationError
 
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.runtime.model_cloud_secret_names import ModelCloudSecretNames
 from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
 )
@@ -123,10 +124,10 @@ def render_secret_resolver_config(
     env = environ if environ is not None else os.environ
     target = _resolve_target_path(target_path=target_path, environ=env)
     if target is None:
-        return None
+        return ModelCloudSecretNames.refuse_disabled_render(env)
 
     data = _load_source_data(environ=env, source_path=source_path)
-    config = _validate_config_data(data, path=target)
+    config = ModelCloudSecretNames.check(_validate_config_data(data, path=target), env)
 
     target.parent.mkdir(parents=True, exist_ok=True)
     staged_target = target.with_suffix(f"{target.suffix}.tmp")
@@ -160,13 +161,12 @@ def _load_yaml(path: Path) -> dict[str, object]:
 
 def main() -> int:
     rendered = render_secret_resolver_config()
-    if rendered is None:
-        sys.stdout.write(
-            "[entrypoint] Secret resolver config rendering disabled: "
-            "ONEX_SECRET_RESOLVER_CONFIG_PATH is empty\n"
-        )
-        return 0
-    sys.stdout.write(f"[entrypoint] Secret resolver config ready: {rendered}\n")
+    sys.stdout.write(
+        "[entrypoint] Secret resolver config rendering disabled: "
+        "ONEX_SECRET_RESOLVER_CONFIG_PATH is empty\n"
+        if rendered is None
+        else f"[entrypoint] Secret resolver config ready: {rendered}\n"
+    )
     return 0
 
 
