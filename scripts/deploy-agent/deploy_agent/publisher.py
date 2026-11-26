@@ -293,12 +293,16 @@ def publish_result(
 ) -> bool:
     """Publish completion event to the same control bus consumed by deploy-agent."""
     correlation_id = payload.get("correlation_id", "")
-    return _produce(
-        TOPIC_REBUILD_COMPLETED,
-        f"deploy-result/{correlation_id}",
-        payload,
-        kafka_config,
-    )
+    # OMN-26704: an event with no git_sha is never published. The agent resets its
+    # sha at the start of every job and only git_pull sets it, so a job that ended
+    # before git_pull has no revision of its own, and the event's consumers reject
+    # an empty one. Nothing true can be reported, so nothing is owed to the bus:
+    # True (no retry is queued).
+    if not payload.get("git_sha"):
+        logger.warning("no git_sha for %s; not publishing", correlation_id)
+        return True
+    key = f"deploy-result/{correlation_id}"
+    return _produce(TOPIC_REBUILD_COMPLETED, key, payload, kafka_config)
 
 
 def publish_dev_lane_drift(

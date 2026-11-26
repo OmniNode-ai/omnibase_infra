@@ -1,0 +1,33 @@
+schema_version: 1.0.0
+ticket_id: OMN-26704
+title: The dev deploy agent never publishes a rebuild-completed event with an empty build sha
+summary: >-
+  The deploy agent resets its current sha at the start of every job and only git_pull sets it, so a job that ended before git_pull published a rebuild-completed event with an empty git_sha. The terminal event now carries the last revision the agent deployed, and a job with no known revision publishes no completion event.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26704-no-empty-sha
+    statement: The deploy agent's rebuild-completed event never carries an empty git_sha.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a job that ends before git_pull publishes no rebuild-completed event, or one carrying the revision it actually ran, never an empty sha -- falsifier: a unit test drives a job that fails before git_pull and asserts no published event has an empty git_sha"
+      - id: AC2
+        statement: "AC2: a normal job still publishes the pulled sha -- falsifier: a unit test asserts the published git_sha equals the pulled revision"
+dod_evidence:
+  - id: dod-omn26704-ac1-pre-pull-failure
+    description: A job failing before git_pull publishes no empty git_sha, and reports the last good sha when one is known.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_terminal_event_never_empty_sha_omn26704.py -k before_git_pull -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26704-ac2-normal-job
+    description: A normal job publishes the pulled sha.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_terminal_event_never_empty_sha_omn26704.py -k pulled_sha -q --no-cov -n 0 -p no:randomly
+        cwd: .
