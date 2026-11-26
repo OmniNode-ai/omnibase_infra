@@ -60,7 +60,7 @@ dod_evidence:
       - AC4
     checks:
       - check_type: command
-        check_value: grep -q 'dev-20261125154033-214c1fa29b7b' pyproject.toml
+        check_value: grep -q 'dev-20261126024324-05fa7e557a73' pyproject.toml
         cwd: .
   - id: dod-omn26227-ac1-core-0-47-80
     description: 'The omnibase-core pin names core 0.47.80 (dev tag dev-20261125154033-214c1fa29b7b, commit 214c1fa29b7b), the lock agrees, and the core dependency-pin check exits zero on this tree.'
@@ -79,4 +79,13 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: grep 'env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT' docker/docker-compose.dev-lane.yml > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=omn-26227-core-0-47-80-pin' --jq .content | base64 -d | grep 'env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT' > /dev/null
+        cwd: .
+  - id: dod-omn26227-ac1-core-dev-20261126
+    description: 'The omnibase-core pin names dev tag dev-20261126024324-05fa7e557a73 (commit 05fa7e557a73, core 0.47.81.dev2 with the migration ledger shape), the lock agrees, and the pin and lineage tests pass.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: uv lock --check && uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_runner_image_identity.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
