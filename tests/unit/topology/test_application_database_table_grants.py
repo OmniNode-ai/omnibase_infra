@@ -66,6 +66,10 @@ _INSTANCE_NAMES = ("local", "onex-dev", "onex-prod")
 # keeps separate from the unified application pair (OMN-15655 AC-2,
 # OMN-15337).
 _DATABASE_REFS = ("application", "omnibase_infra", "omniintelligence")
+# ``omninode_cloud`` (OMN-26471) is declared for its principal and ledger shape
+# only: no node contract projects a table into it, so the table-grant derivation
+# parametrised over ``_DATABASE_REFS`` does not apply to it.
+_DECLARED_DATABASE_REFS = (*_DATABASE_REFS, "omninode_cloud")
 _HELPER = Path(__file__).parents[2] / "helpers" / "application_db_topology.py"
 
 # The only privilege shapes the validator can ever require, plus the one
@@ -421,7 +425,7 @@ def test_every_shipped_instance_declares_the_same_databases() -> None:
         set(yaml.safe_load((_INSTANCE_ROOT / f"{name}.yaml").read_text())["databases"])
         for name in _INSTANCE_NAMES
     ]
-    assert declared[0] == declared[1] == declared[2] == set(_DATABASE_REFS)
+    assert declared[0] == declared[1] == declared[2] == set(_DECLARED_DATABASE_REFS)
 
 
 @pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
