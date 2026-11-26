@@ -1,0 +1,18 @@
+# Runner fleet config baked into the runtime image (OMN-26709).
+#
+# The image carries no lab inventory. The lab's fleet file is config/runner_fleet.yaml
+# in the repository; a lab lane that needs it points RUNNER_FLEET_CONFIG_PATH at it.
+# Cloud mode refuses to start when that setting names a file holding a lab address.
+version: "1.0"
+github_org: OmniNode-ai
+runner_host: runner-host.invalid
+runner_group: omnibase-ci
+runner_name_prefix: image-runner
+expected_count: 0
+burst_count: 0
+hosts:
+  - host: runner-host.invalid
+    arch: amd64
+    runner_name_prefix: image-runner
+    expected_count: 0
+    classes: [action]
