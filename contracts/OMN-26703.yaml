@@ -41,8 +41,8 @@ dod_evidence:
     binds_ac:
       - AC2
     checks:
-      - check_type: command
-        check_value: "! grep -nE '(^|[^0-9.:])(45|2700)([^0-9]|$)' scripts/deploy-agent/deploy_agent/idle_converge.py scripts/deploy-agent/deploy_agent/routing.py"
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_probe_deferral_cap_omn26703.py -k cap_is_read_from_settings -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
   - id: dod-omn26703-ac3-routing-flag
     description: The default instance declares the cap in the committed routing table.

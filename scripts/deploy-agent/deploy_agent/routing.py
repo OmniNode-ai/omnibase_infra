@@ -37,7 +37,7 @@ An instance may declare ``available: false`` (OMN-21402). A route naming it
 takes the default instance, which must remain available. An absent key means
 available. The switch is read at the command's ref, like the route itself.
 
-RESIDUAL, STATED: see docs/decisions/deploy-agent-lane-lag.md.
+RESIDUAL, STATED: see docs/decisions/deploy-agent-lane-lag.yaml.
 """
 
 from __future__ import annotations

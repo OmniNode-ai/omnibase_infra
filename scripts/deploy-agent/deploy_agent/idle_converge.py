@@ -85,7 +85,7 @@ every instance) and the probe windows, which protect a probe from a lane being
 rebuilt under it; a lane with no runtime fails the probe either way.
 
 A LAGGING LANE HAS A DECLARED BOUND (OMN-21146, OMN-26703): see
-docs/decisions/deploy-agent-lane-lag.md.
+docs/decisions/deploy-agent-lane-lag.yaml.
 
 THE STABILITY LANE FOLLOWS THE TAG DEV RAN (OMN-19998, OMN-21485)
 -----------------------------------------------------------------

@@ -14,6 +14,8 @@ head builds between windows.
 
 from __future__ import annotations
 
+import re
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -111,3 +113,34 @@ def test_the_override_is_named_in_the_decision() -> None:
     decision = decide(_inputs(now))
     assert decision.verdict is EnumIdleConvergeVerdict.CONVERGE
     assert "probe deferral cap" in decision.detail
+
+
+DECISION_CODE = (
+    "scripts/deploy-agent/deploy_agent/idle_converge.py",
+    "scripts/deploy-agent/deploy_agent/routing.py",
+)
+LITERAL_CAP = re.compile(r"(^|[^0-9.:])(45|2700)([^0-9]|$)")
+
+
+def test_the_cap_is_read_from_settings_and_no_decision_code_holds_its_literal() -> None:
+    assert cap_from_table() == timedelta(minutes=45)
+    for relative in DECISION_CODE:
+        for number, line in enumerate(
+            (REPO_ROOT / relative).read_text().splitlines(), start=1
+        ):
+            assert not LITERAL_CAP.search(line), f"{relative}:{number}: {line}"
+
+
+def test_the_decision_record_is_not_tracked_markdown() -> None:
+    tracked = subprocess.run(
+        ["git", "ls-files", "docs/decisions"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert [name for name in tracked if name.endswith(".md")] == []
+    for relative in DECISION_CODE:
+        text = (REPO_ROOT / relative).read_text()
+        for referenced in re.findall(r"docs/decisions/[\w.-]+\.yaml", text):
+            assert (REPO_ROOT / referenced).is_file(), referenced
