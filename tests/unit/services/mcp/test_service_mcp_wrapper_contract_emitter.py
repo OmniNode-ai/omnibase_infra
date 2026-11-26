@@ -64,6 +64,7 @@ def spec() -> ModelGeneratedComputeNodeSpec:
         invocation_input_model_name="ModelSentimentInput",
         invocation_output_model_module="generated.models",
         invocation_output_model_name="ModelSentimentOutput",
+        tool_timeout_seconds=30,
     )
 
 
@@ -162,4 +163,5 @@ class TestWrapperContractEmitter:
                 invocation_input_model_name="ModelIn",
                 invocation_output_model_module="generated.models",
                 invocation_output_model_name="ModelOut",
+                tool_timeout_seconds=30,
             )

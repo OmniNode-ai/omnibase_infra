@@ -22,7 +22,6 @@ class ModelMCPWrapperToolEntry(ModelContractMcpTool):
         spec: ModelGeneratedComputeNodeSpec,
         invoke_topic: str,
         result_topic: str,
-        timeout_seconds: int,
     ) -> Self:
         """Build the entry from the spec and the validated invoke and result topics.
 
@@ -32,7 +31,7 @@ class ModelMCPWrapperToolEntry(ModelContractMcpTool):
         return cls(
             tool_name=spec.tool_name,
             description=spec.description,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=spec.tool_timeout_seconds,
             input_model=(
                 f"{spec.invocation_input_model_module}"
                 f".{spec.invocation_input_model_name}"
@@ -52,10 +51,9 @@ class ModelMCPWrapperToolEntry(ModelContractMcpTool):
         spec: ModelGeneratedComputeNodeSpec,
         invoke_topic: str,
         result_topic: str,
-        timeout_seconds: int,
     ) -> dict[str, JsonType]:
         """Return the wrapper contract ``mcp`` block: expose plus its one entry."""
-        entry = cls.from_spec(spec, invoke_topic, result_topic, timeout_seconds)
+        entry = cls.from_spec(spec, invoke_topic, result_topic)
         return {"expose": True, "tools": [entry.model_dump(mode="json")]}
 
 

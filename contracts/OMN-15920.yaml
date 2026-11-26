@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-15920"
 title: "The infra MCP consumers read the contract mcp block as expose plus a tools list"
-summary: "omnibase_infra reads the contract mcp block through omnibase_core's typed model (expose plus a tools list, one entry per operation) in every consumer: the adapter's contract discovery, the server lifecycle's local discovery, the registry discovery and the node capabilities model. The infra single-tool model is deleted, the shipped orchestrator declaration and the wrapper contract emitter move to the list, and an old single-tool block is refused. Core is pinned in this branch only to omnibase_core#2376 head 3380ddc5d3 for tests. This change holds the omnibase_infra half of the ticket only."
+summary: "omnibase_infra reads the contract mcp block through omnibase_core's typed model (expose plus a tools list, one entry per operation) in every consumer: the adapter's contract discovery, the server lifecycle's local discovery, the registry discovery and the node capabilities model. The infra single-tool model is deleted, the shipped orchestrator declaration and the wrapper contract emitter move to the list, and an old single-tool block is refused. Core is pinned to the dev tag dev-20261126164532-801c2557fa43, which carries omnibase_core#2376. This change holds the omnibase_infra half of the ticket only."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -48,3 +48,11 @@ dod_evidence:
         check_value: "uv run --frozen pytest tests/unit/handlers/mcp/test_adapter_onex_to_mcp.py tests/integration/services/mcp/test_service_mcp_tool_discovery.py -k 'two_entry or one_tool_per_entry' -q"
         cwd: "."
     binds_ac: ["AC1592003"]
+  - id: "dod-omn15920-infra-ac4-deploy"
+    description: "Deploy probe. The deployed runtime imports the wrapper tool entry that builds the mcp tools list."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec omninode-runtime python -c 'from omnibase_infra.models.mcp.model_mcp_wrapper_tool_entry import ModelMCPWrapperToolEntry'"
+        cwd: "."
+    binds_ac: ["AC1592002"]
