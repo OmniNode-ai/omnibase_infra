@@ -15,6 +15,7 @@ import importlib
 import importlib.util
 import json
 import logging
+import operator
 import os
 import re
 import subprocess
@@ -523,18 +524,6 @@ def is_lane_build(cmd: object) -> bool:
     )
 
 
-class _LoadDecision(Protocol):
-    verdict: object
-
-    def describe(self) -> str: ...
-
-
-class _HostLoadGate(Protocol):
-    def check(self) -> _LoadDecision: ...
-
-    def recheck_due(self) -> bool: ...
-
-
 def lane_build_gate(agent: object) -> LaneBuildWindowGate:
     """The consumer's gate for ``agent``: its load gate, if any, with the window folded in."""
     return LaneBuildWindowGate(agent, getattr(agent, "_load_gate", None))
@@ -550,19 +539,27 @@ class LaneBuildWindowGate:
     with the time of the next window, until that time passes.
     """
 
-    def __init__(self, agent: object, inner: _HostLoadGate | None) -> None:
+    def __init__(self, agent: object, inner: object | None) -> None:
         self._agent = agent
         self._inner = inner
         self._until: datetime | None = None
         self.is_lane_build = is_lane_build
 
     def recheck_due(self) -> bool:
-        return True if self._inner is None else bool(self._inner.recheck_due())
+        return (
+            True
+            if self._inner is None
+            else bool(operator.attrgetter("recheck_due")(self._inner)())
+        )
 
     def check(self, cmd: object | None = None) -> object:
         verdicts = importlib.import_module("deploy_agent.load_gate").EnumLoadGateVerdict
-        decision = self._inner.check() if self._inner is not None else None
-        if decision is not None and decision.verdict is verdicts.DEFER:
+        decision = (
+            operator.attrgetter("check")(self._inner)()
+            if self._inner is not None
+            else None
+        )
+        if getattr(decision, "verdict", None) is verdicts.DEFER:
             return decision
         held: tuple[datetime, str] | None = None
         if cmd is None:
