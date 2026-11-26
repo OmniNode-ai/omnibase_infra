@@ -14,7 +14,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Protocol
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 _MODULES = (
@@ -23,6 +23,31 @@ _MODULES = (
     "models/model_queued_request_priority_decision.py",
     "handlers/queued_request_priority/handler_queued_request_priority.py",
 )
+
+
+class _Valued(Protocol):
+    @property
+    def value(self) -> str: ...
+
+
+class _Command(Protocol):
+    """The fields of a queued deploy command the priority request reads."""
+
+    correlation_id: str
+    runtime_lane: _Valued
+    requested_by: str
+    git_ref: str
+    scope: _Valued
+    build_source: _Valued
+    services: Sequence[str]
+    rollback: object | None
+    image_ref: str | None
+    image_digest: str | None
+
+
+class _Queued(Protocol):
+    @property
+    def command(self) -> _Command: ...
 
 
 def _load() -> ModuleType:
@@ -38,13 +63,13 @@ def _load() -> ModuleType:
     return sys.modules[name]
 
 
-def handler_class() -> type[Any]:
+def handler_class() -> type:
     """The handler class; the caller builds and calls it."""
-    handler_cls: type[Any] = _load().HandlerQueuedRequestPriority
+    handler_cls: type = _load().HandlerQueuedRequestPriority
     return handler_cls
 
 
-def request(queued: Sequence[Any], *, supersede_queue: bool) -> Any:
+def request(queued: Sequence[_Queued], *, supersede_queue: bool) -> object:
     """The handler's request for ``queued`` commands, head first."""
     module = _load()
     entry = module.ModelQueuedRequestEntry
