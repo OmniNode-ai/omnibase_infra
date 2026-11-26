@@ -55,6 +55,11 @@ requirements:
         statement: "AC13: no stability probe workflow reads secrets.KAFKA_SASL_*, secrets.CHAIN_CANARY_PROJECTION_DSN or secrets.CHAIN_CANARY_GATEWAY_API_KEY, each calls the fetch action before its probe step with exactly the names it needs, and no step re-declares a fetched name -- falsifier: `uv run pytest tests/ci/test_stability_probes_read_infisical_omn26121.py -k 'repository_secret or fetch_precedes or re_declare' -q --no-cov` exits non-zero"
       - id: AC14
         statement: "AC14: the fetch action masks every value before exporting it, prints no value outside the mask command, exports nothing when any name is missing, refused or the identity or login fails, and names the variable, the Infisical name and the store path -- falsifier: `uv run pytest tests/ci/test_stability_probes_read_infisical_omn26121.py -k 'masked or missing_value or refused or identity' -q --no-cov` exits non-zero"
+  - id: req-omn26121-stability-runtime-infisical-identity
+    statement: The stability runtime reads its secret-store address, project id, client id and client secret from STABILITY_TEST_RUNTIME_INFISICAL_* in its own lane env, never the dev lane's names, and a render with any of the four absent is refused naming it.
+    acceptance:
+      - id: AC15
+        statement: "AC15: the stability compose overlay binds INFISICAL_ADDR, INFISICAL_PROJECT_ID, INFISICAL_CLIENT_ID and INFISICAL_CLIENT_SECRET on the stability runtime from STABILITY_TEST_RUNTIME_INFISICAL_* with a fail-closed reference, so present names reach the runtime and an absent name is refused by name -- falsifier: `uv run pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -k infisical -q --no-cov -n 0` exits non-zero"
 evidence_requirements:
   - kind: tests
     description: The roll order and refusal assertions in the new test file, and the neighbouring roll tests.
@@ -68,6 +73,9 @@ evidence_requirements:
   - kind: tests
     description: The fetch action's behaviour against a loopback store and the three workflows' wiring.
     command: uv run --frozen pytest tests/ci/test_stability_probes_read_infisical_omn26121.py tests/ci/test_chain_canary_workflow.py -q --no-cov
+  - kind: tests
+    description: The stability runtime's Infisical identity reaches the rendered runtime, and an absent name is refused by name.
+    command: uv run --frozen pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -k infisical -q --no-cov -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -255,4 +263,12 @@ dod_evidence:
       - check_type: command
         check_value: >-
           grep -F 'uses: ./.github/actions/fetch-stability-secrets' .github/workflows/chain-canary.yml > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/chain-canary.yml?ref=omn-26121-stability-infisical-fetch' --jq .content | base64 -d | grep -F 'uses: ./.github/actions/fetch-stability-secrets' > /dev/null
+        cwd: .
+  - id: dod-omn26121-ac15-runtime-infisical
+    description: The rendered stability runtime carries the four INFISICAL_* names from STABILITY_TEST_RUNTIME_INFISICAL_*, each absent name is refused by name, and the dev lane's names are not read.
+    source: manual
+    binds_ac: [AC15]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -k infisical -q --no-cov -n 0
         cwd: .

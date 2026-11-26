@@ -17,12 +17,16 @@ class ModelDlqReplayPolicy(BaseModel):
     ``broadcast_topics`` may be empty but must be declared; every entry is a
     non-empty topic. ``target_replay_bound`` is required: the contract owns the
     cap, the code carries no default for it.
+    ``deadline_exceeded_max_replays`` (OMN-26316) is how many times the dead
+    letters of one dispatch-deadline expiry, taken together, may be replayed;
+    0 replays none of them.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     broadcast_topics: tuple[str, ...] = Field(...)
     target_replay_bound: ModelDlqTargetReplayBound = Field(...)
+    deadline_exceeded_max_replays: int = Field(..., ge=0)
 
 
 __all__ = ["ModelDlqReplayPolicy"]

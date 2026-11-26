@@ -239,6 +239,14 @@ class ModelDlqReplayEngineConfig(BaseModel):
         default_factory=lambda: load_replay_policy().target_replay_bound
     )
 
+    # OMN-26316: how many times the dead letters of one dispatch-deadline
+    # expiry may be replayed together (defaults from the contract's
+    # replay_policy block, never from code).
+    deadline_exceeded_max_replays: int = Field(
+        default_factory=lambda: load_replay_policy().deadline_exceeded_max_replays,
+        ge=0,
+    )
+
     @field_validator("bootstrap_servers")
     @classmethod
     def _bootstrap_non_empty(cls, value: str) -> str:
@@ -364,6 +372,17 @@ def unwrap_nested_dlq_record(
         "(OMN-18084).",
         original_topic=message.original_topic,
         unwrap_depth=MAX_DLQ_UNWRAP_DEPTH,
+    )
+
+
+_DEADLINE_CLASS = EnumDlqFailureClass.DISPATCH_DEADLINE_EXCEEDED.value
+
+
+def is_deadline_exceeded(message: ModelDlqMessage) -> bool:
+    """Whether the dead letter ends a dispatch that outlived its deadline (OMN-26316)."""
+    return (
+        message.failure_class == _DEADLINE_CLASS
+        or f"failure_class={_DEADLINE_CLASS}" in message.failure_reason
     )
 
 
@@ -509,6 +528,19 @@ def should_replay(
             "the payload fails model_validate for every type-scoped candidate, "
             "so a replay meets the same validator and ends in another failed "
             "terminal; the publisher must re-issue it (OMN-25856)",
+        )
+
+    if is_deadline_exceeded(message) and (
+        message.retry_count >= config.deadline_exceeded_max_replays
+    ):
+        return (
+            False,
+            f"Dispatch deadline exceeded: failure_class={_DEADLINE_CLASS}, the "
+            "handler that outlived its deadline is still running abandoned, so "
+            "a replay adds another orphan dispatch instead of retrying; "
+            f"{message.retry_count} replays seen, at most "
+            f"{config.deadline_exceeded_max_replays} allowed for the lineage "
+            "(OMN-26316)",
         )
 
     if config.filter_start_time or config.filter_end_time:
