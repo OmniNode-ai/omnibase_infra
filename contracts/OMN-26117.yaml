@@ -75,3 +75,13 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/infra/test_dev_runtime_compose_render.py -q --no-cov -n 0 -p no:randomly -k "delegation_check_rows_in_the_settings_snapshot"
         cwd: .
+  - id: dod-omn26117-deploy-settings-root-live
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime container holds the delegation_check_responders row in its settings-store snapshot root. It reads the live container, which carries the mount only after the deploy agent has recreated it, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime test -f /etc/onex/skill-overlays-settings/delegation_check_responders/overlay.yaml
+        cwd: .
