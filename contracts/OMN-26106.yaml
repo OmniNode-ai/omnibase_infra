@@ -1,7 +1,7 @@
 schema_version: 1.0.0
 ticket_id: OMN-26106
 title: deploy-agent-dev.service stays running after omnibase_infra#6080 - every recreate window ask names its requester
-summary: The deploy agent's stability follow and forward migration converge asked the dev recreate window with an empty requester, which the window's request model refuses, so the dev agent crash-looped on every idle tick. Each caller of the gate now names the requester of what it is about to run, and the gate takes it with no default.
+summary: The deploy agent is its own installer (no separate dev installer exists). The deploy agent's stability follow and forward migration converge asked the dev recreate window with an empty requester, which the window's request model refuses, so the dev agent crash-looped on every idle tick. Each caller of the gate now names the requester of what it is about to run, and the gate takes it with no default.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -91,7 +91,7 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/handlers/test_recreate_window_requester_omn26106.py -q --no-cov -n 0 -p no:randomly -k prod_unit
         cwd: .
   - id: dod-omn26106-ac4-integrated
-    description: The prod unit file digest on h201, read before and after the install; the two reads are written in the lane's STATUS rows.
+    description: The prod unit file digest on h201, read before and after a deploy-agent self-install on dev; the two reads are written in the lane's STATUS rows. No separate dev installer exists - the deploy agent is its own installer (unit_drift.sync_own_unit), so the install this read brackets is the agent's own.
     source: manual
     execution_scope: local_done_gate
     checks:
@@ -133,3 +133,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC3
+  - id: dod-omn26106-ac4-self-install-prod-sha
+    description: 'AC4, what holds: the deploy agent is its own installer (unit_drift.sync_own_unit replaces only its own drifting unit, reloads, never restarts; no declared dev installer exists). The test runs the real manifest dev entry over a home holding the prod unit and reads the prod unit sha256 before and after the self-install: unchanged. Control: installing the prod entry changes the sha256, so the read goes red on a known bad.'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_self_install_prod_unit_omn26106.py -q
+        cwd: .

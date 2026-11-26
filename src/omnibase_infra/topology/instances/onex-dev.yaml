@@ -444,6 +444,39 @@ databases:
       public:
         domain: OMNINODE_INTERNAL
         owner: owner_omniintelligence
+  omninode_cloud:
+    bindings:
+      tenant_identity_writer:
+        database_ref: omninode_cloud
+        dsn_env: TENANT_IDENTITY_DATABASE_DSN
+        principal: tenant_identity_writer
+    checksum_ledger: schema_migrations
+    checksum_ledgers:
+      schema_migrations:
+        checksum_column: checksum
+        relation: schema_migrations
+        schema: public
+        shape: version_checksum
+        version_column: version
+    migration_stream: omnibase_infra.cloud
+    owners:
+      owner_omninode_cloud:
+        login: false
+    physical_name: omninode_cloud
+    principals:
+      tenant_identity_writer:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            privileges: [CONNECT]
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: public
+        login: true
+    schemas:
+      public:
+        domain: TENANT
+        owner: owner_omninode_cloud
 presets:
   application-cloud:
     - postgres
