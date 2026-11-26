@@ -35,6 +35,9 @@ dod_evidence:
       - check_type: command
         check_value: grep -q "No error has been found" formal/lane_work_loop/results/Model.out
         cwd: "."
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lane_work_loop_model_omn26700.py -q
+        cwd: "."
   - id: dod-omn26700-ac2-mutations-break
     description: Each of the seven invariant mutations names its own invariant as violated.
     source: manual
@@ -42,6 +45,9 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: bash -c 'cd formal/lane_work_loop && grep -q "Invariant OneTerminal is violated" results/mut_terminal_twice.out && grep -q "Invariant OneLiveWorkflowPerChange is violated" results/mut_random_workflow_id.out && grep -q "Invariant HandoffAtProvenHead is violated" results/mut_skip_confirmation.out && grep -q "Invariant NoLostOutput is violated" results/mut_commit_before_outputs.out && grep -q "Invariant NoDuplicateEffect is violated" results/mut_resend_without_readback.out && grep -q "Invariant RetryBound is violated" results/mut_count_refused_input.out && grep -q "Invariant AnswerInContract is violated" results/mut_answer_any_state.out && grep -q "Temporal properties were violated" results/mut_no_tick.out'
+        cwd: "."
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lane_work_loop_model_omn26700.py -q
         cwd: "."
   - id: dod-omn26700-ac3-sha-matches
     description: The digest file matches the spec and cfg files.
@@ -51,6 +57,9 @@ dod_evidence:
       - check_type: command
         check_value: bash -c 'cd formal/lane_work_loop && shasum -a 256 -c results/model.sha256'
         cwd: "."
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lane_work_loop_model_omn26700.py -q
+        cwd: "."
   - id: dod-omn26700-ac4-nine-properties
     description: The spec defines the nine named properties, one per line of the verdict.
     source: manual
@@ -58,4 +67,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: bash -c 'cd formal/lane_work_loop && test "$(grep -cE "^(OneTerminal|OneLiveWorkflowPerChange|HandoffAtProvenHead|NoLostOutput|NoDuplicateEffect|RetryBound|AnswerInContract|DeadlineFires|Terminates) ==" LaneWorkLoop.tla)" -eq 9'
+        cwd: "."
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lane_work_loop_model_omn26700.py -q
         cwd: "."
