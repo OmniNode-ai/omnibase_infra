@@ -178,7 +178,7 @@ def test_publisher_sends_the_event_on_the_contract_topic() -> None:
         lambda topic, key, payload: sent.append((topic, key, payload)) or True, topics
     )
     event = _judge(_reading(), "forward")
-    assert publisher.build_health(event) is True
+    assert publisher.publish_observed("dev_build_health", event) is True
     assert sent[0][0] == topics["dev_build_health"]
     assert sent[0][2]["under_limit"] is True
 
@@ -187,14 +187,9 @@ class _Publisher:
     def __init__(self) -> None:
         self.health: list[Any] = []
 
-    def container_recreated(self, event: Any) -> bool:
-        return True
-
-    def build_health(self, event: Any) -> bool:
-        self.health.append(event)
-        return True
-
-    def recreate_violation(self, violation: Any) -> bool:
+    def publish_observed(self, kind: str, event: Any) -> bool:
+        if kind == "dev_build_health":
+            self.health.append(event)
         return True
 
 

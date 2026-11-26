@@ -23,6 +23,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Any, Protocol
@@ -291,7 +292,11 @@ def recreate_gate_at(
         ]
         return handler.DevRecreateWindowGate(
             window.ModelDevRecreatePolicy.from_env(policy_env_at(repo_root)),
-            announce or build_events_at(repo_root, state_dir).recreate_announced,
+            announce
+            or partial(
+                build_events_at(repo_root, state_dir).publish_observed,
+                "dev_recreate_announced",
+            ),
             clock=clock or (lambda: datetime.now(UTC)),
             last_recreate_at=last_recreate_at,
             announced_for=announced_for,
@@ -698,7 +703,7 @@ def _image_revision(
     )
 
 
-def _health_reading(state: Mapping[str, Any]) -> dict[str, Any]:
+def _health_reading(state: Mapping[str, object]) -> dict[str, object]:
     """Docker's health status and the end of the first passing check in its log (OMN-26703)."""
     health = state.get("Health")
     if not isinstance(health, dict):
@@ -881,12 +886,12 @@ class NewViolationsOnly:
         self.settled: set[str] = set()
         self.refused = 0
 
-    def recreate_violation(self, violation: BaseModel) -> bool:
+    def publish_observed(self, kind: str, violation: BaseModel) -> bool:
         event_id = str(violation.model_dump(mode="json")["event_id"])
         if event_id in self._seen:
             self.settled.add(event_id)
             return True
-        accepted = bool(self._publisher.recreate_violation(violation))
+        accepted = bool(self._publisher.publish_observed(kind, violation))
         if accepted:
             self.settled.add(event_id)
         else:
@@ -899,44 +904,38 @@ _BUILD_HEALTH = "handlers/dev_build_health/handler_dev_build_health.py"
 
 def _publish_build_health(
     reading: ModelDevContainerReading,
-    state: dict[str, Any],
+    state: dict[str, object],
     publisher: ProtocolDevRollEvents,
     settings: Mapping[str, JsonValue],
-    repo_root: Path,
-    run: Callable[..., subprocess.CompletedProcess[str]],
-    handler_module: ModuleType,
+    order_of: Callable[[str, str], str],
 ) -> None:
     """Publish the container start's health clock and revision order once its health settles (OMN-26703).
 
     The judged start, the revision it ran and the start of the no-rollback clock are kept in
     ``state["build_health"]``; a start the bus did not accept is not marked, so it is retried.
+    ``order_of(previous, current)`` reads how the two revisions stand in the checkout's history.
     """
-    judged: dict[str, Any] = state.get("build_health") or {}
+    recorded = state.get("build_health")
+    judged = recorded if isinstance(recorded, dict) else {}
     key = f"{reading.container_digest}:{reading.started_at.isoformat()}"
     if judged.get("judged") == key:
         return
     previous_revision = str(judged.get("image_revision", ""))
     since = judged.get("no_rollback_since")
     request_module = _module("models/model_dev_build_health_request.py")
-    health_handler = handler_module.HandlerDevBuildHealth()
+    health_handler = _module(_BUILD_HEALTH).HandlerDevBuildHealth()
     event = health_handler.handle(
         request_module.ModelDevBuildHealthRequest(
             reading=reading,
             previous_image_revision=previous_revision,
-            revision_order=revision_order(
-                repo_root,
-                previous_revision,
-                reading.image_revision,
-                float(_setting_int(settings, "build_health_git_timeout_seconds")),
-                run,
-            ),
+            revision_order=order_of(previous_revision, reading.image_revision),
             previous_no_rollback_since=datetime.fromisoformat(since) if since else None,
             limit_seconds=_setting_int(settings, "build_health_limit_seconds"),
         )
     )
     if event is None:
         return
-    if not publisher.build_health(event):
+    if not publisher.publish_observed("dev_build_health", event):
         logger.error(
             "dev build health %s was not accepted by the bus %s",
             event.event_id,
@@ -1024,7 +1023,9 @@ def observe_dev_container(
         )
         # A start the bus did not accept is retried: the reading that would hide it is
         # not saved until the event is out.
-        if result.event is None or publisher.container_recreated(result.event):
+        if result.event is None or publisher.publish_observed(
+            "dev_container_recreated", result.event
+        ):
             state["reading"] = reading.model_dump(mode="json")
         else:
             logger.error(
@@ -1034,8 +1035,15 @@ def observe_dev_container(
             )
 
     if reading is not None:
+        git_timeout = float(_setting_int(settings, "build_health_git_timeout_seconds"))
         _publish_build_health(
-            reading, state, publisher, settings, repo_root, run, _module(_BUILD_HEALTH)
+            reading,
+            state,
+            publisher,
+            settings,
+            lambda previous, current: revision_order(
+                repo_root, previous, current, git_timeout, run
+            ),
         )
 
     journal_size = _journal_size(journal_dir)

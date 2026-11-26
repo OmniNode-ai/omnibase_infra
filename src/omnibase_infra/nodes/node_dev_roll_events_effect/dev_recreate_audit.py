@@ -284,7 +284,7 @@ def audit_and_publish(
     """Read the window, publish one violation event per case, and return what was found."""
     result = handler.handle(request)
     for violation in result.violations:
-        if not events.recreate_violation(violation):
+        if not events.publish_observed("dev_recreate_violation", violation):
             logger.error(
                 "dev recreate violation %s was not accepted by the bus "
                 "friction_type=dev_event_publish_failed",
