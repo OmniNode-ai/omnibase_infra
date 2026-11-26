@@ -568,3 +568,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/nodes/node_build_clock_compute -q --no-cov -n 0 -p no:randomly
         cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/node_build_clock_compute -q --no-cov -n 0 -p no:randomly
+        cwd: .
