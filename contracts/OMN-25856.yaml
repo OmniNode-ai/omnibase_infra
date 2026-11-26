@@ -46,3 +46,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/dlq/test_dlq_replay_publisher_malformed_omn25856.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn25856-inkling-priced-local
+    description: Inkling-2-Mini carries a zero marginal api cost row in the bundled pricing manifest, and an unlisted Inkling id is refused (known-bad control).
+    source: manual
+    binds_ac: [AC25856001]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/models/pricing/test_inkling_priced_local_omn25856.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
