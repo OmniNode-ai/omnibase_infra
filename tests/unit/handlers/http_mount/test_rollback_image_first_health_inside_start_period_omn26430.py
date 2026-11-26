@@ -54,3 +54,28 @@ def test_rollback_image_fixture_names_the_held_frames() -> None:
         sandbox["rollback_image_probe_unreachable_after_first_answer"]["elapsed_ms"]
         > 1000 * sandbox["probe_urlopen_timeout_seconds"]
     )
+
+
+def test_boot_good_7dff_first_health_inside_start_period() -> None:
+    reading = json.loads(_FIXTURE.read_text(encoding="utf-8"))[
+        "boot_good_7dff9d9f641f_reading"
+    ]
+    periods = _runtime_start_periods_seconds()
+    assert periods, "no semantic-healthcheck start_period found in the dev lane compose"
+    assert reading["restart_count"] == 0
+    assert reading["health_200_read_seconds_after_start"] < min(periods), (
+        reading,
+        periods,
+    )
+    assert (
+        reading["first_healthy_probe_seconds_after_start"]
+        <= reading["health_200_read_seconds_after_start"]
+    )
+
+
+def test_boot_good_7dff_reading_above_start_period_is_refused() -> None:
+    """Known bad: the 1032 s reading of the older image must not satisfy a 600 s period."""
+    reading = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+    assert not (
+        reading["dev_lane_reading"]["first_health_200_seconds_after_start"] < 600
+    )
