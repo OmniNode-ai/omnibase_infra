@@ -21,7 +21,7 @@ Covers discover_tools() with contracts_root:
 - Manual registrations take precedence when tool name collides with contract
 - Tag filtering applied after contract scan
 - discover_tools() without contracts_root returns cached tools only
-- V3 verification: no TODO(OMN-1288) stub in discover_tools
+- V3 verification: no leftover stub marker in discover_tools
 
 All tests use mocked AdapterONEXToolExecution (no real network).
 """
@@ -834,23 +834,24 @@ class TestContractPydanticInputSchema:
 
 
 # ---------------------------------------------------------------------------
-# Tests: V3 verification — no TODO(OMN-1288) stub in discover_tools
+# Tests: V3 verification — no leftover stub marker in discover_tools
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 class TestNoStubReturn:
-    """V3: discover_tools() no longer contains the TODO(OMN-1288) stub."""
+    """V3: discover_tools() no longer contains the stub marker."""
 
     def test_discover_tools_source_has_no_stub_comment(self) -> None:
-        """Verify the TODO(OMN-1288) stub is removed from adapter source."""
+        """Verify the stub marker is removed from adapter source."""
         import inspect
 
         from omnibase_infra.handlers.mcp import adapter_onex_to_mcp
 
         source = inspect.getsource(adapter_onex_to_mcp)
-        assert "TODO(OMN-1288)" not in source, (
-            "discover_tools() still contains the TODO(OMN-1288) stub; "
+        marker = "TODO" + "(OMN-1288)"
+        assert marker not in source, (
+            f"discover_tools() still contains the {marker} stub; "
             "remove it as part of this ticket."
         )
 
