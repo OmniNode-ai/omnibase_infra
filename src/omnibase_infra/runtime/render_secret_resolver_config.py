@@ -165,7 +165,7 @@ def main() -> int:
         "[entrypoint] Secret resolver config rendering disabled: "
         "ONEX_SECRET_RESOLVER_CONFIG_PATH is empty\n"
         if rendered is None
-        else f"[entrypoint] Secret resolver config ready: {rendered}\n"
+        else "[entrypoint] Secret resolver config ready\n"
     )
     return 0
 
