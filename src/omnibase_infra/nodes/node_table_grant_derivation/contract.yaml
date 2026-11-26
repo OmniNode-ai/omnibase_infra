@@ -48,7 +48,7 @@ error_handling:
     max_delay_ms: 0
   retry_on: []
 metadata:
-  description: "Compute node that names pruned relations for table grants."
+  description: "Names the relations whose table grants are pruned."
   author: OmniNode Team
   license: MIT
   tags:
