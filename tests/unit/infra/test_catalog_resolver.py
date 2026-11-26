@@ -50,6 +50,7 @@ def test_resolver_does_not_leak_feature_env_when_bundle_unselected() -> None:
         "OMNIMEMORY_DB_URL",
         "OTEL_EXPORTER_OTLP_ENDPOINT",
         "OTEL_TRACES_EXPORTER",
+        "OTEL_RESOURCE_ATTRIBUTES",
         # INFISICAL_ADDR and INFISICAL_CLIENT_ID moved to core bundle
         # as part of Infisical-first config (OMN-5831)
     }

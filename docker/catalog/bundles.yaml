@@ -351,6 +351,9 @@ tracing:
   inject_env:
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://phoenix:6006"
     OTEL_TRACES_EXPORTER: "otlp"
+    # OMN-22097: Phoenix routes a span to the project named by this resource
+    # attribute; unset, every span lands in "default".
+    OTEL_RESOURCE_ATTRIBUTES: "openinference.project.name=onex-runtime"
 omnimemory:
   description: "OmniMemory data layer — Qdrant, Memgraph, Valkey, Kreuzberg (OMN-8738)"
   services:
