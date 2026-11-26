@@ -146,6 +146,6 @@ def test_a_head_the_running_build_contains_is_never_requested(
         _SETTINGS,
         [_decision(shas[0])],
         {shas[0]: "merge (#1)"},
-        context=caller._OverdueContext((running,), {}),
+        context=caller.OverdueContext((running,), {}),
     )
     assert sender.commands == []

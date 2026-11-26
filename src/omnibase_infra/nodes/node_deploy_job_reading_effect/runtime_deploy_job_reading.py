@@ -803,7 +803,7 @@ class AgentDevMergeSender:
         return "published" if taken else "failed"
 
 
-class _OverdueContext(NamedTuple):
+class OverdueContext(NamedTuple):
     """The job records and the merge-sha to repository map an overdue build request reads."""
 
     jobs: tuple[object, ...]
@@ -815,7 +815,7 @@ def _request_overdue_builds(
     settings: dict[str, JsonValue],
     overdue: list[BaseModel],
     subjects: dict[str, str],
-    context: _OverdueContext | None = None,
+    context: OverdueContext | None = None,
 ) -> None:
     """Publish the event and request the one dev build that carries every overdue merge (OMN-26316).
 
@@ -1036,7 +1036,7 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
                     settings,
                     overdue,
                     subjects,
-                    _OverdueContext(jobs, repositories),
+                    OverdueContext(jobs, repositories),
                 )
             except Exception:  # the publish never costs the tick its decisions
                 logger.exception("overdue dev merge build request was not made")
