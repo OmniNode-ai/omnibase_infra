@@ -22,6 +22,12 @@ from omnibase_infra.models.dispatch.model_no_dispatcher_refusal import (
 __all__ = ["ModelFailureTerminalBindings"]
 
 
+def _customer_reason(refusal: ModelNoDispatcherRefusal) -> str:
+    """The refused field's own message, never the dispatch trace (OMN-17397)."""
+    detail = (refusal.validation_detail or "").removeprefix("ValueError: ").strip()
+    return detail or "command payload failed validation"
+
+
 class ModelFailureTerminalBindings:
     """Injected command topic -> declared failure topic map (OMN-26026).
 
@@ -85,7 +91,7 @@ class ModelFailureTerminalBindings:
                 correlation_id=correlation_id,
                 workflow_id=None if raw is None else str(raw),
                 failure_code=refusal.error_code.value,
-                failure_reason=refusal.error_message,
+                failure_reason=_customer_reason(refusal),
                 origin_topic=topic,
             )
         ]
