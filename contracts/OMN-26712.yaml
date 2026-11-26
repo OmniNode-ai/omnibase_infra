@@ -1,0 +1,53 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26712"
+title: "AWS Dev: the gateway's database grants and connection mapping exist for the cloud, and Dev has a declared migration path"
+summary: >-
+  Adds the cloud grant scripts for the gateway and tenant identity writer roles (role and database names from settings, under docker/migrations/seams/cloud/), the cloud-mode secret names the resolver requires with a named boot refusal (CLOUD_SECRET_NAMES_MISSING, behind ONEX_CLOUD_MODE, default off), and one idempotent migration command, apply_cloud_database.sql, carried by the migrate image and proven twice against a throwaway Postgres.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26712-cloud-grants-and-migration"
+    statement: "Dev has cloud-ready grant scripts, declared connection secret names and one idempotent migration path."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: cloud-ready grant scripts for the gateway role and the tenant-identity writer role exist beside the lab ones, with role names and databases from settings, never lab literals -- falsifier: a test renders them for a Dev settings set and asserts no lab address or lab role name appears
+      - id: "AC2"
+        statement: >-
+          AC2: the runtime's secret resolver declares the gateway and tenant-identity connection names it needs in cloud mode, so the cloud owner knows exactly which secrets to store -- falsifier: a test lists the declared names and the runtime refuses to start in cloud mode with a named error when one is missing
+      - id: "AC3"
+        statement: >-
+          AC3: one declared migration path for a cloud database (a migration job or command the runtime image carries) runs the schema against an empty Postgres and is idempotent -- falsifier: a test runs it twice against a throwaway Postgres and the second run changes nothing
+evidence_requirements:
+  - kind: "tests"
+    description: "The cloud grant scripts, the declared secret names and the twice-run migration."
+    command: "uv run --frozen pytest tests/unit/test_cloud_grant_scripts_omn26712.py tests/unit/runtime/test_cloud_connection_secret_names_omn26712.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn26712-ac1-grant-scripts-from-settings"
+    description: "The three cloud scripts carry no lab role, database or address and address every name through a psql variable; the live run lands the grants on the Dev-named roles and no lab name exists afterwards."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/test_cloud_grant_scripts_omn26712.py -q -n 0 --no-cov"
+        cwd: "."
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/integration/migrations/test_cloud_database_migration_omn26712.py -k grants_land -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26712-ac2-cloud-secret-names"
+    description: "The declared connection names are listed, and in cloud mode a config missing either one refuses to boot with CLOUD_SECRET_NAMES_MISSING naming it."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/runtime/test_cloud_connection_secret_names_omn26712.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26712-ac3-migration-idempotent"
+    description: "The migration command builds the schema and both grant sets on an empty Postgres; the second run leaves the catalog, privileges and rows identical; a missing setting, a missing role and a BYPASSRLS role each fail with a named error."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/integration/migrations/test_cloud_database_migration_omn26712.py -q -n 0 --no-cov"
+        cwd: "."
