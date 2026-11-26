@@ -39,3 +39,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_operator_request_beats_overdue_omn26718.py -k names_the_operator_job -q -p no:cacheprovider
         cwd: .
+  - id: dod-omn26718-integration-proof
+    description: Run the contract-routed priority handler on a lab host at the pushed revision; the operator-path request is the admitted one.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha "$(git rev-parse HEAD)" --lane dod-integration-proof-26718 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/handlers/test_queued_request_priority_contract_omn26718.py -q -n 0 -p no:randomly
+        cwd: .
