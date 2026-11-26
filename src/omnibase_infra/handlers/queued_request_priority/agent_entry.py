@@ -25,29 +25,29 @@ _MODULES = (
 )
 
 
-class _Valued(Protocol):
+class ProtocolValued(Protocol):
     @property
     def value(self) -> str: ...
 
 
-class _Command(Protocol):
+class ProtocolQueuedCommand(Protocol):
     """The fields of a queued deploy command the priority request reads."""
 
     correlation_id: str
-    runtime_lane: _Valued
+    runtime_lane: ProtocolValued
     requested_by: str
     git_ref: str
-    scope: _Valued
-    build_source: _Valued
+    scope: ProtocolValued
+    build_source: ProtocolValued
     services: Sequence[str]
     rollback: object | None
     image_ref: str | None
     image_digest: str | None
 
 
-class _Queued(Protocol):
+class ProtocolQueuedDeploy(Protocol):
     @property
-    def command(self) -> _Command: ...
+    def command(self) -> ProtocolQueuedCommand: ...
 
 
 def _load() -> ModuleType:
@@ -69,7 +69,7 @@ def handler_class() -> type:
     return handler_cls
 
 
-def request(queued: Sequence[_Queued], *, supersede_queue: bool) -> object:
+def request(queued: Sequence[ProtocolQueuedDeploy], *, supersede_queue: bool) -> object:
     """The handler's request for ``queued`` commands, head first."""
     module = _load()
     entry = module.ModelQueuedRequestEntry
