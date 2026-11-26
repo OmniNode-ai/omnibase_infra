@@ -788,8 +788,7 @@ jobs:
   deliver-sibling-candidate:
     name: Announce the merged revision for delivery to staging
     needs: [trigger-rebuild, verify-sibling-converged]
-    runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check the announcement credentials are configured

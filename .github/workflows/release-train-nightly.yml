@@ -79,10 +79,7 @@ concurrency:
 jobs:
   decide:
     name: Decide
-    runs-on: >-
-      ${{
-        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-      }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
       cuts: ${{ steps.plan.outputs.cuts }}
@@ -271,10 +268,7 @@ jobs:
     name: Cut ${{ matrix.decision.repo }}
     needs: decide
     if: needs.decide.outputs.cut_count != '0'
-    runs-on: >-
-      ${{
-        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-      }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false

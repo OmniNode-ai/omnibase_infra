@@ -396,7 +396,8 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
         in ci_workflow["env"]["OMNI_CI_SHARED_ENV_ENABLED"]
     )
     standards_workflow = _load_yaml(OMNI_STANDARDS_WORKFLOW)
-    assert standards_workflow["env"]["OMNI_CI_ENV_ROOT"] == RUNNER_SHARED_ENV_ROOT
+    # OMN-22867: like ci.yml, the root is the action input default asserted above, not a literal here.
+    assert "OMNI_CI_ENV_ROOT" not in standards_workflow["env"]
     assert "OMNI_CI_SHARED_ENV_ENABLED" in standards_workflow["env"]
 
     for job_name, job in ci_workflow["jobs"].items():

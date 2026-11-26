@@ -293,13 +293,7 @@ jobs:
     name: runner-image-multiarch-smoke
     # Same placement chain as the job above: docker-executing, so the narrower
     # docker variable governs it ahead of the trusted seam.
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-      }}
+    runs-on: ubuntu-latest
     # The arm64 leg runs under QEMU on an amd64 runner: apt, the deadsnakes
     # Python build and the runner tarball unpack all pay the emulation tax.
     timeout-minutes: 60
