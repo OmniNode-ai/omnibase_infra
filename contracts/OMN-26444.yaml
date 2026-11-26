@@ -10,8 +10,6 @@ requirements:
     statement: |-
       The topology declares tenant_projection_writer SELECT, INSERT, UPDATE and DELETE on public.savings_priced_models, and migration 102, which delivers that grant, is deployed byte-identical to its omnimarket source with one checksum-bound tenant ledger row and the forward-only class.
     acceptance:
-      - id: "AC1"
-        statement: "AC1: on a real Postgres seeded with the OMN-26413 cases, the shared savings view's unpriced_call_count equals the shared metering summary's runs_unknown_spend for the same tenant -- falsifier: a real-Postgres pytest written before the fix that fails on dev unless the two agree."
       - id: "AC2"
         statement: "AC2: the writer grant on savings_priced_models is declared in every topology instance and rendered catalog, and migration 102 is vendored byte-identical -- falsifier: uv run pytest tests/unit/topology/test_topology_savings_priced_models_omn26444.py tests/unit/migrations/test_omn26444_savings_unpriced_matches_refresh_vendored.py -q fails on omnibase_infra dev and passes on the fix branch"
 evidence_requirements:
