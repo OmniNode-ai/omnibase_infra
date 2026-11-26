@@ -1201,9 +1201,9 @@ services:
       # snapshot_root) comes right after the branch root: the rows that live only in the
       # settings store (delegation_check_responders, delegation_check_gateway) are read
       # here, as node_overlay_roots_resolve_effect orders the store root first (OMN-26117).
-      # DEV_LANE_OVERLAY_SETTINGS_SNAPSHOT_DIR overrides the default, the store-read
-      # node's own home fallback.
-      - ${DEV_LANE_OVERLAY_SETTINGS_SNAPSHOT_DIR:-${HOME}/.local/state/onex/overlay-store}:/etc/onex/skill-overlays-settings:ro
+      # The source is the store-read node's own home fallback, under the HOME the
+      # operator env injects (no nested expansion: tests/ci/test_compose_no_nested_expansion.py).
+      - ${HOME}/.local/state/onex/overlay-store:/etc/onex/skill-overlays-settings:ro
       # Read-only: the omniclaude clone the skills mount already comes from (OMN-22691): the
       # skills directory is <clone>/plugins/onex/skills, so the clone root is three directories
       # above it. Derived from that one variable, outside any nested default, so the lane host

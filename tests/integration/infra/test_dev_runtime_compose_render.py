@@ -1488,7 +1488,6 @@ _OVERLAY_STORE_ROOT_HOST_VAR = "DEV_LANE_OVERLAY_STORE_ROOTS_DIR"
 # OMN-26117: the settings-store snapshot each host keeps (node_overlay_store_read_effect's
 # snapshot_root), the store root node_overlay_roots_resolve_effect names first.
 _OVERLAY_SETTINGS_ROOT_TARGET = "/etc/onex/skill-overlays-settings"
-_OVERLAY_SETTINGS_ROOT_HOST_VAR = "DEV_LANE_OVERLAY_SETTINGS_SNAPSHOT_DIR"
 _OVERLAY_SETTINGS_HOME_RELPATH = ".local/state/onex/overlay-store"
 _SKILL_OVERLAY_ROOTS_VALUE = (
     f"{_OVERLAY_BRANCH_ROOT_TARGET}:{_OVERLAY_SETTINGS_ROOT_TARGET}:"
@@ -1990,9 +1989,10 @@ def test_dev_runtime_finds_the_delegation_check_rows_in_the_settings_snapshot(
 ) -> None:
     """OMN-26117: the delegation_check_responders and delegation_check_gateway rows
     exist only in the settings store. The runtime's root walk, over the rendered
-    compose, finds them in the snapshot directory the operator env names, while
+    compose, finds them in the snapshot directory under the injected HOME, while
     the overlays-repository store and the frozen root hold neither."""
-    snapshot = _write_settings_snapshot(tmp_path / "snapshot")
+    home = tmp_path / "home"
+    snapshot = _write_settings_snapshot(home / _OVERLAY_SETTINGS_HOME_RELPATH)
     (tmp_path / "store").mkdir()
     (tmp_path / "frozen").mkdir()
     env = _render_env(
@@ -2000,7 +2000,7 @@ def test_dev_runtime_finds_the_delegation_check_rows_in_the_settings_snapshot(
         **{
             _SKILL_OVERLAY_ROOTS_HOST_VAR: str(tmp_path / "frozen"),
             _OVERLAY_STORE_ROOT_HOST_VAR: str(tmp_path / "store"),
-            _OVERLAY_SETTINGS_ROOT_HOST_VAR: str(snapshot),
+            "HOME": str(home),
         },
     )
     result = _run_compose_config(

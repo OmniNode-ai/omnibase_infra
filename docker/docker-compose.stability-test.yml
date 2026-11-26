@@ -515,7 +515,7 @@ services:
       # The branch root is a directory in the container's writable layer, not a mount.
       - ${DEV_LANE_SKILL_OVERLAY_ROOTS_DIR:-./skill-overlay-roots}:/etc/onex/skill-overlays:ro
       - ${DEV_LANE_OVERLAY_STORE_ROOTS_DIR:-../../overlays/overlays}:/etc/onex/skill-overlays-store:ro
-      - ${DEV_LANE_OVERLAY_SETTINGS_SNAPSHOT_DIR:-${HOME}/.local/state/onex/overlay-store}:/etc/onex/skill-overlays-settings:ro
+      - ${HOME}/.local/state/onex/overlay-store:/etc/onex/skill-overlays-settings:ro
       # OMN-26121: the lane declaration folder, as the dev runtime mounts it (OMN-24854). The lab
       # overlay of node_gateway_batch_ingest_effect names /etc/onex/workspace-config as its config
       # root, and the door's lifespan reads config/lab/ci_bus_lanes.yaml under it to resolve its

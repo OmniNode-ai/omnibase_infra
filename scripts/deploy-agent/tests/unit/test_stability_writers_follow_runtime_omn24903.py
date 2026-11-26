@@ -727,7 +727,7 @@ OPERATOR_UNIT = (
 )
 STORE_DIR_VAR = "DEV_LANE_OVERLAY_STORE_ROOTS_DIR"
 _ASSIGNMENT = re.compile(r"^(?:export\s+)?(?P<name>[A-Z_][A-Z0-9_]*)=(?P<value>.*)$")
-_VARIABLE = re.compile(r"\$\{(\w+)(?:(:?[-?])([^}$]*))?\}")
+_VARIABLE = re.compile(r"\$\{(\w+)(?:(:?[-?])([^}]*))?\}")
 
 
 def _env_file_assignments(text: str) -> dict[str, str]:
@@ -758,11 +758,7 @@ def _interpolate(value: str, env: dict[str, str]) -> str:
             raise KeyError(f"{name}: {argument}")
         return ""
 
-    # A default may name another variable (``${A:-${B}/x}``): resolve the innermost first.
-    previous = None
-    while previous != value:
-        previous, value = value, _VARIABLE.sub(resolve, value)
-    return value
+    return _VARIABLE.sub(resolve, value)
 
 
 def _overlay_mounts(

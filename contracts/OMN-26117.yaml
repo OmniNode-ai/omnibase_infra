@@ -75,6 +75,16 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/infra/test_dev_runtime_compose_render.py -q --no-cov -n 0 -p no:randomly -k "delegation_check_rows_in_the_settings_snapshot"
         cwd: .
+  - id: dod-omn26117-ac2-snapshot-no-nested-expansion
+    description: >-
+      The settings-snapshot mount source in the dev, tenant-fold and stability compose files is the plain ${HOME}/.local/state/onex/overlay-store path, so no compose file holds a nested variable expansion, and the dev render finds the delegation check rows under the injected HOME.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_compose_no_nested_expansion.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
   - id: dod-omn26117-deploy-settings-root-live
     description: >-
       Post-deploy probe: the rebuilt dev runtime container holds the delegation_check_responders row in its settings-store snapshot root. It reads the live container, which carries the mount only after the deploy agent has recreated it, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
