@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-26471"
 title: "omnibase_infra: a least-grant tenant_identity_writer role and the omninode_cloud topology entry exist on the dev lane"
 summary: >-
-  Adds the login tenant_identity_writer on omninode_cloud: one seam, docker/migrations/seams/tenant_identity_writer_grants.sql, mints and re-asserts its credential from TENANT_IDENTITY_WRITER_PASSWORD and grants exactly the declared set (column-scoped UPDATE on tenants, tenant_api_keys and tenant_event_outbox, no DELETE and no TRUNCATE), then reads the effective privileges back, including every grant-option form, and fails the run on any difference. The dev overlay renders TENANT_IDENTITY_DATABASE_DSN and passes the password to the migration runner, both fail-closed. AC6 (the omninode_cloud topology entry) is not built here: the omninode_cloud ledger carries no stream or domain column, so a conforming checksum_ledger would be an invented fact.
+  Adds the login tenant_identity_writer on omninode_cloud: one seam, docker/migrations/seams/tenant_identity_writer_grants.sql, mints and re-asserts its credential from TENANT_IDENTITY_WRITER_PASSWORD and grants exactly the declared set (column-scoped UPDATE on tenants, tenant_api_keys and tenant_event_outbox, no DELETE and no TRUNCATE), then reads the effective privileges back, including every grant-option form, and fails the run on any difference. The dev overlay renders TENANT_IDENTITY_DATABASE_DSN and passes the password to the migration runner, both fail-closed. The omninode_cloud database entry (AC6) is declared in the three topology profiles with ledger shape version_checksum, the shape the dev lane's omninode_cloud public.schema_migrations (version, applied_at, checksum) was read to have.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -25,6 +25,12 @@ requirements:
       - id: "AC5"
         statement: >-
           AC5: the failing test is red before the seam and green after -- falsifier: `uv run pytest tests/unit/test_tenant_identity_writer_grants.py -q` exits non-zero after the change, or the PR's first commit shows it passing
+  - id: "req-omn26471-cloud-topology-entry"
+    statement: "Every shipped topology profile declares omninode_cloud with its migration ledger shape version_checksum and the tenant_identity_writer binding."
+    acceptance:
+      - id: "AC6"
+        statement: >-
+          AC6: the pinned topology resolves omninode_cloud after the core pin raise (omnibase_core#2378) -- falsifier: `uv run --frozen pytest tests/unit/topology/test_omninode_cloud_topology_omn26471.py -q -n 0 --no-cov` fails at the head, or passes at the base commit
   - id: "req-omn26471-bare-sequence-ownership"
     statement: "The application database SQL gate's ownership lookup resolves a sequence the manifest declares as a bare name under its domain, for the schema its table occupies."
     acceptance:
@@ -97,6 +103,14 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/validation/test_bare_sequence_ownership_omn26471.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26471-ac6-cloud-topology-entry"
+    description: "AC6: all nine profiles resolve omninode_cloud with ledger shape version_checksum (relation public.schema_migrations, version and checksum columns, no stream or domain column) and the tenant_identity_writer LOGIN binding on TENANT_IDENTITY_DATABASE_DSN; the test cannot import at the base commit because the core pin there lacks the shape enum."
+    source: "manual"
+    binds_ac: ["AC6"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/topology/test_omninode_cloud_topology_omn26471.py -q -n 0 --no-cov"
         cwd: "."
 emergency_bypass:
   enabled: false
