@@ -53,3 +53,13 @@ dod_evidence:
       - check_type: command
         check_value: grep -c max_probe_deferral_minutes config/deploy_lane_routing.yaml
         cwd: .
+  - id: dod-omn26703-ac3-sibling-build-ref
+    description: >-
+      The overdue build request for a sibling-repository merge (omnimarket) carries a commit of the agent's own omnibase_infra clone as git_ref, never the sibling's sha, so the agent's git reset no longer fails with "Could not parse object" (jobs 7b4c04d5, 865206bc, 8b502715 on 2026-11-26).
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_every_runtime_repo_omn26316.py -k one_build_request -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
