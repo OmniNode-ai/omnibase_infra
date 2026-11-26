@@ -118,7 +118,7 @@ dod_evidence:
       - AC3
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_runtime_env_anchor.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/integration/infra/test_dev_runtime_compose_render.py -q --no-cov -n 0 -p no:cacheprovider
+        check_value: uv run --frozen pytest tests/ci/test_runtime_env_anchor.py tests/unit/docker/test_dev_hook_events_fold_omn21288.py tests/integration/infra/test_dev_runtime_compose_render.py tests/unit/runtime/auto_wiring/test_node_exclusion_every_profile_omn26218.py -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
   - id: dod-omn26232-ac4-live-criterion
     description: 'AC4: no overlay or default sets a value on prod or stability lanes in this change -- falsifier: uv run pytest tests/unit/docker -q fails if any prod or stability compose file or lane entry renders a non-empty ONEX_RUNTIME_NODE_EXCLUSION -- bound to the test that already proves it.'
