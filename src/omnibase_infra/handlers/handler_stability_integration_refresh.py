@@ -28,6 +28,7 @@ import json
 import shutil
 import subprocess
 import time
+import tomllib
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -68,6 +69,18 @@ def _run(argv: Sequence[str], *, cwd: Path | None = None) -> str:
             f"{argv[0]} {argv[1] if len(argv) > 1 else ''} exit {done.returncode}: {tail}"
         )
     return done.stdout.strip()
+
+
+def runtime_version_of(tree: Path) -> str:
+    """The ``[project] version`` of the tree's pyproject.toml; a workspace build refuses the placeholder."""
+    try:
+        data = tomllib.loads((tree / "pyproject.toml").read_text(encoding="utf-8"))
+        version = str(data["project"]["version"]).strip()
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
+        raise RuntimeError(f"Could not resolve RUNTIME_VERSION from {tree}") from exc
+    if not version:
+        raise RuntimeError(f"Empty RUNTIME_VERSION in {tree}")
+    return version
 
 
 class DockerStabilityIntegrationHost:
@@ -166,6 +179,12 @@ class DockerStabilityIntegrationHost:
                 infra_tag,
                 "--build-arg",
                 f"VCS_REF={by_repo['omnibase_infra']}",
+                "--build-arg",
+                f"GIT_SHA={by_repo['omnibase_infra']}",
+                "--build-arg",
+                f"BUILD_DATE={datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}",
+                "--build-arg",
+                f"RUNTIME_VERSION={runtime_version_of(tree)}",
                 "--build-arg",
                 f"RUNTIME_SOURCE_HASH={by_repo['omnibase_infra']}",
                 "--build-arg",
