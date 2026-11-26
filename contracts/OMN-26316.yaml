@@ -142,6 +142,11 @@ requirements:
     acceptance:
       - id: AC51
         statement: "AC51: four dispatch-deadline dead letters of one correlation (dod-verify-start, offsets 120620 to 120624, each with a fresh retry_count of 0) give at most deadline_exceeded_max_replays replays and quarantines naming dispatch_deadline_exceeded for the rest, the contract declares 0, and a consumer_error dead letter still replays -- falsifier: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_omn26316_deadline_replay_loop.py fails at origin/dev (the replay policy has no deadline_exceeded_max_replays and all four are replayed) and passes on the PR branch"
+  - id: req-omn26316-build-clock-within-five-minutes
+    statement: A build answers health within 5 minutes of its runtime container's start, measured per build by the build clock node in the deploy agent verification phase, recorded on the job record, and a build past 5 minutes fails verification.
+    acceptance:
+      - id: AC54
+        statement: "AC54: the build clock node (node_build_clock_compute, ModelBuildClock) turns the runtime container State.StartedAt and the first passing /health time into minutes and a verdict, the deploy agent records it as a build-clock health check on the job record, a fake health answering 6 minutes after the start fails the build and a fast one passes -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_build_clock_omn26316.py fails at origin/dev (no build-clock check) and passes on the PR branch"
   - id: req-omn26316-overdue-every-composed-repository
     statement: The overdue dev merge check reads every repository the dev build composes, from the agent's declared composition, and the overdue topic is declared where the provisioner reads.
     acceptance:
@@ -201,6 +206,9 @@ evidence_requirements:
   - kind: tests
     description: The dispatch-deadline replay loop regression built from the four dod-verify-start dead letters of 2026-11-25.
     command: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_omn26316_deadline_replay_loop.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The build clock regression, a known good build and a fake health answering after 6 minutes.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_build_clock_omn26316.py -q -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ''
@@ -555,6 +563,20 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/dlq/test_dlq_deadline_quarantine_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-build-clock
+    description: "The build clock node returns the minutes from container start to first healthy /health and a verdict; verification records it per build as a build-clock check and a fake health answering after 6 minutes fails the build and a fast one passes."
+    source: manual
+    binds_ac: [AC54]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_build_clock_omn26316.py -q -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_build_clock_compute -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/node_build_clock_compute -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26316-overdue-every-composed-repository
     description: "An omnimarket merge (omnimarket#6872 shape) in a sibling clone with no dev job reads REQUEST, gets its event and one build request at the omnimarket head, and a dev job accepted after it satisfies it; the test fails at origin/dev, where only the agent's own clone is read."
