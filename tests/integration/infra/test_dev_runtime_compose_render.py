@@ -1485,8 +1485,12 @@ _OVERLAY_STORE_ROOT_TARGET = "/etc/onex/skill-overlays-store"
 # OMN-25536: the dev branch installer's root, a writable directory with no mount.
 _OVERLAY_BRANCH_ROOT_TARGET = "/etc/onex/skill-overlays-branch"
 _OVERLAY_STORE_ROOT_HOST_VAR = "DEV_LANE_OVERLAY_STORE_ROOTS_DIR"
+# OMN-26117: the settings-store snapshot each host keeps (node_overlay_store_read_effect's
+# snapshot_root), the store root node_overlay_roots_resolve_effect names first.
+_OVERLAY_SETTINGS_ROOT_TARGET = "/etc/onex/skill-overlays-settings"
+_OVERLAY_SETTINGS_HOME_RELPATH = ".local/state/onex/overlay-store"
 _SKILL_OVERLAY_ROOTS_VALUE = (
-    f"{_OVERLAY_BRANCH_ROOT_TARGET}:"
+    f"{_OVERLAY_BRANCH_ROOT_TARGET}:{_OVERLAY_SETTINGS_ROOT_TARGET}:"
     f"{_OVERLAY_STORE_ROOT_TARGET}:{_SKILL_OVERLAY_ROOTS_TARGET}"
 )
 
@@ -1547,6 +1551,7 @@ def test_dev_lane_overlay_store_root_is_ahead_of_the_frozen_root() -> None:
 
     assert effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV).split(":") == [
         _OVERLAY_BRANCH_ROOT_TARGET,
+        _OVERLAY_SETTINGS_ROOT_TARGET,
         _OVERLAY_STORE_ROOT_TARGET,
         _SKILL_OVERLAY_ROOTS_TARGET,
     ]
@@ -1693,6 +1698,7 @@ def test_tenant_fold_overlay_store_root_is_ahead_of_the_frozen_root() -> None:
 
     assert runtime["environment"].get(_SKILL_OVERLAY_ROOTS_ENV).split(":") == [
         _OVERLAY_BRANCH_ROOT_TARGET,
+        _OVERLAY_SETTINGS_ROOT_TARGET,
         _OVERLAY_STORE_ROOT_TARGET,
         _SKILL_OVERLAY_ROOTS_TARGET,
     ]
@@ -1966,3 +1972,62 @@ def test_base_render_without_the_dev_overlay_carries_no_gateway_lane_indicator()
     assert result.returncode == 0, result.stderr
     service = yaml.safe_load(result.stdout)["services"]["forward-migration"]
     assert _GATEWAY_LANE_INDICATOR not in service.get("environment", {})
+
+
+def _write_settings_snapshot(root: Path) -> Path:
+    """A host's settings-store snapshot: one folder per overlay the store holds."""
+    for name in ("delegation_check_responders", "delegation_check_gateway"):
+        (root / name).mkdir(parents=True)
+        (root / name / "overlay.yaml").write_text(f"# {name}\n", encoding="utf-8")
+    return root
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("with_tenant_fold", [False, True])
+def test_dev_runtime_finds_the_delegation_check_rows_in_the_settings_snapshot(
+    tmp_path: Path, with_tenant_fold: bool
+) -> None:
+    """OMN-26117: the delegation_check_responders and delegation_check_gateway rows
+    exist only in the settings store. The runtime's root walk, over the rendered
+    compose, finds them in the snapshot directory under the injected HOME, while
+    the overlays-repository store and the frozen root hold neither."""
+    home = tmp_path / "home"
+    snapshot = _write_settings_snapshot(home / _OVERLAY_SETTINGS_HOME_RELPATH)
+    (tmp_path / "store").mkdir()
+    (tmp_path / "frozen").mkdir()
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **{
+            _SKILL_OVERLAY_ROOTS_HOST_VAR: str(tmp_path / "frozen"),
+            _OVERLAY_STORE_ROOT_HOST_VAR: str(tmp_path / "store"),
+            "HOME": str(home),
+        },
+    )
+    result = _run_compose_config(
+        env,
+        profile="runtime",
+        with_dev_lane_overlay=True,
+        with_tenant_fold=with_tenant_fold,
+    )
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    service = services["omninode-runtime" if with_tenant_fold else "runtime-effects"]
+
+    (mount,) = _mounts_at(service, _OVERLAY_SETTINGS_ROOT_TARGET)
+    assert mount.get("type") == "bind"
+    assert mount.get("read_only") is True
+    for name in ("delegation_check_responders", "delegation_check_gateway"):
+        assert _resolve_node_overlay_text(service, name) == f"# {name}\n"
+    # Known bad: a row the snapshot lacks resolves to nothing.
+    assert _resolve_node_overlay_text(service, "delegation_check_absent") is None
+
+
+@pytest.mark.integration
+def test_dev_settings_snapshot_root_defaults_to_the_host_home_store() -> None:
+    """Unset, the mount source is the store-read node's own home fallback,
+    <HOME>/.local/state/onex/overlay-store, from the injected HOME."""
+    services = _render_dev_lane_services()
+    (mount,) = _mounts_at(services["runtime-effects"], _OVERLAY_SETTINGS_ROOT_TARGET)
+    assert mount["source"] == str(
+        Path(os.environ["HOME"]) / _OVERLAY_SETTINGS_HOME_RELPATH
+    )

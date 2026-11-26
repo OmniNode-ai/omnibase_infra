@@ -84,28 +84,8 @@ an hour, not one a minute. It ignores routing (a missing runtime is missing on
 every instance) and the probe windows, which protect a probe from a lane being
 rebuilt under it; a lane with no runtime fails the probe either way.
 
-A LAGGING LANE HAS A DECLARED BOUND, AND IS LOUD (OMN-21146)
------------------------------------------------------------
-The probe windows above cost more than they protect. C15 runs every two hours
-for a declared 65 minutes, so with the 40-minute lead each run excludes 105
-minutes of every 120, and a merge that lands in one waits for the 15 minutes
-between. On 2026-10-15 omnimarket#3964 merged at 17:07Z, inside the 17:41Z
-run's exclusion; the default instance's agent accepted its converge at 18:46:52Z, the
-exclusion's end, and dod-verify refused merged_pr fleet-wide on the old image
-until the lane was rebuilt, with nothing saying the lane was behind.
-
-So an instance may declare ``flags.max_dev_lag_minutes`` in the routing table
-(``ModelLaneFlags.max_dev_lag``). The agent records when it first saw the lane
-behind a followed repository's dev head (:func:`next_behind_since`); once that
-is as old as the bound the lane is OVERDUE, and :func:`decide` no longer
-waits out the idle period (``recently_active``) or an unreadable probe schedule.
-It still never starts inside a reserved window of the guarded M4 probes C15
-(the chain canary) and C16. OMN-19175: deploys inside those windows made C16
-and the chain canary reach their terminals after their probe budgets. Every
-other bound holds: no job in flight, the FROZEN flag, the load gate, and one
-converge per head. And the lag is loud:
-:func:`dev_lane_drift` is the ``ModelDevLaneDrift`` the agent publishes and
-serves at ``GET /dev-lane-drift``. An instance with no bound is unchanged.
+A LAGGING LANE HAS A DECLARED BOUND (OMN-21146, OMN-26703): see
+docs/decisions/deploy-agent-lane-lag.yaml.
 
 THE STABILITY LANE FOLLOWS THE TAG DEV RAN (OMN-19998, OMN-21485)
 -----------------------------------------------------------------
@@ -271,14 +251,21 @@ class ModelIdleConvergeInputs(BaseModel):
     behind_since: datetime | None = None
     #: OMN-21146: the instance's declared lag bound, or ``None`` for none.
     max_lag: timedelta | None = None
+    #: OMN-26703: how long the guarded probe windows may defer the converge, or
+    #: ``None`` for no cap.
+    max_probe_deferral: timedelta | None = None
+
+    def waited(self, bound: timedelta | None) -> bool:
+        """Whether the lane has run behind the head for ``bound``."""
+        return (
+            bound is not None
+            and self.behind_since is not None
+            and self.now - self.behind_since >= bound
+        )
 
     def overdue(self) -> bool:
         """Whether the lane has run behind the head for the declared bound."""
-        return (
-            self.max_lag is not None
-            and self.behind_since is not None
-            and self.now - self.behind_since >= self.max_lag
-        )
+        return self.waited(self.max_lag)
 
 
 class ModelIdleConvergeDecision(BaseModel):
@@ -330,7 +317,11 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
             )
         overridden.append(inputs.windows_error)
     if inputs.probe_blocker is not None:
-        return refuse(EnumIdleConvergeVerdict.PROBE_WINDOW, inputs.probe_blocker)
+        # OMN-26703: the guarded windows chain, so a merge cannot wait on them
+        # past the declared cap.
+        if not inputs.waited(inputs.max_probe_deferral):
+            return refuse(EnumIdleConvergeVerdict.PROBE_WINDOW, inputs.probe_blocker)
+        overridden.append(f"probe deferral cap spent: {inputs.probe_blocker}")
     if inputs.head_ref is None:
         return refuse(
             EnumIdleConvergeVerdict.HEAD_UNREADABLE,
@@ -362,8 +353,8 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
             f"; overdue: behind {int(lag.total_seconds())}s of a "
             f"{int(inputs.max_lag.total_seconds())}s bound"
         )
-        if overridden:
-            detail += f", overriding {'; '.join(overridden)}"
+    if overridden:
+        detail += f"; overriding {'; '.join(overridden)}"
     return ModelIdleConvergeDecision(
         verdict=EnumIdleConvergeVerdict.CONVERGE,
         detail=detail,
