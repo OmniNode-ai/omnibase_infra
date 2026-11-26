@@ -522,3 +522,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_post_roll_ledger_proof_operator_switch_omn26316.py -q -p no:cacheprovider
         cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/handlers/test_dev_boot_guard_ledger_proof_omn25942.py -k hidden_ledger_group -q -p no:cacheprovider
+        cwd: .
