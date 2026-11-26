@@ -15,8 +15,19 @@ class ProtocolStabilityIntegrationHost(Protocol):
         """Commit of ``origin/<branch>`` in the repository's canonical clone; ``""`` when absent."""
         ...
 
-    def build_image(self, heads: Sequence[tuple[str, str]]) -> str:
-        """Build the runtime image from the heads with stage_workspace.sh; return its image id.
+    def cut_deploy_tags(
+        self, heads: Sequence[tuple[str, str]]
+    ) -> tuple[tuple[str, str], ...]:
+        """Cut ``deploy-<UTC stamp>-<sha12>`` on each ``(repository, commit)`` in the host's own clone; return ``(repository, tag)``.
+
+        The tags are never pushed. Raises ``RuntimeError`` when a tag cannot be cut.
+        """
+        ...
+
+    def build_image(
+        self, heads: Sequence[tuple[str, str]], tags: Sequence[tuple[str, str]]
+    ) -> str:
+        """Build the runtime image from the deploy ``tags`` of the ``heads`` with stage_workspace.sh; return its image id.
 
         Raises ``RuntimeError`` with the build's refusal text when it fails.
         """

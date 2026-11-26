@@ -61,6 +61,7 @@ CONTRACT_PATH = Path(__file__).resolve().parent / "first_party_sources.yaml"
 DEV_TAG_REFSPEC = "dev-*"
 
 KIND_DEV_MERGE_TAG = "dev-merge-tag"
+KIND_DEPLOY_TAG = "deploy-tag"
 KIND_SHA = "sha"
 KIND_BRANCH = "branch"
 KIND_RELEASE = "release"
@@ -94,12 +95,16 @@ class BuildContext:
     name: str
     target_accepts: tuple[str, ...]
     requires_declared_pr: bool = False
+    # OMN-26715 (RULING 2026-11-18T15:28:49Z): a node-made deploy-* lab tag is
+    # admitted for every package in this context and in no other.
+    accepts_deploy_tag: bool = False
 
 
 @dataclass(frozen=True)
 class FirstPartyContract:
     policy: str
     tag_pattern: re.Pattern[str]
+    deploy_tag_pattern: re.Pattern[str]
     packages: tuple[FirstPartyPackage, ...]
     default_context: str
     pre_pr_slot_context: str
@@ -192,12 +197,14 @@ def load_contract(path: Path = CONTRACT_PATH) -> FirstPartyContract:
             name=str(item["name"]),
             target_accepts=tuple(str(kind) for kind in item["target_accepts"]),
             requires_declared_pr=bool(item.get("requires_declared_pr", False)),
+            accepts_deploy_tag=bool(item.get("accepts_deploy_tag", False)),
         )
         for item in raw["build_contexts"]
     )
     contract = FirstPartyContract(
         policy=str(raw["policy"]),
         tag_pattern=re.compile(str(raw["tag_pattern"])),
+        deploy_tag_pattern=re.compile(str(raw["deploy_tag_pattern"])),
         packages=packages,
         default_context=str(raw["default_context"]),
         pre_pr_slot_context=str(raw["pre_pr_slot_context"]),
@@ -271,6 +278,14 @@ def _classify_revision(
                 f"tag {rev} names {match['sha12']}, installed {commit[:12]}",
             )
         return KIND_DEV_MERGE_TAG, ""
+    deploy = contract.deploy_tag_pattern.match(rev)
+    if deploy is not None:
+        if commit and not commit.startswith(deploy["sha12"]):
+            return (
+                KIND_TAG_MISMATCH,
+                f"tag {rev} names {deploy['sha12']}, installed {commit[:12]}",
+            )
+        return KIND_DEPLOY_TAG, ""
     if _SHA.match(rev):
         return KIND_SHA, f"pinned to commit {rev}"
     if _RELEASE.match(rev):
@@ -292,7 +307,7 @@ def _classify_staged(
             "no staging record binds this local install to a ref",
         )
     commit = str(record.get("vcs_ref", ""))
-    tag = str(record.get("dev_merge_tag", ""))
+    tag = str(record.get("dev_merge_tag", "")) or str(record.get("deploy_tag", ""))
     if record.get("vcs_dirty"):
         return KIND_BRANCH, tag, commit, "the staged tree was dirty"
     if tag:
@@ -326,7 +341,7 @@ def classify_distribution(
         rev = str(vcs_info.get("requested_revision", ""))
         commit = str(vcs_info.get("commit_id", ""))
         kind, detail = _classify_revision(rev, commit, contract)
-        tag = rev if kind == KIND_DEV_MERGE_TAG else ""
+        tag = rev if kind in (KIND_DEV_MERGE_TAG, KIND_DEPLOY_TAG) else ""
         return InstalledSource(
             package.distribution, package.repo, kind, version, tag, commit, url, detail
         )
@@ -391,6 +406,8 @@ def audit_environment(
                 )
             continue
         source = classify_distribution(package, installed, staging, contract)
+        if source.kind == KIND_DEPLOY_TAG:
+            source = _accept_deploy_tag(source, build_context)
         if (
             package.install == "build-context"
             and not source.ok
@@ -399,6 +416,18 @@ def audit_environment(
             source = _accept_target(source, build_context, declared_pr)
         found.append(source)
     return found
+
+
+def _accept_deploy_tag(
+    source: InstalledSource, build_context: BuildContext
+) -> InstalledSource:
+    """``source`` accepted when ``build_context`` admits deploy-* tags, else refused with the reason."""
+    if build_context.accepts_deploy_tag:
+        return replace(source, accepted_in=build_context.name)
+    return replace(
+        source,
+        detail=f"the {build_context.name} build context does not admit a deploy-* tag",
+    )
 
 
 def _accept_target(
@@ -574,11 +603,19 @@ def _build_context_record(
     """The staging record of the build context (omnibase_infra itself)."""
     tags = _git(tree, "tag", "--points-at", "HEAD", "--list", DEV_TAG_REFSPEC)
     dirty = _git(tree, "status", "--porcelain", "--", ".", ":!workspace")
+    deploy_tags = [
+        name
+        for name in _git(
+            tree, "tag", "--points-at", "HEAD", "--list", "deploy-*"
+        ).split()
+        if contract.deploy_tag_pattern.match(name)
+    ]
     return {
         "vcs_ref": _git(tree, "rev-parse", "HEAD"),
         "vcs_dirty": bool(dirty),
         "vcs_branch": _git(tree, "rev-parse", "--abbrev-ref", "HEAD"),
         "dev_merge_tag": newest_dev_merge_tag(tags.split(), contract),
+        "deploy_tag": max(deploy_tags, default=""),
     }
 
 
@@ -602,6 +639,7 @@ def stamp(
         for repo, entry in siblings.items():
             ref = str(rows.get(repo, {}).get("ref", ""))
             entry["dev_merge_tag"] = ref if contract.tag_pattern.match(ref) else ""
+            entry["deploy_tag"] = ref if contract.deploy_tag_pattern.match(ref) else ""
     record["build_context"] = {
         "omnibase_infra": _build_context_record(build_context, contract)
     }
