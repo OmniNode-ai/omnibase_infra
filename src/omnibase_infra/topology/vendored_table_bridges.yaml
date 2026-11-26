@@ -82,3 +82,12 @@
   prefix: overlay_store_
   opts: {}
   tables: [revision, write, provenance, audit]
+# OMN-26623: infra vendors node_projection_delegation 0070, the weekly delegation-quality view,
+# ahead of the omnimarket contract that declares it (access read, role aggregate_quality_weekly);
+# 0070 grants tenant_projection_writer SELECT. Retired when that omnimarket change reaches the pin.
+- ticket: OMN-26623 # omnimarket OMN-26623
+  node: node_projection_delegation
+  create: 0070_delegation_quality_weekly_view.sql
+  prefix: ""
+  opts: {schema: public, access: read, role: aggregate_quality_weekly}
+  tables: [projection_delegation_quality_weekly]

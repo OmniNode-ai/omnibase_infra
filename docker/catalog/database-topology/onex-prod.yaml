@@ -353,6 +353,7 @@ databases:
               - projection_delegation_daily
               - projection_delegation_model_routing
               - projection_delegation_quality_gate
+              - projection_delegation_quality_weekly
               - projection_delegation_savings
               - projection_delegation_summary
               - projection_delegation_token_usage
@@ -546,5 +547,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: c82aa2b0fa60248446c188cfff27d8bb21218c1f26511c8483987521ba2a77dc
+  sha256: 7966a23474913c3db3cd90d52ba32ad025eeae11130038b761a1134a4553f879
 topology_instance: onex-prod

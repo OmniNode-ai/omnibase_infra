@@ -110,6 +110,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "compaction_current_context": "omnimarket OMN-21090 (node_projection_compaction_current_context)",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
     "ledger_line_citation": "omnimarket OMN-21947 (node_projection_work_ledger)",
+    "projection_delegation_quality_weekly": "omnimarket OMN-26623 (node_projection_delegation)",
     **dict.fromkeys(
         (
             "work_outcome_units",
