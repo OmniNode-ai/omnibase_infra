@@ -43,6 +43,9 @@ from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.dispatch.model_malformed_command_terminal import (
+    ModelMalformedCommandTerminal,
+)
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     HandlerDispatchFailureError,
     _raise_if_no_dispatcher_drop,
@@ -213,9 +216,10 @@ async def test_unaccepted_task_class_terminal_names_its_cause_and_code(
     seen = await _drive_unaccepted_task_class(contract_path)
 
     assert len(seen) == 1, "exactly one terminal answers the refused command"
-    terminal = ModelBoundaryFailureTerminal.model_validate(seen[0].payload)
+    terminal = ModelMalformedCommandTerminal.model_validate(seen[0].payload)
     assert terminal.correlation_id == UUID(_CORRELATION)
-    assert terminal.failure_class == "ValueError"
+    # OMN-26026: a publisher-malformed command answers with its own typed terminal.
+    assert terminal.failure_class == "publisher_malformed"
     # RED before the fix: None. The engine resolved this code and the boundary
     # dropped it while building the exception.
     assert terminal.failure_code == EnumCoreErrorCode.ENVELOPE_VALIDATION_FAILED.value

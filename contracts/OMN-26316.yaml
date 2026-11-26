@@ -132,6 +132,11 @@ requirements:
     acceptance:
       - id: AC49
         statement: "AC49: the 18 queued overdue commands at f553b1d6 give zero builds and 18 superseded records, an operator's rollback to the same ref and an overdue command for a merge the running build lacks still build, and an unread lineage builds as before -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stale_overdue_refused_at_accept_omn26316.py -q fails at origin/dev (the verdict and the overdue_references input are absent) and passes on the PR branch"
+  - id: req-omn26316-ledger-proof-operator-switch
+    statement: The post-roll ledger proof of a dev roll runs the operator command with the operator command switch set for that one call, so a healthy new runtime is not restored because the ledger group is hidden.
+    acceptance:
+      - id: AC50
+        statement: "AC50: the post-roll ledger proof runs under env with ONEX_CLI_SHOW_ALL_COMMANDS=1 on that call only, no other boot guard command carries it -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_post_roll_ledger_proof_operator_switch_omn26316.py fails at origin/dev (the switch is absent from the call) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -508,4 +513,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stale_overdue_refused_at_accept_omn26316.py -q -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26316-ledger-proof-operator-switch
+    description: "Dev job d7149818 (2026-11-25T23:27Z): the new runtime was healthy at 23:26:38Z, the ledger proof exited 2 with No such command 'ledger' and the boot guard restored onex-boot-good 93 s later. The proof call now carries ONEX_CLI_SHOW_ALL_COMMANDS=1 through env for that call only; the test fails at origin/dev."
+    source: manual
+    binds_ac: [AC50]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_post_roll_ledger_proof_operator_switch_omn26316.py -q -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/handlers/test_dev_boot_guard_ledger_proof_omn25942.py -k hidden_ledger_group -q -p no:cacheprovider
         cwd: .

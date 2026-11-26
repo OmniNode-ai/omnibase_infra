@@ -2084,8 +2084,11 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     # before anything below reads the environment.
     env.update(operator_store_overlay())
     policy = _load_runtime_policy_env()
-    for key, value in policy.items():
-        env.setdefault(key, value)
+    # OMN-21753: the image's prebuilt node manifest is stamped from the policy's
+    # ONEX_ACTIVE_RUNTIME_PACKAGES and boot compares it with the container's, so no operator
+    # store or process value may widen it; every other policy key only fills a gap.
+    owned = {k: policy[k] for k in ("ONEX_ACTIVE_RUNTIME_PACKAGES",) if k in policy}
+    env = {**policy, **env, **owned}
     # OMN-20932: resolve the private lane-overlay directory every lane compose
     # file mounts. Left unset when none exists, so compose refuses loudly.
     lane_overlay_dir = resolve_lane_overlay_dir(env)

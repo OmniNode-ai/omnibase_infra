@@ -73,6 +73,10 @@ services:
       # longer contains its pin, a check run in the clone stays refused
       # PRODUCT_CLONE_NOT_FRESH.
       DOD_VERIFY_PRODUCT_CLONE_PIN_FILE: /etc/onex/product-clone-pin/pins.json
+      # OMN-25856: total time limit, in seconds, for one hosted dod-verify-start command. omnimarket
+      # has no code default and refuses to start a hosted run without it. Above 0 and below the 600 s
+      # dispatch deadline, so the verdict is written and published inside it.
+      DOD_VERIFY_START_BUDGET_S: "540"
       # OMN-26258: the scheduled ticket closer reads the PR watcher's state at
       # $OMNI_HOME/.claude_scratch/pr-watcher/state.json unless this names another
       # file, and with OMNI_HOME=/app nothing writes that path: the closer's bound
