@@ -1,0 +1,80 @@
+schema_version: 1.0.0
+ticket_id: OMN-20464
+title: The abandoned-dispatch readout names the consumer group that holds the dispatch
+summary: >-
+  On the dev runtime on 2026-11-16 one runtime-tick dispatch was abandoned at its deadline and the readings could not say which subscriber held it, because the orphan line carried only a per-process random subscription id and the abandon log line had rotated out. The orphan line now also carries the consumer group, which auto-wiring derives from the subscribing node's contract name, so a runtime-tick subscriber's group names its node.
+is_seam_ticket: false
+# The orphan line is free text in the /health dispatch_deadline detail, not an event, topic, protocol, envelope or public API surface (the interface surfaces a ticket contract tracks). No reader parses it positionally or by exact match.
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20464-orphan-names-group
+    statement: Each abandoned dispatch the bus reports names the consumer group of the subscription that holds it, beside the topic, partition, offset and subscription id.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a subscriber callback that does not return past the dispatch deadline appears in dispatch_deadline_status().orphans with its consumer group -- falsifier: uv run pytest tests/unit/event_bus/test_omn20464_orphan_degraded_grace.py -q -k names_the_consumer fails on the fix branch, or passes on origin/dev without the fix"
+      - id: AC2
+        statement: "AC2: the grace and orphan-limit behaviour is unchanged, so an old orphan still stops degrading the bus after the grace and the limit still flips it unhealthy -- falsifier: uv run pytest tests/unit/event_bus/test_omn20464_orphan_degraded_grace.py tests/unit/event_bus/test_omn19355_dispatch_deadline.py -q fails on the fix branch"
+evidence_requirements:
+  - kind: tests
+    description: The orphan readout tests.
+    command: uv run --frozen pytest tests/unit/event_bus/test_omn20464_orphan_degraded_grace.py tests/unit/event_bus/test_omn19355_dispatch_deadline.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn20464-ac1-orphan-names-group
+    description: >-
+      The real consume loop over a partition log whose handler never returns, with a second subscription on another consumer group listed first, reports one orphan whose line carries the hung subscription's full group= token and its subscription id, and nothing of the other group.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_omn20464_orphan_degraded_grace.py -q -p no:cacheprovider -k names_the_consumer
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20464-ac2-grace-unchanged
+    description: >-
+      The grace, the orphan limit and the to_thread accounting tests still pass.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_omn20464_orphan_degraded_grace.py tests/unit/event_bus/test_omn19355_dispatch_deadline.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20464-ac1-installed-and-read
+    description: >-
+      Local done gate only, never the hosted runner (a hosted runner has no runtime container): the installed orphan model in the dev runtime container names the consumer group. The command exits non-zero when the group is missing from the description, so a runtime that has not rolled to the change fails it. Judged by exit status only.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: >-
+          docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'import uuid; from omnibase_infra.models.event_bus.model_orphaned_dispatch import ModelOrphanedDispatch as M; line = M(topic="t", consumer_group="g", subscription_key="s", correlation_id=uuid.uuid4(), record_coordinate=(0, 1), started_at=0.0, abandoned_at=0.0).describe(1.0); assert " group=g " in line, line; print("orphan group ok", line)'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20464-ac1-runtime-health-orphan-line
+    description: >-
+      Local done gate only, never the hosted runner: reads the running dev runtime's /health inside its container and fails when any dispatch_deadline orphan line (a string carrying partition=, offset= and subscription=) lacks group=. With no orphan on the runtime at read time it reads zero lines and passes, so it proves the live line only while an orphan is present; the sibling installed-and-read check holds the code that writes it.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: >-
+          docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'import re, sys, urllib.request; body = urllib.request.urlopen("http://localhost:8085/health", timeout=10).read().decode(); lines = re.findall(r"\"([^\"]*partition=[^\"]* offset=[^\"]*subscription=[^\"]*)\"", body); bad = [x for x in lines if " group=" not in x]; print("orphan lines", len(lines), "without group", len(bad)); sys.exit(1 if bad else 0)'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20464-ac1-model-names-group
+    description: >-
+      Runs on the hosted runner: the orphan model's describe method carries the consumer group as a required string, and the two contract commands above exit non-zero without the group (the installed-and-read command against the pre-change model, the runtime read against a /health body whose orphan line has no group=) and zero with it.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/event_bus/test_omn20464_orphan_contract_checks.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra

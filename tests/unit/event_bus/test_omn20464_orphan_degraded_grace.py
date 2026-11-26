@@ -24,7 +24,9 @@ import pytest
 
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from tests.unit.event_bus.test_omn19355_dispatch_deadline import (
+    GROUP,
     HUNG,
+    OTHER_GROUP,
     _config,
     _Handlers,
     _Harness,
@@ -69,6 +71,42 @@ async def test_an_old_orphan_stops_degrading_the_bus_but_stays_tracked() -> None
         handlers.release.set()
         await _settle(harness.bus)
         assert harness.bus.dispatch_deadline_status().orphaned_dispatches == 0
+    finally:
+        handlers.release.set()
+        await harness.close()
+
+
+@pytest.mark.asyncio
+async def test_an_orphan_names_the_consumer_group_that_holds_it() -> None:
+    """The orphan line must name its handler's consumer group, not only a uuid.
+
+    The subscription id is minted per process, so on its own it cannot be
+    traced to a node once the runtime log has rotated (2026-11-16, dev runtime:
+    a runtime-tick dispatch was abandoned and the readings could not say which
+    subscriber held it). The consumer group is derived from the node's contract
+    name, so it names the node.
+
+    A second subscription on the same topic, under another group and listed
+    first, has a handler that returns. The orphan must carry the hung
+    subscription's full group token and nothing of the other group, which a
+    group read from the first subscriber of the topic or from a default would
+    get wrong.
+    """
+    handlers = _Handlers(hung={HUNG})
+    log = _PartitionLog([HUNG, HUNG + 1])
+    harness = _Harness(_config(), log, handlers, bystander_group=OTHER_GROUP)
+    try:
+        await harness.run()
+        assert harness.bus is not None
+        status = harness.bus.dispatch_deadline_status()
+        assert len(status.orphans) == 1
+        orphan = status.orphans[0]
+        assert f" group={GROUP} " in orphan
+        assert OTHER_GROUP not in orphan
+        assert " subscription=sub-1 " in orphan
+        assert "group=None" not in orphan
+        handlers.release.set()
+        await _settle(harness.bus)
     finally:
         handlers.release.set()
         await harness.close()
