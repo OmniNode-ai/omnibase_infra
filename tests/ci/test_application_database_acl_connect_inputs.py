@@ -113,6 +113,7 @@ _DECLARED_CONNECT: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "omnibase_infra": ("omnibase_infra", ("role_omnibase_infra",)),
     "omniintelligence": ("omniintelligence", ("role_omniintelligence",)),
+    "omninode_cloud": ("omninode_cloud", ("tenant_identity_writer",)),
 }
 
 
@@ -252,33 +253,6 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
             "omninode_infra:k8s/dev/postgres/init-databases-cm.yaml:91",
             "omninode_infra:scripts/create-shared-owner-role.sh:114",
             "omnimemory:deployment/database/migrations/001_create_subscription_tables.sql:1",
-        ),
-    ),
-    UndeclaredDeploymentDatabase(
-        physical_name="omninode_cloud",
-        owner_service="onex_api (cloud control plane)",
-        connecting_principals=(
-            (
-                "compose (.201 dev): database present, owned by the bootstrap superuser, no service role exists, nothing observed connecting",
-                (),
-            ),
-            ("onex-lab: declared and owning", ("role_omninode_cloud",)),
-            (
-                "public-cluster dev namespace: declared",
-                ("role_omninode_cloud",),
-            ),
-        ),
-        absent_from_lanes=(),
-        migration_ledger="public.schema_migrations(version, applied_at, checksum)",
-        blocked_by=(
-            "ledger carries two of the four required columns -- no stream and "
-            "no domain column -- so ledger_columns_are_distinct cannot be met"
-        ),
-        provenance=(
-            "omninode_infra:db/migrations/application-relation-ownership.yaml:6",
-            "omninode_infra:k8s/migrations/omninode-cloud-migrate.yaml:354",
-            "omninode_infra:k8s/onex-lab/substitutions/postgres.yaml:355",
-            "omninode_infra:db/migrations/00000000_migrations_tracking.sql:70",
         ),
     ),
     UndeclaredDeploymentDatabase(
