@@ -37,13 +37,7 @@ An instance may declare ``available: false`` (OMN-21402). A route naming it
 takes the default instance, which must remain available. An absent key means
 available. The switch is read at the command's ref, like the route itself.
 
-RESIDUAL, STATED
-----------------
-A sha the clone cannot resolve even after a fetch takes the default, with a
-warning line. Refusing would stall the one .201 agent on every such command
-today; the cost, once a second instance is live, is that an instance that can
-read the table and one that cannot may disagree. Both fetch the same origin, so
-this needs a fetch failure on one host at the moment of the command.
+RESIDUAL, STATED: see docs/decisions/deploy-agent-lane-lag.md.
 """
 
 from __future__ import annotations
@@ -489,6 +483,13 @@ def build_router_from_env(deploy_source_dir: str) -> DeployRouter:
 # probe windows, and the agent publishes a dev-lane drift event naming the
 # running image, the head and the lag (deploy_agent.idle_converge).
 #
+# THE PROBE-DEFERRAL CAP: ``max_probe_deferral_minutes`` (OMN-26703)
+# -----------------------------------------------------------------
+# The longest a merge waits on the guarded C15/C16 windows. They chain (C15's
+# exclusion is 105 of every 120 minutes), and omnimarket 8a5a95e5 merged at
+# 11:49Z on 2026-11-26 waited until 13:00Z. Past the cap the converge starts
+# between windows; every other bound still holds.
+#
 # THE THIRD FLAG: ``disabled_phases`` (OMN-21629)
 # -----------------------------------------------
 # The phases of the instance's deploy that it never runs, as data. The dev lane
@@ -542,6 +543,10 @@ class ModelLaneFlags(BaseModel):
     #: probe windows, and the agent publishes a dev-lane drift event. ``None``:
     #: no bound, the converge waits as before (deploy_agent.idle_converge).
     max_dev_lag_minutes: int | None = Field(default=None, gt=0)
+    #: OMN-26703. How long a lane may run behind a followed repository's dev
+    #: head before its converge no longer waits out the guarded C15/C16 probe
+    #: windows. ``None``: those windows always refuse, as before.
+    max_probe_deferral_minutes: int | None = Field(default=None, gt=0)
     #: OMN-21629. Phases this instance never runs (executor
     #: ``EnumInstancePhase`` values), unioned with its ``lane:`` block's list.
     #: Empty: the instance runs every phase its composition carries.
@@ -551,6 +556,10 @@ class ModelLaneFlags(BaseModel):
         """The declared lag bound, or ``None`` when the instance declares none."""
         minutes = self.max_dev_lag_minutes
         return None if minutes is None else timedelta(minutes=minutes)
+
+    def max_probe_deferral(self) -> timedelta | None:
+        m = self.max_probe_deferral_minutes
+        return None if m is None else timedelta(minutes=m)
 
     def frozen_reason(self, now: datetime) -> str | None:
         """The FROZEN reason in force at ``now``, or ``None``."""
