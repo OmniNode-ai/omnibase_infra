@@ -119,3 +119,15 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_dev_container_recreate_omn25912.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn25912-lane-build-window
+    description: A lane's dev build request (a rollback declaration with no pinned dev tag or image) is deferred to the recreate window with a named reason, and a real rollback to a pinned dev tag or image still runs at once; the consumer step and its window deferral do not exist at the merge base.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_recreate_window_lane_build_omn25912.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_dev_lane_build_window_omn25912.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
