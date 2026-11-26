@@ -334,7 +334,7 @@ class _Gate:
         self.due = due
         self.checks = 0
 
-    def check(self) -> object:
+    def check(self, cmd: object | None = None) -> object:
         self.checks += 1
         return decide(
             THRESHOLDS,

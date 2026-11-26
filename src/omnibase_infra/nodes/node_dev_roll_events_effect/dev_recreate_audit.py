@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """The reader side of the one-recreate-an-hour rule (OMN-25912).
 
-The deploy agent's window gate covers the idle converge and the idle restore, and a lane's
+The deploy agent's window gate covers the idle converge, the idle restore and a lane's build request, and a real
 rollback command or the container's own restart policy never asks it. This handler reads
 what those starts left on the bus (``dev_runtime_started``, ``dev_roll_manifest`` and
 ``dev_recreate_announced``, plus the container's own StartedAt and RestartCount) and names
