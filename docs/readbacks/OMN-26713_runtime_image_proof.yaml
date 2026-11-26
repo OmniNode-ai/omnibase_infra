@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Lab proof that a runtime image built from current dev (the infra image with the
+# marketplace layer) carries the gateway and delegation nodes and answers /health in
+# the Dev-shaped settings (OMN-26713). Read by
+# tests/unit/docker/test_runtime_image_proof_readback_omn26713.py. The image was not
+# pushed to any registry; the pin proposal for the cloud owner is a draft change in a
+# separate documents repository.
+ticket_id: OMN-26713
+host: h202
+measured_by_lane: q-aws5b-90000
+build_commit: 9f77818ea0c96bc05ecffcbbfb621204bed0e6fa
+build_source: workspace
+siblings:
+  omnimarket: 7d6112036bb863a749fc8e01e46e765a95a03a4e
+  omnibase_core: 801c2557fa43146e472fafbc46b23cf2e2d9543e
+  omnibase_spi: 7291f76b0d89fe38906a9b76b25a50d310d66ac0
+  omniintelligence: c4880008c37387df28f7aaf106e0f3cde34b9928
+local_image: omn26713-runtime:9f77818ea0c9
+local_image_digest: sha256:5e94f949adc7e1bc83bc4aacd7967759a01c7eeebef6a9ea15e1daf0e40a3a1e
+infra_layer_image_digest: sha256:099210a26cc9b34f5a85ccc924305c1dacf04d6585175b8b11c1ebcbdd645557
+node_registry:
+  entry_point_group: onex.nodes
+  entry_points: 1513
+  required_present:
+    - node_workflow_gateway_effect
+    - node_gateway_workflow_terminal_effect
+    - node_delegate_skill_orchestrator
+    - node_delegation_orchestrator
+  gateway_or_delegation_names: 99
+  absent_name_control: node_NOPE_zzz
+  absent_name_control_matches: 0
+health:
+  settings: the Dev runtime configmap shape, profile main, bus id cluster
+  http_status: 200
+  docker_health: healthy
+  restart_count: 0
+  contracts_auto_wired: 1422
+  auto_wiring_errors: 0
+known_bad:
+  change: KAFKA_BOOTSTRAP_SERVERS pointing at a host that does not exist
+  http_status: none
+  container_exit_code: 1
+not_proved:
+  - MSK IAM authentication (the broker was a throwaway plaintext Redpanda)
+  - Infisical, Keycloak and the data-plane services (config prefetch read skipped)
+  - a writable /run/onex-runtime under readOnlyRootFilesystem (the lab mounted a tmpfs there)
