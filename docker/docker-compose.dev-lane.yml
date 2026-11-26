@@ -1139,7 +1139,7 @@ services:
       # docker cp cannot write there. The installer's declared roots name it
       # (src/omnibase_infra/models/dev_lane_branch_install_roots.yaml); a recreate removes
       # it, and a reader skips a root that holds no <node>/overlay.yaml.
-      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-branch:/etc/onex/skill-overlays-store:/etc/onex/skill-overlays
+      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-branch:/etc/onex/skill-overlays-settings:/etc/onex/skill-overlays-store:/etc/onex/skill-overlays
       #
       # -- Context-source tenant (OMN-21099) -------------------------------------
       # node_context_compaction_orchestrator (compaction_runtime.tenant_id) and
@@ -1204,6 +1204,13 @@ services:
       # beside the omnibase_infra checkout, the clone the canonical-clone sync keeps
       # current; DEV_LANE_OVERLAY_STORE_ROOTS_DIR overrides it.
       - ${DEV_LANE_OVERLAY_STORE_ROOTS_DIR:-../../overlays/overlays}:/etc/onex/skill-overlays-store:ro
+      # The settings-store snapshot the host keeps (node_overlay_store_read_effect's
+      # snapshot_root) comes right after the branch root: the rows that live only in the
+      # settings store (delegation_check_responders, delegation_check_gateway) are read
+      # here, as node_overlay_roots_resolve_effect orders the store root first (OMN-26117).
+      # The source is the store-read node's own home fallback, under the HOME the
+      # operator env injects (no nested expansion: tests/ci/test_compose_no_nested_expansion.py).
+      - ${HOME}/.local/state/onex/overlay-store:/etc/onex/skill-overlays-settings:ro
       # Read-only: the omniclaude clone the skills mount already comes from (OMN-22691): the
       # skills directory is <clone>/plugins/onex/skills, so the clone root is three directories
       # above it. Derived from that one variable, outside any nested default, so the lane host
