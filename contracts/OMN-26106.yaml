@@ -147,5 +147,5 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_autoclose_sweep_dod_verify_budget_omn26106.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_26106_budget_refusal.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/ci/test_autoclose_sweep_dod_verify_budget_omn26106.py tests/ci/test_autoclose_sweep_budget_refusal_live_contact_omn26106.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_26106_budget_refusal.py -q --no-cov -n 0 -p no:randomly
         cwd: .
