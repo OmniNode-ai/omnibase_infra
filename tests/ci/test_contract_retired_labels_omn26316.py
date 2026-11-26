@@ -75,3 +75,13 @@ def test_control_a_contract_declaring_a_retired_label_is_caught() -> None:
         {"id": "AC5", "statement": "AC5: back again -- falsifier: none"}
     )
     assert declared_labels(contract) & retired_labels(contract) == {"AC5"}
+
+
+def test_the_pin_item_binds_the_ticket_labels_so_the_gate_has_a_bound_check() -> None:
+    contract = load()
+    pin = next(
+        item
+        for item in contract["dod_evidence"]
+        if item["id"] == "dod-omn26316-retired-labels-pinned"
+    )
+    assert {str(label).upper() for label in pin["binds_ac"]} == KEPT

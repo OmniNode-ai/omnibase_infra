@@ -473,7 +473,7 @@ dod_evidence:
   - id: dod-omn26316-retired-labels-pinned
     description: The contract declares only the live ticket's AC1 to AC4 and retires every other bound label through supersedes_ac_binding, with a control that a retired label returning is caught.
     source: manual
-    binds_ac: []
+    binds_ac: [AC1, AC2, AC3, AC4]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_contract_retired_labels_omn26316.py -q --no-cov -n 0 -p no:randomly
