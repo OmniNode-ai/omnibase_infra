@@ -142,3 +142,10 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_self_install_prod_unit_omn26106.py -q
         cwd: .
+  - id: dod-omn26106-autoclose-sweep-start-budget
+    description: 'The evidence close sweep (dry run 45768504347, offer OMN-26106) read 0/0 ACs verified because hosted dod_verify refused to start without DOD_VERIFY_START_BUDGET_S (status unresolved, total_checks 0, cause dispatch_budget_not_declared). The sweep and diagnose steps now declare the budget, and a refused verifier is reported as skipped_dod_verify and never posted to Linear as an evidence gap. Both tests fail on the merge base. Binds no criterion of this ticket: it is evidence about the closer, not about the deploy agent.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_autoclose_sweep_dod_verify_budget_omn26106.py tests/ci/test_autoclose_sweep_budget_refusal_live_contact_omn26106.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_26106_budget_refusal.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
