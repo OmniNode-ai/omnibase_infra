@@ -95,8 +95,8 @@ def test_create_step_leaves_expires_at_to_the_expiry_seam() -> None:
 
 def test_create_step_gates_on_database_and_connects_to_it() -> None:
     text = _sql(CREATE)
-    assert "pg_database WHERE datname = 'omninode_cloud'" in text
-    assert "\\connect omninode_cloud" in text
+    assert "pg_database WHERE datname = :'cloud_database'" in text
+    assert '\\connect :"cloud_database"' in text
     assert (
         "skip  tenant identity schema (database omninode_cloud absent on this lane)"
         in text
@@ -128,7 +128,7 @@ def test_create_step_carries_the_chk_constraints_the_gateway_relies_on() -> None
 
 def test_expiry_seam_adds_the_column_and_partial_index_behind_a_gate() -> None:
     text = _sql(EXPIRY)
-    assert "pg_database WHERE datname = 'omninode_cloud'" in text
+    assert "pg_database WHERE datname = :'cloud_database'" in text
     assert "to_regclass('public.tenant_api_keys') IS NOT NULL" in text
     assert (
         "ALTER TABLE public.tenant_api_keys ADD COLUMN IF NOT EXISTS expires_at timestamptz NULL"

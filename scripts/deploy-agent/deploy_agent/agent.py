@@ -1558,9 +1558,8 @@ class DeployAgent:
         behind_since = next_behind_since(
             self._dev_lag_behind_since.get(repository), running_ref, head_ref, now
         )
-        if behind_since is None:
-            self._dev_lag_behind_since.pop(repository, None)
-        else:
+        self._dev_lag_behind_since.pop(repository, None)
+        if behind_since is not None:
             self._dev_lag_behind_since[repository] = behind_since
         if not web:  # the drift record names the runtime container and image
             self._record_dev_lane_drift(
@@ -1583,6 +1582,7 @@ class DeployAgent:
             frozen_reason=lane_flags.frozen_reason(now),
             behind_since=behind_since,
             max_lag=lane_flags.max_dev_lag(),
+            max_probe_deferral=lane_flags.max_probe_deferral(),
         )
         decision = decide_idle_converge(inputs)
         self._job_reading("record_idle", self._idle_read_head_ref, inputs, decision)

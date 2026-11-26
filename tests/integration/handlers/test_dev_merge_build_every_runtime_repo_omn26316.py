@@ -84,7 +84,7 @@ def _clone(
 
 @pytest.fixture
 def lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    infra, _ = _clone(
+    infra, infra_sha = _clone(
         tmp_path / "omnibase_infra", "docs/old.md", "old (#1)", timedelta(days=3)
     )
     market, market_sha = _clone(
@@ -109,7 +109,11 @@ def lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         caller, "_composed_repositories", lambda _e: ("omnimarket", "omnibase_infra")
     )
     return SimpleNamespace(
-        execution=execution, sender=sender, market_sha=market_sha, market=market
+        execution=execution,
+        sender=sender,
+        market_sha=market_sha,
+        market=market,
+        infra_sha=infra_sha,
     )
 
 
@@ -119,8 +123,9 @@ def test_real_sibling_clone_merge_is_requested_at_its_own_head(
     decisions = caller.check_overdue_dev_merges(force=True)
     assert decisions is not None
     assert {d.merge_sha: d.outcome for d in decisions}[lane.market_sha] == "REQUEST"
+    # The command names the sibling repo, but its git_ref is the agent's own clone head (OMN-26703).
     assert [(c.repo, c.git_ref) for c in lane.sender.commands] == [
-        ("omnimarket", lane.market_sha)
+        ("omnimarket", lane.infra_sha)
     ]
 
 

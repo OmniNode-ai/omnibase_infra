@@ -241,15 +241,14 @@ def render_bifrost_contract(env: Mapping[str, str]) -> int:
 
 
 def render_resolver_config(env: Mapping[str, str]) -> int:
-    """Render the secret-resolver config when its target path is declared."""
-    if not env.get("ONEX_SECRET_RESOLVER_CONFIG_PATH"):
-        return 0
-    from omnibase_infra.runtime.render_secret_resolver_config import (
-        main as render_resolver_main,
-    )
+    """Render the secret-resolver config when its target path is declared or in cloud mode."""
+    from omnibase_infra.models.runtime import model_cloud_secret_names as cloud
+    from omnibase_infra.runtime import render_secret_resolver_config as render
 
+    if not cloud.ModelCloudSecretNames.render_required(env):
+        return 0
     _echo("[entrypoint] Rendering secret resolver config...")
-    return render_resolver_main()
+    return render.main()
 
 
 def run_preflight(env: MutableMapping[str, str]) -> int:
