@@ -42,9 +42,10 @@
 #   reasoning_lightweight, reasoning_transient, vision, stt, tts, reranker
 endpoints:
   - slot_id: coder-5090
-    host: 192.168.86.201
-    port: 8000
-    endpoint_url: http://192.168.86.201:8000
+    host: null
+    port: null
+    endpoint_url: null
+    endpoint_from_overlay: true
     url_env_var: LLM_CODER_URL
     role_env_alias: LLM_CODER_SLOW_URL
     model_hf_id: Qwen/Qwen3.8-27B
@@ -64,7 +65,7 @@ endpoints:
       tests/ci/test_vllm_qwen_coder_service_unit.py); both services are now
       co-resident.
       The SGLang description below is RETIRED. Live readback 2026-09-03T16:07Z,
-      GET http://192.168.86.201:8000/v1/models: id "Qwen3.6-35B-A3B",
+      GET <lab-host>/v1/models: one served id,
       owned_by "vllm", root /data/inference/hf-cache/Qwen3.6-35B-A3B-GPTQ-Int4,
       max_model_len 131072; a chat completion returned HTTP 200. The served
       artifact is a locally-produced GPTQ-Int4 quantization (gptqmodel 6.0.3)
@@ -82,7 +83,7 @@ endpoints:
 
       OMN-18626, live readback 2026-09-17T20:17Z: the slot moved AGAIN, and this
       is the third served id this one endpoint has carried. GET
-      http://192.168.86.201:8000/v1/models now returns exactly one id,
+      <lab-host>/v1/models now returns exactly one id,
       "Qwen3.8-27B", owned_by "vllm", root
       /data/inference/hf-cache/Qwen3.8-27B-NVFP4-RTX5090, max_model_len 131072,
       http=200 in 0.012s. Negative control the same session, same curl shape:
@@ -100,7 +101,7 @@ endpoints:
       OMN-16442 reconcile (2026-08-28) against the canonical inventory
       omni_home/docs/reference/AI_LAB_HARDWARE.md ("Last verified: 2026-08-28").
       The .201 reboot of 2026-08-23 replaced the vLLM Qwen3-Coder-30B stack with
-      SGLang + a DSpark drafter. Live readback, GET http://192.168.86.201:8000
+      SGLang + a DSpark drafter. Live readback, GET <lab-host>
       /v1/models: id "qwen3.8", owned_by "sglang", max_model_len 122880.
       model_hf_id records the BASE model (Qwen/Qwen3.8-27B, per the served
       artifact's own card); the artifact actually loaded is a locally-produced
@@ -128,7 +129,7 @@ endpoints:
       physically REMOVED from .201 for RMA at the 2026-08-23 reboot (OMN-16407,
       after three recurrences of the same GPU1 driver fault). This is not a
       degraded or stopped service — the hardware is absent. Live re-probe
-      2026-08-28: `curl http://192.168.86.201:8001/v1/models` -> exit 7
+      2026-08-28: `curl <lab-host>/v1/models` -> exit 7
       "Couldn't connect to server". The canonical inventory
       (omni_home/docs/reference/AI_LAB_HARDWARE.md, verified 2026-08-28) marks
       .201:8001 DEAD / RETIRED.
@@ -199,9 +200,9 @@ endpoints:
       owns no runtime URL variables or model identity. Re-enabling requires
       a new contract overlay and health check.
   - slot_id: embeddings-200
-    host: 192.168.86.200
-    port: 8100
-    endpoint_url: http://192.168.86.200:8100
+    host: null
+    port: null
+    endpoint_url: null
     url_env_var: null
     role_env_alias: null
     model_hf_id: mlx-community/Qwen3-Embedding-8B-4bit-DWQ
@@ -215,7 +216,7 @@ endpoints:
       `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.mlx.embeddings.plist`.
       Historical LLM_EMBEDDING_URL owner; disabled slots must not own runtime env vars.
       OMN-16442 (2026-08-28): re-probed and still down — `curl
-      http://192.168.86.200:8100/v1/models` -> exit 7. Status unchanged; this is
+      <lab-host>/v1/models` -> exit 7. Status unchanged; this is
       a confirmation, not a state change. NOTE the dimension trap: this slot's
       artifact (Qwen3-Embedding-8B-4bit-DWQ) does NOT emit the same vector width
       as the live embeddings-201 slot (Qwen/Qwen3-Embedding-0.6B, 1024-dim), so
@@ -236,7 +237,7 @@ endpoints:
       Weights cached; booted on demand for high-stakes second opinions.
       LLM_REASONING_TRANSIENT_URL seeded empty; set when process boots.
       OMN-16442 (2026-08-28): the recorded MLX endpoint .200:8103 is GONE —
-      `curl http://192.168.86.200:8103/v1/models` -> exit 7 "Couldn't connect to
+      `curl <lab-host>/v1/models` -> exit 7 "Couldn't connect to
       server". host/port/endpoint_url/model_hf_id are nulled rather than left
       describing a listener that does not exist.
       A Gemma second-opinion service DOES run on the Studio today, but it is a
