@@ -156,3 +156,10 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_autoclose_sweep_dod_verify_budget_omn26106.py tests/ci/test_autoclose_sweep_budget_refusal_live_contact_omn26106.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_26106_budget_refusal.py tests/integration/nodes/test_autoclose_sweep_budget_refusal_integration_omn26106.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26106-snappy-codec-dasnappy2
+    description: The deploy agent's own environment declares the snappy codec kafka-python imports, decodes a snappy record batch with it, and quarantines a fetch that fails before a high-water mark exists instead of stalling the poll loop (measured on h201 at 2026-11-27T06:12:04Z).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_snappy_codec_omn26106.py -q
+        cwd: .
