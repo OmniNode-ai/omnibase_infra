@@ -66,11 +66,23 @@ def test_job_failing_before_git_pull_publishes_no_empty_sha(
 def test_normal_job_publishes_the_pulled_sha(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    cmd = _dev_cmd()
-    fake = _FakeExecutor()
-    agent, _store = _make_agent(tmp_path, monkeypatch, cmd, fake)
-    published = _capture(monkeypatch)
+    """A normal job publishes the pulled sha, and only that, on a shared agent.
 
+    A job that ends before git_pull runs first on the same agent, so the
+    published list is exactly what the consumer would see: the pulled sha, and
+    no empty-sha event beside it.
+    """
+    early = _dev_cmd()
+    agent, store = _make_agent(
+        tmp_path, monkeypatch, early, _FakeExecutor(preflight_error="refused")
+    )
+    published = _capture(monkeypatch)
+    agent._run_deploy(early)
+
+    cmd = _dev_cmd()
+    store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
+    fake = _FakeExecutor()
+    monkeypatch.setattr(agent, "executor", fake)
     agent._run_deploy(cmd)
 
     assert "git_pull" in fake.calls
