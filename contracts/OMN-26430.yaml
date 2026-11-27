@@ -71,3 +71,11 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: docker exec omninode-runtime grep -q owned_database_gate /app/src/omnibase_infra/runtime/auto_wiring/handler_wiring.py
+  - id: dod-omn26430-deploy-probe-symbol-exists
+    description: "The post-deploy probe's grep pattern occurs in the source file it greps in this checkout, so the probe can pass on a build that carries the change; at the merge base the probe names serialize_owned_database, which is in no source file, and the same test fails."
+    source: manual
+    binds_ac: []
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_omn26430_deploy_probe_symbol.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
