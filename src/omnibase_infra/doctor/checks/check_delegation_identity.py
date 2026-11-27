@@ -45,13 +45,14 @@ def _evaluate_identity(onex_home: Path) -> tuple[ModelDelegationDiagnosis, bool]
         else:
             refusal_cause = cause
             refusal_detail = str(exc)
-    return module.evaluate_identity(
+    judged: tuple[ModelDelegationDiagnosis, bool] = module.evaluate_identity(
         onex_home,
         local_identity,
         refusal_cause,
         refusal_detail,
         read_gateway_block,
     )
+    return judged
 
 
 class CheckDelegationIdentity(DoctorCheckBase):

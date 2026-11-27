@@ -302,9 +302,7 @@ def test_render_diagnosis_status_message_and_category(
         assert result.message == "Diagnostic detail."
     else:
         assert result.status is EnumHealthStatusValue.UNHEALTHY
-        assert result.message == (
-            "Diagnostic detail. Fix: Repair the dependency."
-        )
+        assert result.message == ("Diagnostic detail. Fix: Repair the dependency.")
         assert "[" not in result.message
 
 

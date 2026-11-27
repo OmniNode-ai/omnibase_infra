@@ -19,6 +19,7 @@ from omnibase_infra.doctor.enum_delegation_doctor_fault import (
 from omnibase_infra.doctor.model_delegation_diagnosis import (
     ModelDelegationDiagnosis,
 )
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 
 _LOCAL_IDENTITY_FIX = "onex local init"
 _GATEWAY_READER = Callable[[Path], tuple[str, dict[str, object] | None]]
@@ -32,6 +33,14 @@ __all__ = [
 
 class HandlerCheckDelegationIdentity:
     """Own the local-identity and gateway-block diagnosis logic."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.EFFECT
 
     @staticmethod
     def handle(request: object) -> object:
