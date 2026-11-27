@@ -160,6 +160,18 @@ DAILY_VIEW_FILE = (
     / "node_projection_delegation"
     / "0067_delegation_daily_view.sql"
 )
+
+# OMN-26623: the weekly delegation-quality view's SELECT is carried by the migration
+# that creates it, for the same reason 0067's is.
+WEEKLY_QUALITY_VIEW_FILE = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "nodes"
+    / "node_projection_delegation"
+    / "0070_delegation_quality_weekly_view.sql"
+)
 BOOTSTRAP_SCRIPT = (
     REPO_ROOT / "docker" / "migrations" / "forward" / "000_create_multiple_databases.sh"
 )
@@ -485,6 +497,7 @@ def test_read_only_declarations_are_granted_select_and_never_write() -> None:
         AGGREGATE_VIEWS_FILE.read_text()
         + SAVINGS_AGGREGATE_VIEWS_FILE.read_text()
         + DAILY_VIEW_FILE.read_text()
+        + WEEKLY_QUALITY_VIEW_FILE.read_text()
     )
     select_granted = set(
         re.findall(
