@@ -1,0 +1,81 @@
+schema_version: 1.0.0
+ticket_id: OMN-26709
+title: 'AWS Dev: no lab-only address ships in the cloud runtime path, and cloud mode refuses to start with one'
+summary: >-
+  The runtime image no longer ships a lab address: the model-host list carries no address for the coder slot (it is read from the overlay, like the embeddings slot), the image bakes an address-free runner fleet file, and the secrets-store project file names the store by INFISICAL_ADDR. Cloud mode (a non-local topology profile) now refuses to boot, with CloudModeLabAddressError naming the setting, when an LLM_*_URL variable, INFISICAL_ADDR or the file named by RUNNER_FLEET_CONFIG_PATH holds a lab address.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26709-no-lab-address-in-cloud-path
+    statement: No lab-only address ships in the cloud runtime path and cloud mode refuses to start with one.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the model-host list, the runner fleet file and the secrets-store project file are read from settings or the environment, not from lab addresses in shipped files -- falsifier: a grep for the lab addresses and lab host names over the files the runtime image copies prints nothing'
+      - id: AC2
+        statement: 'AC2: in cloud mode the runtime refuses to start, with a named error, when any of those settings still holds a lab address -- falsifier: a unit test sets cloud mode with a lab address and asserts the named startup refusal'
+      - id: AC3
+        statement: 'AC3: the runtime image starts in cloud mode with none of them set to lab values -- falsifier: a lab run of the image with the cloud settings reaches /health 200'
+evidence_requirements:
+  - kind: tests
+    description: The shipped-file scan, the named cloud-mode refusal and the cloud-mode start with no lab value.
+    command: uv run --frozen pytest tests/unit/runtime/test_cloud_mode_lab_address_guard_omn26709.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26709-ac1-shipped-files-clean
+    description: >-
+      The three shipped files (contracts/llm_endpoints.yaml, the image's config/image/runner_fleet.yaml, config/infisical_projects.yaml) match no lab pattern, and the Dockerfile bakes the image fleet file.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_cloud_mode_lab_address_guard_omn26709.py -q --no-cov -n 0 -p no:randomly -k "shipped_files or dockerfile_bakes"
+        cwd: .
+  - id: dod-omn26709-ac2-cloud-mode-refusal
+    description: >-
+      Cloud mode with a lab address in LLM_CODER_URL, INFISICAL_ADDR or the fleet file raises CloudModeLabAddressError naming the setting, the preflight aborts boot, and lab mode keeps its addresses.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_cloud_mode_lab_address_guard_omn26709.py -q --no-cov -n 0 -p no:randomly -k "cloud_mode or lab_mode or preflight_aborts"
+        cwd: .
+  - id: dod-omn26709-ac3-cloud-start-no-lab-values
+    description: >-
+      Cloud mode with no lab value passes the guard; the lab preflight run of the entrypoint (known good passes, known bad refuses) is posted as a pull request comment naming the head and is not claimed by a static check.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_cloud_mode_lab_address_guard_omn26709.py -q --no-cov -n 0 -p no:randomly -k "no_lab_values_starts"
+        cwd: .
+  - id: dod-omn26709-post-deploy-guard-in-image
+    description: >-
+      Post-deploy probe: the rebuilt dev runtime container imports the cloud lab guard this change adds and carries the address-free runner fleet file the image now bakes. It reads the live container, which carries both only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime python -c 'from omnibase_infra.handlers.handler_cloud_lab_guard import refuse_in_cloud_mode'
+      - check_type: command
+        check_value: docker exec omninode-runtime grep -q '^runner_host.*invalid$' /app/config/runner_fleet.yaml
+  - id: dod-omn26709-integration-proof-guard
+    description: >-
+      Live-surface proof: the contract-declared guard node loads through the onex CLI and the entrypoint step refuses a cloud-mode boot holding a lab address in a fresh process.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: onex validate src/omnibase_infra/nodes/node_cloud_lab_guard_effect
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_cloud_lab_guard_entrypoint_integration_omn26709.py -q --no-cov -n 0 -p no:randomly
+        cwd: .

@@ -349,7 +349,7 @@ RUNTIME_IMAGE_PATHS: tuple[str, ...] = (
     "uv.lock",
     "src/**",
     "contracts/**",
-    "config/runner_fleet.yaml",
+    "config/image/runner_fleet.yaml",
     "docker/Dockerfile.runtime",
     "docker/entrypoint-runtime.sh",
     "docker/catalog/**",

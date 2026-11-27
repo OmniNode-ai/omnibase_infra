@@ -149,7 +149,13 @@ def _make_sandbox(
     (overlay_root / "llm_endpoints").mkdir(parents=True)
     (overlay_root / "llm_endpoints" / "overlay.yaml").write_text(
         yaml.safe_dump(
-            {"schema_version": 1, "endpoint_urls": {SLOT_ID: OVERLAY_ADDRESS}}
+            {
+                "schema_version": 1,
+                "endpoint_urls": {
+                    "coder-5090": "http://192.0.2.50:8000",
+                    SLOT_ID: OVERLAY_ADDRESS,
+                },
+            }
         ),
         encoding="utf-8",
     )
