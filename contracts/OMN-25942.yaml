@@ -131,7 +131,10 @@ dod_evidence:
     binds_ac: [AC6]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/handlers/test_overdue_names_newest_unbuilt_merge_omn25942.py scripts/deploy-agent/tests/unit/test_own_repo_lag_bound_omn26316.py -q --no-header -p no:cacheprovider --no-cov -n 0
+        check_value: uv run --frozen pytest tests/unit/handlers/test_overdue_names_newest_unbuilt_merge_omn25942.py tests/integration/handlers/test_overdue_names_newest_unbuilt_merge_omn25942.py -q --no-header -p no:cacheprovider --no-cov -n 0
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_own_repo_lag_bound_omn26316.py -q --no-header -p no:cacheprovider --no-cov -n 0
         cwd: .
   - id: dod-omn25942-ac6-deploy
     description: Hosted-runner probe that reads the committed publisher and idle converge at the checked-out commit and requires the newest-unbuilt selection and the lag-bound routing.
