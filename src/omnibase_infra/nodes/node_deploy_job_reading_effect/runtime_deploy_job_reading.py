@@ -855,7 +855,7 @@ def _newest_unbuilt_decision(
                     "outcome": "REQUEST",
                     "reason": "overdue_no_build",
                     "merge_sha": sha,
-                    "due_at": contained.due_at,
+                    "due_at": contained.model_dump(mode="json")["due_at"],
                     "request_id": handler_mod.request_id_for(_OWN_REPOSITORY, sha),
                 }
             )
