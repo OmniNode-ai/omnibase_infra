@@ -245,6 +245,19 @@ def test_the_dying_run_differs_from_the_healthy_one_only_in_task_class() -> None
 
 
 @pytest.mark.unit
+def test_the_healthy_run_sets_no_output_cap() -> None:
+    """OMN-26566: the healthy run is the chain canary's shape, which sets no cap.
+
+    The task class "test" carries a system prompt that asks for pytest code, so
+    a model answers past 32 tokens; the delegation passes a request cap below
+    its default straight to the provider, which ends the call with
+    ``finish_reason=length``. Three truncated calls end the run ``failed`` and
+    R-DELEG-11 and R-DELEG-12 grade SKIP (stability run 46060727920).
+    """
+    assert "max_tokens" not in probe.HEALTHY_PAYLOAD
+
+
+@pytest.mark.unit
 def test_the_header_form_is_pinned() -> None:
     assert probe.HEADER_NAME == "x-api-key"
 

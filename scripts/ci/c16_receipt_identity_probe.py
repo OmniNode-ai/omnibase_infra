@@ -114,7 +114,9 @@ WORKFLOW_TYPE: Final[str] = "delegate-skill"
 
 # The healthy run is the chain canary's own liveness shape, so a green here is
 # evidence about the delegation the lane already serves every two hours rather
-# than about a bespoke probe-only path.
+# than about a bespoke probe-only path. It sets no output cap (OMN-26566): the
+# task class "test" asks the model for pytest code, and a cap of 32 tokens ended
+# every call with finish_reason=length, so the run failed before it had a receipt.
 HEALTHY_PAYLOAD: Final[dict[str, Any]] = {
     "prompt": (
         "Reply with the single word: alive. This is an automated C16 "
@@ -122,7 +124,6 @@ HEALTHY_PAYLOAD: Final[dict[str, Any]] = {
     ),
     "task_type": "test",
     "source": "external-client",
-    "max_tokens": 32,
 }
 
 # The dying run differs from the healthy one in exactly one field.
