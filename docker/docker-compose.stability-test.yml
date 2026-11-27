@@ -474,17 +474,6 @@ services:
       BIFROST_VERIFY_ENDPOINTS: ${STABILITY_TEST_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS}
       ONEX_SECRET_RESOLVER_CONFIG_PATH: ${STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH}
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON}
-      # OMN-26566: BYOK credential read, by reference only. The store-backed
-      # config carries the tenant_inference_credentials namespace rule
-      # (contracts/services/runtime_policy.contract.yaml); the identity and
-      # project id come from the operator env, never from this file. `:-` so a
-      # render without the identity still succeeds; a blank identity is loud at
-      # wiring time (build_lane_infisical_handler names each blank variable).
-      INFISICAL_ADDR: ${STABILITY_TEST_RUNTIME_INFISICAL_ADDR:-}
-      INFISICAL_PROJECT_ID: ${STABILITY_TEST_RUNTIME_INFISICAL_PROJECT_ID:-}
-      INFISICAL_CLIENT_ID: ${STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_ID:-}
-      INFISICAL_CLIENT_SECRET: ${STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_SECRET:-}
-      INFISICAL_ENVIRONMENT_SLUG: "dev"
       OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${STABILITY_TEST_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-main
       # OMN-20593: this lane's main runtime publishes the runtime tick
@@ -610,17 +599,6 @@ services:
       BIFROST_VERIFY_ENDPOINTS: ${STABILITY_TEST_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS}
       ONEX_SECRET_RESOLVER_CONFIG_PATH: ${STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH}
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON}
-      # OMN-26566: BYOK credential read, by reference only. The store-backed
-      # config carries the tenant_inference_credentials namespace rule
-      # (contracts/services/runtime_policy.contract.yaml); the identity and
-      # project id come from the operator env, never from this file. `:-` so a
-      # render without the identity still succeeds; a blank identity is loud at
-      # wiring time (build_lane_infisical_handler names each blank variable).
-      INFISICAL_ADDR: ${STABILITY_TEST_RUNTIME_INFISICAL_ADDR:-}
-      INFISICAL_PROJECT_ID: ${STABILITY_TEST_RUNTIME_INFISICAL_PROJECT_ID:-}
-      INFISICAL_CLIENT_ID: ${STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_ID:-}
-      INFISICAL_CLIENT_SECRET: ${STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_SECRET:-}
-      INFISICAL_ENVIRONMENT_SLUG: "dev"
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
       # OMN-20593: the two prune effects on this role resolve their local
       # archive directory from these names on every runtime tick, and this lane
