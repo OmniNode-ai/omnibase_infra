@@ -23,6 +23,11 @@ requirements:
         statement: "AC25856004: with boot_subscriptions policy gate_required, a contract on a retained non-command topic is not joined at boot and a priority contract, a command contract in use and a contract on an unreadable topic are -- falsifier: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn25856_gate_required_boot_set.py fails at origin/dev (no gate_required policy) and passes on the PR branch"
       - id: AC25856005
         statement: "AC25856005: a deferred contract joins from earliest when the first record reaches one of its topics, so that record is not lost -- falsifier: the test_a_deferred_contract_starts_from_earliest_on_its_first_record case fails at origin/dev and passes on the PR branch"
+  - id: req-omn25856-shipped-runtime-config-loads
+    statement: The shipped contracts/runtime/runtime_config.yaml loads through the kernel's own loader, so a boot policy the runtime model refuses fails in CI with the message the boot printed.
+    acceptance:
+      - id: AC25856006
+        statement: "AC25856006: load_runtime_config on the shipped contracts directory returns the policy the yaml declares, and a policy the model refuses raises naming boot_subscriptions.policy -- falsifier: with the pre-gate_required model_boot_subscriptions_config.py (origin/dev at 0f84c5c8d) the shipped-file case fails with Input should be 'all' or 'in_use'"
 evidence_requirements:
   - kind: tests
     description: The publisher-malformed refusal, the handler's quarantine count and the transient-failure control.
@@ -32,6 +37,14 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn25856-shipped-runtime-config-loads
+    description: The shipped runtime_config.yaml loads through load_runtime_config and a refused boot policy raises naming boot_subscriptions.policy; the same file fails against the model at 0f84c5c8d with Input should be 'all' or 'in_use'.
+    source: manual
+    binds_ac: [AC25856006]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_omn25856_shipped_runtime_config_loads.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
   - id: dod-omn25856-malformed-not-replayed
     description: A publisher_malformed dead letter is refused by should_replay and counted quarantined by the handler with no replay publish; transient failure classes are still replayed.
     source: manual
