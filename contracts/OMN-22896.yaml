@@ -7,6 +7,13 @@ summary: security-scan.yml gains a secret-scan job on a hosted runner that runs 
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn22896-ac1-workflow-shape:
+      - label: AC1
+        criterion_hash: 804ada866f5dbcd9762868bde07dcae54a8cf0b96aea0deee415596fffa050b5
+        proposed_by: lane=dod-closeout-bind-2026-11-27T0745Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-27T0745Z-c3
 requirements:
   - id: req-omn22896-secret-scan
     statement: The repository's security scan runs a secret scanner on a hosted runner with a control that can fail.
