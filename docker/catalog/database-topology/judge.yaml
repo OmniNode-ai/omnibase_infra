@@ -165,12 +165,6 @@ databases:
             schema: omninode_internal
           - object_type: TABLE
             objects:
-              - lane_work_terminal
-            privileges:
-              - SELECT
-            schema: omninode_internal
-          - object_type: TABLE
-            objects:
               - baselines_breakdown
               - baselines_comparisons
               - baselines_quality_snapshots
@@ -553,5 +547,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: f70073a90e75eba61bf46a383e09e52fb337cc267ac93b929aaf009d9ad886aa
+  sha256: 61373a29b946bcd3b05c595c16feec99b3a943eb48d3fbd50e1fb37b7fdd256c
 topology_instance: local

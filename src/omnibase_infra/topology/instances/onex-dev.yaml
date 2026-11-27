@@ -169,11 +169,6 @@ databases:
             schema: omninode_internal
           - object_type: TABLE
             objects:
-              - lane_work_terminal
-            privileges: [SELECT]
-            schema: omninode_internal
-          - object_type: TABLE
-            objects:
               - baselines_breakdown
               - baselines_comparisons
               - baselines_quality_snapshots
