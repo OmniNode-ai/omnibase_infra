@@ -63,7 +63,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit -q --no-cov -n 0 -p no:randomly -k compose_settings_match
         cwd: .
-  - id: dod-omn25942-ac6-h201-install-job-record
+  - id: dod-omn25942-ac7-h201-install-job-record
     description: 'Local Done gate for the install proof: reads dev job 3731df3e on h201 (git_sha 0c38cce0230c, omninode-runtime image revision 0c38cce0230c) and exits 0 only when its phase verification reads success and its status reads success. Reads the live h201 job record, so a hosted runner cannot pass it.'
     source: manual
     execution_scope: local_done_gate
@@ -145,7 +145,7 @@ dod_evidence:
   - id: dod-omn25942-ac6-deploy
     description: Hosted-runner probe that reads the committed publisher and idle converge at the checked-out commit and requires the newest-unbuilt selection and the lag-bound routing.
     source: manual
-    binds_ac: [AC7]
+    binds_ac: [AC6]
     checks:
       - check_type: command
         check_value: >-
