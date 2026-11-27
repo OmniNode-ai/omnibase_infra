@@ -8,7 +8,7 @@ bus is absent, so the sink records what the contract-declared topic would carry.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +16,14 @@ import pytest
 import yaml
 
 from omnibase_infra.enums.enum_dev_recreate_cause import EnumDevRecreateCause
+from omnibase_infra.handlers.dev_build_health.handler_dev_build_health import (
+    HandlerDevBuildHealth,
+)
 from omnibase_infra.handlers.dev_container_recreate.handler_dev_container_recreate import (
     HandlerDevContainerRecreate,
+)
+from omnibase_infra.models.model_dev_build_health_request import (
+    ModelDevBuildHealthRequest,
 )
 from omnibase_infra.models.model_dev_container_reading import ModelDevContainerReading
 from omnibase_infra.models.model_dev_container_recreate_request import (
@@ -75,6 +81,48 @@ def test_same_build_recreate_is_published_on_the_contract_declared_topic() -> No
     publisher = DevRollEventsPublisher(
         lambda topic, key, payload: sent.append((topic, key, payload)) or True, topics
     )
-    assert publisher.container_recreated(event) is True
+    assert publisher.publish_observed("dev_container_recreated", event) is True
     assert sent[0][0] == topics["dev_container_recreated"]
     assert sent[0][2]["same_build"] is True
+
+
+def test_build_health_known_good_and_known_bad_are_published_on_the_contract_topic() -> (
+    None
+):
+    """OMN-26703: the contract's own limit judges a build, and the verdict rides its declared topic."""
+    contract: dict[str, Any] = yaml.safe_load(_CONTRACT.read_text(encoding="utf-8"))
+    topics = contract["topics"]
+    limit = int(contract["settings"]["build_health_limit_seconds"])
+    started = datetime(2026, 11, 26, 19, 24, 53, tzinfo=UTC)
+    sent: list[tuple[str, str, dict[str, Any]]] = []
+    publisher = DevRollEventsPublisher(
+        lambda topic, key, payload: sent.append((topic, key, payload)) or True, topics
+    )
+
+    def judge(healthy_after_seconds: int, order: str) -> Any:
+        reading = _reading("c3", started).model_copy(
+            update={
+                "image_revision": "9f77818ea0c96bc05ecffcbbfb621204bed0e6fa",
+                "health_status": "healthy",
+                "first_healthy_at": started + timedelta(seconds=healthy_after_seconds),
+            }
+        )
+        return HandlerDevBuildHealth().handle(
+            ModelDevBuildHealthRequest(
+                reading=reading,
+                previous_image_revision="2b0c718bb7a89f25e69b5adaaa0f3949cda86543",
+                revision_order=order,
+                previous_no_rollback_since=None,
+                limit_seconds=limit,
+            )
+        )
+
+    good = judge(14, "forward")
+    bad = judge(limit + 60, "back")
+    assert good is not None and bad is not None
+    assert publisher.publish_observed("dev_build_health", good) is True
+    assert publisher.publish_observed("dev_build_health", bad) is True
+
+    assert [topic for topic, _, _ in sent] == [topics["dev_build_health"]] * 2
+    assert (sent[0][2]["under_limit"], sent[0][2]["rolled_back"]) == (True, False)
+    assert (sent[1][2]["under_limit"], sent[1][2]["rolled_back"]) == (False, True)
