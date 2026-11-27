@@ -30,6 +30,9 @@ LlmEndpointEnv = executor_mod.load_dev_boot_guard(
 
 SLOT_ID = "embeddings-201"
 OVERLAY_ADDRESS = "http://192.0.2.50:8100"
+# the coder slot is also overlay-addressed (OMN-26709), so every overlay names it
+CODER_SLOT_ID = "coder-5090"
+CODER_ADDRESS = "http://192.0.2.50:8000"
 STALE_ADDRESS = "http://192.0.2.50:8002"
 BACKEND_ID = "local-embedding"
 EMBEDDING_PATH = "/v1/embeddings"
@@ -58,7 +61,12 @@ def _overlay_home(root: Path, endpoint_urls: dict[str, str] | None) -> Path:
         overlay = repo / "overlays" / "llm_endpoints" / "overlay.yaml"
         overlay.parent.mkdir(parents=True)
         overlay.write_text(
-            yaml.safe_dump({"schema_version": 1, "endpoint_urls": endpoint_urls}),
+            yaml.safe_dump(
+                {
+                    "schema_version": 1,
+                    "endpoint_urls": {CODER_SLOT_ID: CODER_ADDRESS, **endpoint_urls},
+                }
+            ),
             encoding="utf-8",
         )
         _git(repo, "add", str(overlay.relative_to(repo)))
@@ -148,7 +156,10 @@ def test_golden_without_a_lane_overlay_dir_renders_only_the_slot_env(
 ) -> None:
     rendered = _render(world["environ"], None)
 
-    assert rendered.env == {"LLM_EMBEDDING_URL": OVERLAY_ADDRESS}
+    assert rendered.env == {
+        "LLM_CODER_URL": CODER_ADDRESS,
+        "LLM_EMBEDDING_URL": OVERLAY_ADDRESS,
+    }
     assert rendered.lane_overlay_dir is None
 
 
@@ -249,7 +260,10 @@ def test_the_overlay_is_read_at_the_ref_not_the_working_tree(
     overlay = world["home"] / "overlays" / "llm_endpoints" / "overlay.yaml"
     overlay.write_text(
         yaml.safe_dump(
-            {"schema_version": 1, "endpoint_urls": {SLOT_ID: STALE_ADDRESS}}
+            {
+                "schema_version": 1,
+                "endpoint_urls": {CODER_SLOT_ID: CODER_ADDRESS, SLOT_ID: STALE_ADDRESS},
+            }
         ),
         encoding="utf-8",
     )
@@ -324,9 +338,9 @@ def test_seam_the_real_contract_binds_the_slot_the_overlay_names() -> None:
     slots = {
         e["slot_id"]: e for e in contract["endpoints"] if e.get("endpoint_from_overlay")
     }
+    assert set(slots) == {CODER_SLOT_ID, SLOT_ID}
     declared = LlmEndpointEnv.declaration(executor_mod)
 
-    assert set(slots) == {SLOT_ID}
     slot = slots[SLOT_ID]
     assert slot["url_env_var"] == "LLM_EMBEDDING_URL"
     assert slot["lane_overlay_binding"] == {
