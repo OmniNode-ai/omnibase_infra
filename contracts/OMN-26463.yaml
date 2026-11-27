@@ -109,3 +109,10 @@ dod_evidence:
       - check_type: command
         check_value: onex validate src/omnibase_infra/nodes/node_runtime_canary_receipt_effect
         cwd: .
+  - id: dod-omn26463-canary-principal
+    description: The lab-only principal runtime-canary-h051 has bindings and grants derived by the grant derivation node, reading the dev candidate topics and writing the receipt topic only.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_runtime_canary_h051_grants_omn26463.py -q
+        cwd: .
