@@ -46,7 +46,7 @@ import tempfile
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -210,7 +210,7 @@ def followed_branch(
     return pin.branch
 
 
-def follow(repo: str, tag: str, state_dir: Path) -> dict[str, Any]:
+def follow(repo: str, tag: str, state_dir: Path) -> dict[str, object]:
     """The fields that make a rebuild a stability follow of ``tag`` (OMN-24562).
 
     ``sibling_tags`` names the dev tag the build stages for ``repo``. While a pin is
@@ -222,7 +222,7 @@ def follow(repo: str, tag: str, state_dir: Path) -> dict[str, Any]:
     open pull request (``open_pr``) and the rollback declaration that goes with a
     deliberate off-lineage build.
     """
-    fields: dict[str, Any] = {"sibling_tags": {repo: tag}}
+    fields: dict[str, object] = {"sibling_tags": {repo: tag}}
     pin = read_active_pin(state_dir, datetime.now(UTC))
     if pin is not None:
         fields["git_ref"] = pin.head
