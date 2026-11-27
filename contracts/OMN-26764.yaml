@@ -1,0 +1,63 @@
+schema_version: "1.0.0"
+ticket_id: OMN-26764
+title: "A fix is installed on the dev lane from its branch and commit for a live proof, with no pull request number required"
+summary: "The dev-lane branch install declared pr as a required positive integer, so a fix could not be installed on dev before a change was open. The pull request number is now optional, an install declared without an id is keyed by repository and the first 12 characters of its sha, and a dev roll whose running build contains the sha removes the install by itself."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26764-no-pr-install
+    statement: A branch install takes a repository, a branch and a full sha with no pull request number, and is removed by a roll that contains the sha.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the dev-lane branch install takes a repository, a branch and a full commit sha with no pull request number, records them, and the pull request number is optional -- falsifier: uv run pytest tests -k dev_lane_branch_install_no_pr"
+      - id: AC2
+        statement: "AC2: an install by branch and sha is removed the same way an install by pull request is, and a dev roll of a build that contains that sha removes it by itself -- falsifier: uv run pytest tests -k dev_lane_branch_install_removed_on_roll"
+      - id: AC3
+        statement: "AC3: one fix installed on dev by branch and sha alone runs there, read from the dev runtime log or a ticket transition -- falsifier: the dev lane install record and the runtime log line naming the installed sha"
+evidence_requirements:
+  - kind: tests
+    description: The no-PR install tests pass at the pushed head and fail at the base commit.
+    command: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_no_pr_omn26764.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26764-ac1
+    description: 'AC1: an install registers with no pr, keyed repo and sha12, from the command line without --pr.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_no_pr_omn26764.py -q -k dev_lane_branch_install_no_pr
+        cwd: .
+  - id: dod-omn26764-ac2
+    description: 'AC2: a no-PR install is released as merged when the running build contains its sha, kept when it does not, and released by operator the same way.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_no_pr_omn26764.py -q -k dev_lane_branch_install_removed_on_roll
+        cwd: .
+  - id: dod-omn26764-ac3
+    description: 'hosted proxy for AC3: the existing install, apply and readback tests pass with the change; the lab install reading is on the pull request Lab line.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q
+        cwd: .
+  - id: dod-omn26764-deploy-probe
+    description: 'The handler on the dev branch declares the pull request number optional; the probe exits 0 once the change is merged and 1 at the merge base.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_lane_branch_install.py?ref=dev" --jq .content | base64 -d | grep -qF "pr: int | None"'
+        cwd: .

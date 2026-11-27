@@ -60,7 +60,7 @@ named by the caller.
 Command line::
 
     python -m omnibase_infra.handlers.handler_dev_lane_branch_install register \\
-        --state-dir D --lane dev --id ID --repo omnimarket --pr 4312 --branch B \\
+        --state-dir D --lane dev [--id ID] --repo omnimarket [--pr 4312] --branch B \\
         --head SHA --ticket OMN-n --registered-by LANE --service omninode-runtime \\
         --expires-in-hours 48 --file /app/.../handler.py=/local/copy/handler.py
     python -m omnibase_infra.handlers.handler_dev_lane_branch_install check \\
@@ -343,9 +343,9 @@ def register(
     store: DevLaneBranchInstallStore,
     *,
     lane: str,
-    install_id: str,
+    install_id: str | None,
     repo: str,
-    pr: int,
+    pr: int | None,
     branch: str,
     head: str,
     ticket: str,
@@ -368,6 +368,7 @@ def register(
         raise DevLaneBranchInstallRefusedError(
             f"lane {lane!r} refused: branch installs are for the dev lane only"
         )
+    install_id = install_id or f"{repo}-{head[:12]}"
     when = (now or datetime.now(UTC)).astimezone(UTC)
     expires = expires_at.astimezone(UTC)
     if expires <= when:
@@ -701,8 +702,7 @@ class HandlerDevLaneBranchInstall:
                     self.store,
                     install.id,
                     EnumDevLaneBranchInstallReleaseReason.EXPIRED,
-                    f"expired {_utc(install.expires_at)} before "
-                    f"{install.repo}#{install.pr} merged",
+                    f"expired {_utc(install.expires_at)} before {install.label} merged",
                     now=now,
                 )
             else:
@@ -718,10 +718,10 @@ class HandlerDevLaneBranchInstall:
                 )
             if done is not None:
                 logger.info(
-                    "branch install RELEASED: id=%s repo=%s pr=#%s reason=%s detail=%s",
+                    "branch install RELEASED: id=%s repo=%s pr=%s reason=%s detail=%s",
                     install.id,
                     install.repo,
-                    install.pr,
+                    install.pr_text,
                     done.reason.value,
                     done.detail,
                 )
@@ -862,12 +862,12 @@ def report_one(readback: ModelDevLaneBranchInstallReadback) -> None:
         if row.state in _WHOLE:
             continue
         logger.error(
-            "BRANCH-INSTALL-MISSING: id=%s repo=%s pr=#%s head=%s ticket=%s service=%s "
+            "BRANCH-INSTALL-MISSING: id=%s repo=%s pr=%s head=%s ticket=%s service=%s "
             "container=%s file=%s state=%s expected_sha256=%s observed_sha256=%s "
             "detail=%s friction_type=branch_install_missing",
             readback.install_key,
             readback.repo,
-            readback.pr,
+            readback.pr_text,
             readback.head[:12],
             readback.ticket,
             row.service,
@@ -887,11 +887,11 @@ def report(receipt: ModelDevLaneBranchInstallReceipt) -> None:
             continue
         if readback.state is EnumDevLaneBranchInstallState.REAPPLIED:
             logger.warning(
-                "branch install REAPPLIED: id=%s repo=%s pr=#%s head=%s files=%s "
+                "branch install REAPPLIED: id=%s repo=%s pr=%s head=%s files=%s "
                 "readback=sha256-match restarted=%s",
                 readback.install_key,
                 readback.repo,
-                readback.pr,
+                readback.pr_text,
                 readback.head[:12],
                 len(readback.files),
                 ",".join(c[:12] for c in receipt.restarted) or "none",
@@ -981,7 +981,7 @@ def git_merged_probe(
         if contained.returncode != 0:
             return None
         return (
-            f"{install.repo}#{install.pr} merged as {merge[:12]} on {dev_ref}; the "
+            f"{install.label} merged as {merge[:12]} on {dev_ref}; the "
             f"running image carries it (build ref {running[:12]})"
         )
 
@@ -1007,7 +1007,7 @@ def _merge_commit(
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    if log.returncode == 0:
+    if install.pr is not None and log.returncode == 0:
         for line in log.stdout.splitlines():
             sha, _, subject = line.partition("\x1f")
             if COMMIT_PATTERN.match(sha) and subject.rstrip().endswith(suffix):
@@ -1068,9 +1068,9 @@ def _build_parser() -> argparse.ArgumentParser:
             )
     reg = sub.choices["register"]
     reg.add_argument("--lane", required=True)
-    reg.add_argument("--id", required=True, dest="install_id")
+    reg.add_argument("--id", dest="install_id")
     reg.add_argument("--repo", required=True)
-    reg.add_argument("--pr", required=True, type=int)
+    reg.add_argument("--pr", type=int)
     reg.add_argument("--branch", required=True)
     reg.add_argument("--head", required=True)
     reg.add_argument("--ticket", required=True)
