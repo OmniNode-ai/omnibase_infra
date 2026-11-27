@@ -14,7 +14,7 @@ requirements:
       - id: "AC2"
         statement: "AC2: onex doctor and onex local identity agree on whether an identity is configured; Falsifier: tests/unit/doctor/test_omn26616_ac2_identity_agreement.py::test_local_identity_present_is_not_no_identity"
       - id: "AC4"
-        statement: "AC4: on a working customer install both commands exit 0; Falsifier: the dod-omn26616-integration-proof item below"
+        statement: "AC4: on a working customer install both commands exit 0; Falsifier: tests/integration/doctor/test_omn26616_identity_check_integration.py (the dod-omn26616-integration-proof item below runs it)"
 evidence_requirements:
   - kind: "tests"
     description: "Run the unit doctor test suite to verify identity agreement, refusal handling, and message wording."
@@ -34,12 +34,11 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/doctor/test_omn26616_ac2_identity_agreement.py tests/unit/doctor -q -n 0 --no-cov -p no:cacheprovider"
         cwd: "."
   - id: "dod-omn26616-integration-proof"
-    description: "The headless run of the OMN-26616 doctor tests on a lab host at the pushed head; hosted CI cannot reach the lab runner so only the local Done gate runs it."
+    description: "AC4: on a working customer install the identity check judges a readable identity healthy and an unreadable one as a plain refusal that never echoes upstream text, end to end through the contract's input model and handler."
     source: "manual"
-    execution_scope: "local_done_gate"
     binds_ac:
       - "AC4"
     checks:
-      - check_type: "command"
-        check_value: "env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha \"$(git rev-parse HEAD)\" --lane dod-integration-proof-26616 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/doctor -q -n 0 --no-cov -p no:cacheprovider"
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/integration/doctor/test_omn26616_identity_check_integration.py -q -n 0 --no-cov -p no:cacheprovider"
         cwd: "."
