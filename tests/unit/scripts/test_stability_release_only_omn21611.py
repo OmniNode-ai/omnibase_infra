@@ -168,7 +168,7 @@ def _run_refresh(
     overlay_root = tmp_path / "overlay-root"
     (overlay_root / "llm_endpoints").mkdir(parents=True, exist_ok=True)
     (overlay_root / "llm_endpoints" / "overlay.yaml").write_text(
-        "schema_version: 1\nendpoint_urls:\n  embeddings-201: http://192.0.2.50:8100\n"
+        "schema_version: 1\nendpoint_urls:\n  embeddings-201: http://192.0.2.50:8100\n  coder-5090: http://192.0.2.51:8200\n"
     )
     env["ONEX_SKILL_OVERLAY_ROOTS"] = str(overlay_root)
     for key in ("ONEX_DEPLOY_REASON", "ONEX_DEPLOY_GRANT_ACK"):

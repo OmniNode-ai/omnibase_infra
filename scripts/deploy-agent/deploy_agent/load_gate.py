@@ -283,8 +283,8 @@ class LoadGate:
         self._clock = clock
         self._last_check: float | None = None
 
-    def check(self) -> ModelLoadGateDecision:
-        """A fresh reading and its verdict. Stamps the re-check clock."""
+    def check(self, cmd: object | None = None) -> ModelLoadGateDecision:
+        """A fresh reading and its verdict; the command is the window gate's, not the host's (OMN-25912)."""
         self._last_check = self._clock()
         return decide(self.thresholds, self._read())
 

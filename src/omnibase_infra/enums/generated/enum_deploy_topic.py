@@ -21,4 +21,5 @@ class EnumDeployTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     EVT_DEV_LANE_DRIFT_V1 = contract_topic_value('services/topics.yaml', 'deploy', 'EVT_DEV_LANE_DRIFT_V1')  # onex.evt.deploy.dev-lane-drift.v1
+    EVT_DEV_MERGE_BUILD_OVERDUE_V1 = contract_topic_value('services/topics.yaml', 'deploy', 'EVT_DEV_MERGE_BUILD_OVERDUE_V1')  # onex.evt.deploy.dev-merge-build-overdue.v1
     EVT_DEV_TAG_HEARTBEAT_V1 = contract_topic_value('services/topics.yaml', 'deploy', 'EVT_DEV_TAG_HEARTBEAT_V1')  # onex.evt.deploy.dev-tag-heartbeat.v1

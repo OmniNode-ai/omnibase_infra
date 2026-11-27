@@ -246,6 +246,13 @@ replay_policy:
   target_replay_bound:
     max_replays: 50
     window_seconds: 60
+  # OMN-26316: a dispatch deadline expiry leaves its handler running,
+  # abandoned, so a replay adds one more orphan dispatch instead of retrying.
+  # Four replays of one dod-verify-start intent on the dev lane (2026-11-25
+  # 19:23Z to 19:53Z) passed the runtime's orphan limit of 3 and /health
+  # answered 503. The dead letters of one correlation are replayed at most
+  # this many times together, then quarantined by name.
+  deadline_exceeded_max_replays: 0
 # Metadata
 metadata:
   description: >

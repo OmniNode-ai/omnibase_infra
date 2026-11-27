@@ -1,0 +1,40 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26678"
+title: "A replayed rebuild-completed event carries the sha the deploy job resolved"
+summary: "The deploy agent's publish retry rebuilt the completion event with an empty git_sha, so the build delegation checks node refused it and a dev build had no check result. The agent now keeps the resolved sha on the job record and the retry reads it from there. This change holds the publisher half of AC3 of the ticket only."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-retried-publish-git-sha"
+    statement: "A rebuild-completed event published by the retry loop names the commit its job resolved, and a job that resolved none reports none."
+    acceptance:
+      - id: "AC2667801"
+        statement: "AC2667801: a completion event replayed after the agent's per-job sha was reset carries the sha git_pull resolved -- falsifier: the replayed event's git_sha is empty"
+      - id: "AC2667802"
+        statement: "AC2667802: failing control: a job that never resolved a sha replays an empty git_sha, never another job's -- falsifier: the replayed event carries the agent's current sha"
+evidence_requirements:
+  - kind: "tests"
+    description: "The retry tests pass at the head; the test file is absent at the merge base."
+    command: "uv run --frozen pytest scripts/deploy-agent/tests/unit/test_retried_publish_carries_git_sha_omn26678.py -q -n 0"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn26678-retry-sha"
+    description: "Hosted probe. The replayed event carries the resolved sha; the test fails at the merge base, where the retry passes an empty string."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest scripts/deploy-agent/tests/unit/test_retried_publish_carries_git_sha_omn26678.py -k resolved_sha -q -n 0"
+        cwd: "."
+    binds_ac: ["AC2667801"]
+  - id: "dod-omn26678-retry-sha-control"
+    description: "Hosted probe. A job with no resolved sha replays an empty one, not the agent's current sha."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest scripts/deploy-agent/tests/unit/test_retried_publish_carries_git_sha_omn26678.py -k unresolved -q -n 0"
+        cwd: "."
+    binds_ac: ["AC2667802"]

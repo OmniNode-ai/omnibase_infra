@@ -17,6 +17,11 @@ requirements:
         statement: 'AC26152003: the existing dispatch engine tests still pass -- falsifier: uv run pytest tests/unit/runtime/test_message_dispatch_engine.py -q -n 0 --no-cov -p no:cacheprovider reports a failure at the fixed head'
       - id: AC26152004
         statement: 'AC26152004: on the running dev runtime after the deploy agent applies the change, the log of omninode-runtime holds no INFO "Dispatch started" line in a 15 minute window -- falsifier: the probe command exits non-zero'
+  - id: req-omn26152-applier-log-volume
+    statement: A successful result apply and a successful intent execution cost no INFO line at the runtime's INFO level.
+    acceptance:
+      - id: AC26152005
+        statement: 'AC26152005: a test built from the recorded 30 minute dev log sample (fixtures/omn26152/dev_runtime_log_sample_20261126T0607Z.json, 9,894 of 36,161 lines) finds no applier "Published output event" or "Delegated" line and no executor "Intent executed" line at INFO, and finds them at DEBUG -- falsifier: uv run pytest tests/unit/runtime/test_result_applier_log_volume_omn26152.py -q -n 0 --no-cov -p no:cacheprovider passes at the unfixed base or fails at the fixed head'
 evidence_requirements:
   - kind: tests
     description: The OMN-26152 log volume test and the existing dispatch engine tests pass at the pushed head.
@@ -79,4 +84,22 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/runtime/test_message_dispatch_engine_log_volume_integration_omn26152.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26152-ac26152005
+    description: 'AC26152005: the applier and executor success lines are DEBUG-only; the test file is absent at the merge base so the check fails there (must-fail control).'
+    source: manual
+    binds_ac:
+      - AC26152005
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_result_applier_log_volume_omn26152.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26152-integration-proof-applier-stream
+    description: 'AC26152005: a real applier driving a real executor into a real INFO stream handler renders no success line; the test file is absent at the merge base so the check fails there (must-fail control).'
+    source: manual
+    binds_ac:
+      - AC26152005
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_result_applier_log_volume_integration_omn26152.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .

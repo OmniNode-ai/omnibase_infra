@@ -39,7 +39,7 @@ def test_the_script_runs_no_onex_launcher() -> None:
 
 def test_the_script_runs_the_build_loop_through_the_core_module() -> None:
     assert (
-        "uv run python -m omnibase_core.cli.cli_commands run build_loop_workflow.yaml"
+        "env ONEX_CLI_SHOW_ALL_COMMANDS=1 uv run python -m omnibase_core.cli.cli_commands run build_loop_workflow.yaml"
         in SCRIPT.read_text()
     )
 

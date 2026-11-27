@@ -226,7 +226,7 @@ class IntentExecutor:
             # register_handler() accepts ProtocolIntentEffect.
             await handler.execute(payload, correlation_id=effective_correlation_id)
 
-            logger.info(
+            logger.debug(
                 "Intent executed: intent_type=%s handler=%s correlation_id=%s",
                 intent_type,
                 type(handler).__name__,

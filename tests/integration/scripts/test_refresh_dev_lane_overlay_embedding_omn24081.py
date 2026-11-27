@@ -71,7 +71,7 @@ def _make_sandbox(tmp_path: Path) -> tuple[dict[str, str], Path]:
     overlay_root = tmp_path / "overlay-root"
     (overlay_root / "llm_endpoints").mkdir(parents=True)
     (overlay_root / "llm_endpoints" / "overlay.yaml").write_text(
-        "schema_version: 1\nendpoint_urls:\n  embeddings-201: http://192.0.2.50:8100\n"
+        "schema_version: 1\nendpoint_urls:\n  coder-5090: http://192.0.2.50:8000\n  embeddings-201: http://192.0.2.50:8100\n"
     )
 
     operator_env = tmp_path / "operator.env"
@@ -152,7 +152,7 @@ def test_error_an_overlay_without_the_embedding_slot_is_refused(
     overlay_root = tmp_path / "overlay-root"
     (overlay_root / "llm_endpoints").mkdir(parents=True)
     (overlay_root / "llm_endpoints" / "overlay.yaml").write_text(
-        "schema_version: 1\nendpoint_urls:\n  some-other-slot: http://192.0.2.50:8100\n"
+        "schema_version: 1\nendpoint_urls:\n  coder-5090: http://192.0.2.50:8000\n  some-other-slot: http://192.0.2.50:8100\n"
     )
 
     operator_env = tmp_path / "operator.env"

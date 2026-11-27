@@ -77,6 +77,7 @@ def _request(
             "now": now,
             "window_seconds": _WINDOW,
             "jobs": kept,
+            "descendant_shas": [*merge["descendant_shas"], merge["merge_sha"]],
         }
     )
 
@@ -161,6 +162,7 @@ def test_a_failed_job_that_carries_the_merge_is_left_to_the_failed_head_gate() -
         "accepted_at": "2026-11-23T18:20:00Z",
         "status": "failed",
         "git_ref": "origin/dev",
+        "built_sha": "d" * 40,
     }
     decision = _decide(
         _request("2026-11-23T19:00:00Z", drop=("2098b18c",), extra=(failed,))
@@ -197,6 +199,7 @@ def test_a_job_pinned_to_the_merge_sha_itself_satisfies_it() -> None:
         "accepted_at": "2026-11-23T18:20:00Z",
         "status": "success",
         "git_ref": "a27c0c218555c93421803e9f6dc4dd95c28b3da5",
+        "built_sha": "a27c0c218555c93421803e9f6dc4dd95c28b3da5",
     }
     decision = _decide(
         _request("2026-11-23T19:00:00Z", drop=("2098b18c",), extra=(pinned,))

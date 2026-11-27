@@ -92,6 +92,17 @@ class LazyStartFrontDoor:
         """The contracts whose wake completed: started and committed."""
         return frozenset(self._serving)
 
+    @property
+    def awaiting_first_request(self) -> frozenset[str]:
+        """The dormant contracts no request has reached yet (OMN-26316).
+
+        Dormant, not serving and with no recorded wake failure: their consumers are
+        absent from the bus registry by design until a first message or request
+        wakes them. A contract whose wake failed is not listed, so it is judged by
+        the live registry like any other that should be attached.
+        """
+        return frozenset(self._dormant - self._serving - self.wake_failures.keys())
+
     def serving_status(self) -> ModelLazyStartServingStatus:
         """The serving set and the failed wakes, as ``/ready`` reports them (OMN-26316)."""
         serving = tuple(sorted(self._serving))

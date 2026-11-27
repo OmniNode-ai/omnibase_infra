@@ -1074,7 +1074,7 @@ jobs:
       # whole-tree CI counterpart so the header requirement still holds
       # over the entire tree, not only a developer's staged diff.
       - name: SPDX header check (OMN-19612)
-        run: uv run --frozen python -m omnibase_core.cli.cli_commands spdx validate src tests scripts
+        run: env ONEX_CLI_SHOW_ALL_COMMANDS=1 uv run --frozen python -m omnibase_core.cli.cli_commands spdx validate src tests scripts
 
       - name: Census health and shared restart bounds (OMN-19416)
         run: |
@@ -2750,7 +2750,7 @@ jobs:
       - name: Check if onex compliance command exists
         id: check-command
         run: |
-          if uv run python -m omnibase_core.cli.cli_commands compliance check --help >/dev/null 2>&1; then
+          if env ONEX_CLI_SHOW_ALL_COMMANDS=1 uv run python -m omnibase_core.cli.cli_commands compliance check --help >/dev/null 2>&1; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::onex compliance check command not available yet — skipping"
@@ -2762,7 +2762,7 @@ jobs:
         if: steps.check-command.outputs.available == 'true'
         run: |
           mkdir -p .onex_state/compliance
-          if uv run python -m omnibase_core.cli.cli_commands compliance check --repo-root . --output .onex_state/compliance/report.yaml; then
+          if env ONEX_CLI_SHOW_ALL_COMMANDS=1 uv run python -m omnibase_core.cli.cli_commands compliance check --repo-root . --output .onex_state/compliance/report.yaml; then
             echo "result=pass" >> "$GITHUB_OUTPUT"
           else
             echo "result=fail" >> "$GITHUB_OUTPUT"
@@ -4606,6 +4606,21 @@ jobs:
           # 24.9 min after this job started, so 90 min is not a new timeout risk.
           DEADLINE_MINUTES: "90"
           POLL_INTERVAL_SECONDS: "45"
+          # OMN-24562: bound on a job that never gets a conclusion. Once every
+          # other in-run job has completed, a job still without one this many
+          # minutes after the LAST of them completed fails closed, named. It
+          # sits above the 30m budgets of the gating jobs.
+          STALL_MINUTES: "45"
+          # OMN-24562: names, from the jobs listing, each job without a
+          # conclusion that has outlived STALL_MINUTES since the last other
+          # job completed. Empty output means nothing is stalled.
+          STALL_JQ: |
+            [.[] | select(.run_attempt == $attempt and .name != $self)] as $j
+            | ([$j[] | select(.conclusion != null and .completed_at != null)
+                | .completed_at | fromdateiso8601] | max) as $last
+            | [$j[] | select(.conclusion == null) | .name] as $waiting
+            | if $last != null and ($waiting | length) > 0 and ($now - $last) >= $stall
+              then $waiting | unique | .[] else empty end
         run: |
           # GitHub invokes this step as `bash -e {0}`; disable errexit because the
           # gate script's non-zero exit codes are handled explicitly below
@@ -4650,9 +4665,22 @@ jobs:
             # the pipeline runs, so a failed fetch leaves an empty listing that
             # reads as "no gate has reported" — the same trap the check-runs
             # fetch below already avoids by removing its file outright.
-            if ! { gh api --paginate \
-                "repos/${GH_REPO}/actions/runs/${RUN_ID}/jobs?filter=all&per_page=100" \
-                --jq '.jobs[]' 2>jobs_fetch.err | jq -s '.' > jobs.json.tmp; }; then
+            # OMN-24562: page small. GET actions/runs/<id>/jobs?per_page=100
+            # answered HTTP 502 three of three tries on a 91-job run (run
+            # 45566676848) while per_page=30 answered at once, so a failed read
+            # is retried with a smaller page before it counts as failed.
+            jobs_read=false
+            for jobs_page in 30 10; do
+              if { gh api --paginate \
+                  "repos/${GH_REPO}/actions/runs/${RUN_ID}/jobs?filter=all&per_page=${jobs_page}" \
+                  --jq '.jobs[]' 2>jobs_fetch.err | jq -s '.' > jobs.json.tmp; }; then
+                jobs_read=true
+                break
+              fi
+              echo "jobs read at per_page=${jobs_page} failed"
+              sed -e 's/^/  gh: /' jobs_fetch.err || true
+            done
+            if [ "${jobs_read}" != "true" ]; then
               jobs_fetch_failures=$((jobs_fetch_failures + 1))
               rm -f jobs.json.tmp
               echo "gh api fetch failed (attempt ${attempt}, failures ${jobs_fetch_failures}); retrying after ${POLL_INTERVAL_SECONDS}s"
@@ -4714,7 +4742,26 @@ jobs:
             case "${rc}" in
               0) echo "::notice::CI Summary = SUCCESS (all gating jobs and asserted external contexts provably passed)"; exit 0 ;;
               1) echo "::error::CI Summary = FAILURE (fail-closed: a gating job or an asserted external context failed/cancelled)"; exit 1 ;;
-              2) : ;;  # PENDING — gating jobs or external contexts still running; keep polling
+              2)
+                # PENDING — keep polling, unless a job with no conclusion has
+                # outlived STALL_MINUTES past the last other job's completion.
+                # The clock is the bash builtin, not `date`: the deadline logic
+                # above counts `date` calls (OMN-23027 tests drive it), and the
+                # stall read must not consume one. Both inputs come from this
+                # step's env; an absent filter means no stall check.
+                stall_minutes="${STALL_MINUTES:-45}"
+                stalled=""
+                if [ -n "${STALL_JQ:-}" ]; then
+                  printf -v now_epoch '%(%s)T' -1
+                  stalled=$(jq -r --argjson attempt "${RUN_ATTEMPT}" --arg self "CI Summary" \
+                    --argjson now "${now_epoch}" --argjson stall "$((stall_minutes * 60))" \
+                    "${STALL_JQ}" jobs.json | paste -sd, -)
+                fi
+                if [ -n "${stalled}" ]; then
+                  echo "::error::CI Summary = FAILURE (fail-closed, OMN-24562): job(s) ${stalled} still have no conclusion ${stall_minutes}m after the last other job completed"
+                  exit 1
+                fi
+                ;;
               *) echo "::error::ci_summary_gate.py returned unexpected code ${rc}; failing closed"; exit 1 ;;
             esac
             sleep "${POLL_INTERVAL_SECONDS}"
