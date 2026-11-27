@@ -73,8 +73,10 @@ def test_absent_chat_backend_never_probes(
     result = check.run()
 
     assert diagnosis.fault is EnumDelegationDoctorFault.NO_LOCAL_MODEL
-    assert "onex models add" in diagnosis.fix
-    assert ".yaml" not in diagnosis.fix
+    assert "onex" in diagnosis.fix
+    assert "/config" in diagnosis.fix
+    for hidden in ("onex models", "onex setup", ".yaml"):
+        assert hidden not in diagnosis.fix
     assert result.status is EnumHealthStatusValue.UNHEALTHY
     assert "[no_local_model]" not in result.message
     assert "[" not in result.message

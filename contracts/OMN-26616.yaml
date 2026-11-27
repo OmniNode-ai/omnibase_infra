@@ -52,7 +52,7 @@ dod_evidence:
         check_value: "uv run pytest tests/integration/doctor/test_omn26616_identity_check_integration.py -q -n 0 --no-cov -p no:cacheprovider"
         cwd: "."
   - id: "dod-omn26616-optional-local-model"
-    description: "AC4: on a working customer install onex doctor exits 0 without a local model: the local-model check fails only when no model at all is set up, local or hosted, names onex models add or onex setup as the fix, and still fails a declared local model that is unreachable"
+    description: "AC4: on a working customer install onex doctor exits 0 without a local model: the local-model check fails only when no model at all is set up, local or hosted, also fails when the rule in force is local models only and only hosted providers are set up, names onex and /config as the fix, and still fails a declared local model that is unreachable"
     source: "manual"
     binds_ac:
       - "AC4"

@@ -21,14 +21,13 @@ _LIST_SEAM = "omnimarket.handlers.models_only_command"
 # The provider name omnimarket gives a Local Model; every other row is hosted.
 _LOCAL_PROVIDER = "local"
 
-_NO_SETUP_FIX = (
-    "Run `onex models add <provider>` to add a hosted provider, or `onex setup`."
-)
+_NO_SETUP_FIX = "Run `onex` and open /config to add a provider or a Local Model."
 
 __all__ = [
     "HandlerCheckDelegationLocalModel",
     "evaluate_no_local_model",
     "read_hosted_providers",
+    "read_model_rule",
 ]
 
 
@@ -65,10 +64,30 @@ class HandlerCheckDelegationLocalModel:
             return None
 
     @staticmethod
+    def read_model_rule() -> str | None:
+        """Return the ``onex models only`` rule in force: ``local``, ``free`` or ``None``.
+
+        Read from the same omnimarket seam, as the ``only`` field of the status
+        ``onex models list`` shows. ``None`` also covers an unreadable seam.
+        """
+        try:
+            seam = importlib.import_module(_LIST_SEAM)
+            status = seam.model_handler().handle(
+                seam.ModelModelSetupRequest(operation="status")
+            )
+            return status.only if status.only in ("local", "free") else None
+        except (ImportError, AttributeError, OSError, ValueError):
+            return None
+
+    @staticmethod
     def evaluate_no_local_model(
         hosted: tuple[str, ...] | None,
     ) -> tuple[ModelDelegationDiagnosis, bool]:
-        """A local model is optional: fail only when no model at all is set up."""
+        """A local model is optional: fail only when no usable model is set up.
+
+        Under the ``local`` rule a hosted provider is never used, so it does not
+        count: ``onex delegate`` refuses every run until a Local Model is added.
+        """
         if hosted is None:
             return (
                 ModelDelegationDiagnosis(
@@ -80,6 +99,18 @@ class HandlerCheckDelegationLocalModel:
                     fix="",
                 ),
                 False,
+            )
+        if hosted and read_model_rule() == "local":
+            return (
+                ModelDelegationDiagnosis(
+                    fault=EnumDelegationDoctorFault.NO_LOCAL_MODEL,
+                    detail=(
+                        "Your rule is local models only, but no Local Model is set "
+                        "up, so delegation refuses every run."
+                    ),
+                    fix=_NO_SETUP_FIX,
+                ),
+                True,
             )
         if hosted:
             return (
@@ -106,6 +137,11 @@ class HandlerCheckDelegationLocalModel:
 def read_hosted_providers() -> tuple[str, ...] | None:
     """Keep the baselined doctor check thin."""
     return HandlerCheckDelegationLocalModel.read_hosted_providers()
+
+
+def read_model_rule() -> str | None:
+    """Keep the baselined doctor check thin."""
+    return HandlerCheckDelegationLocalModel.read_model_rule()
 
 
 def evaluate_no_local_model(

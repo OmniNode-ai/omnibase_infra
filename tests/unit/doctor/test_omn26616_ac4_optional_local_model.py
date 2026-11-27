@@ -17,6 +17,9 @@ from omnibase_infra.doctor.enum_delegation_doctor_fault import EnumDelegationDoc
 from omnibase_infra.doctor.protocol_models_transport import ProtocolModelsTransport
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
+from omnibase_infra.handlers import (
+    handler_check_delegation_local_model as handler_module,
+)
 
 _ENDPOINT = "https://model.invalid/proxy/v1/chat/completions"
 _MODEL = "local/test-model"
@@ -86,9 +89,10 @@ def test_no_model_at_all_fails_with_a_cli_fix(
     result = check.run()
 
     assert diagnosis.fault is EnumDelegationDoctorFault.NO_LOCAL_MODEL
-    assert "onex models add" in diagnosis.fix
-    assert "onex setup" in diagnosis.fix
-    assert ".yaml" not in diagnosis.fix
+    assert "onex" in diagnosis.fix
+    assert "/config" in diagnosis.fix
+    for hidden in ("onex models", "onex setup", ".yaml"):
+        assert hidden not in diagnosis.fix
     assert str(path) not in diagnosis.fix
     assert result.status is EnumHealthStatusValue.UNHEALTHY
     transport.get.assert_not_awaited()
@@ -130,3 +134,91 @@ def test_declared_but_unreachable_local_model_still_fails_beside_a_hosted_one(
     assert diagnosis.fault is EnumDelegationDoctorFault.LOCAL_MODEL_NOT_SERVING
     assert check.run().status is EnumHealthStatusValue.UNHEALTHY
     transport.get.assert_awaited()
+
+
+def _rule_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rule: str | None,
+    hosted: tuple[str, ...],
+) -> CheckDelegationLocalModel:
+    monkeypatch.setattr(handler_module, "read_model_rule", lambda: rule)
+    return CheckDelegationLocalModel(
+        overlay_path=tmp_path / "absent-overlay.yaml",
+        environ={},
+        transport=_transport(),
+        hosted_models_reader=lambda: hosted,
+    )
+
+
+def test_local_only_rule_with_only_hosted_providers_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    check = _rule_check(tmp_path, monkeypatch, "local", ("gemini",))
+
+    diagnosis = check.diagnose()
+    result = check.run()
+
+    assert diagnosis.fault is EnumDelegationDoctorFault.NO_LOCAL_MODEL
+    assert result.status is EnumHealthStatusValue.UNHEALTHY
+    assert "local models only" in diagnosis.detail
+    assert "uses your hosted" not in diagnosis.detail
+    assert "uses your hosted" not in result.message
+    assert "onex" in diagnosis.fix
+    assert "/config" in diagnosis.fix
+    for hidden in ("onex models", "onex setup", ".yaml"):
+        assert hidden not in diagnosis.fix
+
+
+@pytest.mark.parametrize("rule", [None, "free"])
+def test_other_rules_keep_a_hosted_provider_healthy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rule: str | None
+) -> None:
+    check = _rule_check(tmp_path, monkeypatch, rule, ("gemini",))
+
+    assert check.diagnose().fault is None
+    assert check.run().status is EnumHealthStatusValue.HEALTHY
+
+
+def _fake_status(
+    monkeypatch: pytest.MonkeyPatch, rows: tuple[str, ...], only: str | None
+):
+    module = pytest.importorskip(
+        "omnimarket.handlers.models_only_command",
+        reason="omnimarket is not installed in this environment",
+    )
+    from omnimarket.nodes.node_model_setup_effect.models.model_model_setup_result import (
+        ModelModelSetupResult,
+        ModelModelStatus,
+    )
+
+    result = ModelModelSetupResult(
+        operation="status",
+        providers=tuple(ModelModelStatus(provider=name, set_up=True) for name in rows),
+        only=only,
+    )
+    monkeypatch.setattr(
+        module, "model_handler", lambda: Mock(handle=Mock(return_value=result))
+    )
+
+
+def test_seam_does_not_count_the_local_provider_as_hosted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from omnibase_infra.handlers.handler_check_delegation_local_model import (
+        read_hosted_providers,
+    )
+
+    _fake_status(monkeypatch, ("local", "gemini"), None)
+
+    assert read_hosted_providers() == ("gemini",)
+
+
+def test_seam_reads_the_rule_in_force(monkeypatch: pytest.MonkeyPatch) -> None:
+    from omnibase_infra.handlers.handler_check_delegation_local_model import (
+        read_model_rule,
+    )
+
+    _fake_status(monkeypatch, ("gemini",), "local")
+
+    assert read_model_rule() == "local"

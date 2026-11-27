@@ -236,8 +236,10 @@ def test_each_fault_is_named_with_one_distinct_fix(
     assert {item.fault for item in diagnoses} == set(EnumDelegationDoctorFault)
     assert len({item.fix for item in diagnoses}) == 8
     if expected_fault is EnumDelegationDoctorFault.NO_LOCAL_MODEL:
-        assert "onex models add" in diagnosis.fix
-        assert ".yaml" not in diagnosis.fix
+        assert "onex" in diagnosis.fix
+        assert "/config" in diagnosis.fix
+        for hidden in ("onex models", "onex setup", ".yaml"):
+            assert hidden not in diagnosis.fix
     if expected_fault is EnumDelegationDoctorFault.LOCAL_MODEL_ID_MISMATCH:
         assert _MODEL_ID in diagnosis.detail
         assert "some/other-model" in diagnosis.detail
