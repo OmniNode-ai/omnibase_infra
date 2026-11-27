@@ -67,7 +67,6 @@ dod_evidence:
     description: 'Local Done gate for the install proof: reads dev job 3731df3e on h201 (git_sha 0c38cce0230c, omninode-runtime image revision 0c38cce0230c) and exits 0 only when its phase verification reads success and its status reads success. Reads the live h201 job record, so a hosted runner cannot pass it.'
     source: manual
     execution_scope: local_done_gate
-    binds_ac: [AC7]
     checks:
       - check_type: command
         check_value: "python3 -c 'import glob, json, sys; hits = glob.glob(\"/data/omninode/deploy-agent/state/jobs-dev/\" + sys.argv[1] + \"*.json\"); rec = json.load(open(hits[0])) if len(hits) == 1 else {}; sys.exit(0 if rec.get(\"phase_results\", {}).get(\"verification\") == \"success\" and rec.get(\"status\") == \"success\" else 1)' 3731df3e"
