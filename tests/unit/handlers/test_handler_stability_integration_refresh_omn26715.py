@@ -128,7 +128,7 @@ def test_healthy_build_runs_on_the_new_image_and_records_the_rollback_target(
     host = _Host(health_after=60.0, clock=clock)
     result = _run(host, clock, tmp_path)
     assert result.outcome == "refreshed"
-    assert result.built_image_id == "sha256:new"
+    assert result.built_image_digest == "sha256:new"
     assert result.seconds_to_healthy == pytest.approx(60.0, abs=5.0)
     assert dict(result.rollback_target)["omninode-runtime"] == "sha256:old-rt"
     record = json.loads(next(tmp_path.glob("rollback-*.json")).read_text())
@@ -182,7 +182,7 @@ def test_a_refused_recreate_returns_refused_and_leaves_the_lane_untouched(
     assert host.recreated == []
     assert host.calls == ["tag", "build", "recreate"]
     assert dict(result.rollback_target)["omninode-runtime"] == "sha256:old-rt"
-    assert result.built_image_id == "sha256:new"
+    assert result.built_image_digest == "sha256:new"
 
 
 def test_a_missing_integration_branch_refuses_before_any_build(tmp_path: Path) -> None:
