@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_runtime_canary_receipt_effect
+contract_name: node_runtime_canary_receipt_effect
+node_name: node_runtime_canary_receipt_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Delivers a runtime canary receipt over the bus. On the canary lane the publish operation reads the receipt a canary run wrote and returns it as the event the runtime publishes. On the dev agent the record operation consumes that event and writes the receipt into the agent's canary-receipts directory, which the dev roll's boot guard reads and refuses a candidate without a PASS.
+input_model:
+  name: ModelRuntimeCanaryReceiptPublishRequest
+  module: omnibase_infra.models.model_runtime_canary_receipt_publish_request
+  description: The candidate and the directory its canary run wrote its receipt in.
+output_model:
+  name: ModelRuntimeCanaryReceiptEvent
+  module: omnibase_infra.models.model_runtime_canary_receipt_event
+  description: The whole receipt, as the published event.
+event_bus:
+  version: {major: 1, minor: 0, patch: 0}
+  subscribe_topics:
+    - &receipt_topic "onex.evt.omnibase-infra.runtime-canary-receipt.v1"
+  publish_topics:
+    - *receipt_topic
+published_events:
+  - topic: *receipt_topic
+    event_type: "ModelRuntimeCanaryReceiptEvent"
+    message_category: "EVENT"
+    description: "One PASS or FAIL canary receipt for a dev candidate."
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: publish_receipt
+      handler: {name: HandlerRuntimeCanaryReceiptPublish, module: omnibase_infra.handlers.handler_runtime_canary_receipt_delivery}
+    - operation: record_receipt
+      handler: {name: HandlerRuntimeCanaryReceiptRecord, module: omnibase_infra.handlers.handler_runtime_canary_receipt_delivery}
+capabilities:
+  - name: runtime_canary.receipt_publish
+    description: Return a candidate's canary receipt as the event to publish.
+  - name: runtime_canary.receipt_record
+    description: Record a delivered canary receipt in the dev agent's canary-receipts directory.
+metadata:
+  ticket: OMN-26463
+  author: OmniNode Team
+  description: Receipt delivery between the canary lane and the dev agent; no dev data credential.
+  tags: [effect, deployment, canary]
