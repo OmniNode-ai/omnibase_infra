@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Collection, Sequence
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from omnibase_infra.event_bus.enum_contract_attach_exclusion_reason import (
     EnumContractAttachExclusionReason,
@@ -33,25 +33,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__: list[str] = ["ProtocolDemandSource", "split_boot_set_by_demand"]
+type WatchIdleTopics = Callable[
+    ...,
+    Awaitable[tuple[frozenset[str], Callable[[], Awaitable[None]]]],
+]
 
-
-class ProtocolDemandSource(Protocol):
-    """What the split needs of a demand source."""
-
-    async def watch_idle_topics(
-        self,
-        topics: Collection[str],
-        on_first_record: Callable[[str], Awaitable[None]],
-        *,
-        watch_retained: Collection[str] = (),
-    ) -> tuple[frozenset[str], Callable[[], Awaitable[None]]]: ...
+__all__: list[str] = ["split_boot_set_by_demand"]
 
 
 async def split_boot_set_by_demand(
     eligible: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]],
     *,
-    demand_source: ProtocolDemandSource,
+    watch_idle_topics: WatchIdleTopics,
     start: Callable[
         [ModelContractWiringResult, ModelDiscoveredContract],
         Awaitable[ModelContractAttachResult],
@@ -138,7 +131,7 @@ async def split_boot_set_by_demand(
             contract_subscribes_a_command_topic,
         )
 
-        in_use, stop = await demand_source.watch_idle_topics(
+        in_use, stop = await watch_idle_topics(
             all_topics,
             on_first_record,
             watch_retained={
@@ -149,9 +142,7 @@ async def split_boot_set_by_demand(
             },
         )
     else:
-        in_use, stop = await demand_source.watch_idle_topics(
-            all_topics, on_first_record
-        )
+        in_use, stop = await watch_idle_topics(all_topics, on_first_record)
     if watch_stops_out is not None:
         watch_stops_out.append(stop)
     boot: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]] = []

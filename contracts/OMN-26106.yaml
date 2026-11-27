@@ -34,6 +34,16 @@ requirements:
         statement: 'AC3: integrated: after the fix is installed on h201 through the declared dev installer, deploy-agent-dev.service is active, its NRestarts reading is the same at two reads ten minutes apart, and the health port 8098 answers on h201 -- falsifier: systemctl show -p NRestarts --value deploy-agent-dev.service on h201 differs between the two reads, or curl -sS http://127.0.0.1:8098/health on h201 is refused'
       - id: AC4
         statement: 'AC4: the prod deploy agent''s unit file and its key are untouched -- falsifier: sha256sum of the prod deploy agent unit file on h201 read before and after the install differs'
+  - id: req-omn26106-closer-budget
+    statement: The evidence close sweep declares the dod-verify start budget, and a verifier that refused to start is reported as a skip and never as an evidence gap.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: the evidence close sweep workflow declares DOD_VERIFY_START_BUDGET_S, and a dod_verify refusal with cause dispatch_budget_not_declared is reported as skipped_dod_verify with nothing written to Linear -- falsifier: the sweep budget tests exit non-zero on the merge base and zero on the fix head'
+  - id: req-omn26106-snappy-codec
+    statement: The deploy agent's own locked environment declares the snappy codec its kafka client imports, so a snappy-compressed fetch decodes and a failed fetch is quarantined instead of stalling the poll loop.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: the deploy agent environment declares python-snappy, a snappy record batch decodes in that environment, and a fetch that fails before a high-water mark exists is skipped -- falsifier: the snappy codec test exits non-zero on the merge base and zero at the fix head'
 evidence_requirements:
   - kind: tests
     description: The deploy agent gate-requester tests and the real recreate window requester tests.
@@ -143,9 +153,20 @@ dod_evidence:
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_self_install_prod_unit_omn26106.py -q
         cwd: .
   - id: dod-omn26106-autoclose-sweep-start-budget
-    description: 'The evidence close sweep (dry run 45768504347, offer OMN-26106) read 0/0 ACs verified because hosted dod_verify refused to start without DOD_VERIFY_START_BUDGET_S (status unresolved, total_checks 0, cause dispatch_budget_not_declared). The sweep and diagnose steps now declare the budget, and a refused verifier is reported as skipped_dod_verify and never posted to Linear as an evidence gap. Both tests fail on the merge base. Binds no criterion of this ticket: it is evidence about the closer, not about the deploy agent.'
+    description: 'The evidence close sweep (dry run 45768504347, offer OMN-26106) read 0/0 ACs verified because hosted dod_verify refused to start without DOD_VERIFY_START_BUDGET_S (status unresolved, total_checks 0, cause dispatch_budget_not_declared). The sweep and diagnose steps now declare the budget, and a refused verifier is reported as skipped_dod_verify and never posted to Linear as an evidence gap. Both tests fail on the merge base. Binds AC5, the closer criterion this change adds to the contract; the deploy agent criteria AC1 to AC4 are unchanged.'
     source: manual
+    binds_ac:
+      - AC5
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_autoclose_sweep_dod_verify_budget_omn26106.py tests/ci/test_autoclose_sweep_budget_refusal_live_contact_omn26106.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_26106_budget_refusal.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/ci/test_autoclose_sweep_dod_verify_budget_omn26106.py tests/ci/test_autoclose_sweep_budget_refusal_live_contact_omn26106.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_26106_budget_refusal.py tests/integration/nodes/test_autoclose_sweep_budget_refusal_integration_omn26106.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26106-snappy-codec-dasnappy2
+    description: The deploy agent's own environment declares the snappy codec kafka-python imports, decodes a snappy record batch with it, and quarantines a fetch that fails before a high-water mark exists instead of stalling the poll loop (measured on h201 at 2026-11-27T06:12:04Z).
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_snappy_codec_omn26106.py -q
         cwd: .

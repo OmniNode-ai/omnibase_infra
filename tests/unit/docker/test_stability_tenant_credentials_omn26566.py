@@ -59,10 +59,10 @@ def declaration_gaps(
         gaps.append(f"no {NAMESPACE} namespace")
     for name, variable in IDENTITY.items():
         value = environment.get(name, "")
-        if not re.fullmatch(rf"\$\{{{variable}:-\}}", value):
+        if not re.fullmatch(rf"\$\{{{variable}:[-?].*\}}", value):
             gaps.append(f"{name} is not a reference to {variable}")
-    if environment.get("INFISICAL_ENVIRONMENT_SLUG") != "dev":
-        gaps.append("INFISICAL_ENVIRONMENT_SLUG is not pinned to dev")
+    if environment.get("INFISICAL_ENVIRONMENT_SLUG") != "stability":
+        gaps.append("INFISICAL_ENVIRONMENT_SLUG is not pinned to stability")
     return gaps
 
 

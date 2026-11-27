@@ -1238,8 +1238,11 @@ class TestServiceLlmEndpointHealthLifecycle:
             ),
         ):
             await svc.start()
-            # Let a few probe cycles run
-            await real_sleep(0.15)
+            # Wait for the loop to survive the first error and probe again.
+            # A fixed sleep is load-dependent; the condition is the contract.
+            deadline = asyncio.get_running_loop().time() + 10.0
+            while probe_count < 2 and asyncio.get_running_loop().time() < deadline:
+                await real_sleep(0.01)
             await svc.stop()
 
         # Should have continued after the first error

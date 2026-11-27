@@ -24,6 +24,7 @@ test runtime, so the release-tag-only rule of ``refresh_stability_lane.sh``
 
 from __future__ import annotations
 
+import http.client
 import json
 import shutil
 import subprocess
@@ -33,8 +34,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-import httpx
+from urllib.parse import urlsplit
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.model_stability_integration_refresh_request import (
@@ -55,7 +55,11 @@ _AUDIT_CONTEXT = "stability-integration"
 _STAGE_SCRIPT = "scripts/runtime_build/stage_workspace.sh"
 _RECREATE_SH = (
     'set -euo pipefail; set -a; source "$1/docker/runtime-policy.env"; '
-    '[ -r "$2" ] && source "$2"; set +a; shift 2; exec docker compose "$@"'
+    '[ -r "$2" ] && source "$2"; set +a; '
+    'export ONEX_LANE_OVERLAY_DIR="$3" ONEX_LANE_DECLARATION_DIR="$4"; shift 4; '
+    "export ONEX_DECLARED_HANDLER=handler_stability_integration_refresh "
+    f"ONEX_BUILD_CONTEXT={_AUDIT_CONTEXT}; "
+    'exec docker compose "$@"'
 )
 
 
@@ -94,7 +98,13 @@ class DockerStabilityIntegrationHost:
         work_dir: Path,
         operator_env_file: Path,
         health_timeout_seconds: float,
+        lane_declaration_dir: Path,
+        lane_overlay_dir: Path,
     ) -> None:
+        # The lane declaration's folders are injected, never guessed: the lane
+        # compose files refuse a recreate that names neither.
+        self._lane_declaration = lane_declaration_dir
+        self._lane_overlays = lane_overlay_dir
         self._operator_env = operator_env_file
         self._health_timeout = health_timeout_seconds
         self._registry_root = registry_root
@@ -249,6 +259,31 @@ class DockerStabilityIntegrationHost:
     def recreate(
         self, compose_project: str, services: Sequence[tuple[str, str]]
     ) -> None:
+        previous = {
+            service: _run(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    "--format",
+                    "{{.Id}}",
+                    f"{compose_project}-{service}:latest",
+                ]
+            )
+            for service, _ in services
+        }
+        try:
+            self._recreate_on(compose_project, services)
+        except RuntimeError:
+            # A refused or failed recreate must not leave the lane's :latest tags
+            # on the new image, or the next restart of a container would run it.
+            for service, image_id in previous.items():
+                _run(["docker", "tag", image_id, f"{compose_project}-{service}:latest"])
+            raise
+
+    def _recreate_on(
+        self, compose_project: str, services: Sequence[tuple[str, str]]
+    ) -> None:
         for service, image_id in services:
             _run(["docker", "tag", image_id, f"{compose_project}-{service}:latest"])
         first = services[0][0]
@@ -278,6 +313,8 @@ class DockerStabilityIntegrationHost:
                 "recreate",
                 str(self._infra),
                 str(self._operator_env),
+                str(self._lane_overlays),
+                str(self._lane_declaration),
                 "-p",
                 compose_project,
                 *file_args,
@@ -292,10 +329,17 @@ class DockerStabilityIntegrationHost:
         )
 
     def health_status(self, url: str) -> int:
+        parts = urlsplit(url)
+        connection = http.client.HTTPConnection(
+            parts.hostname or "", parts.port, timeout=self._health_timeout
+        )
         try:
-            return httpx.get(url, timeout=self._health_timeout).status_code
-        except httpx.HTTPError:
+            connection.request("GET", parts.path or "/")
+            return connection.getresponse().status
+        except (OSError, http.client.HTTPException):
             return 0
+        finally:
+            connection.close()
 
 
 class HandlerStabilityIntegrationRefresh:
@@ -359,9 +403,20 @@ class HandlerStabilityIntegrationRefresh:
                 detail=str(exc),
             )
 
-        self._host.recreate(
-            request.compose_project, tuple((svc, image_id) for svc in request.services)
-        )
+        try:
+            self._host.recreate(
+                request.compose_project,
+                tuple((svc, image_id) for svc in request.services),
+            )
+        except RuntimeError as exc:
+            return ModelStabilityIntegrationRefreshResult(
+                outcome="refused",
+                heads=heads,
+                deploy_tags=tags,
+                built_image_digest=image_id,
+                rollback_target=target,
+                detail=f"recreate refused, lane untouched: {exc}",
+            )
         started = self.clock()
         while True:
             if self._host.health_status(request.health_url) == 200:
@@ -369,7 +424,7 @@ class HandlerStabilityIntegrationRefresh:
                     outcome="refreshed",
                     heads=heads,
                     deploy_tags=tags,
-                    built_image_id=image_id,
+                    built_image_digest=image_id,
                     rollback_target=target,
                     seconds_to_healthy=self.clock() - started,
                 )
@@ -382,7 +437,7 @@ class HandlerStabilityIntegrationRefresh:
             outcome="rolled_back",
             heads=heads,
             deploy_tags=tags,
-            built_image_id=image_id,
+            built_image_digest=image_id,
             rollback_target=target,
             detail=f"/health not 200 within {request.health_window_seconds}s",
         )

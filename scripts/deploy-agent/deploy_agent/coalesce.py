@@ -90,18 +90,28 @@ from __future__ import annotations
 
 import logging
 import re
+import runpy
 import subprocess  # fixed argv, no shell, trusted git binary
 import time
 from collections.abc import Callable, Sequence
 from enum import StrEnum
+from pathlib import Path
 from typing import Final
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested, Scope
+from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested
 
 logger = logging.getLogger(__name__)
+
+#: node_queued_request_priority_compute's way in (OMN-26718), loaded from the agent's own checkout.
+entry = runpy.run_path(
+    str(
+        Path(__file__).resolve().parents[3]
+        / "src/omnibase_infra/handlers/queued_request_priority/agent_entry.py"
+    )
+)
 
 #: A full 40-character lowercase commit sha. The same shape
 #: ``scripts/ci/lab_pass_receipt.py`` gates on, and for the same reason: an
@@ -153,6 +163,7 @@ class EnumCoalesceRefusal(StrEnum):
     ANCESTRY_UNPROVEN = "ancestry_unproven"
     NOT_A_DESCENDANT = "not_a_descendant"
     DUPLICATE_COMMAND = "duplicate_command"
+    OPERATOR_REQUEST = "operator_request"
 
 
 class ModelQueuedCommand(BaseModel):
@@ -180,6 +191,8 @@ class ModelSupersession(BaseModel):
     #: ``False`` when the lane's queue-supersede rule replaced it without asking
     #: (OMN-26637). The job record states which, so a reader never has to infer.
     by_containment: bool = True
+    #: What the job record of the superseded command says, and it names ``superseded_by``.
+    reason: str
 
     @model_validator(mode="after")
     def _by_sha_is_exact(self) -> ModelSupersession:
@@ -259,45 +272,10 @@ class ModelCoalescePlan(BaseModel):
 AncestryResolver = Callable[[str, str], bool | None]
 
 
-def _refusal_for(
-    head: ModelRebuildRequested,
-    candidate: ModelRebuildRequested,
-) -> EnumCoalesceRefusal | None:
-    """The static half of the decision: everything that is not ancestry.
-
-    Compared against the HEAD: all of these are equality tests, so it is the
-    same comparison as against the previous member.
-    """
-    if candidate.runtime_lane != head.runtime_lane:
-        return EnumCoalesceRefusal.DIFFERENT_LANE
-    # OMN-26316: two overdue-build commands are one kind of build (the dev head, with a rollback
-    # declared only to pass the lineage fence), so the newer replaces the older at one scope.
-    overdue = head.requested_by == candidate.requested_by == OVERDUE_BUILD_REQUESTER
-    if not overdue and (head.rollback is not None or candidate.rollback is not None):
-        return EnumCoalesceRefusal.ROLLBACK_DECLARED
-    if head.scope is not candidate.scope or (
-        not overdue and head.scope is not Scope.FULL
-    ):
-        return EnumCoalesceRefusal.NOT_FULL_SCOPE
-    if list(candidate.services) != list(head.services):
-        return EnumCoalesceRefusal.SERVICES_DIFFER
-    if candidate.build_source != head.build_source:
-        return EnumCoalesceRefusal.BUILD_SOURCE_DIFFERS
-    if (
-        head.image_ref
-        or head.image_digest
-        or candidate.image_ref
-        or candidate.image_digest
-    ):
-        return EnumCoalesceRefusal.PINNED_IMAGE
-    if not SHA_RE.match(head.git_ref) or not SHA_RE.match(candidate.git_ref):
-        return EnumCoalesceRefusal.REF_NOT_A_SHA
-    return None
-
-
 def _newest_containing(
     queued: Sequence[ModelQueuedCommand],
     index: int,
+    limit: int,
     group: Sequence[ModelQueuedCommand],
     known: AncestryResolver,
 ) -> int | None:
@@ -313,16 +291,7 @@ def _newest_containing(
     # where the consecutive scan ended. Only the newest command is a candidate,
     # so a poll asks at most one question per queued command. The head was
     # vetted by the lineage fence, so the runner descends from the running ref.
-    ids = {member.command.correlation_id for member in group}
-    run: list[ModelQueuedCommand] = []
-    for entry in queued[index:]:
-        command = entry.command
-        if command.correlation_id in ids:
-            break
-        if _refusal_for(group[0].command, command) is not None:
-            break
-        ids.add(command.correlation_id)
-        run.append(entry)
+    run = queued[index:limit]
     if len(run) < 2:
         return None
     runner_ref = run[-1].command.git_ref
@@ -366,25 +335,16 @@ def plan_coalesce(
             answers[earlier, later] = contains(earlier, later)
         return answers[earlier, later]
 
-    index = 1
-    while index < len(queued):
+    # OMN-26718. node_queued_request_priority_compute owns the static half (which queued
+    # requests may fold, and an operator-path request running ahead of automatic ones).
+    handler = entry["handler_class"]()
+    fold = handler().handle(entry["request"](queued, supersede_queue=supersede_queue))
+    limit, index = fold.foldable, 1
+    if fold.operator_path:
+        group, index = list(queued[:limit]), limit
+    while index < limit:
         candidate = queued[index]
         examined += 1
-        # OMN-19521. A redelivered copy of a command already in the group is
-        # not newer work and must never become the runner: the earlier copy
-        # would then be recorded as superseded by its own correlation id,
-        # which ModelSupersession refuses, and the raise lands before the
-        # offset commit, so every restart re-reads the pair and dies again.
-        # Checked first, because a copy needs no clone to recognise.
-        if candidate.command.correlation_id in {
-            member.command.correlation_id for member in group
-        }:
-            stop_reason = EnumCoalesceRefusal.DUPLICATE_COMMAND
-            break
-        refusal = _refusal_for(head.command, candidate.command)
-        if refusal is not None:
-            stop_reason = refusal
-            break
         if supersede_queue:
             # OMN-26637. Newest wins, whatever git says about the pair.
             group.append(candidate)
@@ -400,23 +360,40 @@ def plan_coalesce(
             break
         newest: int | None = index
         if not verdict:
-            newest = _newest_containing(queued, index, group, known)
+            newest = _newest_containing(queued, index, limit, group, known)
         if newest is None:
             stop_reason = EnumCoalesceRefusal.NOT_A_DESCENDANT
             break
         examined += newest - index
         group.extend(queued[index : newest + 1])
         index = newest + 1
+    else:
+        stop_reason = EnumCoalesceRefusal(fold.refusal) if fold.refusal else None
+        examined += bool(fold.refusal)
 
     runner = group[-1]
+    # OMN-26637. Exactly one reason, and it is true: containment is claimed only when ancestry
+    # proved it. The priority node's reason (OMN-26718) names the operator-path request.
+    why = (
+        "a newer request for this lane that was accepted while this one was queued; the "
+        "lane cancels every older queued request whatever its git ancestry"
+        if supersede_queue
+        else "which contains this command's ref and was already queued when the agent "
+        "reached this one"
+    )
     supersessions = tuple(
         ModelSupersession(
             superseded=member,
             superseded_by_sha=runner.command.git_ref,
             superseded_by_correlation_id=runner.command.correlation_id,
             by_containment=not supersede_queue,
+            reason=reason
+            or f"superseded by {runner.command.correlation_id} at "
+            f"{runner.command.git_ref}, {why}",
         )
-        for member in group[:-1]
+        for member, reason in zip(
+            group[:-1], fold.reasons or ("",) * len(group), strict=False
+        )
     )
     return ModelCoalescePlan(
         runner=runner,

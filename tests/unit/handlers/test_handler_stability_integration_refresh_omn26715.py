@@ -40,6 +40,7 @@ class _Host:
         *,
         health_after: float | None,
         build_error: str = "",
+        recreate_error: str = "",
         heads: dict[str, str] | None = None,
         clock: _Clock,
     ) -> None:
@@ -47,6 +48,7 @@ class _Host:
         self.recreated: list[tuple[tuple[str, str], ...]] = []
         self._health_after = health_after
         self._build_error = build_error
+        self._recreate_error = recreate_error
         self._heads = _HEADS if heads is None else heads
         self._clock = clock
         self._live = {
@@ -81,6 +83,8 @@ class _Host:
         self, compose_project: str, services: Sequence[tuple[str, str]]
     ) -> None:
         self.calls.append("recreate")
+        if self._recreate_error:
+            raise RuntimeError(self._recreate_error)
         self.recreated.append(tuple(services))
         self._live.update(dict(services))
         self._recreated_at = self._clock.now
@@ -124,7 +128,7 @@ def test_healthy_build_runs_on_the_new_image_and_records_the_rollback_target(
     host = _Host(health_after=60.0, clock=clock)
     result = _run(host, clock, tmp_path)
     assert result.outcome == "refreshed"
-    assert result.built_image_id == "sha256:new"
+    assert result.built_image_digest == "sha256:new"
     assert result.seconds_to_healthy == pytest.approx(60.0, abs=5.0)
     assert dict(result.rollback_target)["omninode-runtime"] == "sha256:old-rt"
     record = json.loads(next(tmp_path.glob("rollback-*.json")).read_text())
@@ -163,6 +167,24 @@ def test_a_failed_build_leaves_the_lane_untouched(tmp_path: Path) -> None:
     assert dict(result.rollback_target)["runtime-worker"] == "sha256:old-wk"
 
 
+def test_a_refused_recreate_returns_refused_and_leaves_the_lane_untouched(
+    tmp_path: Path,
+) -> None:
+    clock = _Clock()
+    host = _Host(
+        health_after=0.0,
+        recreate_error="LANDING-COMPOSE-GUARD refused: declared lane",
+        clock=clock,
+    )
+    result = _run(host, clock, tmp_path)
+    assert result.outcome == "refused"
+    assert "LANDING-COMPOSE-GUARD" in result.detail
+    assert host.recreated == []
+    assert host.calls == ["tag", "build", "recreate"]
+    assert dict(result.rollback_target)["omninode-runtime"] == "sha256:old-rt"
+    assert result.built_image_digest == "sha256:new"
+
+
 def test_a_missing_integration_branch_refuses_before_any_build(tmp_path: Path) -> None:
     clock = _Clock()
     host = _Host(
@@ -193,3 +215,56 @@ def test_runtime_version_is_read_from_the_built_trees_pyproject(
     )
     with pytest.raises(RuntimeError, match="RUNTIME_VERSION"):
         runtime_version_of(tmp_path)
+
+
+def test_recreate_exports_the_declared_handler_identity_and_exact_command(
+    tmp_path: Path,
+) -> None:
+    """The compose guard admits the stability recreate only with both identity variables set."""
+    import os
+    import subprocess
+
+    from omnibase_infra.handlers.handler_stability_integration_refresh import (
+        _RECREATE_SH,
+    )
+
+    infra = tmp_path / "infra"
+    (infra / "docker").mkdir(parents=True)
+    (infra / "docker" / "runtime-policy.env").write_text("X=1\n", encoding="utf-8")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    shim = bindir / "docker"
+    shim.write_text(
+        '#!/bin/sh\nprintf "%s|%s|%s" "$ONEX_DECLARED_HANDLER" "$ONEX_BUILD_CONTEXT" "$*"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    done = subprocess.run(
+        [
+            "bash",
+            "-c",
+            _RECREATE_SH,
+            "recreate",
+            str(infra),
+            str(tmp_path / "missing.env"),
+            "/lane/bifrost-dir",
+            "/lane/declaration",
+            "-p",
+            "lane-project",
+            "up",
+            "-d",
+            "--no-deps",
+            "--no-build",
+            "--force-recreate",
+            "runtime",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"},
+    )
+    assert done.stdout == (
+        "handler_stability_integration_refresh|stability-integration|"
+        "compose -p lane-project up -d --no-deps --no-build "
+        "--force-recreate runtime"
+    )
