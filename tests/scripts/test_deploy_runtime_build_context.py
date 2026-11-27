@@ -235,7 +235,7 @@ def test_deploy_runtime_stages_every_config_copy_source() -> None:
     config_sources = _dockerfile_config_copy_sources()
     # The Dockerfile must at minimum COPY the known runner_fleet.yaml path; a
     # regex that silently matched nothing would make this guard vacuously pass.
-    assert "config/runner_fleet.yaml" in config_sources
+    assert "config/image/runner_fleet.yaml" in config_sources
 
     directory_staged = '"${repo_root}/config/"' in deploy_script
 

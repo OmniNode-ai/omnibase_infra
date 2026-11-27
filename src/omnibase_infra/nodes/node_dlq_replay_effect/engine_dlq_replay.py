@@ -31,7 +31,7 @@ from aiokafka.admin import AIOKafkaAdminClient
 from aiokafka.errors import KafkaConnectionError, KafkaError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from omnibase_infra.enums import EnumNonRetryableErrorCategory
+from omnibase_infra.enums import EnumDlqFailureClass, EnumNonRetryableErrorCategory
 from omnibase_infra.errors import DlqTopicFixedPointError
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.mixin_kafka_dlq import DLQ_UNREADABLE_VALUE_MARKER
@@ -239,6 +239,14 @@ class ModelDlqReplayEngineConfig(BaseModel):
         default_factory=lambda: load_replay_policy().target_replay_bound
     )
 
+    # OMN-26316: how many times the dead letters of one dispatch-deadline
+    # expiry may be replayed together (defaults from the contract's
+    # replay_policy block, never from code).
+    deadline_exceeded_max_replays: int = Field(
+        default_factory=lambda: load_replay_policy().deadline_exceeded_max_replays,
+        ge=0,
+    )
+
     @field_validator("bootstrap_servers")
     @classmethod
     def _bootstrap_non_empty(cls, value: str) -> str:
@@ -367,6 +375,17 @@ def unwrap_nested_dlq_record(
     )
 
 
+_DEADLINE_CLASS = EnumDlqFailureClass.DISPATCH_DEADLINE_EXCEEDED.value
+
+
+def is_deadline_exceeded(message: ModelDlqMessage) -> bool:
+    """Whether the dead letter ends a dispatch that outlived its deadline (OMN-26316)."""
+    return (
+        message.failure_class == _DEADLINE_CLASS
+        or f"failure_class={_DEADLINE_CLASS}" in message.failure_reason
+    )
+
+
 def should_replay(
     message: ModelDlqMessage, config: ModelDlqReplayEngineConfig
 ) -> tuple[bool, str]:
@@ -489,6 +508,39 @@ def should_replay(
         return (
             False,
             f"Non-retryable error type in failure reason: {message.error_type}",
+        )
+
+    # OMN-25856: a command its publisher malformed fails ``model_validate`` on
+    # every replay, so replay only multiplies the failed terminal. Measured on
+    # the dev lane (24 h to 2026-11-24T17:28Z): 935 of 935 delegate-skill dead
+    # letters were this class and 640 extra failed events came from replaying
+    # them to ``max_replay_count``. The class is read from the envelope's own
+    # ``failure_class`` key, and from the reason text for a record that carries
+    # only the marker. Quarantined with this reason, never replayed.
+    publisher_malformed = EnumDlqFailureClass.PUBLISHER_MALFORMED.value
+    if (
+        message.failure_class == publisher_malformed
+        or f"failure_class={publisher_malformed}" in message.failure_reason
+    ):
+        return (
+            False,
+            f"Publisher-malformed command: failure_class={publisher_malformed}, "
+            "the payload fails model_validate for every type-scoped candidate, "
+            "so a replay meets the same validator and ends in another failed "
+            "terminal; the publisher must re-issue it (OMN-25856)",
+        )
+
+    if is_deadline_exceeded(message) and (
+        message.retry_count >= config.deadline_exceeded_max_replays
+    ):
+        return (
+            False,
+            f"Dispatch deadline exceeded: failure_class={_DEADLINE_CLASS}, the "
+            "handler that outlived its deadline is still running abandoned, so "
+            "a replay adds another orphan dispatch instead of retrying; "
+            f"{message.retry_count} replays seen, at most "
+            f"{config.deadline_exceeded_max_replays} allowed for the lineage "
+            "(OMN-26316)",
         )
 
     if config.filter_start_time or config.filter_end_time:

@@ -1,0 +1,40 @@
+schema_version: "1.0.0"
+ticket_id: OMN-26330
+title: "omnibase_infra ledger-file census: the disk-gc unit comments stop spelling the ledger file name"
+summary: "Two comments in deploy/disk-gc service units spelled the ledger file's name and were counted as readers by the census, which does not strip comments from the .service suffix. They now say the rolling work ledger, and the omnibase_infra census row is lowered 18 to 17 with the per-file table. The one executable read left in those units, the --ledger argument that onex-worktree-prune.service hands to omniclaude's worktree_auto_prune.py, cannot move from this repository and stays on its row."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26330-infra-census-prose
+    statement: The omnibase_infra census holds no hit for a comment in a disk-gc unit, and its ratchet row and per-file table are lowered to match.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the census run for omnibase_infra counts 17 files, none of them deploy/disk-gc/onex-disk-gc.service, with deploy/disk-gc/onex-worktree-prune.service holding only its ExecStart line -- falsifier: the pre-commit census command prints files=18 or a hit on a unit comment line"
+      - id: AC2
+        statement: "AC2: a unit test fails on the pre-change unit files and passes on the change -- falsifier: uv run pytest tests/ci/test_disk_gc_units_ledger_name_omn26330.py passes on a tree holding the pre-change deploy/disk-gc units"
+evidence_requirements:
+  - kind: tests
+    description: The disk-gc unit test and the census hook wiring test pass at the head.
+    command: uv run --frozen pytest tests/ci/test_disk_gc_units_ledger_name_omn26330.py tests/ci/test_ledger_file_census_hook_omn24480.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26330-unit-comments-test
+    description: The disk-gc unit test passes at the head, and fails against the pre-change onex-disk-gc.service and onex-worktree-prune.service copied into a scratch tree.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_disk_gc_units_ledger_name_omn26330.py tests/ci/test_ledger_file_census_hook_omn24480.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26330-census-row
+    description: No disk-gc unit comment spells the ledger file's name, so the census holds no hit on a unit comment; the check fails against the pre-change unit files.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_disk_gc_units_ledger_name_omn26330.py -k test_the_disk_gc_unit_comments_do_not_spell_the_ledger_file_name -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra

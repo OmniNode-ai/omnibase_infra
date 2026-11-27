@@ -131,8 +131,12 @@ SCOPE_BUNDLES: dict[Scope, list[str]] = {
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers.handler_dev_boot_guard import HandlerDevBootGuard
+    from omnibase_infra.models.model_answering_degraded import ModelAnsweringDegraded
     from omnibase_infra.models.model_dev_boot_report_config import (
         ModelDevBootReportConfig,
+    )
+    from omnibase_infra.models.model_runtime_health_judgement import (
+        ModelRuntimeHealthJudgement,
     )
 
 
@@ -182,6 +186,13 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/model_dev_boot_request.py",
         "models/model_dev_boot_result.py",
         "handlers/handler_dev_boot_guard.py",
+        "models/model_answering_degraded.py",
+        "models/model_runtime_health_reading.py",
+        "models/model_runtime_health_judgement.py",
+        "handlers/runtime_health_reading/handler_runtime_health_reading.py",
+        "models/model_build_clock.py",
+        "models/model_build_clock_request.py",
+        "handlers/build_clock/handler_build_clock.py",
         "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",
         "nodes/node_dev_roll_events_effect/runtime_dev_agent_adoption.py",
         "models/model_dev_lane_code_ref_pin.py",
@@ -2084,8 +2095,11 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     # before anything below reads the environment.
     env.update(operator_store_overlay())
     policy = _load_runtime_policy_env()
-    for key, value in policy.items():
-        env.setdefault(key, value)
+    # OMN-21753: the image's prebuilt node manifest is stamped from the policy's
+    # ONEX_ACTIVE_RUNTIME_PACKAGES and boot compares it with the container's, so no operator
+    # store or process value may widen it; every other policy key only fills a gap.
+    owned = {k: policy[k] for k in ("ONEX_ACTIVE_RUNTIME_PACKAGES",) if k in policy}
+    env = {**policy, **env, **owned}
     # OMN-20932: resolve the private lane-overlay directory every lane compose
     # file mounts. Left unset when none exists, so compose refuses loudly.
     lane_overlay_dir = resolve_lane_overlay_dir(env)
@@ -2175,123 +2189,6 @@ def _runtime_version_from_pyproject(repo_dir: str = REPO_DIR) -> str:
     if not version:
         raise RuntimeError(f"Empty RUNTIME_VERSION in {pyproject}")
     return version
-
-
-def _runtime_health_reason(result: subprocess.CompletedProcess[str]) -> str:
-    """Return why a runtime /health response is not a pass, or "" when it is.
-
-    OMN-18640 AC8. The predicate this replaced returned a bare bool, so the
-    executor knew a probe had failed and could not say ANYTHING about why. A
-    verdict that fails the job has to name its own reason -- the reason is what
-    reaches ``errors`` on the terminal event and what a reader of the job
-    record has instead of going to the host.
-
-    Every branch below is a distinct fact about the runtime and they take
-    different next steps: curl could not reach it at all, it answered something
-    that is not a health document, or it answered a health document that says
-    it is not ready.
-    """
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()[:200]
-        return f"curl exited {result.returncode}: {detail or 'no output'}"
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return f"health response is not JSON: {result.stdout.strip()[:200]!r}"
-    if not isinstance(payload, dict):
-        return f"health response is not a JSON object: {type(payload).__name__}"
-    details = payload.get("details")
-    if not isinstance(details, dict):
-        return "health response carries no details object"
-    status = payload.get("status")
-    is_running = details.get("is_running")
-    prefetch = details.get("config_prefetch_status")
-    if status == "healthy" and is_running is True and prefetch in {"ok", "skipped"}:
-        return ""
-    return (
-        f"health response is not ready: status={status!r} "
-        f"is_running={is_running!r} config_prefetch_status={prefetch!r}"
-    )
-
-
-class ModelAnsweringDegraded(BaseModel):
-    """A runtime that answered ``/health`` running, with its monitor degraded.
-
-    OMN-20864. ``observed_at`` is the health monitor's own timestamp for the
-    reading, so two probes inside one monitor cycle read as ONE observation.
-    ``dimensions`` names every monitor dimension that is not ``HEALTHY``.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-    observed_at: str
-    dimensions: frozenset[str]
-
-    def describe(self) -> str:
-        return (
-            f"monitor DEGRADED on {', '.join(sorted(self.dimensions))} "
-            f"(observed {self.observed_at or 'at an unread time'})"
-        )
-
-
-def _answering_degraded(
-    result: subprocess.CompletedProcess[str],
-) -> ModelAnsweringDegraded | None:
-    """The monitor-degraded reading of a runtime that is up, or ``None``.
-
-    OMN-20864. MEASURED on the lab dev lane 2026-10-11: job 72e74ec6's
-    runtime answered ``status=degraded is_running=True`` on every probe; its
-    health monitor (``onex.evt.omnibase-infra.runtime-health-check.v1``) named
-    ``projection_dlq_saturation`` on every cycle from 13:28Z, the same finding
-    the container it replaced had carried since at least 12:41Z. The agent
-    force-recreated it at 13:50Z, the recreate timed out, and the lane was down
-    until 19:41Z.
-
-    The runtime's own contract (``ServiceHealth``: degraded and operational is
-    HTTP 200, "automatic restarts may mask recurring issues") is that such a
-    runtime stays in service. So this is NARROW, and everything outside it
-    keeps the OMN-18640 recreate: the probe answered JSON, ``status`` is
-    ``degraded``, ``details.is_running`` is true, the runtime is attached and
-    not starting, the event bus is not reported unhealthy, and the monitor
-    block names at least one non-``HEALTHY`` dimension. A dead port, a
-    timeout, an ``unhealthy`` runtime, a stopped one, one whose bus is down,
-    or a degraded one whose monitor names nothing is not this.
-    """
-    if result.returncode != 0:
-        return None
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    details = payload.get("details")
-    if not isinstance(details, dict):
-        return None
-    if (
-        payload.get("status") != "degraded"
-        or details.get("is_running") is not True
-        or details.get("runtime_attached") is False
-        or details.get("startup_in_progress") is True
-        or details.get("event_bus_healthy") is False
-    ):
-        return None
-    monitor = details.get("runtime_health")
-    if not isinstance(monitor, dict):
-        return None
-    raw_dimensions = monitor.get("dimensions")
-    dimensions = frozenset(
-        str(dimension["name"])
-        for dimension in (raw_dimensions if isinstance(raw_dimensions, list) else [])
-        if isinstance(dimension, dict)
-        and dimension.get("name")
-        and dimension.get("status") != "HEALTHY"
-    )
-    if not dimensions:
-        return None
-    return ModelAnsweringDegraded(
-        observed_at=str(monitor.get("observed_at") or ""),
-        dimensions=dimensions,
-    )
 
 
 def monitor_settled_degraded(
@@ -3440,6 +3337,7 @@ class DeployExecutor:
         # whether that repaired them. Read by the agent when it builds the
         # terminal event, for the same reason residue and supervision are.
         self.verify_recreate: list[ModelVerifyRecreate] = []
+        self._first_pass_at: dict[int, datetime] = {}
         # OMN-19911: the control-plane one-shots a runtime rebuild re-ran
         # because their config hash moved, with each exit code. Read by the
         # agent when it writes the job's terminal record and event.
@@ -3481,9 +3379,9 @@ class DeployExecutor:
         # signed command and _compose_build exports it to the staging script.
         self.sibling_tags: dict[str, str] = {}
         # OMN-19220: ONE BUILD_DATE per rebuild, shared by every compose build
-        # in it. Dockerfile.runtime declares ARG BUILD_DATE at the top of both
-        # stages, so every RUN after it takes the value as build environment
-        # and a new timestamp misses the cache for the whole image. The
+        # in it. Dockerfile.runtime declares ARG BUILD_DATE late in both stages
+        # (OMN-26316), so every RUN after it takes the value as build
+        # environment and a new timestamp misses the cache for those layers. The
         # dev-lane-only build (OMN-18108) is a second `compose build` of the
         # same Dockerfile and args; stamping it with its own clock re-ran the
         # full build from scratch (2% cached, 46 min at load 163 on .201,
@@ -3498,6 +3396,7 @@ class DeployExecutor:
         self.deploy_build_date = None
         self.recreate_supervision = []
         self.verify_recreate = []
+        self._first_pass_at = {}
         self.oneshot_reruns = []
         self.cloud_migration_failure = ""
         self.deps_convergence = []
@@ -7035,7 +6934,9 @@ class DeployExecutor:
                 verdict_failures.append(check)
             if timed_out is not None and pending_timeout is None:
                 pending_timeout = timed_out
-        checks.extend(settled)
+        clock = self._build_clock_checks(lane)
+        checks.extend(settled + clock)
+        verdict_failures.extend(c for c in clock if c.status == "fail")
 
         # The probings are over; record them on the executor BEFORE any
         # refusal (OMN-18640 AC8). The agent's own ``health_checks`` local is
@@ -7134,7 +7035,8 @@ class DeployExecutor:
             )
             self._last_answering_degraded[port] = None
         else:
-            reason = _runtime_health_reason(result)
+            judged = self._judge_health(result)
+            reason = judged.reason
             # Docker executes the compose-declared healthcheck, including its
             # policy and consecutive-failure threshold. A separate JSON
             # predicate must not label an answering Docker-healthy service
@@ -7154,9 +7056,11 @@ class DeployExecutor:
                     reason = ""
                     docker_healthy = True
             self._last_answering_degraded[port] = (
-                _answering_degraded(result) if reason else None
+                judged.answering_degraded if reason else None
             )
         latency = int((time.monotonic() - start) * 1000)
+        if not reason:
+            self._first_pass_at.setdefault(port, datetime.now(UTC))
         return (
             ModelHealthCheck(
                 service=service,
@@ -7171,6 +7075,46 @@ class DeployExecutor:
             ),
             timed_out,
         )
+
+    def _judge_health(
+        self, result: subprocess.CompletedProcess[str]
+    ) -> ModelRuntimeHealthJudgement:
+        """OMN-18640, OMN-20864: the health reading node judges one /health probe."""
+        node = load_dev_boot_guard(
+            "handlers.runtime_health_reading.handler_runtime_health_reading"
+        )
+        reading = node.ModelRuntimeHealthReading(
+            returncode=result.returncode, stdout=result.stdout, stderr=result.stderr
+        )
+        handler = node.HandlerRuntimeHealthReading()
+        return cast("ModelRuntimeHealthJudgement", handler.handle(reading))
+
+    def _build_clock_checks(self, lane: EnumRuntimeLane) -> list[ModelHealthCheck]:
+        """OMN-26316: the build clock node judges container start to first healthy."""
+        if lane is not EnumRuntimeLane.DEV:
+            return []
+        service, port = lane_config_for(lane).runtime_health_targets[0]
+        box = self._compose_service_container(lane, service)
+        began = _runtime_health_helper("runtime_started_at", box) if box else ""
+        if port not in self._first_pass_at or not began:
+            return []
+        node = load_dev_boot_guard("handlers.build_clock.handler_build_clock")
+        handler = node.HandlerBuildClock()
+        clock = handler.handle(
+            node.ModelBuildClockRequest(
+                container_started_at=began, first_healthy_at=self._first_pass_at[port]
+            )
+        )
+        if clock.verdict == "unread":
+            return []
+        return [
+            ModelHealthCheck(
+                service="build-clock",
+                endpoint="container start to first healthy /health",
+                status=clock.verdict,
+                detail=clock.detail,
+            )
+        ]
 
     def _await_declared_start(
         self,

@@ -34,9 +34,16 @@ def _checkout(tmp_path: Path, script_body: str) -> types.SimpleNamespace:
     entry.write_text("#!/bin/sh\n" + script_body, encoding="utf-8")
     entry.chmod(0o755)
 
-    def run(command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+    def run(
+        command: list[str], timeout: int, *, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            command, capture_output=True, text=True, timeout=timeout, check=False
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env=env,
         )
 
     return types.SimpleNamespace(
@@ -74,3 +81,18 @@ def test_failing_ledger_message_names_the_exception_last_on_stderr(
     )
     with pytest.raises(guard.DevBootFailedError, match="ProtocolConfigurationError"):
         guard._prove_work_ledger_answers(execution)
+
+
+def test_hidden_ledger_group_is_reached_through_the_operator_switch(
+    tmp_path: Path,
+) -> None:
+    """A real process that hides ``ledger`` unless the switch is set still answers (OMN-26316)."""
+    execution = _checkout(
+        tmp_path,
+        'if [ "${ONEX_CLI_SHOW_ALL_COMMANDS:-}" != "1" ]; then\n'
+        "  echo \"Error: No such command 'ledger'\" >&2\n"
+        "  exit 2\n"
+        "fi\n"
+        "echo '{\"rows\": []}'\n",
+    )
+    guard._prove_work_ledger_answers(execution)

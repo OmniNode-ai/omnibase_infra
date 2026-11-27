@@ -28,6 +28,14 @@ topics:
   dev_recreate_announced: onex.evt.omnimarket.dev-recreate-announced.v1
   # OMN-25912: the reader publishes one event per start that broke the one-recreate-a-window rule.
   dev_recreate_violation: onex.evt.omnimarket.dev-recreate-violation.v1
+  # OMN-25912: published by the deploy agent's tick for each start of the dev runtime
+  # container, with its cause (a deploy job, the restart policy or unknown) and its image.
+  dev_container_recreated: onex.evt.omnimarket.dev-container-recreated.v1
+  # OMN-26703: published once per start of the dev runtime container after its health settles:
+  # the seconds from start to first passing health check, whether that is within the declared
+  # limit, the image revision against the previous build's (went back or not) and where the
+  # 24 hour no-rollback clock starts.
+  dev_build_health: onex.evt.omnimarket.dev-build-health.v1
 # One incident event carries each failing container's log tail, and a broker message must stay
 # under its size limit.
 settings:
@@ -38,6 +46,31 @@ settings:
   # StartedAt is within this many seconds of a dev_runtime_started event's.
   audit_announcement_lookback_seconds: 1800
   audit_start_match_tolerance_seconds: 120
+  # OMN-25912: the declared trigger of the reader is the deploy agent's idle tick
+  # (``audit_trigger: agent_tick``). Each tick, at most once per
+  # ``container_observation_interval_seconds``, reads the container named by
+  # ``observed_service`` in the dev compose project, publishes a dev_container_recreated
+  # event for each new start and runs the reader over the events the agent published in the
+  # last ``audit_read_window_seconds``. The agent journals each accepted event of the roles
+  # in ``audit_input_topics`` under ``event_journal_dir`` of its job state directory (one
+  # file a day) and keeps its last container reading and the violations already published
+  # in ``container_reading_state_file`` beside it. The first reading names no start.
+  audit_trigger: agent_tick
+  observed_service: omninode-runtime
+  container_observation_interval_seconds: 60
+  audit_read_window_seconds: 86400
+  audit_input_topics:
+    - dev_runtime_started
+    - dev_roll_manifest
+    - dev_recreate_announced
+    - dev_container_recreated
+  event_journal_dir: dev-roll-events
+  # OMN-26703: a dev build must answer /health within this many seconds of its container start
+  # (the operator's goal: five minutes). The previous build's image revision and the start of the
+  # no-rollback clock are kept in the container reading state file beside the reading.
+  build_health_limit_seconds: 300
+  build_health_git_timeout_seconds: 30
+  container_reading_state_file: dev-container-reading.json
   # OMN-26494: the deploy agent adopts a code ref only after its one-shot self-check exits 0, and
   # returns to the previous ref after this many restarts inside this many seconds. The agent
   # keeps its adoption record (current ref, previous ref, start times, refused refs) in its
@@ -64,6 +97,20 @@ handler_routing:
       event_model:
         name: ModelDevRecreateAnnouncement
         module: omnibase_infra.models.model_dev_recreate_announcement
+    - operation: dev_roll.announce_container_recreate
+      handler:
+        name: DevRollEventsPublisher
+        module: omnibase_infra.nodes.node_dev_roll_events_effect.dev_roll_events
+      event_model:
+        name: ModelDevContainerRecreated
+        module: omnibase_infra.models.model_dev_container_recreated
+    - operation: dev_roll.observe_container
+      handler:
+        name: HandlerDevContainerRecreate
+        module: omnibase_infra.handlers.dev_container_recreate.handler_dev_container_recreate
+      event_model:
+        name: ModelDevContainerRecreateRequest
+        module: omnibase_infra.models.model_dev_container_recreate_request
     - operation: dev_roll.audit_recreates
       handler:
         name: DevRecreateAuditReader
@@ -71,9 +118,20 @@ handler_routing:
       event_model:
         name: ModelDevRecreateAuditRequest
         module: omnibase_infra.models.model_dev_recreate_audit_request
+    - operation: dev_roll.read_build_health
+      handler:
+        name: HandlerDevBuildHealth
+        module: omnibase_infra.handlers.dev_build_health.handler_dev_build_health
+      event_model:
+        name: ModelDevBuildHealthRequest
+        module: omnibase_infra.models.model_dev_build_health_request
 capabilities:
+  - name: dev_roll.build_health
+    description: Publish, once per start of the dev runtime container after its health settles, the seconds from start to first passing health check against the declared limit, whether the running image revision went back to an older build than the previous one (read from git), and where the 24 hour no-rollback clock starts.
   - name: dev_roll.audit
     description: Read the dev start, manifest and recreate announcement events with the container's own start readings and publish one violation event per start that broke the one-recreate-a-window rule.
+  - name: dev_roll.observe
+    description: Read the dev runtime container each agent tick, publish one event per new start with its cause (a deploy job, the restart policy or unknown), its StartedAt, RestartCount and image, and run the audit reader over the events of the read window.
   - name: dev_roll.announce
     description: Announce each dev runtime start, each accepted dev roll with its issuer, and each failed roll with its evidence.
 metadata:

@@ -360,6 +360,7 @@ class TestPolicySeam:
                     "replay_policy": {
                         "broadcast_topics": [],
                         "target_replay_bound": bound,
+                        "deadline_exceeded_max_replays": 0,
                     }
                 }
             ),

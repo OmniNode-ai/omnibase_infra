@@ -2,95 +2,34 @@
 # SPDX-License-Identifier: MIT
 """Never rebuild what the lane already runs, and never rebuild it backwards (OMN-19270).
 
-WHAT THIS COST, MEASURED
-------------------------
-On 2026-09-23 the .201 dev lane's runtime image tags record each build's
-infra ref. Job ``c009462c`` built the lane at ``0edf5c914`` (image
-``20260923T141329Z-0edf5c91``). At 14:32:21Z the agent accepted job
-``ab27aedd`` (``scope=full``, ``git_ref=c159b7118``, an infra commit from
-10:32:14Z whose command had waited upstream for hours) and rebuilt the lane
-onto it (``20260923T144642Z-c159b711``). ``c159b7118`` is a strict ancestor of
-``0edf5c914``, so that deploy moved the lane BACKWARDS by every commit in
-between. The next command, ``e074126b`` at ``533b19c23``, was also behind
-``0edf5c914``. The lane did not return to ``0edf5c914`` until ``602b1d61``
-completed at 17:18:52Z, nearly three hours after the rollback.
+On 2026-09-23 the dev lane ran infra ``0edf5c914`` (job ``c009462c``). The agent then
+accepted ``ab27aedd`` at ``c159b7118``, an ancestor, and rolled the lane BACKWARDS, accepted
+``e074126b`` behind it too, and four more full rebuilds re-delivered omnimarket merges the
+lane already vendored; ``98bb76df`` failed verification and left the runtime in ``Created``.
+``coalesce`` folds only commands that arrive together and ``ref_fence`` lets every 40-hex
+sha through, so nothing stopped them. The image records what it was built from
+(``/app/build-provenance.json``), which the agent never read.
 
-Behind those two came four more full rebuilds -- ``602b1d61``, ``5ce1f33e``,
-``f645854b``, ``98bb76df`` -- each triggered by an omnimarket merge from
-13:37Z-13:51Z, each at infra ``0edf5c914``, and each accepted hours later.
-The trigger resolves the infra dev head when it publishes, so every ref was
-right when it was sent. The wait was upstream: the publish monitor forwards
-one command at a time and waits for each to finish, so a command reaches
-this agent's topic milliseconds before it is accepted, however long it waited
-to get there. ``98bb76df``, the last, failed post-deploy verification and left
-the runtime container in ``Created``.
-
-Nothing in the accept protocol could have prevented any of it. ``coalesce``
-folds a prefix of commands that arrived TOGETHER, so a stale command that
-arrives alone is invisible to it. ``ref_fence`` refuses a stale branch ALIAS
-and by design lets every 40-hex SHA through. The image already records what
-it was built from (``infra_vcs_ref`` and ``build_time`` in
-``/app/build-provenance.json``), but the agent never read it.
-
-THE RULE: THE BUILD THAT IS RUNNING NOW
----------------------------------------
-Every decision compares the command with the build the lane runs NOW, never
-with a build that once succeeded: a lane can be rolled back after a good build,
-and a command superseded against a build that no longer runs would leave the
-lane behind.
+THE RULE: THE BUILD THAT IS RUNNING NOW, never a build that once succeeded.
 
 1. **Supersede what the running build already carries**, CI commands only
-   (``requested_by`` ``gha/<repo>/...``), and only when the command's infra ref
-   is an ancestor of, or equal to, the running infra ref, and one of:
-
-   * the command is an infra merge (``gha/omnibase_infra/...``). Its whole
-     payload is the infra ref, and the running build already contains it; or
-   * the running build is a whole-workspace build -- ``scope`` full or runtime,
-     no service subset, no pinned image -- that STARTED after the command was
-     requested. A workspace build stages every sibling from its dev branch,
-     and the sibling merge that produced the command landed before the command
-     was published, so that build already vendors it.
-
-   The command is recorded ``superseded``, acknowledged with
-   ``superseded_by_running_build``, and never built.
-
-   "Requested" is the command's signed ``requested_at``. Without one it is the
-   record's broker timestamp, which the forwarding hop sets just before this
-   agent reads it: never earlier than the running build's start, so it never
-   over-supersedes. The running build's start is the ``accepted_at`` of the job
-   whose accept-to-complete window contains the image's ``build_time``: exactly
-   the job that produced the running image. When no single job matches, the
-   start is unknown and the command builds.
-
-   A command from anyone but CI -- an operator, lab-health triage -- is
-   deliberate, and it is never superseded: a same-ref rebuild is how a wedged
-   lane is recovered.
-
-2. **Never build backwards.** A command that is not superseded builds at the
-   newer of its infra ref and the running ref: a strict ancestor is ``RAISED``
-   to the running ref.
-
-3. **Diverged is refused unless it is the way home.** An infra ref that is
-   neither ancestor nor descendant of the running build is ``DIVERGENT`` and
-   refused with ``divergent_ref``, unless it is on the lane's tracking branch
-   (``RETURNS_TO_TRACKING``): a lane left on an off-branch build, such as a
-   pre-PR proof at a PR head, must not refuse every dev command until someone
-   declares a rollback.
-
-4. **A declared rollback is the only way backwards.** A command carrying a
-   signed ``ModelRollbackDeclaration`` is built exactly as asked, and
-   coalescing never folds it.
-
-5. **A symbolic ref is resolved at accept time.** ``origin/dev`` is resolved in
-   the deploy clone after a fetch, and the job builds that exact sha and
-   records it. Job ``c009462c`` asked for ``origin/dev`` and its record kept only
-   the alias, so which commit it built had to be recovered from an image tag.
-
-6. **Missing facts fail open.** A running build that cannot be read, an alias
-   that cannot be resolved, or an ancestry the clone cannot answer is
-   ``UNPROVEN``, and the command builds as requested. A lane that is down has no
-   container to read, and a lane that is down is exactly the lane that must
-   accept a rebuild.
+   (``requested_by`` ``gha/<repo>/...``), when the command's infra ref is an ancestor of,
+   or equal to, the running infra ref, and either the command is an infra merge, or the
+   running build is a whole-workspace build (``scope`` full or runtime, no service subset,
+   no pinned image) that STARTED after the command was requested. "Requested" is the
+   command's signed ``requested_at``, else the record's broker timestamp. The running
+   build's start is the ``accepted_at`` of the job whose accept-to-complete window holds
+   the image's ``build_time``; with no single match the command builds. The command is
+   recorded ``superseded``, acknowledged ``superseded_by_running_build`` and never built.
+   An operator's or lab-health triage's command is deliberate and never superseded.
+2. **Never build backwards.** A strict ancestor is ``RAISED`` to the running ref.
+3. **Diverged is refused** (``divergent_ref``) unless on the lane's tracking branch.
+4. **A declared rollback is the only way backwards**, built as asked and never coalesced,
+   except a command of ``agent/overdue-dev-merge-build`` at or behind a ref the lane built
+   or tracks that the running build contains: superseded, never built (OMN-26316).
+5. **A symbolic ref is resolved at accept time** and the job builds and records that sha.
+6. **Missing facts fail open.** An unreadable build, unresolvable alias or unanswered
+   ancestry is ``UNPROVEN`` and the command builds as requested.
 """
 
 from __future__ import annotations
@@ -99,7 +38,7 @@ import json
 import logging
 import re
 import subprocess  # fixed argv, no shell, trusted docker and git binaries
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any, Final
 
@@ -108,6 +47,7 @@ from pydantic import BaseModel, ConfigDict
 from deploy_agent.coalesce import (
     GIT_FETCH_TIMEOUT_SECONDS,
     GIT_TIMEOUT_SECONDS,
+    OVERDUE_BUILD_REQUESTER,
     SHA_RE,
     AncestryResolver,
     GitAncestryResolver,
@@ -230,6 +170,34 @@ def _already_carried(
     )
 
 
+def _at_or_behind(ref: str, later: str, contains: AncestryResolver) -> bool:
+    return ref == later or contains(ref, later) is True
+
+
+def _overdue_carried(
+    cmd: ModelRebuildRequested,
+    ref: str,
+    read_running_build: Callable[[], ModelRunningBuild | None],
+    contains: AncestryResolver,
+    references: Callable[[], Sequence[str]] | None,
+) -> str | None:
+    """The running ref when an overdue-build command has nothing left to build (OMN-26316).
+
+    Only for ``agent/overdue-dev-merge-build``, whose declared rollback just passes the fence.
+    Needs two proofs: the ref is at or behind a reference ref and in the running build.
+    A ref the running build lacks, or an answer the host cannot give, returns ``None``.
+    """
+    if cmd.requested_by != OVERDUE_BUILD_REQUESTER or references is None:
+        return None
+    if not SHA_RE.match(ref) or not any(
+        _at_or_behind(ref, r, contains) for r in references() if SHA_RE.match(r)
+    ):
+        return None
+    running = read_running_build()
+    ok = running is not None and _at_or_behind(ref, running.infra_ref, contains)
+    return running.infra_ref if running is not None and ok else None
+
+
 def decide_lineage(
     cmd: ModelRebuildRequested,
     *,
@@ -238,8 +206,13 @@ def decide_lineage(
     resolve_ref: RefResolver | None,
     tracking_ref: str | None,
     published_at: datetime | None,
+    overdue_references: Callable[[], Sequence[str]] | None = None,
 ) -> ModelLineageDecision:
     """Classify ``cmd`` against the running build. Pure apart from its callables.
+
+    ``overdue_references`` (OMN-26316) returns the refs a command of the overdue dev merge
+    build check is judged against: the newest ref the agent built successfully and the
+    tracking branch's head. Without it that command keeps the declared-rollback path.
 
     ``read_running_build`` is called only for a command the comparison applies
     to, so a promotion or a declared rollback never costs a ``docker exec``.
@@ -287,6 +260,18 @@ def decide_lineage(
         ref = resolved = answer_sha
 
     if cmd.rollback is not None:
+        overdue = _overdue_carried(
+            cmd, ref, read_running_build, contains, overdue_references
+        )
+        if overdue is not None:
+            return decision(
+                EnumLineageVerdict.CONTAINED,
+                f"overdue dev merge build at {ref} is in the running build and at or "
+                "behind a ref the lane built or tracks; nothing is left to build",
+                build=overdue,
+                resolved=resolved,
+                running=overdue,
+            )
         return decision(
             EnumLineageVerdict.ROLLBACK_DECLARED,
             f"rollback declared by {cmd.rollback.actor!r}: {cmd.rollback.reason}",

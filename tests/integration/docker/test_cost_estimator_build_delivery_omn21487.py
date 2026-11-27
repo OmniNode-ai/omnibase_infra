@@ -26,6 +26,8 @@ from unittest.mock import Mock
 
 import pytest
 import yaml
+from deploy_agent import executor
+from deploy_agent.events import EnumRuntimeLane
 
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.handlers.handler_cost_estimator_build import (
@@ -127,12 +129,23 @@ def engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _deliver(
     web_source: Path,
+    monkeypatch: pytest.MonkeyPatch,
     *,
-    lane: str = "dev",
+    lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
     disabled: tuple[str, ...] = (),
     settings: dict[str, str] | None = None,
 ) -> Mock:
-    """Run the dev-lane delivery the way the deploy agent calls it."""
+    """Run the dev-lane delivery the way the deploy agent calls it.
+
+    ``execution`` is the deploy agent's real executor module, which is what the
+    kernel passes in production. Only the two readings that depend on the host
+    are replaced: the lane's compose configuration (so the test chooses which
+    services are disabled) and the compose environment (so the test chooses the
+    estimator source). Every name the delivery reads beyond those, the lane
+    enum, the scope enum and the stability overlay path included, is the real
+    one, so a name the delivery starts reading is found here and not by the
+    nightly run.
+    """
     environment = (
         {
             "ESTIMATOR_GATE_PASSWORD": "synthetic-test-secret",
@@ -142,20 +155,17 @@ def _deliver(
         if settings is None
         else settings
     )
-    execution = SimpleNamespace(
-        # The handler locates the contract relative to the deploy agent module.
-        __file__=str(REPOSITORY_ROOT / "scripts/deploy-agent/deploy_agent/executor.py"),
-        EnumRuntimeLane=SimpleNamespace(DEV="dev"),
-        DEV_LANE_BUILD_SERVICES=("runtime",),
-        Scope=SimpleNamespace(RUNTIME="runtime"),
-        lane_config_for=lambda _lane: SimpleNamespace(
+    monkeypatch.setattr(
+        executor,
+        "lane_config_for",
+        lambda _lane: SimpleNamespace(
             compose_files=("base", "dev"), disabled_services=disabled
         ),
-        _compose_env=lambda: dict(environment),
     )
+    monkeypatch.setattr(executor, "_compose_env", lambda *_a, **_k: dict(environment))
     build_images = Mock()
     build_dev_lane_services(
-        execution,
+        executor,
         build_images,
         "c" * 40,
         lambda *args, **kwargs: None,
@@ -191,44 +201,49 @@ def test_shipped_contract_declares_the_recipe_the_delivery_reads() -> None:
 
 
 def test_absent_image_is_built_and_stamped_with_the_web_head(
-    web_source: Path, engine: Path
+    web_source: Path, engine: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     head = _commit(web_source, "FROM scratch\n")
 
-    _deliver(web_source)
+    _deliver(web_source, monkeypatch)
 
     assert _labels(engine) == {SOURCE_LABEL: SOURCE_REPOSITORY, REVISION_LABEL: head}
     assert len(_builds(engine)) == 1
 
 
-def test_unchanged_web_head_reuses_the_image(web_source: Path, engine: Path) -> None:
+def test_unchanged_web_head_reuses_the_image(
+    web_source: Path, engine: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _commit(web_source, "FROM scratch\n")
-    _deliver(web_source)
+    _deliver(web_source, monkeypatch)
 
-    _deliver(web_source)
+    _deliver(web_source, monkeypatch)
 
     assert len(_builds(engine)) == 1
 
 
-def test_advanced_web_head_rebuilds_the_image(web_source: Path, engine: Path) -> None:
+def test_advanced_web_head_rebuilds_the_image(
+    web_source: Path, engine: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _commit(web_source, "FROM scratch\n")
-    _deliver(web_source)
+    _deliver(web_source, monkeypatch)
     advanced = _commit(web_source, "FROM scratch\nLABEL page=advanced\n")
 
-    _deliver(web_source)
+    _deliver(web_source, monkeypatch)
 
     assert _labels(engine)[REVISION_LABEL] == advanced
     assert len(_builds(engine)) == 2
 
 
 def test_unreachable_source_refuses_before_any_build(
-    web_source: Path, engine: Path, tmp_path: Path
+    web_source: Path, engine: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     missing = tmp_path / "no-such-repository"
 
     with pytest.raises(RuntimeError, match="estimator git clone exited"):
         _deliver(
             web_source,
+            monkeypatch,
             settings={
                 "ESTIMATOR_GATE_PASSWORD": "synthetic-test-secret",
                 "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY": SOURCE_REPOSITORY,
@@ -240,11 +255,12 @@ def test_unreachable_source_refuses_before_any_build(
 
 
 def test_missing_source_setting_refuses_before_any_engine_call(
-    web_source: Path, engine: Path
+    web_source: Path, engine: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with pytest.raises(RuntimeError, match="COST_ESTIMATOR_WEB_SOURCE_URL"):
         _deliver(
             web_source,
+            monkeypatch,
             settings={
                 "ESTIMATOR_GATE_PASSWORD": "synthetic-test-secret",
                 "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY": SOURCE_REPOSITORY,
@@ -255,11 +271,11 @@ def test_missing_source_setting_refuses_before_any_engine_call(
 
 
 def test_disabled_instance_does_no_estimator_work(
-    web_source: Path, engine: Path
+    web_source: Path, engine: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _commit(web_source, "FROM scratch\n")
 
-    _deliver(web_source, disabled=("cost-estimator-web",))
+    _deliver(web_source, monkeypatch, disabled=("cost-estimator-web",))
 
     assert not (engine / "calls.log").exists()
 
@@ -270,6 +286,6 @@ def test_foreign_checkout_ignores_inherited_git_location(
     expected = _commit(web_source, "FROM scratch\n")
     monkeypatch.setenv("GIT_DIR", str(tmp_path / "unrelated.git"))
     monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "unrelated"))
-    _deliver(web_source)
+    _deliver(web_source, monkeypatch)
     assert _labels(engine)[REVISION_LABEL] == expected
     assert len(_builds(engine)) == 1

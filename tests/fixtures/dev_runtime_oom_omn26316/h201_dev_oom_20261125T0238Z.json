@@ -1,0 +1,13 @@
+{
+  "source": "h201 kernel log (journalctl -k) and docker inspect/cgroup memory.peak of omninode-runtime container a03db5cb7d1f, read 2026-11-25T02:50Z",
+  "container_created": "2026-11-25T01:05:51Z",
+  "memory_limit_bytes": 3221225472,
+  "max_concurrent_contract_attach": 16,
+  "restart_count_at_read": 15,
+  "oom_kills": [
+    {"at": "2026-11-25T02:38:51Z", "anon_rss_kb": 3100560},
+    {"at": "2026-11-25T02:42:21Z", "anon_rss_kb": 3117460}
+  ],
+  "cgroup_memory_peak_bytes": 3221225472,
+  "steady_state_gib_after_boot": 1.2
+}

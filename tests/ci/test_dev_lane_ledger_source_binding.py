@@ -42,9 +42,10 @@ from tests.ci._compose_render_omn21099 import (
 pytestmark = [pytest.mark.unit]
 
 CONFIG_ROOT_PREFIX = "env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config"
+CLI_SURFACE_PREFIX = "env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config"
 LEDGER_ENV = {
     "ONEX_LEDGER_BUS_READ_COMMAND": (
-        f"{CONFIG_ROOT_PREFIX} OMNIBASE_PATH=/app python -m omnibase_core.cli.cli_commands ledger query --bus-lane dev --stdin"
+        f"{CLI_SURFACE_PREFIX} OMNIBASE_PATH=/app python -m omnibase_core.cli.cli_commands ledger query --bus-lane dev --stdin"
     ),
     "ONEX_LEDGER_BUS_APPEND_COMMAND": (
         f"{CONFIG_ROOT_PREFIX} python -m omnimarket.work_ledger_bus.cli append "

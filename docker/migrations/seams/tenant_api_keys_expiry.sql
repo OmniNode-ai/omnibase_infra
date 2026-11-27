@@ -12,11 +12,19 @@
 -- GATES (a named skip, never a failure, so a run started with ON_ERROR_STOP=1 survives):
 -- database omninode_cloud absent, or table public.tenant_api_keys absent in it.
 
-SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'omninode_cloud') AS db_present
+-- OMN-26712: the database this seam targets is the psql variable cloud_database. The lab
+-- runner never sets it, so it defaults to the lab name; the cloud apply entry
+-- (cloud/apply_cloud_database.sql) sets it from its settings before including this file.
+\if :{?cloud_database}
+\else
+  \set cloud_database omninode_cloud
+\endif
+
+SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = :'cloud_database') AS db_present
 \gset
 
 \if :db_present
-  \connect omninode_cloud
+  \connect :"cloud_database"
 
   SELECT to_regclass('public.tenant_api_keys') IS NOT NULL AS table_present
   \gset

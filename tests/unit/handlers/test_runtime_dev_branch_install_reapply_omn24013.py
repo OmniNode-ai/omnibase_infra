@@ -69,7 +69,7 @@ def _run(
     state_dir = state_dir if state_dir is not None else tmp_path / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     publisher = publisher if publisher is not None else _RecordingPublisher()
-    build = build if build is not None else (lambda repo_root: publisher)
+    build = build if build is not None else (lambda repo_root, state_dir: publisher)
     captured: list[str] = []
 
     def announce(state_dir: Path, stdout: str, *, repo_root: Path) -> bool:
@@ -148,7 +148,7 @@ def test_a_success_job_is_not_active(tmp_path: Path) -> None:
 
 
 def test_a_build_failure_never_fails_the_deploy(tmp_path: Path) -> None:
-    def build(_repo_root: Path) -> _RecordingPublisher:
+    def build(_repo_root: Path, _state_dir: Path) -> _RecordingPublisher:
         raise OSError("no contract")
 
     publisher = _RecordingPublisher()

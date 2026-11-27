@@ -20,6 +20,7 @@ import math
 import re
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
@@ -237,11 +238,13 @@ def _require_canary_receipt(command: Mapping[str, JsonValue], state_dir: Path) -
     _canary_gate().require_for_roll(command, state_dir)
 
 
-def _load_roll_events(execution: ModuleType) -> ProtocolDevRollEvents:
-    """The real events object of the running deploy agent."""
+def _load_roll_events(
+    execution: ModuleType, state_dir: Path | None = None
+) -> ProtocolDevRollEvents:
+    """The real events object of the running deploy agent (journaling under ``state_dir``)."""
     return cast(
         "ProtocolDevRollEvents",
-        _roll_events_module(execution).build_events(execution),
+        _roll_events_module(execution).build_events(execution, state_dir),
     )
 
 
@@ -289,6 +292,39 @@ def _checked(
     )
 
 
+# The agent's own consumer transport declaration (the unit's ``KAFKA_SASL_MECHANISM``,
+# ``KAFKA_SECURITY_PROTOCOL`` and ``KAFKA_SASL_ENV_PREFIX``, OMN-18012). The agent's lane login
+# lives only under that prefix, so the unprefixed pair the append command's client config reads
+# is absent, and ``ModelKafkaEventBusConfig.default()`` rejects a SASL mechanism with no
+# credentials before the lane's stored identity is bound (OMN-26316). The append command takes
+# its broker, protocol, mechanism and login from the ``dev`` lane declaration and the machine's
+# lane store, so none of these three reaches it; the post-roll ledger proof reads the same client
+# config and met the same refusal (dev job 02059fe5, 2026-11-24T06:38Z).
+_LEDGER_CLIENT_UNINHERITED_ENV: Final = frozenset(
+    {"KAFKA_SASL_MECHANISM", "KAFKA_SECURITY_PROTOCOL", "KAFKA_SASL_ENV_PREFIX"}
+)
+
+
+# omnibase_core 0.47.77 and later list the internal command groups, ``ledger`` among
+# them, only when this variable is truthy; the post-roll proof calls ``onex ledger`` and
+# exited 2 ("No such command 'ledger'") on a healthy new runtime (dev job d7149818,
+# 2026-11-25T23:27Z, OMN-26316). It is set by ``env`` for that one call, never the process.
+_OPERATOR_COMMANDS_SWITCH: Final = "ONEX_CLI_SHOW_ALL_COMMANDS=1"
+
+
+def _without_agent_broker_declaration(command: list[str]) -> list[str]:
+    """``command`` run under ``env`` for the ledger call: the agent's own broker
+    declarations unset and the operator command switch set.
+
+    Both are done by ``env`` in the child, so this handler never reads the process
+    environment (handlers take no direct environment access).
+    """
+    unset = [
+        arg for name in sorted(_LEDGER_CLIENT_UNINHERITED_ENV) for arg in ("-u", name)
+    ]
+    return ["env", *unset, _OPERATOR_COMMANDS_SWITCH, *command]
+
+
 def _prove_work_ledger_answers(execution: ModuleType) -> None:
     """After a dev runtime recreate verified, prove one ledger read answers (OMN-25942).
 
@@ -316,7 +352,7 @@ def _prove_work_ledger_answers(execution: ModuleType) -> None:
         str(bound),
     ]
     try:
-        done = execution._run(command, timeout=bound)
+        done = execution._run(_without_agent_broker_declaration(command), timeout=bound)
     except execution.subprocess.TimeoutExpired as exc:
         raise DevBootFailedError(f"work ledger: no answer within {bound}s") from exc
     except OSError as exc:
@@ -1201,7 +1237,9 @@ class HandlerDevBootGuard:
             self._command = command
             if self.events is None:
                 try:
-                    self.events = _load_roll_events(self.execution)
+                    self.events = _load_roll_events(
+                        self.execution, self.root.parents[1]
+                    )
                 except Exception:
                     # The events are evidence; a sender that cannot be built (no
                     # broker settings) never fails or delays a roll.
@@ -1624,22 +1662,28 @@ def _append_status_over_bus(
     """
     try:
         done = execution._run(
-            [
-                "bash",
-                "-c",
-                _APPEND_STATUS_SCRIPT,
-                "ledger-append",
-                row,
-                lane,
-                request_id,
-            ],
+            _without_agent_broker_declaration(
+                [
+                    "bash",
+                    "-c",
+                    _APPEND_STATUS_SCRIPT,
+                    "ledger-append",
+                    row,
+                    lane,
+                    request_id,
+                ]
+            ),
             timeout=REPORT_SECONDS,
         )
     except (OSError, execution.subprocess.SubprocessError):
         logger.warning("Dev boot STATUS delivery still pending: append command failed")
         return False
     if done.returncode != 0:
-        logger.warning("Dev boot STATUS delivery still pending: append command refused")
+        answer = done.stderr.strip().splitlines()[-1:]
+        logger.warning(
+            "Dev boot STATUS delivery still pending: append command refused: %s",
+            _safe(answer[0]) if answer else f"exit {done.returncode}, no stderr",
+        )
         return False
     try:
         receipt = json.loads(done.stdout.strip().splitlines()[-1])
@@ -1648,10 +1692,57 @@ def _append_status_over_bus(
     return isinstance(receipt, dict) and receipt.get("status") in _LEDGER_ACCEPTED
 
 
+class BackgroundPass:
+    """Runs one pass at a time on its own daemon thread; a start while one runs starts none."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+
+    def start(self, work: Callable[..., None], *args: object) -> bool:
+        """Start ``work`` on the pass thread and return at once; False when a pass is running."""
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return False
+            self._thread = threading.Thread(
+                target=self._run, args=(work, args), name=self._name, daemon=True
+            )
+            self._thread.start()
+            return True
+
+    def join(self, timeout: float | None = None) -> None:
+        with self._lock:
+            thread = self._thread
+        if thread is not None:
+            thread.join(timeout)
+
+    def _run(self, work: Callable[..., None], args: tuple[object, ...]) -> None:
+        try:
+            work(*args)
+        except (OSError, ValueError, RuntimeError):
+            logger.exception("Dev boot failure reports remain pending")
+
+
+def _incident_age_seconds(at: object, now: datetime) -> float | None:
+    """Seconds since the incident's own stamp, None when the stamp cannot be read."""
+    try:
+        stamped = datetime.strptime(str(at), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+    return (now - stamped).total_seconds()
+
+
 def deliver_reports(
     root: Path, *, execution: ModuleType, config: ModelDevBootReportConfig
 ) -> None:
-    """Retry durable STATUS and exception deliveries independently of the bus."""
+    """Retry durable STATUS and exception deliveries independently of the bus.
+
+    One pass is bounded (OMN-26316): it starts no new incident once ``config.pass_seconds``
+    have passed, oldest first, so a backlog of refused incidents costs one bound per pass and
+    never an unbounded run. An incident older than ``config.abandon_after_seconds`` moves to
+    the delivered-abandoned state with one log line and is not retried again.
+    """
     if config.plugin_dir is None:
         logger.warning(
             "Dev boot reports pending: configure DEPLOY_AGENT_REPORT_PLUGIN_DIR"
@@ -1659,12 +1750,38 @@ def deliver_reports(
         return
     plugin = config.plugin_dir
     interpreter = str(config.registry_root / ".onex-dispatch-venv" / "bin" / "python")
-    for path in root.glob("incident-*.json"):
+    deadline = execution._dev_boot_clock() + config.pass_seconds
+    stamp = execution._dev_boot_timestamp()
+    now = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    paths = sorted(root.glob("incident-*.json"))
+    for index, path in enumerate(paths):
         incident = (
             RootModel[dict[str, JsonValue]]
             .model_validate_json(execution._read_private_text(path))
             .root
         )
+        if not (incident["ledger_pending"] or incident["exception_pending"]):
+            continue
+        age = _incident_age_seconds(incident["at"], now)
+        if age is None or age > config.abandon_after_seconds:
+            incident["ledger_pending"] = False
+            incident["exception_pending"] = False
+            incident["delivered_abandoned_at"] = stamp
+            execution._atomic_write_private_json(path, incident)
+            logger.warning(
+                "Dev boot incident %s delivered-abandoned: stamp %s older than the bound of %d seconds",
+                incident["job"],
+                incident["at"],
+                int(config.abandon_after_seconds),
+            )
+            continue
+        if execution._dev_boot_clock() >= deadline:
+            logger.warning(
+                "Dev boot report pass bound of %d seconds reached: %d incident files left for the next pass",
+                int(config.pass_seconds),
+                len(paths) - index,
+            )
+            return
         evidence = (
             f"commit={incident['commit']} job={incident['job']} error={incident['error']} "
             f"restored_revision={incident['restored_revision']} recovery_verified={incident['recovery_verified']}"
@@ -1674,9 +1791,14 @@ def deliver_reports(
         request_id = uuid5(
             NAMESPACE_URL, f"deploy-boot:{incident['project']}:{incident['job']}"
         )
+        # The row is stamped with the delivery time, never the incident's: the ledger refuses a
+        # row stamped more than a day behind its own clock, so a retried row carrying the
+        # incident's stamp could never land once the incident was a day old (OMN-26316). The
+        # incident's own time rides in the evidence cell.
         status_row = (
-            f"{incident['at']} | STATUS | lane=deploy-agent-{incident['project']} "
-            f"| actor=script:deploy-agent | model=none | req={request_id} | {evidence}"
+            f"{stamp} | STATUS | lane=deploy-agent-{incident['project']} "
+            f"| actor=script:deploy-agent | model=none | req={request_id} "
+            f"| incident_at={incident['at']} {evidence}"
         )
         commands = {
             "exception_pending": [

@@ -89,8 +89,9 @@ FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv-bin
 # ============================================================================
 FROM python:${PYTHON_VERSION}-slim AS builder
 
-ARG BUILD_DATE
-ARG VCS_REF
+# BUILD_DATE and VCS_REF change on every deploy and a declared ARG is part of the
+# build environment of every RUN after it, so they are declared at their one use
+# (the provenance manifest below), never here (OMN-26316).
 ARG BUILD_SOURCE=release
 ARG EXPECTED_BUILD_SOURCE=release
 ARG OMNI_HOME=""
@@ -412,6 +413,8 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 
 # Compute the provenance manifest. Workspace mode records sibling repo proofs;
 # release mode writes an explicit manifest so the runtime copy is deterministic.
+ARG BUILD_DATE
+ARG VCS_REF
 RUN set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
         /app/.venv/bin/python /workspace/compute_workspace_provenance.py; \
@@ -598,9 +601,13 @@ FROM python:${PYTHON_VERSION}-slim AS runtime
 # These can be passed at build time for better image tracing and operator visibility.
 # RUNTIME_SOURCE_HASH and COMPOSE_PROJECT are stamped as env vars so operators can
 # verify which code is running via `docker logs <container>` without git forensics.
-ARG RUNTIME_VERSION=0.1.0
-ARG BUILD_DATE
-ARG VCS_REF
+#
+# RUNTIME_VERSION, BUILD_DATE and VCS_REF are NOT declared here (OMN-26316). A
+# declared ARG is part of the build environment of every RUN after it, and these
+# three change on every deploy, so declaring them at the top of the stage re-ran
+# the apt, node, coding-agent CLI and venv layers on every build (42 of 48 image
+# layers differed between two consecutive dev builds, 2026-11-24). They are
+# declared just before the first layer that depends on the commit.
 ARG BUILD_SOURCE=release
 ARG EXPECTED_BUILD_SOURCE=release
 ARG OMNI_HOME=""
@@ -632,44 +639,6 @@ RUN set -eu; \
       echo "BUILD_SOURCE=workspace requires OMNI_HOME" >&2; \
       exit 64; \
     fi
-
-# OMN-12965: workspace-mode builds must stamp a real image identity. A blank
-# VCS_REF (-> blank org.opencontainers.image.revision) or the placeholder
-# RUNTIME_VERSION default (0.1.0) degrades every proof packet, since the runtime
-# SHA + image digest are required citations in accepted evidence. Fail the build
-# here rather than ship a blank-identity image. Release-mode builds may rely on
-# the placeholder default (operator-driven release tooling pins them explicitly),
-# so the guard is scoped to workspace mode.
-RUN set -eu; \
-    if [ "${BUILD_SOURCE}" = "workspace" ]; then \
-      if [ -z "${VCS_REF}" ] || [ "${VCS_REF}" = "unknown" ]; then \
-        echo "workspace build requires a non-empty VCS_REF for org.opencontainers.image.revision (OMN-12965)" >&2; \
-        exit 64; \
-      fi; \
-      if [ -z "${RUNTIME_VERSION}" ] || [ "${RUNTIME_VERSION}" = "0.1.0" ]; then \
-        echo "workspace build requires RUNTIME_VERSION from pyproject (not placeholder 0.1.0) for org.opencontainers.image.version (OMN-12965)" >&2; \
-        exit 64; \
-      fi; \
-      if [ "${PROMOTION_CLASS}" != "stability-candidate" ] || [ "${NON_MAIN_LINEAGE}" != "true" ]; then \
-        echo "workspace build MUST stamp PROMOTION_CLASS=stability-candidate + NON_MAIN_LINEAGE=true so the prod-promotion gate refuses it for prod (OMN-13656); got PROMOTION_CLASS='${PROMOTION_CLASS}' NON_MAIN_LINEAGE='${NON_MAIN_LINEAGE}'" >&2; \
-        exit 64; \
-      fi; \
-    fi
-
-# OCI Image Labels (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
-LABEL org.opencontainers.image.title="OmniBase Infra Runtime" \
-      org.opencontainers.image.description="ONEX Infrastructure Runtime Service - Contract-driven kernel for event-based infrastructure orchestration" \
-      org.opencontainers.image.vendor="OmniNode" \
-      org.opencontainers.image.source="https://github.com/OmniNode-ai/omnibase_infra" \
-      org.opencontainers.image.documentation="https://github.com/OmniNode-ai/omnibase_infra/blob/main/README.md" \
-      org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.version="${RUNTIME_VERSION}" \
-      org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.revision="${VCS_REF}" \
-      com.omninode.build_source="${BUILD_SOURCE}" \
-      com.omninode.promotion_class="${PROMOTION_CLASS}" \
-      com.omninode.non_main_lineage="${NON_MAIN_LINEAGE}" \
-      com.omninode.workspace_provenance_manifest="/app/build-provenance.json"
 
 # Runtime environment configuration
 ENV PYTHONUNBUFFERED=1 \
@@ -948,6 +917,51 @@ COPY --from=uv-bin /uv /uvx /usr/local/bin/
 # This contains all installed Python packages
 COPY --from=builder --chown=omniinfra:omniinfra /app/.venv /app/.venv
 
+# Per-deploy identity (OMN-26316): declared here, after every layer that does not
+# depend on the commit, so a new BUILD_DATE or VCS_REF cannot miss the cache for
+# the layers above.
+ARG RUNTIME_VERSION=0.1.0
+ARG BUILD_DATE
+ARG VCS_REF
+
+# OMN-12965: workspace-mode builds must stamp a real image identity. A blank
+# VCS_REF (-> blank org.opencontainers.image.revision) or the placeholder
+# RUNTIME_VERSION default (0.1.0) degrades every proof packet, since the runtime
+# SHA + image digest are required citations in accepted evidence. Fail the build
+# here rather than ship a blank-identity image. Release-mode builds may rely on
+# the placeholder default (operator-driven release tooling pins them explicitly),
+# so the guard is scoped to workspace mode.
+RUN set -eu; \
+    if [ "${BUILD_SOURCE}" = "workspace" ]; then \
+      if [ -z "${VCS_REF}" ] || [ "${VCS_REF}" = "unknown" ]; then \
+        echo "workspace build requires a non-empty VCS_REF for org.opencontainers.image.revision (OMN-12965)" >&2; \
+        exit 64; \
+      fi; \
+      if [ -z "${RUNTIME_VERSION}" ] || [ "${RUNTIME_VERSION}" = "0.1.0" ]; then \
+        echo "workspace build requires RUNTIME_VERSION from pyproject (not placeholder 0.1.0) for org.opencontainers.image.version (OMN-12965)" >&2; \
+        exit 64; \
+      fi; \
+      if [ "${PROMOTION_CLASS}" != "stability-candidate" ] || [ "${NON_MAIN_LINEAGE}" != "true" ]; then \
+        echo "workspace build MUST stamp PROMOTION_CLASS=stability-candidate + NON_MAIN_LINEAGE=true so the prod-promotion gate refuses it for prod (OMN-13656); got PROMOTION_CLASS='${PROMOTION_CLASS}' NON_MAIN_LINEAGE='${NON_MAIN_LINEAGE}'" >&2; \
+        exit 64; \
+      fi; \
+    fi
+
+# OCI Image Labels (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
+LABEL org.opencontainers.image.title="OmniBase Infra Runtime" \
+      org.opencontainers.image.description="ONEX Infrastructure Runtime Service - Contract-driven kernel for event-based infrastructure orchestration" \
+      org.opencontainers.image.vendor="OmniNode" \
+      org.opencontainers.image.source="https://github.com/OmniNode-ai/omnibase_infra" \
+      org.opencontainers.image.documentation="https://github.com/OmniNode-ai/omnibase_infra/blob/main/README.md" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${RUNTIME_VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      com.omninode.build_source="${BUILD_SOURCE}" \
+      com.omninode.promotion_class="${PROMOTION_CLASS}" \
+      com.omninode.non_main_lineage="${NON_MAIN_LINEAGE}" \
+      com.omninode.workspace_provenance_manifest="/app/build-provenance.json"
+
 # Copy source code with proper ownership
 COPY --chown=omniinfra:omniinfra src/ /app/src/
 
@@ -1007,7 +1021,9 @@ COPY --chown=omniinfra:omniinfra workspace/routing_tiers.yaml /app/config/delega
 # -- the deployed pods have no such mount.
 # scripts/ci/assert_image_config_paths.py asserts this path (and every other
 # entry in the typed registry) inside the built image before the push step.
-COPY --chown=omniinfra:omniinfra config/runner_fleet.yaml /app/config/runner_fleet.yaml
+# OMN-26709: the image bakes an address-free fleet file; the lab's inventory stays
+# in config/runner_fleet.yaml and is selected with RUNNER_FLEET_CONFIG_PATH.
+COPY --chown=omniinfra:omniinfra config/image/runner_fleet.yaml /app/config/runner_fleet.yaml
 
 # Copy workspace/release provenance manifest generated by the builder stage.
 COPY --from=builder --chown=omniinfra:omniinfra /app/build-provenance.json /app/build-provenance.json

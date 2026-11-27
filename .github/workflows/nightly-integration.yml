@@ -519,6 +519,14 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Run integration tests
+        env:
+          # OMN-20317: the kafka-marked suites that name ci.yml's
+          # service-integration-suites as their owner, but appear in no
+          # workflow's pytest list, fail closed without this opt-in
+          # (tests/helpers/service_env.py, OMN-18781). The e2e stack above boots
+          # a plaintext Redpanda and exports its address as
+          # KAFKA_BOOTSTRAP_SERVERS, so the opt-in is true for this step.
+          KAFKA_INTEGRATION_TESTS: "1"
         run: |
           THRESHOLD="${{ github.event.inputs.success_threshold || env.SUCCESS_THRESHOLD }}"
           echo "Success threshold: $THRESHOLD consecutive green runs"

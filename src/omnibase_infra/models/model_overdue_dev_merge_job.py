@@ -19,6 +19,9 @@ class ModelOverdueDevMergeJob(BaseModel):
     accepted before a merge never carries that merge. ``status`` is the record's own status
     (``accepted``, ``in_progress``, ``success``, ``failed`` or ``superseded``).
     ``git_ref`` is the command's ref: ``origin/dev`` builds the dev head at acceptance.
+    ``requested_by`` is the command's requester. ``built_sha`` is the sha the job built (the
+    lineage record's resolved ref, else its build ref); empty when the record does not say,
+    which the decision reads as a job that carried nothing.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -28,3 +31,5 @@ class ModelOverdueDevMergeJob(BaseModel):
     accepted_at: datetime
     status: EnumJobStatus
     git_ref: str = Field(min_length=1)
+    requested_by: str = ""
+    built_sha: str = Field(default="", pattern=r"^([0-9a-f]{40})?$")

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Main orchestrator. Single-job concurrency. Runs consumer + health + publisher concurrently."""
+# Main orchestrator. Single-job concurrency. Runs consumer + health + publisher concurrently.
 
 from __future__ import annotations
 
@@ -149,6 +149,8 @@ from deploy_agent.lane_lock_client import (
     lane_lock,
 )
 from deploy_agent.lane_policy import (
+    MERGED_REF_LANES,
+    SUPERSEDING_LANES,
     follows_stability,
     is_lab_dev_fence,
     load_allowed_lanes_from_env,
@@ -538,6 +540,8 @@ class DeployAgent:
         reading = load_dev_boot_guard(JOB_READING)
         self._post_failure = reading.post_failure_converge(self, converge_command)
         self._idle_build_gate = reading.idle_build_gate(self)
+        # OMN-26316: the revisions a lag is judged on, net of not-runtime paths.
+        self._idle_lag_refs = reading.lag_refs_reader(self)
         self._idle_converge_last_verdict: EnumIdleConvergeVerdict | None = None
         self._idle_converge_last_verdicts: dict[str, EnumIdleConvergeVerdict] = {}
         self._migration_converge_last_check: float | None = None
@@ -648,6 +652,10 @@ class DeployAgent:
             max_workers=LAG_POOL_MAX_WORKERS,
             thread_name_prefix="deploy-agent-lag",
         )
+        # OMN-26316. The dev boot incident report pass gets a thread of its OWN,
+        # for the reason the lag pool above has one: on the job thread it queues
+        # the consumer's poll behind it.
+        self._report_pass = load_dev_boot_guard().BackgroundPass("deploy-agent-reports")
         # OMN-19501. See SETTLE_POOL_MAX_WORKERS. ``_settle_future`` is the most
         # recently submitted settle; the pool is FIFO with one worker, so that
         # one finishing means every earlier one has.
@@ -818,7 +826,10 @@ class DeployAgent:
 
         # Step 3: Retry pending publishes. Called directly rather than through
         # _offload: nothing is listening yet (the site starts at step 4), so
-        # there is no HTTP surface for a blocking call to deny here.
+        # there is no HTTP surface for a blocking call to deny here. The dev boot
+        # incident reports it starts run on their own thread (OMN-26316): 394
+        # refused incidents held this step, and with it /health and the
+        # consumer, for about twenty minutes after every re-exec.
         self._retry_pending_publishes()
 
         # Step 4: Start health endpoint
@@ -898,12 +909,17 @@ class DeployAgent:
             running_build=DockerProvenanceReader(_runtime_container_for_lane),
             ref_resolver=GitRefResolver(REPO_DIR),
             tracking_ref=load_tracking_remote_ref_from_env(),
+            # OMN-26637. Operator ruling 2026-11-24: a newer build request
+            # cancels every older queued one, and the dev lane builds only
+            # merged refs. Both lane sets are declared in lane_policy.
+            supersede_lanes=SUPERSEDING_LANES,
+            merged_ref_lanes=MERGED_REF_LANES,
             router=self._router,
             # OMN-19544 AC1: refuse, as busy, while a prover holds the host.
             host_slot=self._host_slot,
             host_slot_owner=self._host_slot_owner,
             # OMN-19507: defer, without refusing, while the host is loaded.
-            load_gate=self._load_gate,
+            load_gate=load_dev_boot_guard(DEV_ROLL_EVENTS).lane_build_gate(self),
             # Lane flags: refuse, as frozen, all but a promotion.
             lane_flags=self._lane_flags,
         )
@@ -1527,23 +1543,23 @@ class DeployAgent:
         # routing row sends it elsewhere; this instance is its only follower.
         web = getattr(_web_source(), "repository", None) == repository
         routed_elsewhere = web or routed_to != self._router.instance.name
+        lane_flags = getattr(self, "_lane_flags", ModelLaneFlags())
         running_ref = head_ref = probe_blocker = windows_error = None
-        if routed_elsewhere:
+        # OMN-26316: with a declared lag bound the instance's own repository is
+        # read too, so the bound covers a merge its trigger never delivered.
+        if routed_elsewhere or lane_flags.max_dev_lag() is not None:
             try:
                 probe_blocker = self._idle_probe_blocker(now)
             except Exception as exc:  # noqa: BLE001 - an unread schedule refuses
                 windows_error = (
                     f"probe schedule unreadable: {type(exc).__name__}: {exc}"
                 )
-            running_ref = self._idle_read_running_ref(repository)
-            head_ref = self._idle_read_head_ref(repository)
-        lane_flags = getattr(self, "_lane_flags", ModelLaneFlags())
+            running_ref, head_ref = self._idle_lag_refs(repository, routed_elsewhere)
         behind_since = next_behind_since(
             self._dev_lag_behind_since.get(repository), running_ref, head_ref, now
         )
-        if behind_since is None:
-            self._dev_lag_behind_since.pop(repository, None)
-        else:
+        self._dev_lag_behind_since.pop(repository, None)
+        if behind_since is not None:
             self._dev_lag_behind_since[repository] = behind_since
         if not web:  # the drift record names the runtime container and image
             self._record_dev_lane_drift(
@@ -1566,6 +1582,7 @@ class DeployAgent:
             frozen_reason=lane_flags.frozen_reason(now),
             behind_since=behind_since,
             max_lag=lane_flags.max_dev_lag(),
+            max_probe_deferral=lane_flags.max_probe_deferral(),
         )
         decision = decide_idle_converge(inputs)
         self._job_reading("record_idle", self._idle_read_head_ref, inputs, decision)
@@ -1964,10 +1981,10 @@ class DeployAgent:
                 # deploy-source clone is shared with that script, and this agent
                 # took nothing until now.
                 self._current_git_sha = self.executor.git_pull(
-                    cmd.git_ref,
-                    lane=cmd.runtime_lane,
-                    on_phase_update=on_phase_update,
+                    cmd.git_ref, lane=cmd.runtime_lane, on_phase_update=on_phase_update
                 )
+                # OMN-26678: a replayed completion event reads the sha from the record.
+                self.job_store.record_git_sha(cid, self._current_git_sha)
 
                 # Regenerate compose from catalog (non-fatal — logs warning on failure)
                 self.executor.compose_gen(
@@ -2502,36 +2519,35 @@ class DeployAgent:
     def _deliver_onex_api_pin(
         self, cmd: ModelRebuildRequested, *, sha: str, manifest_sha: str | None
     ) -> ModelOnexApiDelivery | None:
-        """Advance ``ONEX_API_IMAGE`` to the image the settle just built (OMN-18572).
-
-        The build makes a correct onex-api image EXIST on this host; this is the
-        step that makes the lane RUN it. ``manifest_sha`` is the overlay SOURCE
-        commit the image was built from (its tags are ``<sha8>-<stamp>``), not
-        the merged omnibase_infra sha the fence answered: passing the fence's
-        sha searched for a lineage no image ever carried, and thirty deliveries
-        refused on that between 2026-09-17 and 2026-09-19.
-
-        A MISSING LINEAGE IS A NAMED NON-DELIVERY, NEVER A FALLBACK. The repoint
-        script will happily take the newest resident image of any lineage when
-        ``--sha`` is omitted, and reaching for that here would deliver some
-        other merge's image and record it as this one's. ``NOT_ATTEMPTED`` says
-        what happened instead.
-
-        STILL DOES NOT RAISE, AND NO LONGER STAYS QUIET. The delivery runs after
-        the compose lane's verdict is written; converting its failure into a
-        failed deploy would report a lane that converged as broken, and an
-        escape here would skip the terminal publish that sits after this
-        method's caller. Both of those remain true. What changes is that every
-        outcome is now a typed record on the job and on the terminal event, and
-        a failing one is logged at ``ERROR``: the refusal above was emitted at
-        ``INFO`` thirty times and read exactly like a successful no-op.
-
-        OMN-19501: runs on the settle worker, and RE-ACQUIRES the dev lane lock
-        for the recreate, because the recreate is a mutation of the compose
-        project and the next compose job may hold it. ``sha`` is the fence's
-        answer from the job thread; it is not re-derived here, because the
-        agent's per-job sha now belongs to whichever job runs next.
-        """
+        # Advance ``ONEX_API_IMAGE`` to the image the settle just built (OMN-18572).
+        #
+        # The build makes a correct onex-api image EXIST on this host; this is the
+        # step that makes the lane RUN it. ``manifest_sha`` is the overlay SOURCE
+        # commit the image was built from (its tags are ``<sha8>-<stamp>``), not
+        # the merged omnibase_infra sha the fence answered: passing the fence's
+        # sha searched for a lineage no image ever carried, and thirty deliveries
+        # refused on that between 2026-09-17 and 2026-09-19.
+        #
+        # A MISSING LINEAGE IS A NAMED NON-DELIVERY, NEVER A FALLBACK. The repoint
+        # script will happily take the newest resident image of any lineage when
+        # ``--sha`` is omitted, and reaching for that here would deliver some
+        # other merge's image and record it as this one's. ``NOT_ATTEMPTED`` says
+        # what happened instead.
+        #
+        # STILL DOES NOT RAISE, AND NO LONGER STAYS QUIET. The delivery runs after
+        # the compose lane's verdict is written; converting its failure into a
+        # failed deploy would report a lane that converged as broken, and an
+        # escape here would skip the terminal publish that sits after this
+        # method's caller. Both of those remain true. What changes is that every
+        # outcome is now a typed record on the job and on the terminal event, and
+        # a failing one is logged at ``ERROR``: the refusal above was emitted at
+        # ``INFO`` thirty times and read exactly like a successful no-op.
+        #
+        # OMN-19501: runs on the settle worker, and RE-ACQUIRES the dev lane lock
+        # for the recreate, because the recreate is a mutation of the compose
+        # project and the next compose job may hold it. ``sha`` is the fence's
+        # answer from the job thread; it is not re-derived here, because the
+        # agent's per-job sha now belongs to whichever job runs next.
         if not lane_runs_phase(cmd.runtime_lane, EnumInstancePhase.ONEX_API_PIN):
             # OMN-19522: no onex-api runs on this instance (its overlay
             # disables the service), so there is no pin to deliver.
@@ -2948,16 +2964,14 @@ class DeployAgent:
     def _retry_pending_publishes(self) -> None:
         """Replay any result still owed to the bus. BLOCKING — see ``_offload``."""
         # Failure reports use their own durable outbox and survive a runtime
-        # bus outage. Retry only on a dev-capable instance.
+        # bus outage. Retry only on a dev-capable instance, off this thread.
         if EnumRuntimeLane.DEV in self._allowed_lanes:
-            try:
-                deliver_reports(
-                    STATE_DIR
-                    / "dev-boot-guard"
-                    / lane_config_for(EnumRuntimeLane.DEV).compose_project
-                )
-            except (OSError, ValueError, RuntimeError):
-                logger.exception("Dev boot failure reports remain pending")
+            self._report_pass.start(
+                deliver_reports,
+                STATE_DIR
+                / "dev-boot-guard"
+                / lane_config_for(EnumRuntimeLane.DEV).compose_project,
+            )
         pending = self.job_store.get_pending_publish()
         for job in pending:
             cid_str = str(job.correlation_id)
@@ -2991,7 +3005,7 @@ class DeployAgent:
                     )
                 continue
 
-            payload = build_completion_payload(job, "")
+            payload = build_completion_payload(job, job.git_sha)
             if publish_result(payload, self._kafka_config):
                 self.job_store.mark_published(job.correlation_id)
                 self._publish_cb.record_success(cid_str)

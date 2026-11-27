@@ -92,8 +92,8 @@ def test_alter_sits_inside_the_to_regclass_gate_with_the_named_skip_in_else() ->
 
 def test_database_gate_precedes_the_connect_and_names_its_skip() -> None:
     sql = "\n".join(_sql_lines(_seam()))
-    db_gate = sql.index("datname = 'omninode_cloud'")
-    connect = sql.index(r"\connect omninode_cloud")
+    db_gate = sql.index("datname = :'cloud_database'")
+    connect = sql.index(r'\connect :"cloud_database"')
     table_gate = sql.index("to_regclass('public.tenant_api_keys')")
     alter = sql.index("ALTER TABLE")
     assert db_gate < connect < table_gate < alter

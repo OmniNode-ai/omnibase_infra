@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """The reader side of the one-recreate-an-hour rule (OMN-25912).
 
-The deploy agent's window gate covers the idle converge and the idle restore, and a lane's
+The deploy agent's window gate covers the idle converge, the idle restore and a lane's build request, and a real
 rollback command or the container's own restart policy never asks it. This handler reads
 what those starts left on the bus (``dev_runtime_started``, ``dev_roll_manifest`` and
 ``dev_recreate_announced``, plus the container's own StartedAt and RestartCount) and names
@@ -34,6 +34,9 @@ from omnibase_infra.enums.enum_dev_recreate_violation_kind import (
 )
 from omnibase_infra.handlers.dev_recreate_window.handler_dev_recreate_window import (
     window_start,
+)
+from omnibase_infra.models.model_dev_container_observation import (
+    ModelDevContainerObservation,
 )
 from omnibase_infra.models.model_dev_recreate_announcement import (
     ModelDevRecreateAnnouncement,
@@ -72,6 +75,14 @@ def _violation_id(kind: EnumDevRecreateViolationKind, key: str) -> UUID:
 
 def _stamp(at: datetime) -> str:
     return at.isoformat()
+
+
+def _observed(seen: ModelDevContainerObservation) -> str:
+    """The cause and build the observer read for the start, when it read them."""
+    if seen.cause is None:
+        return ""
+    build = "the same build as the previous start" if seen.same_build else "a new build"
+    return f"; cause {seen.cause.value}, on {build}"
 
 
 class DevRecreateAuditReader:
@@ -258,7 +269,7 @@ class DevRecreateAuditReader:
                     detail=(
                         f"container {seen.container} started {_stamp(seen.started_at)} "
                         f"(RestartCount {seen.restart_count}, exit code {seen.exit_code}) "
-                        "with no dev_runtime_started event"
+                        "with no dev_runtime_started event" + _observed(seen)
                     ),
                 )
             )
@@ -273,7 +284,7 @@ def audit_and_publish(
     """Read the window, publish one violation event per case, and return what was found."""
     result = handler.handle(request)
     for violation in result.violations:
-        if not events.recreate_violation(violation):
+        if not events.publish_observed("dev_recreate_violation", violation):
             logger.error(
                 "dev recreate violation %s was not accepted by the bus "
                 "friction_type=dev_event_publish_failed",

@@ -707,7 +707,11 @@ def test_the_build_passes_the_full_deploy_sha_as_the_label_and_cache_args(
 
 
 DEV_FOLD_OVERLAY = REPO / "docker" / "docker-compose.dev-tenant-fold.yml"
-OVERLAY_TARGETS = ("/etc/onex/skill-overlays", "/etc/onex/skill-overlays-store")
+OVERLAY_TARGETS = (
+    "/etc/onex/skill-overlays",
+    "/etc/onex/skill-overlays-settings",
+    "/etc/onex/skill-overlays-store",
+)
 ROOTS_DIR_VAR = "DEV_LANE_SKILL_OVERLAY_ROOTS_DIR"
 #: What the deploy agent's process environment holds for every lane it deploys: the
 #: operator env sets the roots directory and OMNI_HOME; no env sets the store
@@ -715,6 +719,7 @@ ROOTS_DIR_VAR = "DEV_LANE_SKILL_OVERLAY_ROOTS_DIR"
 DEPLOY_ENV = {
     ROOTS_DIR_VAR: "/srv/private/overlays",
     "OMNI_HOME": "/srv/registry",
+    "HOME": "/srv/home",
     "ONEX_LANE_DECLARATION_DIR": "/srv/registry/config/lab",
 }
 OPERATOR_UNIT = (
@@ -816,6 +821,9 @@ def test_stability_runtime_main_reads_the_same_overlay_roots_as_dev() -> None:
     assert roots["/etc/onex/skill-overlays"] == DEPLOY_ENV[ROOTS_DIR_VAR]
     # Line 317's default is relative to the project directory: two levels up from
     # docker/, the registry root's own overlays clone. The resolved path, not a suffix.
+    assert roots["/etc/onex/skill-overlays-settings"] == os.path.normpath(
+        f"{DEPLOY_ENV['HOME']}/.local/state/onex/overlay-store"
+    )
     assert roots["/etc/onex/skill-overlays-store"] == os.path.normpath(
         _project_directory(LANE) / ".." / ".." / "overlays" / "overlays"
     )

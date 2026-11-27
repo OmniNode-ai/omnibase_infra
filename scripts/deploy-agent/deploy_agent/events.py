@@ -1015,28 +1015,27 @@ class EnumJobNotStarted(StrEnum):
 
 
 class EnumRejectionReason(StrEnum):
-    """Why a command reached the rejection topic instead of running.
-
-    Every value was already a bare string literal at a ``_publish_rejected``
-    call site; naming them is what lets OMN-18143 AC6's requirement -- a
-    terminal event that says "superseded" distinguishably from a timeout and
-    from a rollback -- be a type rather than a convention about spelling.
-
-    ``SUPERSEDED`` is the only one that is not a refusal of the command: the
-    work it asked for IS being done, by the newer command named alongside it.
-
-    ``SUPERSEDED_BY_RUNNING_BUILD`` and ``DIVERGENT_REF`` are the lineage fence
-    (OMN-19270). The first acknowledges a CI-triggered command whose work the
-    build the lane runs already carries: its infra ``git_ref`` is in that build,
-    and either it is an infra merge or that workspace build started after the
-    command was requested. The command is recorded ``superseded`` and never
-    built. It is a token of its own rather
-    than ``SUPERSEDED`` because no newer COMMAND replaced it. The replacement
-    is the running build, which need not have come from a command this agent
-    recorded, so there is no correlation id to name. The second refuses a ref
-    that is neither an ancestor nor a descendant of the running build and is
-    not on the lane's tracking branch.
-    """
+    # Why a command reached the rejection topic instead of running.
+    #
+    # Every value was already a bare string literal at a ``_publish_rejected``
+    # call site; naming them is what lets OMN-18143 AC6's requirement -- a
+    # terminal event that says "superseded" distinguishably from a timeout and
+    # from a rollback -- be a type rather than a convention about spelling.
+    #
+    # ``SUPERSEDED`` is the only one that is not a refusal of the command: the
+    # work it asked for IS being done, by the newer command named alongside it.
+    #
+    # ``SUPERSEDED_BY_RUNNING_BUILD`` and ``DIVERGENT_REF`` are the lineage fence
+    # (OMN-19270). The first acknowledges a CI-triggered command whose work the
+    # build the lane runs already carries: its infra ``git_ref`` is in that build,
+    # and either it is an infra merge or that workspace build started after the
+    # command was requested. The command is recorded ``superseded`` and never
+    # built. It is a token of its own rather
+    # than ``SUPERSEDED`` because no newer COMMAND replaced it. The replacement
+    # is the running build, which need not have come from a command this agent
+    # recorded, so there is no correlation id to name. The second refuses a ref
+    # that is neither an ancestor nor a descendant of the running build and is
+    # not on the lane's tracking branch.
 
     BUSY = "busy"
     DUPLICATE = "duplicate"
@@ -1048,6 +1047,9 @@ class EnumRejectionReason(StrEnum):
     SUPERSEDED = "superseded"
     SUPERSEDED_BY_RUNNING_BUILD = "superseded_by_running_build"
     DIVERGENT_REF = "divergent_ref"
+    #: OMN-26637. A command for a merged-ref-only lane (``dev``) whose ref the
+    #: lane's tracking branch does not contain: a PR head or an unmerged branch.
+    NOT_A_MERGED_REF = "not_a_merged_ref"
     #: The instance's ``flags.freeze`` is in force and the command is not a
     #: promotion (``deploy_agent.lane_flags``).
     FROZEN = "frozen"
