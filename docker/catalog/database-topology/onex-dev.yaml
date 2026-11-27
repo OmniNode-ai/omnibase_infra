@@ -122,6 +122,7 @@ databases:
               - lab_lane_health
               - lab_proof_receipts
               - lane_drift_and_stalls
+              - lane_work_workflow
               - ledger_line_citation
               - live_events
               - log_entries
@@ -161,6 +162,12 @@ databases:
               - INSERT
               - SELECT
               - UPDATE
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
+              - lane_work_terminal
+            privileges:
+              - SELECT
             schema: omninode_internal
           - object_type: TABLE
             objects:
@@ -546,5 +553,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: b89650a694584af25cd311f2c1d5bf763070ecc40fecf706ec0c99053d9fb8cf
+  sha256: cf0634a388b593c2e42a34b5db60d8704c44be83810276d199f00ae6f52d70da
 topology_instance: onex-dev

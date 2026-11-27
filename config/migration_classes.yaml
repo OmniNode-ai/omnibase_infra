@@ -419,6 +419,8 @@ migrations:
   forward/nodes/node_projection_metering_summary/0004_metering_summary_savings_pct.sql: expand-only
   forward/nodes/node_projection_lab_alerts/0000_create_lab_alerts.sql: expand-only # CREATE TABLE lab_alerts and a non-unique index on (state, raised_at)
   forward/nodes/node_projection_lab_alerts/0001_grant_omninode_runtime_lab_alerts.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on lab_alerts
+  forward/nodes/node_projection_lane_work/0000_create_lane_work_workflow.sql: forward-only # CREATE TABLE lane_work_workflow plus CREATE OR REPLACE VIEW lane_work_terminal
+  forward/nodes/node_projection_lane_work/0001_grant_omninode_runtime_lane_work_workflow.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on lane_work_workflow
   forward/nodes/node_projection_lab_container_memory/0000_create_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_lab_container_memory/0001_grant_omninode_runtime_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_topic_activity/0000_create_topic_activity.sql: forward-only # ALTER TABLE on the created table
