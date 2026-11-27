@@ -5,7 +5,7 @@
 Failure modes this delivery check catches:
 - the migration is absent from the infrastructure forward tree;
 - the vendored SQL file differs by even one byte from its approved source,
-  omnimarket#6629 at d2b838adf7968ef57a097adc91b65cc5aa46c933;
+  omnimarket#6629 at 5b056878ad221aecc47dc99a2c89ac7de8e813f1;
 - its exact tenant ledger row is missing, duplicated, or has a wrong field;
 - its forward-only migration classification is missing or changed;
 - it stops granting tenant_projection_writer the table the topology declares.
@@ -29,7 +29,7 @@ RELATIVE = (
 )
 NODE = "node:node_projection_savings"
 # SHA-256 digest of the approved omnimarket source migration.
-DIGEST = "00050853bba63893152676adafe3d2a3ffe31136d13016661ced5ea2cc7edd4d"
+DIGEST = "59bbe8e3f27d1d39d2c25c871569328a79b83d42326a46b6d90d42334bbbc24e"
 
 
 def test_migration_102_is_byte_identical_ledgered_and_forward_only() -> None:
