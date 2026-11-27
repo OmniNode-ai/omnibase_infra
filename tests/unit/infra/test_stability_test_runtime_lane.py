@@ -150,6 +150,9 @@ def test_stability_lane_runtime_services_do_not_reuse_production_names() -> None
         assert "image" not in service
         # OMN-24562: the runtime builds on omnimarket's composed image.
         assert service["build"]["dockerfile"] == "Dockerfile.runtime"
+        assert service["build"]["additional_contexts"] == {
+            "infra-runtime": "service:composed-runtime-base-image"
+        }
         assert service["restart"] == "unless-stopped"
 
 
