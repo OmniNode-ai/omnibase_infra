@@ -48,11 +48,11 @@ dod_evidence:
         check_value: "uv run --frozen pytest tests/unit/handlers/mcp/test_adapter_onex_to_mcp.py tests/integration/services/mcp/test_service_mcp_tool_discovery.py -k 'two_entry or one_tool_per_entry' -q"
         cwd: "."
     binds_ac: ["AC1592003"]
-  - id: "dod-omn15920-infra-ac4-deploy"
-    description: "Deploy probe. The deployed runtime imports the wrapper tool entry that builds the mcp tools list."
+  - id: "dod-omn15920-infra-ac4-pushed-emitter-entry"
+    description: "Deploy-scope probe, hosted-runnable. The pushed head's wrapper contract emitter builds the mcp tools list from ModelMCPWrapperToolEntry; read through the GitHub contents API at the exact head."
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "docker exec omninode-runtime python -c 'from omnibase_infra.models.mcp.model_mcp_wrapper_tool_entry import ModelMCPWrapperToolEntry'"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/services/mcp/service_mcp_wrapper_contract_emitter.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF ModelMCPWrapperToolEntry"
         cwd: "."
     binds_ac: ["AC1592002"]
