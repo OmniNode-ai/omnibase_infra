@@ -62,6 +62,7 @@ from collections.abc import Callable, Mapping, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
 
+from omnibase_infra.handlers import handler_contracts_revision_guard as guard
 from omnibase_infra.handlers.handler_boot_failure_ledger import HandlerBootFailureLedger
 from omnibase_infra.handlers.handler_cloud_lab_guard import refuse_in_cloud_mode
 from omnibase_infra.models.health.model_boot_attempt_outcome import (
@@ -98,9 +99,7 @@ DEFAULT_HEALTHY_AFTER_SECONDS: float = 600.0
 #: kernel's ``logging.basicConfig`` is a no-op once the root has a handler.
 _KERNEL_LOGGER_NAME: str = "omnibase_infra.runtime.service_kernel"
 _MAX_CAUSE_CHARS: int = 500
-_NO_KERNEL_ERROR: str = (
-    "no kernel error was logged before the exit; last dispatch error: "
-)
+_NO_KERNEL_ERROR = "no kernel error was logged before the exit; last dispatch error: "
 _PARK_SLEEP_SECONDS: float = 3600.0
 _PUBLISH_TIMEOUT_SECONDS: float = 8.0
 
@@ -258,6 +257,7 @@ def run_preflight(env: MutableMapping[str, str]) -> int:
     """
     return (
         refuse_in_cloud_mode(env)
+        or guard.refuse_mismatched_contracts(env)
         or stamp_all_fingerprints(env)
         or render_bifrost_contract(env)
         or render_resolver_config(env)

@@ -179,6 +179,9 @@ def test_a_failed_render_aborts_boot(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(render_secret_resolver_config, "main", lambda: 3)
     monkeypatch.setattr(entrypoint_preflight, "stamp_all_fingerprints", lambda _env: 0)
+    monkeypatch.setattr(
+        entrypoint_preflight.guard, "refuse_mismatched_contracts", lambda _env: 0
+    )
 
     rc = entrypoint_preflight.run_preflight({"ONEX_SECRET_RESOLVER_CONFIG_PATH": "/x"})
 
