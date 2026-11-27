@@ -249,6 +249,31 @@ class DockerStabilityIntegrationHost:
     def recreate(
         self, compose_project: str, services: Sequence[tuple[str, str]]
     ) -> None:
+        previous = {
+            service: _run(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    "--format",
+                    "{{.Id}}",
+                    f"{compose_project}-{service}:latest",
+                ]
+            )
+            for service, _ in services
+        }
+        try:
+            self._recreate_on(compose_project, services)
+        except RuntimeError:
+            # A refused or failed recreate must not leave the lane's :latest tags
+            # on the new image, or the next restart of a container would run it.
+            for service, image_id in previous.items():
+                _run(["docker", "tag", image_id, f"{compose_project}-{service}:latest"])
+            raise
+
+    def _recreate_on(
+        self, compose_project: str, services: Sequence[tuple[str, str]]
+    ) -> None:
         for service, image_id in services:
             _run(["docker", "tag", image_id, f"{compose_project}-{service}:latest"])
         first = services[0][0]
@@ -359,9 +384,20 @@ class HandlerStabilityIntegrationRefresh:
                 detail=str(exc),
             )
 
-        self._host.recreate(
-            request.compose_project, tuple((svc, image_id) for svc in request.services)
-        )
+        try:
+            self._host.recreate(
+                request.compose_project,
+                tuple((svc, image_id) for svc in request.services),
+            )
+        except RuntimeError as exc:
+            return ModelStabilityIntegrationRefreshResult(
+                outcome="refused",
+                heads=heads,
+                deploy_tags=tags,
+                built_image_id=image_id,
+                rollback_target=target,
+                detail=f"recreate refused, lane untouched: {exc}",
+            )
         started = self.clock()
         while True:
             if self._host.health_status(request.health_url) == 200:
