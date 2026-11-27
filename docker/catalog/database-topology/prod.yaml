@@ -24,6 +24,7 @@ databases:
         domain_column: domain
         relation: schema_migrations
         schema: platform_catalog
+        shape: stream_domain_version_checksum
         stream_column: migration_stream
         version_column: version
     migration_stream: omnibase_infra.application
@@ -114,6 +115,7 @@ databases:
               - goal_traces
               - host_disk_class
               - host_disk_volume
+              - lab_alerts
               - lab_container_memory_window
               - lab_job_state
               - lab_job_transitions
@@ -130,6 +132,10 @@ databases:
               - open_obligations
               - orchestration_style_outcomes
               - overlay_store
+              - overlay_store_audit
+              - overlay_store_provenance
+              - overlay_store_revision
+              - overlay_store_write
               - pr_landing_state
               - pr_landing_transitions
               - pr_state
@@ -404,6 +410,7 @@ databases:
         domain_column: domain
         relation: schema_migrations
         schema: public
+        shape: stream_domain_version_checksum
         stream_column: migration_stream
         version_column: version
     migration_stream: omnibase_infra.service
@@ -457,6 +464,7 @@ databases:
         domain_column: domain
         relation: schema_migrations
         schema: public
+        shape: stream_domain_version_checksum
         stream_column: migration_stream
         version_column: version
     migration_stream: omniintelligence.service
@@ -491,6 +499,46 @@ databases:
       public:
         domain: OMNINODE_INTERNAL
         owner: owner_omniintelligence
+  omninode_cloud:
+    bindings:
+      tenant_identity_writer:
+        database_ref: omninode_cloud
+        dsn_env: TENANT_IDENTITY_DATABASE_DSN
+        principal: tenant_identity_writer
+    checksum_ledger: schema_migrations
+    checksum_ledgers:
+      schema_migrations:
+        checksum_column: checksum
+        domain_column: null
+        relation: schema_migrations
+        schema: public
+        shape: version_checksum
+        stream_column: null
+        version_column: version
+    migration_stream: omnibase_infra.cloud
+    owners:
+      owner_omninode_cloud:
+        login: false
+    physical_name: omninode_cloud
+    principals:
+      tenant_identity_writer:
+        bypass_rls: false
+        grants:
+          - object_type: DATABASE
+            objects: []
+            privileges:
+              - CONNECT
+            schema: null
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: public
+        login: true
+    schemas:
+      public:
+        domain: TENANT
+        owner: owner_omninode_cloud
 environment: prod
 schema_version: '1.0'
 source:
@@ -498,5 +546,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 7c4115a180b7e96fb8ac5e9e6fe34dd6026b40d9b46a55bb3c4ed57108427d7e
+  sha256: 13e22d383a49c9ba39932d834883b48db7ecf5713d1ca6dffffb444aee48845d
 topology_instance: local

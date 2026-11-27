@@ -71,8 +71,8 @@ def without_env_unset(argv: list[str]) -> list[str]:
     if argv[:1] != ["env"]:
         return argv
     rest = argv[1:]
-    while rest[:1] == ["-u"]:
-        rest = rest[2:]
+    while rest[:1] == ["-u"] or (rest and "=" in rest[0] and rest[0][0].isupper()):
+        rest = rest[2:] if rest[0] == "-u" else rest[1:]
     return rest
 
 
@@ -82,6 +82,7 @@ def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
         "containers": _containers(),
         "logs": "",
         "commands": [],
+        "raw_commands": [],
         "ledger": '{"status": "ok", "rows": []}',
         "ledger_exit": 0,
         "ledger_raises": None,
@@ -106,6 +107,7 @@ def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
     }
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        state["raw_commands"].append(list(argv))
         argv = without_env_unset(argv)
         state["commands"].append(argv)
         output = ""

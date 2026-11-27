@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.38.84"
+version = "0.38.86"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -287,7 +287,7 @@ override-dependencies = [
 [tool.uv.sources]
 # RULING 2026-10-29T01:50:26Z: iterate with a dev-merge TAG, verified by
 # core dev_tag_lineage; rev and branch pins remain refused.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261120075721-2a9efbda3548" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261126053711-ce48c176d269" }
 
 
 [tool.ruff]
@@ -639,6 +639,7 @@ node_boot_catalog_effect = "omnibase_infra.nodes.node_boot_catalog_effect"
 node_broker_disk_watermark_compute = "omnibase_infra.nodes.node_broker_disk_watermark_compute"
 node_broker_grant_derive_compute = "omnibase_infra.nodes.node_broker_grant_derive_compute"
 node_broker_principal_effect = "omnibase_infra.nodes.node_broker_principal_effect"
+node_build_clock_compute = "omnibase_infra.nodes.node_build_clock_compute"
 node_build_loop_projection_compute = "omnibase_infra.nodes.node_build_loop_projection_compute"
 node_build_loop_write_effect = "omnibase_infra.nodes.node_build_loop_write_effect"
 node_bus_forwarder_effect = "omnibase_infra.nodes.node_bus_forwarder_effect"
@@ -654,6 +655,7 @@ node_checkpoint_effect = "omnibase_infra.nodes.node_checkpoint_effect"
 node_checkpoint_validate_compute = "omnibase_infra.nodes.node_checkpoint_validate_compute"
 node_ci_live_contact_effect = "omnibase_infra.nodes.node_ci_live_contact_effect"
 node_ci_runner_route_compute = "omnibase_infra.nodes.node_ci_runner_route_compute"
+node_cloud_lab_guard_effect = "omnibase_infra.nodes.node_cloud_lab_guard_effect"
 node_coding_agent_fsm_reducer = "omnibase_infra.nodes.node_coding_agent_fsm_reducer"
 node_coding_agent_invoke_effect = "omnibase_infra.nodes.node_coding_agent_invoke_effect"
 node_coding_agent_orchestrator = "omnibase_infra.nodes.node_coding_agent_orchestrator"

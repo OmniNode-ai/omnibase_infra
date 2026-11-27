@@ -62,9 +62,8 @@ from collections.abc import Callable, Mapping, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
 
-from omnibase_infra.handlers.handler_boot_failure_ledger import (
-    HandlerBootFailureLedger,
-)
+from omnibase_infra.handlers.handler_boot_failure_ledger import HandlerBootFailureLedger
+from omnibase_infra.handlers.handler_cloud_lab_guard import refuse_in_cloud_mode
 from omnibase_infra.models.health.model_boot_attempt_outcome import (
     ModelBootAttemptOutcome,
 )
@@ -242,15 +241,14 @@ def render_bifrost_contract(env: Mapping[str, str]) -> int:
 
 
 def render_resolver_config(env: Mapping[str, str]) -> int:
-    """Render the secret-resolver config when its target path is declared."""
-    if not env.get("ONEX_SECRET_RESOLVER_CONFIG_PATH"):
-        return 0
-    from omnibase_infra.runtime.render_secret_resolver_config import (
-        main as render_resolver_main,
-    )
+    """Render the secret-resolver config when its target path is declared or in cloud mode."""
+    from omnibase_infra.models.runtime import model_cloud_secret_names as cloud
+    from omnibase_infra.runtime import render_secret_resolver_config as render
 
+    if not cloud.ModelCloudSecretNames.render_required(env):
+        return 0
     _echo("[entrypoint] Rendering secret resolver config...")
-    return render_resolver_main()
+    return render.main()
 
 
 def run_preflight(env: MutableMapping[str, str]) -> int:
@@ -259,7 +257,8 @@ def run_preflight(env: MutableMapping[str, str]) -> int:
     Returns ``0`` when the kernel may start, or the boot-abort exit code.
     """
     return (
-        stamp_all_fingerprints(env)
+        refuse_in_cloud_mode(env)
+        or stamp_all_fingerprints(env)
         or render_bifrost_contract(env)
         or render_resolver_config(env)
     )

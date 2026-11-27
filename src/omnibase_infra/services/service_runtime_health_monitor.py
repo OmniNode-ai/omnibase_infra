@@ -37,6 +37,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.handlers import lazy_start_projection_deferral as deferral
 from omnibase_infra.handlers.kafka_idle_topic_watches import idle_watched_topics
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_consumer_sync_status import (
@@ -788,13 +789,18 @@ class ServiceRuntimeHealthMonitor:
             # is deferred to that record (OMN-18087), not unattached. Selecting
             # it made every boot read DEGRADED: 11 of 18 projections on the dev
             # effects runtime, 2026-10-31, each on a watched topic.
-            idle = idle_watched_topics()
-            projections = tuple(
-                ref
-                for ref in select_projection_contracts(
+            # OMN-26316: the manifest holds every contract the profile owns, the
+            # ones a lazy-start lane left dormant included (111 wired at boot and
+            # 1179 dormant on the dev lane, 2026-11-24). A dormant contract has no
+            # consumer until a first message or request wakes it, so the registry
+            # cannot hold one for it: 37 of the 38 projections the dev runtime read
+            # as unattached were dormant, which held the container unhealthy. The
+            # evaluation below sets apart the ones nothing has reached.
+            projections = deferral.without_idle(
+                select_projection_contracts(
                     manifest, kernel_nonwriting=kernel_nonwriting
-                )
-                if not ref.subscribe_topics or not idle.issuperset(ref.subscribe_topics)
+                ),
+                idle_watched_topics(),
             )
             nonwriting_projections = select_kernel_nonwriting_projections(
                 manifest, kernel_nonwriting
@@ -1006,6 +1012,7 @@ class ServiceRuntimeHealthMonitor:
             kernel_nonwriting=nonwriting_projections,
             projection_group_suffixes=projection_group_suffixes,
             nonprojection_group_infixes=nonprojection_group_infixes,
+            awaiting_first_request=deferral.awaiting_first_request(),
         )
         dimensions.append(
             ModelRuntimeHealthDimension(

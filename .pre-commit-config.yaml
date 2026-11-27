@@ -2251,7 +2251,7 @@ repos:
       - id: validate-spdx-headers
         require_serial: true
         name: ONEX SPDX Header Requirement
-        entry: uv run --frozen python -m omnibase_core.cli.cli_commands spdx validate
+        entry: env ONEX_CLI_SHOW_ALL_COMMANDS=1 uv run --frozen python -m omnibase_core.cli.cli_commands spdx validate
         language: system
         pass_filenames: true
         files: ^(src|tests|scripts|examples)/.*\.(py|sh|bash|yml|yaml|toml)$

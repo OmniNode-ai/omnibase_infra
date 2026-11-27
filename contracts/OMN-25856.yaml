@@ -12,6 +12,10 @@ requirements:
     acceptance:
       - id: AC25856001
         statement: "AC25856001: should_replay refuses a publisher_malformed dead letter on its first attempt, the handler counts it quarantined with its reason and replays nothing, and a transient failure is still replayed -- falsifier: uv run pytest tests/unit/nodes/node_dlq_replay_effect/test_omn25856_publisher_malformed_not_replayed.py fails at origin/dev and passes on the PR branch"
+      - id: AC25856002
+        statement: "AC25856002: both dev compose files set DOD_VERIFY_START_BUDGET_S to 540 in the host service that carries DOD_VERIFY_PRODUCT_CLONE_PIN_FILE, above 0 and below the 600 s dispatch deadline -- falsifier: uv run pytest tests/ci/test_dev_runtime_dod_verify_start_budget_omn25856.py fails at origin/dev and passes on the PR branch"
+      - id: AC25856003
+        statement: "AC25856003: the folded dev runtime and the dev-lane runtime-effects bind INFISICAL_TENANT_CREDENTIAL_WRITER_CLIENT_ID and _CLIENT_SECRET from operator env names, as interpolations only -- falsifier: uv run pytest tests/unit/docker/test_byok_writer_identity_binding_omn25856.py fails at origin/dev and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The publisher-malformed refusal, the handler's quarantine count and the transient-failure control.
@@ -45,4 +49,36 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/dlq/test_dlq_replay_publisher_malformed_omn25856.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn25856-ac2-start-budget-declared
+    description: 'AC25856002: the dev-lane and tenant-fold compose files declare DOD_VERIFY_START_BUDGET_S=540 inside the 600 s dispatch deadline; at the merge base neither does'
+    source: manual
+    binds_ac: [AC25856002]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_dev_runtime_dod_verify_start_budget_omn25856.py -q --no-cov -p no:randomly
+        cwd: .
+  - id: dod-omn25856-ac2-runtime-environment
+    description: 'Integrated reading: the running dev runtime carries DOD_VERIFY_START_BUDGET_S=540. It binds no hosted criterion; the local Done gate and the lane STATUS row carry it.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime printenv DOD_VERIFY_START_BUDGET_S
+        cwd: .
+  - id: dod-omn25856-inkling-priced-local
+    description: Inkling-2-Mini carries a zero marginal api cost row in the bundled pricing manifest, and an unlisted Inkling id is refused (known-bad control).
+    source: manual
+    binds_ac: [AC25856001]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/models/pricing/test_inkling_priced_local_omn25856.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn25856-ac3-byok-writer-binding
+    description: 'AC25856003: both dev runtime compose services bind the two BYOK writer identity variables as operator-env interpolations; at the merge base neither does'
+    source: manual
+    binds_ac: [AC25856003]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_byok_writer_identity_binding_omn25856.py -q --no-cov -n 0 -p no:randomly
         cwd: .

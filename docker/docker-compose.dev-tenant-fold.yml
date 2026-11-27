@@ -29,6 +29,13 @@ services:
       INFISICAL_PROJECT_ID: ${RUNTIME_EFFECTS_INFISICAL_PROJECT_ID:-}
       INFISICAL_CLIENT_ID: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_ID:-}
       INFISICAL_CLIENT_SECRET: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_SECRET:-}
+      # OMN-25856: the BYOK intake writes a customer's provider key with its own
+      # machine identity, because the identity above is read-only on
+      # /tenant-inference-credentials and a create with it answers 403. Both
+      # blank keeps the process identity; one blank is a configuration error the
+      # intake names. Values come from the operator env file, never from here.
+      INFISICAL_TENANT_CREDENTIAL_WRITER_CLIENT_ID: ${RUNTIME_EFFECTS_INFISICAL_TENANT_CREDENTIAL_WRITER_CLIENT_ID:-}
+      INFISICAL_TENANT_CREDENTIAL_WRITER_CLIENT_SECRET: ${RUNTIME_EFFECTS_INFISICAL_TENANT_CREDENTIAL_WRITER_CLIENT_SECRET:-}
       INFISICAL_ENVIRONMENT_SLUG: "dev"
       # Coding-agent nodes, savings consumer and the projection read binding.
       CODING_AGENT_CRED_HOME: /home/${RUNTIME_USER_NAME:-omniinfra}
@@ -47,7 +54,7 @@ services:
       # docker cp cannot write there. The installer's declared roots name it
       # (src/omnibase_infra/models/dev_lane_branch_install_roots.yaml); a recreate removes
       # it, and a reader skips a root that holds no <node>/overlay.yaml.
-      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-branch:/etc/onex/skill-overlays-store:/etc/onex/skill-overlays
+      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-branch:/etc/onex/skill-overlays-settings:/etc/onex/skill-overlays-store:/etc/onex/skill-overlays
       ONEX_CONTEXT_SOURCE_TENANT_ID: ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}
       ONEX_TICKET_GUARD_PATH: /etc/onex/ticket-guard/plugins/onex/hooks/lib/ticket_creation_guard.py
       #
@@ -63,7 +70,7 @@ services:
       # other reader in the container sees a config root it never had. The root
       # holds only config/lab, mounted read-only below, where the lane declaration
       # the broker address is resolved from lives.
-      ONEX_LEDGER_BUS_READ_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config OMNIBASE_PATH=/app python -m omnibase_core.cli.cli_commands ledger query --bus-lane dev --stdin
+      ONEX_LEDGER_BUS_READ_COMMAND: env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config OMNIBASE_PATH=/app python -m omnibase_core.cli.cli_commands ledger query --bus-lane dev --stdin
       ONEX_LEDGER_BUS_APPEND_COMMAND: env ONEX_WORKSPACE_CONFIG_ROOT=/etc/onex/workspace-config python -m omnimarket.work_ledger_bus.cli append --bus-lane dev --omnibase-path /app
       ONEX_LEDGER_HOST_NAME: ${DEV_LANE_LEDGER_HOST_NAME:-dev-runtime}
       # OMN-25901: the product clones below are read-only, so the verifier cannot fetch
@@ -73,6 +80,10 @@ services:
       # longer contains its pin, a check run in the clone stays refused
       # PRODUCT_CLONE_NOT_FRESH.
       DOD_VERIFY_PRODUCT_CLONE_PIN_FILE: /etc/onex/product-clone-pin/pins.json
+      # OMN-25856: total time limit, in seconds, for one hosted dod-verify-start command. omnimarket
+      # has no code default and refuses to start a hosted run without it. Above 0 and below the 600 s
+      # dispatch deadline, so the verdict is written and published inside it.
+      DOD_VERIFY_START_BUDGET_S: "540"
       # OMN-26258: the scheduled ticket closer reads the PR watcher's state at
       # $OMNI_HOME/.claude_scratch/pr-watcher/state.json unless this names another
       # file, and with OMNI_HOME=/app nothing writes that path: the closer's bound
@@ -109,6 +120,13 @@ services:
       # beside the omnibase_infra checkout, the clone the canonical-clone sync keeps
       # current; DEV_LANE_OVERLAY_STORE_ROOTS_DIR overrides it.
       - ${DEV_LANE_OVERLAY_STORE_ROOTS_DIR:-../../overlays/overlays}:/etc/onex/skill-overlays-store:ro
+      # The settings-store snapshot the host keeps (node_overlay_store_read_effect's
+      # snapshot_root) comes right after the branch root: the rows that live only in the
+      # settings store (delegation_check_responders, delegation_check_gateway) are read
+      # here, as node_overlay_roots_resolve_effect orders the store root first (OMN-26117).
+      # The source is the store-read node's own home fallback, under the HOME the
+      # operator env injects (no nested expansion: tests/ci/test_compose_no_nested_expansion.py).
+      - ${HOME}/.local/state/onex/overlay-store:/etc/onex/skill-overlays-settings:ro
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}/../../..:/etc/onex/ticket-guard:ro
       # The lane declaration folder (OMN-24218): the deploy agent sets
       # ONEX_LANE_DECLARATION_DIR to the real config/lab folder, because it points

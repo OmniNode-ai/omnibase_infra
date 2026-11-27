@@ -136,7 +136,15 @@ def _make_sandbox(
         overlay_root = tmp_path / "overlay-root"
         (overlay_root / "llm_endpoints").mkdir(parents=True)
         (overlay_root / "llm_endpoints" / "overlay.yaml").write_text(
-            yaml.safe_dump({"schema_version": 1, "endpoint_urls": endpoint_urls}),
+            yaml.safe_dump(
+                {
+                    "schema_version": 1,
+                    "endpoint_urls": {
+                        "coder-5090": "http://192.0.2.50:8000",
+                        **endpoint_urls,
+                    },
+                }
+            ),
             encoding="utf-8",
         )
         env["ONEX_SKILL_OVERLAY_ROOTS"] = str(overlay_root)

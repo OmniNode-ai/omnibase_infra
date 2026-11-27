@@ -134,7 +134,7 @@ def test_container_recreate_on_the_same_build_is_published_with_its_cause_and_fl
     publisher = DevRollEventsPublisher(
         lambda topic, key, payload: sent.append((topic, key, payload)) or True, topics
     )
-    assert publisher.container_recreated(event) is True
+    assert publisher.publish_observed("dev_container_recreated", event) is True
     (topic, _, payload) = sent[0]
     assert topic == topics["dev_container_recreated"]
     assert payload["cause"] == "unknown"

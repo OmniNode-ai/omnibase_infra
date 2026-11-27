@@ -53,6 +53,7 @@ LEDGER_ROW_KINDS = (
 )
 MACHINE_TOPICS = (
     "onex.evt.omnimarket.credential-registered.v1",
+    "onex.evt.omnimarket.credential-revoked.v1",
     *(f"onex.evt.omnimarket.work-ledger-{kind}.v1" for kind in LEDGER_ROW_KINDS),
 )
 MACHINE_ROW = {
@@ -229,7 +230,7 @@ def test_a_machine_row_may_bind_grant_roles_the_issuer_does_not_grant(
         ).issue("ops@example.invalid", {"lane": "dev", "device": "lab-host"})
         granted.append(sorted(broker.granted))
     assert {name for name, _ in granted[0]} >= set(MACHINE_TOPICS)
-    assert len(MACHINE_TOPICS) == 13
+    assert len(MACHINE_TOPICS) == 14
     assert granted[0] == granted[1]
 
 

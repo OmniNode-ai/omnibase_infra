@@ -18,6 +18,20 @@
     {
       "broker": "dev",
       "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.credential-revoked.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.credential-revoked.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.work-ledger-ack.v1",
       "operation": "DESCRIBE",
       "pattern": "LITERAL"

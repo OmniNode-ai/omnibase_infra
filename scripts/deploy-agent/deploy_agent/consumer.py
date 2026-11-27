@@ -360,30 +360,14 @@ class DeployConsumer:
         )
 
     def poll_and_accept(self) -> tuple[ModelRebuildRequested | None, str | None]:
-        """Poll for one command.
+        """Poll for one command: ``(command, None)`` on accept, ``(None, reason)`` on reject,
+        ``(None, None)`` when nothing arrived.
 
-        Returns (command, None) on accept.
-        Returns (None, reason) on reject.
-        Returns (None, None) on no message.
-
-        Protocol:
-        1. Poll message — an undecodable batch is quarantined, not re-read
-        2. Verify HMAC signature
-        3. Validate payload (schema, scope, services legality)
-        4. Check the lane fence -> reject "lane_not_allowed"
-        5. Check busy (has_active_job) -> reject "busy"
-        5a. Check the host slot (OMN-19544) -> reject "busy" while another
-            owner, a prover, holds it
-        5b. Load gate (OMN-19507) -> DEFER while the host's model servers need
-            it: nothing committed or published, the partition paused until a
-            re-check at the top of a later poll opens the gate
-        6. Check dedup (is_duplicate) -> reject "duplicate"
-        6a. Lineage fence (OMN-19270) -> reject "superseded_by_running_build"
-            or "divergent_ref"
-        7. Self-update boundary (OMN-16442) -- may not return
-        8. Persist job state (accepted)
-        9. Commit Kafka offset
-        10. Return (command, None)
+        Protocol: quarantine an undecodable batch; verify the HMAC signature; validate
+        the payload; lane fence; busy; host slot (OMN-19544); load gate (OMN-19507, a
+        deferral commits nothing); dedup; lineage fence (OMN-19270, ``superseded_by_running_build``
+        or ``divergent_ref``); coalesce; self-update boundary (OMN-16442, may not
+        return); persist the job; commit the offset; return the command.
         """
         self._maybe_resume_after_load_gate()
         try:
@@ -721,7 +705,7 @@ class DeployConsumer:
         # gate. Nothing is published, because nothing about the command is
         # wrong; it is taken, or coalesced past, once the host has room.
         if self.load_gate is not None:
-            gate = self.load_gate.check()
+            gate = self.load_gate.check(cmd)
             if gate.verdict is EnumLoadGateVerdict.DEFER:
                 topic_partition = TopicPartition(msg.topic, msg.partition)
                 self.consumer.seek(
@@ -905,10 +889,21 @@ class DeployConsumer:
             resolve_ref=self.ref_resolver,
             tracking_ref=self.tracking_ref,
             published_at=cmd.requested_at or _broker_timestamp(msg),
+            overdue_references=lambda: self._overdue_references(cmd),
         )
         if not (decision.verdict.refuses or decision.verdict.supersedes):
             logger.info("%s %s", cmd.correlation_id, decision.journal_line())
         return decision
+
+    def _overdue_references(self, cmd: ModelRebuildRequested) -> list[str]:
+        """The built and tracking-head refs an overdue command is judged against (OMN-26316)."""
+        built = self.job_store.newest_successful_build_ref(cmd.runtime_lane.value)
+        head = (
+            self.ref_resolver(self.tracking_ref)
+            if self.ref_resolver and self.tracking_ref
+            else None
+        )
+        return [r for r in (built, head) if isinstance(r, str)]
 
     def _with_producing_job(
         self, running: ModelRunningBuild | None

@@ -305,16 +305,24 @@ _LEDGER_CLIENT_UNINHERITED_ENV: Final = frozenset(
 )
 
 
-def _without_agent_broker_declaration(command: list[str]) -> list[str]:
-    """``command`` run under ``env -u`` for the agent's own broker declarations.
+# omnibase_core 0.47.77 and later list the internal command groups, ``ledger`` among
+# them, only when this variable is truthy; the post-roll proof calls ``onex ledger`` and
+# exited 2 ("No such command 'ledger'") on a healthy new runtime (dev job d7149818,
+# 2026-11-25T23:27Z, OMN-26316). It is set by ``env`` for that one call, never the process.
+_OPERATOR_COMMANDS_SWITCH: Final = "ONEX_CLI_SHOW_ALL_COMMANDS=1"
 
-    The unset is done by ``env`` in the child, so this handler never reads the process
+
+def _without_agent_broker_declaration(command: list[str]) -> list[str]:
+    """``command`` run under ``env`` for the ledger call: the agent's own broker
+    declarations unset and the operator command switch set.
+
+    Both are done by ``env`` in the child, so this handler never reads the process
     environment (handlers take no direct environment access).
     """
     unset = [
         arg for name in sorted(_LEDGER_CLIENT_UNINHERITED_ENV) for arg in ("-u", name)
     ]
-    return ["env", *unset, *command]
+    return ["env", *unset, _OPERATOR_COMMANDS_SWITCH, *command]
 
 
 def _prove_work_ledger_answers(execution: ModuleType) -> None:

@@ -1,3 +1,42 @@
+## v0.38.85 (2026-11-26)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.85 by the scheduled release train.
+- 8 release-relevant commit(s) merged since v0.38.84.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.84
+- : the cloud database joins the deployment topology with its version_checksum ledger (#6295)
+- : quarantine dispatch-deadline dead letters instead of replaying them in a loop (#6288)
+- : a publisher_malformed command emits its contract's declared failure terminal (#6277)
+- : the dev boot guard's ledger proof runs with the operator command switch (#6293)
+- : price Inkling-2-Mini at zero marginal API cost in the pricing manifest (#6285)
+- : log one run line per published runtime loop reading (#6291)
+- : move omnibase-core to 0.47.80 (#6289)
+- : grant the runtime account the lab_alerts table in the topology profiles (#6258)
+
+## v0.38.84 (2026-11-25)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.84 by the scheduled release train.
+- 13 release-relevant commit(s) merged since v0.38.83.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.83
+- : an abandoned dispatch names its consumer group on the health line and in the deadline log (#6261)
+- : Coalesce dev merge build requests inside a declared window (#6276)
+- : Vendor overlay store write tables and grant them in the database topologies (#6274)
+- : chain canary command carries the headers the ledger chain reads (#6264)
+- : overdue renumber ac17 ac18 (#6238)
+- : stop judging lazy-start dormant projections as unattached (#6259)
+- : the dead letter replay never replays an unsequenced live row (#6252)
+- : the sweep verifier anchors a relative check cwd at the product clone (#6246)
+- : dev deploy agent STATUS append runs without the agent's SASL declaration (#6234)
+- : refuse publisher_malformed dead letters in node_dlq_replay_effect (#6253)
+- : the delegation dispatch port publishes system prompt, temperature and response format (#6247)
+- : bound dev boot report delivery and abandon stale incidents (#6240)
+- : dispatch engine writes no INFO line and builds no log context for a successful dispatch (#6236)
+
 ## v0.38.83 (2026-11-24)
 
 ### Release
