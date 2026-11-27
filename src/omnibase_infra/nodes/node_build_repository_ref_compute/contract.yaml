@@ -21,7 +21,7 @@ output_model:
   description: The typed verdict and, when refused, the reason.
 event_bus:
   subscribe_topics: ["onex.cmd.deploy.build-repository-ref-check.v1"]
-  publish_topics: ["onex.evt.deploy.build-repository-ref-checked.v1"]
+  publish_topics: ["onex.evt.deploy.build-repository-ref-checked.v1", "onex.cmd.deploy.build-repository-ref-check.v1"]
 terminal_event: "onex.evt.deploy.build-repository-ref-checked.v1"
 handler_routing:
   routing_strategy: operation_match
