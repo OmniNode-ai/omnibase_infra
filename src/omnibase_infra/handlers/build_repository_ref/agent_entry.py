@@ -20,7 +20,7 @@ from typing import Protocol
 logger = logging.getLogger(__name__)
 
 
-class _Completed(Protocol):
+class CompletedProcessLike(Protocol):
     returncode: int
 
 
@@ -59,7 +59,7 @@ class BuildRepositoryRefCheck:
     def __init__(
         self,
         repo_dir: str,
-        run: Callable[[list[str], int], _Completed],
+        run: Callable[[list[str], int], CompletedProcessLike],
     ) -> None:
         self.repo_dir = repo_dir
         self._run = run

@@ -37,3 +37,29 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_build_repository_ref_omn26724.py -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
+  - id: dod-omn26724-integration-proof-node-verdict
+    description: The node runs through the onex runtime and its terminal payload refuses a ref the clone lacks after one good fetch.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: |-
+          .venv/bin/onex node node_build_repository_ref_compute --contract src/omnibase_infra/nodes/node_build_repository_ref_compute/contract.yaml --input tests/ci/fixtures/build_repository_ref_request_omn26724.json --backend event_bus=inmemory --state-root .onex_state/build-ref-omn26724 && grep -q '"verdict": "missing"' .onex_state/build-ref-omn26724/workflow_result.json
+        cwd: .
+  - id: dod-omn26724-ac4-deploy-node-run
+    description: Deploy probe; the onex runtime runs the new node and the refusal verdict is read from its terminal payload; fails if the node or contract is absent.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: |-
+          .venv/bin/onex node node_build_repository_ref_compute --contract src/omnibase_infra/nodes/node_build_repository_ref_compute/contract.yaml --input tests/ci/fixtures/build_repository_ref_request_omn26724.json --backend event_bus=inmemory --state-root .onex_state/build-ref-omn26724 && grep -q '"verdict": "missing"' .onex_state/build-ref-omn26724/workflow_result.json
+        cwd: .
+  - id: dod-omn26724-ac4-real-clone-integration
+    description: Integration test over a real git clone refuses a missing commit and holds a real one.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_build_repository_ref_integration_omn26724.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
