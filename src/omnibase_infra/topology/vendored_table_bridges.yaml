@@ -83,13 +83,6 @@
   prefix: ""
   opts: {}
   tables: [lane_work_workflow]
-# 0001 also grants omninode_runtime SELECT on the lane_work_terminal view.
-- ticket: OMN-26708
-  node: node_projection_lane_work
-  create: 0000_create_lane_work_workflow.sql
-  prefix: ""
-  opts: {access: read}
-  tables: [lane_work_terminal]
 # OMN-26635: infra vendors the overlay store write tables (node_projection_overlay_store
 # 0003-0004) ahead of the omnimarket node contract; 0004 grants omninode_runtime
 # SELECT, INSERT, UPDATE. Retired when omnimarket#6761 reaches the pin.

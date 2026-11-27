@@ -73,10 +73,10 @@ _LEDGER = (
 )
 _EXPECTED_SHAS = {
     "0000_create_lane_work_workflow.sql": (
-        "539b1cc351910f87c816695cbf47724b00ace66a5e26a13e6948293fa18323e3"
+        "c9538b91136fb35c651795be2364adc44c8dc8415b103cf40e7cb21257610361"
     ),
     "0001_grant_omninode_runtime_lane_work_workflow.sql": (
-        "b14f9cd8e2ba0eb24390916dd8b79d68bc2dfc7e41f9899e4d3188001f2c47c2"
+        "9a6f991296a50521d7904263147cad585855206f4e773024e33c58c09bb983ef"
     ),
 }
 
@@ -95,15 +95,3 @@ def test_both_lane_work_migrations_are_vendored_with_their_ledger_rows() -> None
         ]
         assert len(matching) == 1, name
         assert matching[0][5] == sha, name
-
-
-@pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
-def test_the_runtime_role_reads_the_terminal_view_and_nothing_more(
-    profile: str,
-) -> None:
-    got = {
-        p
-        for who, rel, p in _grants(profile)
-        if who == _RUNTIME and rel == "lane_work_terminal"
-    }
-    assert got == {"SELECT"}, profile
