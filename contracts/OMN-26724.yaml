@@ -46,14 +46,23 @@ dod_evidence:
         check_value: |-
           env PYTHONPATH=src uv run --frozen onex node node_build_repository_ref_compute --contract src/omnibase_infra/nodes/node_build_repository_ref_compute/contract.yaml --input tests/ci/fixtures/build_repository_ref_request_omn26724.json --backend event_bus=inmemory --state-root .onex_state/build-ref-omn26724 && grep -q '"verdict": "missing"' .onex_state/build-ref-omn26724/workflow_result.json
         cwd: .
-  - id: dod-omn26724-ac4-deploy-node-run
-    description: Deploy probe; the onex runtime runs the new node and the refusal verdict is read from its terminal payload; fails if the node or contract is absent.
+  - id: dod-omn26724-ac4-node-run
+    description: The onex runtime runs the new node from a clean checkout and the refusal verdict is read from its terminal payload; fails if the node or contract is absent. Runs on the hosted runner through uv run.
     source: manual
     binds_ac: [AC4]
     checks:
       - check_type: command
         check_value: |-
-          env PYTHONPATH=src uv run --frozen onex node node_build_repository_ref_compute --contract src/omnibase_infra/nodes/node_build_repository_ref_compute/contract.yaml --input tests/ci/fixtures/build_repository_ref_request_omn26724.json --backend event_bus=inmemory --state-root .onex_state/build-ref-omn26724 && grep -q '"verdict": "missing"' .onex_state/build-ref-omn26724/workflow_result.json && env PATH="$(uv run --frozen python -c 'import os,sys;print(os.path.dirname(sys.executable))'):$PATH" onex --help
+          env PYTHONPATH=src uv run --frozen onex node node_build_repository_ref_compute --contract src/omnibase_infra/nodes/node_build_repository_ref_compute/contract.yaml --input tests/ci/fixtures/build_repository_ref_request_omn26724.json --backend event_bus=inmemory --state-root .onex_state/build-ref-omn26724 && grep -q '"verdict": "missing"' .onex_state/build-ref-omn26724/workflow_result.json
+        cwd: .
+  - id: dod-omn26724-deploy-agent-runs-merged-ref
+    description: 'Deploy probe: the running dev deploy agent on the lab host reports, on its own /health, a loaded_code_sha equal to the head of omnibase_infra dev, the merged ref. It exits non-zero while the agent runs older code, an empty or null sha, or an unreachable agent. Scoped to the local Done gate with no criterion bound: the hosted runner cannot reach the lab host, and the deploy gate reads the probe from the contract regardless of scope.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: |-
+          want="$(gh api repos/OmniNode-ai/omnibase_infra/commits/dev --jq .sha)" && test -n "$want" && ssh "$DEPLOY_PROBE_HOST" "curl -sf http://localhost:8098/health" | python3 -c 'import json,sys;want=sys.argv[1];got=json.load(sys.stdin).get("loaded_code_sha");sys.exit(0 if got and got==want else 1)' "$want"
         cwd: .
   - id: dod-omn26724-ac4-real-clone-integration
     description: Integration test over a real git clone refuses a missing commit and holds a real one.
