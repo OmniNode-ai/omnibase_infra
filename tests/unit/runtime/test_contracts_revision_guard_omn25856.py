@@ -144,3 +144,20 @@ def test_the_dockerfile_stamps_the_manifest_outside_the_mounted_path() -> None:
         "ONEX_CONTRACTS_STAMP_PATH=/app/config/contracts_runtime.sha256" in dockerfile
     )
     assert "> /app/config/contracts_runtime.sha256" in dockerfile
+
+
+def test_the_dockerfile_stamps_the_repo_runtime_contracts_before_core_overlays_them() -> (
+    None
+):
+    """The mount carries the clone's ``contracts/runtime``; core's runtime_data
+    overlay replaces five of those files in the image. Stamping after the overlay
+    records core's bytes, so the same revision's mount reads as another revision
+    (the laptop profile's runtime-boot died on CONTRACTS_REVISION_MISMATCH).
+    """
+    dockerfile = (_DOCKER_DIR / "Dockerfile.runtime").read_text()
+
+    stamp_at = dockerfile.index("> /app/config/contracts_runtime.sha256")
+    repo_copy_at = dockerfile.index("COPY --chown=omniinfra:omniinfra contracts/ ")
+    core_overlay_at = dockerfile.index("/app/contracts/runtime/\n")
+
+    assert repo_copy_at < stamp_at < core_overlay_at

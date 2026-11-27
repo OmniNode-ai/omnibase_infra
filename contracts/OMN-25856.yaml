@@ -139,3 +139,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/docker/test_contracts_revision_guard_real_contracts_omn25856.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn25856-contracts-stamp-before-core-overlay
+    description: The Dockerfile stamps the checkout's runtime contracts before the packaged runtime_data replaces them, so the checkout's own mounted contracts match the stamp; the stamp taken after that replacement fails this test.
+    source: manual
+    binds_ac: [AC25856007]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_contracts_revision_guard_omn25856.py -k before_core_overlays -q --no-cov -n 0 -p no:randomly
+        cwd: .
