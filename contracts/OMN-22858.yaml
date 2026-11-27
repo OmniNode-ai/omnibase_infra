@@ -5,6 +5,13 @@ summary: 'config/runner_fleet.yaml no longer declares the h101 mini host row (ar
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn22858-ac1-accepted-20261127t0345z:
+      - label: AC1
+        criterion_hash: e4205ad0297e939aac0e3cb01da2c6cde74842da02556d756053ad6d8340c926
+        proposed_by: lane=dod-closeout-bind-2026-11-27T0345Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-27T0345Z-c2
 requirements:
   - id: req-22858-1
     statement: The declared runner fleet names no runner on the h101 mini host, which no longer runs Docker.
@@ -13,6 +20,8 @@ requirements:
         statement: The runner fleet inventory, host targeting and pool spread tests pass with the h101 mini row removed.
       - id: AC22858002
         statement: With the fleet file of the base branch put back, the host targeting and inventory tests fail.
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
 evidence_requirements:
   - kind: tests
     description: The three focused test files pass on the branch and four tests fail with the base branch's fleet file.
@@ -28,7 +37,8 @@ dod_evidence:
     binds_ac: [AC22858001]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_runner_pool_spread_omn19895.py tests/scripts/test_deploy_runners_host_targeting.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q --no-cov
+        check_value: uv run pytest tests/ci/test_runner_pool_spread_omn19895.py tests/scripts/test_deploy_runners_host_targeting.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q --no-cov
+        cwd: .
   - id: dod-002
     description: The base branch's fleet file fails four of the same tests (4 failed, 24 passed on h106 with config/runner_fleet.yaml taken from origin/dev)
     source: generated
@@ -36,3 +46,13 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'test -z "$(grep -n omninode-mini-runner config/runner_fleet.yaml)"'
+        cwd: .
+  - id: dod-omn22858-ac1-accepted-20261127t0345z
+    description: 'AC1: no infra host table carries the h101 mini-runner row and the three pinning tests pass; with the fleet file of 83b0afcf6^ restored, four of them fail.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_pool_spread_omn19895.py tests/scripts/test_deploy_runners_host_targeting.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q --no-cov
+        cwd: .
+    binds_ac:
+      - AC1
