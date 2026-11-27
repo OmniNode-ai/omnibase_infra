@@ -66,3 +66,16 @@ dod_evidence:
         check_value: docker exec omninode-runtime python -c 'from omnibase_infra.handlers.handler_cloud_lab_guard import refuse_in_cloud_mode'
       - check_type: command
         check_value: docker exec omninode-runtime grep -q '^runner_host.*invalid$' /app/config/runner_fleet.yaml
+  - id: dod-omn26709-integration-proof-guard
+    description: >-
+      Live-surface proof: the contract-declared guard node loads through the onex CLI and the entrypoint step refuses a cloud-mode boot holding a lab address in a fresh process.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: onex validate src/omnibase_infra/nodes/node_cloud_lab_guard_effect
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_cloud_lab_guard_entrypoint_integration_omn26709.py -q --no-cov -n 0 -p no:randomly
+        cwd: .

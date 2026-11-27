@@ -63,3 +63,31 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_every_runtime_repo_omn26316.py -k one_build_request -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
+  - id: dod-omn26703-ac3-sibling-build-ref-real-git
+    description: The sibling build request's git_ref resolves in the agent's own real git clone.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_dev_merge_build_sibling_build_ref_omn26703.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26703-ac3-build-health-event
+    description: >-
+      Each dev container start publishes one dev_build_health event once its health settles: seconds from container start to first passing health check, whether that is within the declared 300 second limit, whether the running image revision went back to an older build than the previous one (read from git), and the start of the 24 hour no-rollback clock. A known good (14 s, forward) passes and a known bad (6 min, and a build on an ancestor of the previous one) fails, driven through the agent tick with a fake docker.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_build_health_omn26703.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26703-deploy-build-health-on-dev
+    description: 'Deploy probe: the dev branch of omnibase_infra carries the handler that builds the dev_build_health event; read from GitHub at ref dev, so it exits non-zero until the change has merged and zero after. Scoped to the local Done gate with no criterion bound: the hosted gate runs this at a pull request head, where dev cannot yet carry the change, and the deploy gate reads the probe from the contract regardless of scope.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/dev_build_health/handler_dev_build_health.py?ref=dev" --jq .content | base64 -d | grep -q 'class HandlerDevBuildHealth'
+        cwd: .
