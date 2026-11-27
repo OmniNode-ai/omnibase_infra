@@ -21,6 +21,11 @@ requirements:
         statement: "AC1: the loop or call that holds the HTTP answer for 16 minutes is named from a thread dump or profile of this image -- falsifier: the report holds no stack frame naming it"
       - id: AC2
         statement: "AC2: first /health 200 on a boot of this image reads inside the compose start period -- falsifier: a boot reading above the start period from docker logs timestamps"
+  - id: req-omn26430-deploy-probe-names-real-symbol
+    statement: The contract's post-deploy probe greps a symbol that occurs in the source file it reads, so the probe can pass on a build that carries the change.
+    acceptance:
+      - id: AC5
+        statement: "AC5: the probe's grep pattern occurs in the source file it greps, as committed at HEAD -- falsifier: uv run pytest tests/ci/test_contract_omn26430_deploy_probe_symbol.py fails at the merge base, where the probe names serialize_owned_database, in no source file"
 evidence_requirements:
   - kind: tests
     description: The serial-dispatch regression and the existing projection-runner dispatch tests.
@@ -62,12 +67,20 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_rollback_image_first_health_inside_start_period_omn26430.py -k boot_good_7dff_first_health -q --no-cov -n 0 -p no:randomly
         cwd: .
-  - id: dod-omn26430-deploy-serial-dispatch-live
+  - id: dod-omn26430-deploy-owned-database-gate-live
     description: >-
-      Post-deploy probe: the rebuilt dev runtime container carries the per-handler lock in its dispatch callback. It reads the live container, which carries the change only after the deploy agent has rebuilt it, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
+      Post-deploy probe: the rebuilt dev runtime container carries the per-handler lock in its dispatch callback (the merged symbol is owned_database_gate, imported and entered in handler_wiring.py; the earlier probe grepped a name that never existed in source, so it could not pass on any build). It reads the live container, which carries the change only after the deploy agent has rebuilt it, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
     source: manual
     execution_scope: local_done_gate
     binds_ac: []
     checks:
       - check_type: command
-        check_value: docker exec omninode-runtime grep -q serialize_owned_database /app/src/omnibase_infra/runtime/auto_wiring/handler_wiring.py
+        check_value: docker exec omninode-runtime grep -q owned_database_gate /app/src/omnibase_infra/runtime/auto_wiring/handler_wiring.py
+  - id: dod-omn26430-deploy-probe-symbol-exists
+    description: "The post-deploy probe's grep pattern occurs in the source file it greps in this checkout, so the probe can pass on a build that carries the change; at the merge base the probe names serialize_owned_database, which is in no source file, and the same test fails."
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_omn26430_deploy_probe_symbol.py -q --no-cov -n 0 -p no:randomly
+        cwd: .

@@ -419,6 +419,8 @@ migrations:
   forward/nodes/node_projection_metering_summary/0004_metering_summary_savings_pct.sql: expand-only
   forward/nodes/node_projection_lab_alerts/0000_create_lab_alerts.sql: expand-only # CREATE TABLE lab_alerts and a non-unique index on (state, raised_at)
   forward/nodes/node_projection_lab_alerts/0001_grant_omninode_runtime_lab_alerts.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on lab_alerts
+  forward/nodes/node_projection_lane_work/0000_create_lane_work_workflow.sql: expand-only # CREATE TABLE lane_work_workflow
+  forward/nodes/node_projection_lane_work/0001_grant_omninode_runtime_lane_work_workflow.sql: expand-only # GRANT SELECT, INSERT, UPDATE to omninode_runtime on lane_work_workflow
   forward/nodes/node_projection_lab_container_memory/0000_create_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_lab_container_memory/0001_grant_omninode_runtime_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_topic_activity/0000_create_topic_activity.sql: forward-only # ALTER TABLE on the created table
@@ -459,6 +461,7 @@ migrations:
   forward/nodes/node_projection_savings/098_delegation_savings_measured_population.sql: forward-only # Replace monetary population and append provenance counts
   forward/nodes/node_projection_savings/100_savings_overview_token_directions.sql: forward-only # Replace the overview view and append its token directions
   forward/nodes/node_projection_savings/101_delegation_savings_unpriced_single_pass.sql: forward-only # Read the savings unpriced count in one pass
+  forward/nodes/node_projection_savings/102_delegation_savings_unpriced_matches_refresh.sql: forward-only # Count unpriced runs by the shared metering refresh's rule
   forward/nodes/node_projection_savings/099_savings_series_tenant_bucket.sql: forward-only # Replace tenant/day series view and append tenant key
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_content/0002_add_session_barrier_stamps.sql: expand-only

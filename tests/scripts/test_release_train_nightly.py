@@ -1760,6 +1760,105 @@ class TestADuplicatedContextResolvesToItsLatestRun:
         assert reason is rt.EnumTrainReason.CI_REQUIRED_CONTEXT_PENDING
 
 
+class TestOnlyTheNewestCopyPerWorkflowAndContextIsJudged:
+    """omnibase_core#2369, 2026-11-27 (OMN-26706).
+
+    The train skipped omnibase_core with ``ci_not_green`` on required context
+    'CI Summary' while the watcher read the head green: the failing copies were
+    a run cancelled at 04:18:39Z and a copy that failed at 07:00:08Z, both
+    older than the green copy that superseded them. A red copy counts only when
+    it is the newest of its (workflow, context) or overlaps the newest, as
+    ``cut_facts.sh`` and ``ci_premise.py`` judge it.
+    """
+
+    CONTEXT = "CI Summary"
+    WORKFLOW = ".github/workflows/ci.yml"
+
+    def _copy(
+        self,
+        conclusion: str | None,
+        started: str,
+        completed: str | None,
+        *,
+        workflow: str = WORKFLOW,
+        status: str = "completed",
+    ) -> dict[str, object]:
+        return {
+            "name": self.CONTEXT,
+            "status": status,
+            "conclusion": conclusion,
+            "started_at": started,
+            "completed_at": completed,
+            "workflow": workflow,
+        }
+
+    def _classify(self, runs: list[dict[str, object]]) -> object:
+        reason, _ = rt.classify_ci_green(
+            "omnibase_core",
+            "s" * 40,
+            "dev",
+            required_contexts=lambda repo, branch: [self.CONTEXT],
+            check_runs=lambda repo, sha: list(runs),
+            gating_sha=lambda repo, sha: "g" * 40,
+        )
+        return reason
+
+    def test_an_older_failed_copy_and_a_newer_green_one_cut(self) -> None:
+        runs = [
+            self._copy("failure", "2026-11-27T06:58:00Z", "2026-11-27T07:00:08Z"),
+            self._copy("success", "2026-11-27T07:05:00Z", "2026-11-27T07:09:00Z"),
+        ]
+        assert self._classify(runs) is None
+        assert self._classify(list(reversed(runs))) is None
+
+    def test_an_older_cancelled_copy_with_no_completed_at_does_not_outrank_a_newer_green_one(
+        self,
+    ) -> None:
+        """The defect: an absent completed_at sorted as 'newest of all'."""
+        runs = [
+            self._copy("cancelled", "2026-11-27T04:10:00Z", None),
+            self._copy("success", "2026-11-27T07:05:00Z", "2026-11-27T07:09:00Z"),
+        ]
+        assert self._classify(runs) is None
+        assert self._classify(list(reversed(runs))) is None
+
+    def test_a_newest_red_copy_skips(self) -> None:
+        runs = [
+            self._copy("success", "2026-11-27T06:58:00Z", "2026-11-27T07:00:00Z"),
+            self._copy("failure", "2026-11-27T07:05:00Z", "2026-11-27T07:09:00Z"),
+        ]
+        assert self._classify(runs) is rt.EnumTrainReason.CI_NOT_GREEN
+        assert self._classify(list(reversed(runs))) is rt.EnumTrainReason.CI_NOT_GREEN
+
+    def test_a_red_copy_overlapping_the_newest_green_one_skips(self) -> None:
+        runs = [
+            self._copy("failure", "2026-11-27T07:00:00Z", "2026-11-27T07:08:00Z"),
+            self._copy("success", "2026-11-27T07:05:00Z", "2026-11-27T07:09:00Z"),
+        ]
+        assert self._classify(runs) is rt.EnumTrainReason.CI_NOT_GREEN
+
+    def test_a_green_copy_of_another_workflow_does_not_hide_a_newest_red_one(
+        self,
+    ) -> None:
+        runs = [
+            self._copy("success", "2026-11-27T07:05:00Z", "2026-11-27T07:09:00Z"),
+            self._copy(
+                "failure",
+                "2026-11-27T07:00:00Z",
+                "2026-11-27T07:01:00Z",
+                workflow=".github/workflows/hygiene.yml",
+            ),
+        ]
+        assert self._classify(runs) is rt.EnumTrainReason.CI_NOT_GREEN
+
+    def test_an_unfinished_newer_copy_still_reads_pending(self) -> None:
+        runs = [
+            self._copy("success", "2026-11-27T07:05:00Z", "2026-11-27T07:09:00Z"),
+            self._copy(None, "2026-11-27T07:20:00Z", None, status="in_progress"),
+        ]
+        assert self._classify(runs) is rt.EnumTrainReason.CI_REQUIRED_CONTEXT_PENDING
+
+
 class TestTheCheckRunProjectionKeepsWhatTheResolverSortsOn:
     """The second half of the same bug, and the better-hidden half.
 

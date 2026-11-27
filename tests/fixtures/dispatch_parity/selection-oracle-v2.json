@@ -265,6 +265,22 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e": {
+      "category": "command",
+      "contract_name": "node_build_repository_ref_compute",
+      "event_model_module": "omnibase_infra.models.model_build_repository_ref_request",
+      "event_model_name": "ModelBuildRepositoryRefRequest",
+      "handler_id": "dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e",
+      "handler_module": "omnibase_infra.handlers.build_repository_ref.handler_build_repository_ref",
+      "handler_name": "HandlerBuildRepositoryRef",
+      "message_types": [
+        "ModelBuildRepositoryRefRequest",
+        "deploy.build-repository-ref-check",
+        "${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_c11_delegation_legs_effect.HandlerC11DelegationLegs.c11_delegation_legs_check_3c848af6": {
       "category": "command",
       "contract_name": "node_c11_delegation_legs_effect",
@@ -3947,15 +3963,15 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 177
+        "omnibase_infra": 180
       },
-      "contracts_discovered": 198,
+      "contracts_discovered": 201,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 107,
-      "probe_count": 1151,
-      "registered_dispatchers": 146,
-      "registered_routes": 127,
-      "type_scoped_dispatchers": 91
+      "distinct_subscribe_topics": 108,
+      "probe_count": 1154,
+      "registered_dispatchers": 147,
+      "registered_routes": 128,
+      "type_scoped_dispatchers": 92
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -4001,10 +4017,10 @@
       "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-11-27T03:05:36.494967+00:00",
+    "generated_at_utc": "2026-11-27T14:58:51.435396+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.81.dev3+gce48c176",
-      "omnibase-infra": "0.38.86",
+      "omnibase-infra": "0.38.87",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
@@ -4085,6 +4101,21 @@
         "status": "success"
       },
       "topic": "${topic:contract:core.CMD_COMPLIANCE_SCAN_REQUESTED_V1}"
+    },
+    "P1a::${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "deploy.build-repository-ref-check",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:dlq:deploy}",
+        "message_category": "command",
+        "message_type": "deploy.build-repository-ref-check",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}"
     },
     "P1a::${topic:contract:omnibase-core.CMD_SHARED_TOKEN_POLICY_REQUESTED_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -5756,6 +5787,21 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:contract:core.CMD_COMPLIANCE_SCAN_REQUESTED_V1}"
+    },
+    "P1b::${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}"
     },
     "P1b::${topic:contract:omnibase-core.CMD_SHARED_TOKEN_POLICY_REQUESTED_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -7514,6 +7560,26 @@
         "status": "success"
       },
       "topic": "${topic:contract:omnibase-core.CMD_SHARED_TOKEN_POLICY_REQUESTED_V1}"
+    },
+    "P4::dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e::${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e",
+      "event_model": "omnibase_infra.models.model_build_repository_ref_request.ModelBuildRepositoryRefRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "deploy.build-repository-ref-check",
+        "payload": "ModelBuildRepositoryRefRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "deploy.build-repository-ref-check",
+        "status": "success"
+      },
+      "topic": "${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}"
     },
     "P4::dispatcher.auto.node_c11_delegation_legs_effect.HandlerC11DelegationLegs.c11_delegation_legs_check_3c848af6::${topic:contract:platform.CMD_C11_DELEGATION_LEGS_CHECK_V1}": {
       "construct_only": true,
@@ -26146,6 +26212,16 @@
       "topic": "${topic:contract:omnibase-infra.CMD_BUILD_LOOP_APPEND_V1}",
       "topic_pattern": "*.cmd.omnibase-infra.build-loop-append.*",
       "type_scoped": false
+    },
+    {
+      "contract_name": "node_build_repository_ref_compute",
+      "dispatcher_id": "dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e",
+      "handler_id": "dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e",
+      "message_category": "command",
+      "route_id": "route.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e.onex_cmd_deploy_build_repository_ref_check_v1",
+      "topic": "${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}",
+      "topic_pattern": "*.cmd.deploy.build-repository-ref-check.*",
+      "type_scoped": true
     },
     {
       "contract_name": "node_c11_delegation_legs_effect",
