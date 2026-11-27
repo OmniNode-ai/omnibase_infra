@@ -59,3 +59,11 @@ dod_evidence:
       - check_type: "command"
         check_value: "env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --bus-lane dev --repo OmniNode-ai/omnibase_infra --sha \"$(git rev-parse HEAD)\" --lane dod-integration-proof-26712 --kind test -- uv run --frozen pytest tests/integration/migrations/test_cloud_database_migration_omn26712.py -k second_run_changes_nothing -q -n 0 --no-cov"
         cwd: "."
+  - id: "dod-omn26712-ac3-probe-routed-to-lab"
+    description: "The AC3 deploy probe is a local Done gate item that binds no criterion and reaches a lab host through onex lab-work run on the dev lane at the checked-out sha; the merge base, which ran a raw docker command, fails this test."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_contract_omn26712_deploy_probe_lab_work.py -q -n 0 --no-cov"
+        cwd: "."
