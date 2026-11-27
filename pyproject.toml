@@ -807,4 +807,3 @@ node_verify_stability_refresh = "omnibase_infra.nodes.node_verify_stability_refr
 node_waste_detection_compute = "omnibase_infra.nodes.node_waste_detection_compute"
 node_wiring_report_ratchet_compute = "omnibase_infra.nodes.node_wiring_report_ratchet_compute"
 node_workspace_config_root_resolve_effect = "omnibase_infra.nodes.node_workspace_config_root_resolve_effect"
-
