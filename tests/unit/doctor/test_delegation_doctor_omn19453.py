@@ -183,6 +183,7 @@ def fault_checks(tmp_path: Path) -> tuple[DiagnosticCheck, ...]:
         CheckDelegationLocalModel(
             overlay_path=tmp_path / "absent-overlay.yaml",
             environ={},
+            hosted_models_reader=lambda: (),
         ),
         CheckDelegationLocalModel(
             overlay_path=not_serving_overlay,
@@ -235,9 +236,8 @@ def test_each_fault_is_named_with_one_distinct_fix(
     assert {item.fault for item in diagnoses} == set(EnumDelegationDoctorFault)
     assert len({item.fix for item in diagnoses}) == 8
     if expected_fault is EnumDelegationDoctorFault.NO_LOCAL_MODEL:
-        assert str(tmp_path / "absent-overlay.yaml") in diagnosis.fix
-        assert "tier: local" in diagnosis.fix
-        assert "endpoint_url" in diagnosis.fix
+        assert "onex models add" in diagnosis.fix
+        assert ".yaml" not in diagnosis.fix
     if expected_fault is EnumDelegationDoctorFault.LOCAL_MODEL_ID_MISMATCH:
         assert _MODEL_ID in diagnosis.detail
         assert "some/other-model" in diagnosis.detail
@@ -330,7 +330,11 @@ def test_empty_machine_is_total_and_reports_actionable_results(tmp_path: Path) -
         CheckDelegationKey(onex_home=tmp_path),
         CheckDelegationGateway(onex_home=tmp_path),
         CheckDelegationQuota(onex_home=tmp_path),
-        CheckDelegationLocalModel(overlay_path=missing_overlay, environ={}),
+        CheckDelegationLocalModel(
+            overlay_path=missing_overlay,
+            environ={},
+            hosted_models_reader=lambda: (),
+        ),
     )
 
     results = [check.run() for check in checks]
@@ -454,7 +458,11 @@ def test_embedding_backend_is_not_the_declared_chat_model(tmp_path: Path) -> Non
         "    endpoint_url: http://embed.invalid/v1/embeddings\n"
     )
     assert (
-        CheckDelegationLocalModel(overlay_path=embeddings_only, environ={})
+        CheckDelegationLocalModel(
+            overlay_path=embeddings_only,
+            environ={},
+            hosted_models_reader=lambda: (),
+        )
         .diagnose()
         .fault
         is EnumDelegationDoctorFault.NO_LOCAL_MODEL

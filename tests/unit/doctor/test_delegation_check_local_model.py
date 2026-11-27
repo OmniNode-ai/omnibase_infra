@@ -65,14 +65,16 @@ def test_absent_chat_backend_never_probes(
     path = tmp_path / "overlay.yaml"
     if config is not None:
         path.write_text(config, encoding="utf-8")
-    check = CheckDelegationLocalModel(overlay_path=path, transport=transport)
+    check = CheckDelegationLocalModel(
+        overlay_path=path, transport=transport, hosted_models_reader=lambda: ()
+    )
 
     diagnosis = check.diagnose()
     result = check.run()
 
     assert diagnosis.fault is EnumDelegationDoctorFault.NO_LOCAL_MODEL
-    assert str(path) in diagnosis.fix
-    assert "tier: local" in diagnosis.fix
+    assert "onex models add" in diagnosis.fix
+    assert ".yaml" not in diagnosis.fix
     assert result.status is EnumHealthStatusValue.UNHEALTHY
     assert "[no_local_model]" not in result.message
     assert "[" not in result.message

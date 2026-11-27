@@ -168,5 +168,5 @@ def test_local_model_serving_state_over_http(
         assert "Fix:" not in result.message
     else:
         assert result.status is EnumHealthStatusValue.UNHEALTHY
-        assert result.message.startswith("[local_model_not_serving] ")
+        assert not result.message.startswith("[")
         assert result.message.endswith(f"Fix: Start the model server at {gateway_url}.")

@@ -101,7 +101,8 @@ def test_mismatch_on_a_later_local_backend_is_reported_over_http(
         f"The overlay declares '{_STALE}', but the server reports {_SERVED}."
     )
     assert result.status is EnumHealthStatusValue.UNHEALTHY
-    assert result.message.startswith("[local_model_id_mismatch] ")
+    assert not result.message.startswith("[")
+    assert result.message.startswith(diagnosis.detail)
     assert first_seen == ["/v1/models", "/v1/models"]
     assert second_seen == ["/v1/models", "/v1/models"]
 

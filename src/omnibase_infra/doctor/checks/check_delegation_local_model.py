@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
 from typing import ClassVar
@@ -36,6 +36,10 @@ from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.gateway.client.gateway_transport_httpx import (
     GatewayTransportHttpx,
 )
+from omnibase_infra.handlers.handler_check_delegation_local_model import (
+    evaluate_no_local_model,
+    read_hosted_providers,
+)
 
 # The routing authority (omnimarket) binds the overlay through BIFROST_OVERLAY_PATH and
 # otherwise reads the machine-local default below; the doctor reads the same two.
@@ -55,7 +59,9 @@ class CheckDelegationLocalModel(DoctorCheckBase):
         overlay_path: Path | None = None,
         environ: Mapping[str, str] | None = None,
         transport: ProtocolModelsTransport | None = None,
+        hosted_models_reader: Callable[[], tuple[str, ...] | None] | None = None,
     ) -> None:
+        self._hosted_models_reader = hosted_models_reader or read_hosted_providers
         resolved_environ = os.environ if environ is None else environ
         self._overlay_path = overlay_path or self._path_from_environ(resolved_environ)
         self._transport = (
@@ -133,17 +139,8 @@ class CheckDelegationLocalModel(DoctorCheckBase):
         return (response.status, served)
 
     def _no_local_model(self) -> tuple[ModelDelegationDiagnosis, bool]:
-        return (
-            ModelDelegationDiagnosis(
-                fault=EnumDelegationDoctorFault.NO_LOCAL_MODEL,
-                detail=f"No local chat backend is declared in {self._overlay_path}.",
-                fix=(
-                    f"Edit {self._overlay_path}: add a backend with `tier: local`, "
-                    "a chat-completions `endpoint_url`, and optionally `model_name`."
-                ),
-            ),
-            True,
-        )
+        # A local model is optional: fail only when no model at all is set up.
+        return evaluate_no_local_model(self._hosted_models_reader())
 
     def _evaluate(self) -> tuple[ModelDelegationDiagnosis, bool]:
         try:
