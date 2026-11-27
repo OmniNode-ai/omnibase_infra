@@ -6,11 +6,11 @@
     },
     "contracts_discovered": 199,
     "discovery_errors": 0,
-    "distinct_subscribe_topics": 107,
-    "probe_count": 1151,
-    "registered_dispatchers": 146,
-    "registered_routes": 127,
-    "type_scoped_dispatchers": 91
+    "distinct_subscribe_topics": 108,
+    "probe_count": 1154,
+    "registered_dispatchers": 147,
+    "registered_routes": 128,
+    "type_scoped_dispatchers": 92
   },
   "exclusions": [
     {
