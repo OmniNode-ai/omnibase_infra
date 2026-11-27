@@ -16,6 +16,15 @@ requirements:
       - id: "AC4"
         statement: >-
           AC4: the lane writes one STATUS row `crit=C16 probe=c16-receipt-identity verdict=<green|red> read_at=<UTC>` beside the same row for C11 and C15 -- falsifier: a ledger grep for `crit=C11 probe=c11-negative-paths` finds no STATUS row after this ticket's creation
+  - id: "req-omn26151-intent-is-a-lab-database"
+    statement: "The gateway's database intent is read from the code: the overlay key database.dsn_secret resolves through gateway.database.dsn to the lane's own lab omninode_cloud, so the cloud-only reading does not hold."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the report names, with file and line, what gateway.database.dsn is for (overlay key, WorkflowPostgresPool, the tables the gateway reads and writes), which lanes' gateways read it, and whether the gateway is meant to use the cloud database or a lab database -- falsifier: the report states the intent with no file and line for the overlay key, the pool code and the runtime policy profile
+      - id: "AC3"
+        statement: >-
+          AC3: if only the cloud database is valid for the gateway, the lane stops with no write and returns the code lines that say so, and the cloud owner ask stands -- falsifier: the report names a cloud-only reading with no file and line, or any write to a database or the secret store was made
 evidence_requirements:
   - kind: "tests"
     description: "The role mints login only, the grant seam declares exactly the nine items and nothing broader, both lane overlays render the DSN fail-closed while the shared base never requires the password, and the runtime policy maps the logical name in the dev and stability profiles only."
@@ -88,6 +97,22 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/infra/test_gateway_runtime_login_role_omn26151.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26151-ac1-intent-named-in-policy"
+    description: "AC1 (hosted part): each of the dev and stability profiles' gateway.database.dsn mapping in contracts/services/runtime_policy.contract.yaml (lines 240 and 611 at the pinned head) carries the comment naming the overlay key database.dsn_secret and the gateway_runtime role on the lane's own omninode_cloud, and maps the name in exactly those two profiles. The overlay key and WorkflowPostgresPool live in other repositories, so the report names them there."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_gateway_runtime_login_role_omn26151.py -k \"cites_the_overlay_key or on_no_other_profile\" -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26151-ac3-cloud-only-reading-does-not-hold"
+    description: "AC3 (not applicable, lab database intended): the cloud-only branch is not taken. Both lane compose files point the gateway DSN at the lane's own postgres service, never a cloud host, and the gateway_runtime role is login-only with nine grants, so no cloud database or cloud secret was written."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_gateway_runtime_login_role_omn26151.py -k \"own_postgres_service or exactly_the_nine_items\" -q -n 0 --no-cov"
         cwd: "."
 emergency_bypass:
   enabled: false

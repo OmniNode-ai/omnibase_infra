@@ -62,9 +62,8 @@ from collections.abc import Callable, Mapping, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
 
-from omnibase_infra.handlers.handler_boot_failure_ledger import (
-    HandlerBootFailureLedger,
-)
+from omnibase_infra.handlers.handler_boot_failure_ledger import HandlerBootFailureLedger
+from omnibase_infra.handlers.handler_cloud_lab_guard import refuse_in_cloud_mode
 from omnibase_infra.models.health.model_boot_attempt_outcome import (
     ModelBootAttemptOutcome,
 )
@@ -258,7 +257,8 @@ def run_preflight(env: MutableMapping[str, str]) -> int:
     Returns ``0`` when the kernel may start, or the boot-abort exit code.
     """
     return (
-        stamp_all_fingerprints(env)
+        refuse_in_cloud_mode(env)
+        or stamp_all_fingerprints(env)
         or render_bifrost_contract(env)
         or render_resolver_config(env)
     )

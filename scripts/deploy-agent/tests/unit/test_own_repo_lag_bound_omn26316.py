@@ -87,11 +87,17 @@ class TestDecide:
         assert "overdue" in decision.detail
         assert "sends omnibase_infra rebuilds to this instance" in decision.detail
 
-    def test_within_the_bound_the_own_repository_still_waits_for_its_trigger(
+    def test_a_newer_own_repository_head_is_routed_to_the_build_not_refused(
         self,
     ) -> None:
-        decision = decide(_inputs(now=MERGED + BOUND - timedelta(minutes=1)))
-        assert decision.verdict is EnumIdleConvergeVerdict.NOT_ROUTED_ELSEWHERE
+        # OMN-25942: heads 48ccf8bc, b04b1de3, 02a88529, 2a442a5b and 06ca1e58 of the
+        # build repository were each logged refused ``not_routed_elsewhere`` while the
+        # lane ran a 22:01Z build (tests/fixtures/overdue_build_oldest_contained_omn25942).
+        now = MERGED + timedelta(minutes=5)
+        decision = decide(_inputs(now=now, last_activity=now - timedelta(hours=1)))
+        assert decision.verdict is EnumIdleConvergeVerdict.CONVERGE
+        assert decision.head_ref == HEAD
+        assert "sends omnibase_infra rebuilds to this instance" in decision.detail
 
     def test_with_no_declared_bound_nothing_changes(self) -> None:
         decision = decide(_inputs(max_lag=None))

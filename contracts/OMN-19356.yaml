@@ -1,0 +1,38 @@
+schema_version: 1.0.0
+ticket_id: OMN-19356
+title: Observability consumers report DEGRADED 300s after their last write once any message has arrived, so autoheal restart-cycles them on quiet topics
+summary: omnibase_infra#4031 makes the observability consumers count only traffic that arrived after their last write or skip as unhandled, so a consumer whose batch was schema-skipped and then went quiet stays HEALTHY past the write-staleness window. This contract records the acceptance-criterion bindings a second lane accepted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19356-ac1-accepted-20261126t1945z:
+      - label: AC1
+        criterion_hash: 638f7107c1dd432e39853077d33e7e031f26271742fbe9e90dc9ff72d3b3e112
+        proposed_by: lane=dod-closeout-bind-2026-11-26T1945Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-26T1945Z-c0
+requirements:
+  - id: req-omn-19356-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC1: a skill-lifecycle consumer that received 2 events whose batch was schema-skipped, then went quiet for 416s of write age, reports HEALTHY with HTTP 200. Absent before omnibase_infra#4031; fails with that change''s product paths reverted.'
+    command: uv run pytest tests/unit/services/observability/skill_lifecycle/test_consumer.py::TestHealthAfterTrafficGoesQuiet::test_healthy_quiet_after_schema_skipped_batch -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19356-ac1-accepted-20261126t1945z
+    description: 'AC1: a skill-lifecycle consumer that received 2 events whose batch was schema-skipped, then went quiet for 416s of write age, reports HEALTHY with HTTP 200. Absent before omnibase_infra#4031; fails with that change''s product paths reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/services/observability/skill_lifecycle/test_consumer.py::TestHealthAfterTrafficGoesQuiet::test_healthy_quiet_after_schema_skipped_batch -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

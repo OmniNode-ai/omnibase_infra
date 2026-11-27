@@ -370,6 +370,7 @@ class JobStore:
         superseded_by_sha: str,
         superseded_by_correlation_id: UUID,
         by_containment: bool = True,
+        reason: str = "",
     ) -> JobState:
         # Write a command's terminal record without ever running it (OMN-18143).
         #
@@ -384,18 +385,6 @@ class JobStore:
         # ``result_publish_pending`` is set: the terminal event owed to the bus
         # for this command is the one AC6 asks for, and the agent's existing
         # retry loop is what makes it survive a broker that is briefly away.
-        # OMN-26637. Exactly one reason, and it is true: containment is claimed
-        # only when ancestry proved it.
-        reason = (
-            f"superseded by {superseded_by_correlation_id} at "
-            f"{superseded_by_sha}, which contains this command's ref and "
-            "was already queued when the agent reached this one"
-            if by_containment
-            else f"superseded by {superseded_by_correlation_id} at "
-            f"{superseded_by_sha}, a newer request for this lane that was "
-            "accepted while this one was queued; the lane cancels every older "
-            "queued request whatever its git ancestry"
-        )
         now = datetime.now(UTC)
         job = JobState(
             correlation_id=correlation_id,

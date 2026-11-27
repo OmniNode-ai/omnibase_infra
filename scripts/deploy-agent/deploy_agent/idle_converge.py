@@ -296,8 +296,11 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
     if not inputs.routed_elsewhere:
         detail = f"the routing table sends {repo} rebuilds to this instance"
         # OMN-26316: the instance's own repository waits for its merge trigger,
-        # which runs inside the runtime it rebuilds; past the bound it does not.
-        if not overdue:
+        # which runs inside the runtime it rebuilds. OMN-25942: an instance that
+        # declares a lag bound follows it like any repository, so a newer head
+        # goes to the dev build; the idle, probe-window, job and once-per-head
+        # gates still apply. With no bound the trigger alone delivers it.
+        if inputs.max_lag is None:
             return refuse(EnumIdleConvergeVerdict.NOT_ROUTED_ELSEWHERE, detail)
         overridden.append(detail)
     if inputs.job_active:
