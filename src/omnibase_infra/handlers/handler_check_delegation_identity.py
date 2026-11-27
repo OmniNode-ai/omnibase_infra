@@ -22,6 +22,9 @@ from omnibase_infra.doctor.model_delegation_diagnosis import (
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 
 _LOCAL_IDENTITY_FIX = "onex local init"
+_IDENTITY_UNREADABLE = (
+    "The saved delegation tenant identity on this machine could not be read."
+)
 _GATEWAY_READER = Callable[[Path], tuple[str, dict[str, object] | None]]
 
 __all__ = [
@@ -52,7 +55,6 @@ class HandlerCheckDelegationIdentity:
         onex_home: Path,
         local_identity: str | None,
         refusal_cause: BaseException | None,
-        refusal_detail: str,
         gateway_reader: _GATEWAY_READER,
     ) -> tuple[ModelDelegationDiagnosis, bool]:
         """Judge the local identity first, then keep the cloud gateway path."""
@@ -60,7 +62,7 @@ class HandlerCheckDelegationIdentity:
             return (
                 ModelDelegationDiagnosis(
                     fault=None,
-                    detail=refusal_detail,
+                    detail=f"{_IDENTITY_UNREADABLE} Fix: {_LOCAL_IDENTITY_FIX}",
                     fix="",
                 ),
                 False,
@@ -120,7 +122,6 @@ def evaluate_identity(
     onex_home: Path,
     local_identity: str | None,
     refusal_cause: BaseException | None,
-    refusal_detail: str,
     gateway_reader: _GATEWAY_READER,
 ) -> tuple[ModelDelegationDiagnosis, bool]:
     """Keep the baselined doctor check thin."""
@@ -128,6 +129,5 @@ def evaluate_identity(
         onex_home,
         local_identity,
         refusal_cause,
-        refusal_detail,
         gateway_reader,
     )

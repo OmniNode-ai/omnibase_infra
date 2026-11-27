@@ -35,21 +35,17 @@ def _evaluate_identity(onex_home: Path) -> tuple[ModelDelegationDiagnosis, bool]
     try:
         local_identity = read_install_identity()
         refusal_cause: BaseException | None = None
-        refusal_detail = ""
     except DelegateTenantRefusedError as exc:
         cause: BaseException = exc.__cause__ or exc
         local_identity = None
         if isinstance(cause, (ImportError, AttributeError)):
             refusal_cause = None
-            refusal_detail = ""
         else:
             refusal_cause = cause
-            refusal_detail = str(exc)
     judged: tuple[ModelDelegationDiagnosis, bool] = module.evaluate_identity(
         onex_home,
         local_identity,
         refusal_cause,
-        refusal_detail,
         read_gateway_block,
     )
     return judged

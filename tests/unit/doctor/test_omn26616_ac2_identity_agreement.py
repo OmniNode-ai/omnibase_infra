@@ -69,7 +69,7 @@ def test_unreadable_recorded_identity_is_a_refusal_not_no_identity(
     diagnosis = check.diagnose()
 
     assert diagnosis.fault is not EnumDelegationDoctorFault.NO_IDENTITY
-    assert "corrupt" in diagnosis.detail
+    assert "could not be read" in diagnosis.detail
     assert check.run().status is not EnumHealthStatusValue.HEALTHY
 
 
