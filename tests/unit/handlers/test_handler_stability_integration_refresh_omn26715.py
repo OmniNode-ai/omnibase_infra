@@ -215,3 +215,54 @@ def test_runtime_version_is_read_from_the_built_trees_pyproject(
     )
     with pytest.raises(RuntimeError, match="RUNTIME_VERSION"):
         runtime_version_of(tmp_path)
+
+
+def test_recreate_exports_the_declared_handler_identity_and_exact_command(
+    tmp_path: Path,
+) -> None:
+    """The compose guard admits the stability recreate only with both identity variables set."""
+    import os
+    import subprocess
+
+    from omnibase_infra.handlers.handler_stability_integration_refresh import (
+        _RECREATE_SH,
+    )
+
+    infra = tmp_path / "infra"
+    (infra / "docker").mkdir(parents=True)
+    (infra / "docker" / "runtime-policy.env").write_text("X=1\n", encoding="utf-8")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    shim = bindir / "docker"
+    shim.write_text(
+        '#!/bin/sh\nprintf "%s|%s|%s" "$ONEX_DECLARED_HANDLER" "$ONEX_BUILD_CONTEXT" "$*"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    done = subprocess.run(
+        [
+            "bash",
+            "-c",
+            _RECREATE_SH,
+            "recreate",
+            str(infra),
+            str(tmp_path / "missing.env"),
+            "-p",
+            "lane-project",
+            "up",
+            "-d",
+            "--no-deps",
+            "--no-build",
+            "--force-recreate",
+            "runtime",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"},
+    )
+    assert done.stdout == (
+        "handler_stability_integration_refresh|stability-integration|"
+        "compose -p lane-project up -d --no-deps --no-build "
+        "--force-recreate runtime"
+    )
