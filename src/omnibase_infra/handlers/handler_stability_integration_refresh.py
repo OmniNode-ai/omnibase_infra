@@ -55,7 +55,10 @@ _AUDIT_CONTEXT = "stability-integration"
 _STAGE_SCRIPT = "scripts/runtime_build/stage_workspace.sh"
 _RECREATE_SH = (
     'set -euo pipefail; set -a; source "$1/docker/runtime-policy.env"; '
-    '[ -r "$2" ] && source "$2"; set +a; shift 2; exec docker compose "$@"'
+    '[ -r "$2" ] && source "$2"; set +a; shift 2; '
+    "export ONEX_DECLARED_HANDLER=handler_stability_integration_refresh "
+    f"ONEX_BUILD_CONTEXT={_AUDIT_CONTEXT}; "
+    'exec docker compose "$@"'
 )
 
 
