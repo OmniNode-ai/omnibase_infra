@@ -44,7 +44,18 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: command
-        check_value: bash -c 'cd formal/lane_work_loop && grep -q "Invariant OneTerminal is violated" results/mut_terminal_twice.out && grep -q "Invariant OneLiveWorkflowPerChange is violated" results/mut_random_workflow_id.out && grep -q "Invariant HandoffAtProvenHead is violated" results/mut_skip_confirmation.out && grep -q "Invariant NoLostOutput is violated" results/mut_commit_before_outputs.out && grep -q "Invariant NoDuplicateEffect is violated" results/mut_resend_without_readback.out && grep -q "Invariant RetryBound is violated" results/mut_count_refused_input.out && grep -q "Invariant AnswerInContract is violated" results/mut_answer_any_state.out && grep -q "Temporal properties were violated" results/mut_no_tick.out'
+        check_value: bash -c 'cd formal/lane_work_loop && grep -q "Invariant OneTerminal is violated" results/mut_terminal_twice.out && grep -q "Invariant OneLiveWorkflowPerChange is violated" results/mut_random_workflow_id.out && grep -q "Invariant HandoffAtProvenHead is violated" results/mut_skip_confirmation.out && grep -q "Invariant NoLostOutput is violated" results/mut_commit_before_outputs.out && grep -q "Invariant NoDuplicateEffect is violated" results/mut_resend_without_readback.out && grep -q "Invariant RetryBound is violated" results/mut_count_refused_input.out && grep -q "Invariant AnswerInContract is violated" results/mut_answer_any_state.out && grep -q "Temporal property DeadlineFires was violated" results/mut_no_tick.out'
+        cwd: "."
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_lane_work_loop_model_omn26700.py -q
+        cwd: "."
+  - id: dod-omn26700-ac2-no-tick-names-property
+    description: mut_no_tick checks DeadlineFires alone and its output names that property as violated and not Terminates.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: bash -c 'cd formal/lane_work_loop && grep -qx "PROPERTIES DeadlineFires" mut_no_tick.cfg && grep -q "Temporal property DeadlineFires was violated" results/mut_no_tick.out && ! grep -q "Temporal property Terminates was violated" results/mut_no_tick.out'
         cwd: "."
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_lane_work_loop_model_omn26700.py -q
