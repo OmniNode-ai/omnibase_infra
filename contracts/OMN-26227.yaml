@@ -80,8 +80,8 @@ dod_evidence:
       - check_type: command
         check_value: grep -q 'ONEX_LEDGER_BUS_READ_COMMAND.*env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT' docker/docker-compose.dev-lane.yml && grep -q 'ONEX_LEDGER_BUS_READ_COMMAND.*env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT' docker/docker-compose.dev-tenant-fold.yml
         cwd: .
-      - check_type: command
-        check_value: "! grep -q 'gh ap[i]' contracts/OMN-26227.yaml"
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_omn26227_evidence_reads_repository_omn26227.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_dev_lane_ledger_source_binding.py -q -n 0 --no-cov -p no:cacheprovider -k 'test_runtime_effects_binds_the_ledger_source or test_folded_main_binds_the_same_ledger_source or test_the_read_command_is_one_the_ledger_cli_accepts'
