@@ -201,6 +201,18 @@ node = "omnibase_infra.cli.cli_node:run_node_by_name"
 profile = "omnibase_infra.cli.cli_profile:profile_group"
 skill = "omnibase_infra.cli.cli_skill:run_skill_by_name"
 
+# onex --help reads each command's one-line help from this table instead of importing the
+# command (OMN-26615). Keep it equal to the command's own help; the drift test enforces it.
+[project.entry-points."onex.cli.help"]
+auth = "Manage the gateway credential and the tokens minted from it."
+delegate = "Delegate PROMPT to a local LLM and print the result."
+identity = "Runtime-identity stamp: what code ran, where, against what config."
+kafka = "Kafka utilities — publish to command topics without SSH."
+ledger = "Read the cloud hook ledger and the dev work ledger."
+node = "Run a packaged ONEX node on the local runtime, resolved by NAME."
+profile = "Per-developer defaults in ~/.onex/config.yaml (OMN-19973)."
+skill = "Dispatch a skill to its backing node and print one typed result."
+
 [project.entry-points."onex.backends"]
 event_bus_kafka = "omnibase_infra.event_bus.event_bus_kafka:EventBusKafka"
 state_postgres = "omnibase_infra.backends.backend_probe:probe_postgres"
