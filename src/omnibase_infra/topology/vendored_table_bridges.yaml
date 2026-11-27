@@ -92,3 +92,13 @@
   prefix: overlay_store_
   opts: {}
   tables: [revision, write, provenance, audit]
+# OMN-26444: infra vendors savings_priced_models (node_projection_savings 102)
+# ahead of the omnimarket node contract pin. The metering-summary refresh
+# refills the priced-models manifest. Retired when the omnimarket pin
+# carries node_projection_metering_summary's savings_priced_models decl.
+- ticket: OMN-26444 # omnimarket OMN-26444
+  node: node_projection_savings
+  create: 102_delegation_savings_unpriced_matches_refresh.sql
+  prefix: ""
+  opts: {schema: public, access: read_write, role: savings_priced_models}
+  tables: [savings_priced_models]

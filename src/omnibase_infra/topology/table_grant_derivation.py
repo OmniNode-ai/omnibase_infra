@@ -41,6 +41,10 @@ from omnibase_core.models.core import ModelDeploymentTopology
 from omnibase_core.models.core.model_deployment_topology_database_grant import (
     ModelDeploymentTopologyDatabaseGrant,
 )
+from omnibase_infra.handlers.handler_table_grant_derivation.handler import (
+    PRUNE_PRIVILEGES,
+    HandlerTableGrantDerivation,
+)
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _INTERNAL_PROJECTION_BINDING,
     _TENANT_PROJECTION_BINDING,
@@ -75,24 +79,7 @@ READ_PRIVILEGES = frozenset({EnumDatabasePrivilege.SELECT})
 WRITE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
     {*READ_PRIVILEGES, EnumDatabasePrivilege.INSERT, EnumDatabasePrivilege.UPDATE}
 )
-# A retention prune's ``DELETE ... WHERE <column> < ...`` reads the rows it
-# removes, so DELETE rides with SELECT and nothing else: no INSERT or UPDATE,
-# and never TRUNCATE. No contract derives it; a principal that prunes declares
-# it by hand on the one relation it prunes (OMN-17427,
-# node_projection_consumer_flow/0006 for omninode_internal.consumer_flow_windows).
-PRUNE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
-    {EnumDatabasePrivilege.SELECT, EnumDatabasePrivilege.DELETE}
-)
-
-# Relations whose vendored migration also grants DELETE, which no ``access`` mode
-# derives. The reservations table is released or expired by deleting its rows
-# (OMN-23055, node_gate_store_effect/0001). floor_integration_rows deletes the
-# rows of an older integration pass that the newest no longer names (OMN-25103,
-# node_projection_floor_integration/0001). Each is declared as a separate
-# PRUNE_PRIVILEGES grant beside the derived one, so no grant carries a
-# non-canonical privilege set; expire with its bridge.
-_PRUNED_TABLES = ("gate_store_reservations", "floor_integration_rows")
-PRUNED_RELATIONS = frozenset(("omninode_internal", t) for t in _PRUNED_TABLES)
+_PRUNED = HandlerTableGrantDerivation()
 
 # Mirrors ``_projection_operation_bindings``. PLATFORM_CATALOG is absent by
 # design: that domain requires a caller-supplied read/write binding, so a
@@ -620,7 +607,7 @@ def derive_table_grants(
         grant_schema = physical_grant_schema_for_table(table.schema, table.name)
         key = (binding.principal, grant_schema, table.name)
         required.setdefault(key, set()).update(_privileges_for_access(table.access))
-        if (table.schema, table.name) in PRUNED_RELATIONS:
+        if _PRUNED.needs_delete(table.schema, table.name):
             pruned.add(key)
 
     grants: dict[str, tuple[ModelDeploymentTopologyDatabaseGrant, ...]] = {}
