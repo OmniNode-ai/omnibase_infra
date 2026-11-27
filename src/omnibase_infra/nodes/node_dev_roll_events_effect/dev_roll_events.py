@@ -150,49 +150,24 @@ class DevRollEventsPublisher:
         """Contract-bound entry: publish the start event the request carries."""
         self.started(request.job_id, request.started_at, request.cause)
 
-    def recreate_announced(self, announcement: BaseModel) -> bool:
-        """Publish the announcement of a dev recreate; True only when the bus accepted it."""
-        try:
-            payload = announcement.model_dump(mode="json")
-            return bool(
-                self._send(
-                    self._topics["dev_recreate_announced"],
-                    f"dev-recreate-announced/{payload['event_id']}",
-                    payload,
-                )
-            )
-        except Exception:
-            logger.exception("dev recreate announcement failed %s", FRICTION)
-            return False
+    def publish_observed(self, kind: str, event: BaseModel) -> bool:
+        """Publish one observed dev event on the contract topic ``kind``; True only when the bus accepted it.
 
-    def container_recreated(self, event: BaseModel) -> bool:
-        """Publish one dev container start; True only when the bus accepted it."""
+        ``kind`` is a key of the contract's ``topics`` (``dev_recreate_announced``,
+        ``dev_container_recreated``, ``dev_build_health``, ``dev_recreate_violation``);
+        the message key is the hyphenated kind and the event id.
+        """
         try:
             payload = event.model_dump(mode="json")
             return bool(
                 self._send(
-                    self._topics["dev_container_recreated"],
-                    f"dev-container-recreated/{payload['event_id']}",
+                    self._topics[kind],
+                    f"{kind.replace('_', '-')}/{payload['event_id']}",
                     payload,
                 )
             )
         except Exception:
-            logger.exception("dev container recreate event failed %s", FRICTION)
-            return False
-
-    def recreate_violation(self, violation: BaseModel) -> bool:
-        """Publish one dev recreate violation; True only when the bus accepted it."""
-        try:
-            payload = violation.model_dump(mode="json")
-            return bool(
-                self._send(
-                    self._topics["dev_recreate_violation"],
-                    f"dev-recreate-violation/{payload['event_id']}",
-                    payload,
-                )
-            )
-        except Exception:
-            logger.exception("dev recreate violation failed %s", FRICTION)
+            logger.exception("%s event failed %s", kind, FRICTION)
             return False
 
     def started(self, job_id: str, started_at: datetime, cause: str) -> None:
