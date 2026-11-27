@@ -29,7 +29,7 @@ RELATIVE = (
 )
 NODE = "node:node_projection_savings"
 # SHA-256 digest of the approved omnimarket source migration.
-DIGEST = "59bbe8e3f27d1d39d2c25c871569328a79b83d42326a46b6d90d42334bbbc24e"
+DIGEST = "699950784b59f19483ed26a6f68117f3292fd7a461a9e55efe9b8a3a20d445ba"
 
 
 def test_migration_102_is_byte_identical_ledgered_and_forward_only() -> None:
@@ -64,12 +64,10 @@ def test_migration_102_is_byte_identical_ledgered_and_forward_only() -> None:
 def test_migration_102_delivers_the_writer_grant_on_savings_priced_models() -> None:
     sql = (FORWARD / RELATIVE).read_text(encoding="utf-8")
     assert (
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON public.savings_priced_models "
+        "GRANT SELECT, INSERT, UPDATE ON public.savings_priced_models "
         "TO tenant_projection_writer;" in sql
     )
-    # One grant to the writer: a second, narrower one without DELETE would
-    # contradict the fill, which deletes rows the manifest no longer names.
     assert (
-        "GRANT SELECT, INSERT, UPDATE ON public.savings_priced_models "
-        "TO tenant_projection_writer;" not in sql
+        "GRANT DELETE ON public.savings_priced_models "
+        "TO tenant_projection_writer;" in sql
     )
