@@ -154,6 +154,11 @@ requirements:
         statement: "AC52: an omnimarket runtime merge with no dev build reads REQUEST and gets one build request naming omnimarket, its PR number and its own dev head -- falsifier: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_every_runtime_repo_omn26316.py -q fails at origin/dev or the omnimarket merge reads no decision"
       - id: AC53
         statement: "AC53: onex.evt.deploy.dev-merge-build-overdue.v1 is a topic row in services/topics.yaml the provisioner creates -- falsifier: the overdue topic test in tests/unit/handlers/test_dev_merge_build_every_runtime_repo_omn26316.py fails"
+  - id: req-omn26316-overdue-topic-ensured
+    statement: The deploy agent creates the overdue dev merge build event topic before its first publish, so the publish does not fail with the topic not found in cluster metadata.
+    acceptance:
+      - id: AC55
+        statement: "AC55: publishing the overdue dev merge build event on a broker without its topic creates the topic once first -- falsifier: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_topic_ensured_omn26316.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (no topic is created) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -209,6 +214,9 @@ evidence_requirements:
   - kind: tests
     description: The build clock regression, a known good build and a fake health answering after 6 minutes.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_build_clock_omn26316.py -q -p no:cacheprovider
+  - kind: tests
+    description: The overdue dev merge build event topic is created by the agent before its first publish.
+    command: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_topic_ensured_omn26316.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -602,4 +610,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/handlers/test_dev_merge_build_every_runtime_repo_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-overdue-topic-ensured
+    description: "The sender creates the overdue dev merge build event topic once before the first publish to it; the test fails at origin/dev (no topic is created)."
+    source: manual
+    binds_ac: [AC55]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_topic_ensured_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
