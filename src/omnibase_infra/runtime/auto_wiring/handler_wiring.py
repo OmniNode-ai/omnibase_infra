@@ -10487,7 +10487,7 @@ async def subscribe_wired_contract_topics(
         eligible = await split_boot_set_by_demand(
             eligible,
             priority_contracts=knobs.priority_contracts,
-            demand_source=demand_source,
+            watch_idle_topics=demand_source.watch_idle_topics,
             start=partial(_provision_ready_attach, auto_offset_reset="earliest"),
             exclude=_exclude,
             watch_stops_out=demand_watch_stops_out,
