@@ -21,6 +21,11 @@ requirements:
         statement: "AC1: the loop or call that holds the HTTP answer for 16 minutes is named from a thread dump or profile of this image -- falsifier: the report holds no stack frame naming it"
       - id: AC2
         statement: "AC2: first /health 200 on a boot of this image reads inside the compose start period -- falsifier: a boot reading above the start period from docker logs timestamps"
+  - id: req-omn26430-deploy-probe-names-real-symbol
+    statement: The contract's post-deploy probe greps a symbol that occurs in the source file it reads, so the probe can pass on a build that carries the change.
+    acceptance:
+      - id: AC5
+        statement: "AC5: the probe's grep pattern occurs in the source file it greps, as committed at HEAD -- falsifier: uv run pytest tests/ci/test_contract_omn26430_deploy_probe_symbol.py fails at the merge base, where the probe names serialize_owned_database, in no source file"
 evidence_requirements:
   - kind: tests
     description: The serial-dispatch regression and the existing projection-runner dispatch tests.
@@ -74,7 +79,7 @@ dod_evidence:
   - id: dod-omn26430-deploy-probe-symbol-exists
     description: "The post-deploy probe's grep pattern occurs in the source file it greps in this checkout, so the probe can pass on a build that carries the change; at the merge base the probe names serialize_owned_database, which is in no source file, and the same test fails."
     source: manual
-    binds_ac: []
+    binds_ac: [AC5]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_contract_omn26430_deploy_probe_symbol.py -q --no-cov -n 0 -p no:randomly
