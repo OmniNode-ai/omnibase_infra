@@ -191,7 +191,7 @@ def test_stability_judge_collaborator_and_prod_paths_refuse_a_branch_build(
 
 
 def test_the_lanes_that_may_build_an_open_pr_come_from_the_data(tmp_path: Path) -> None:
-    assert CONTRACT.open_pr_lanes == ("dev",)
+    assert CONTRACT.open_pr_lanes == ("dev", "stability_test")
 
     widened = shared._write_policy(
         tmp_path / "widened",
