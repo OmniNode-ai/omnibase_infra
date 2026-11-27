@@ -7,33 +7,56 @@ not have, so it runs only in the local Done gate and binds no acceptance criteri
 Because nothing on a pull request ever runs it, a probe naming a symbol that never
 existed in source (``serialize_owned_database``) could not pass on any build and no
 hosted check noticed. This test reads the probe's grep pattern and file path from the
-contract and requires the pattern to occur in that source file in this checkout.
+contract and requires the pattern to occur in that source file, both as committed at
+``HEAD``. The hosted control copies the new contract and tests over the older
+commit's tree, so a working-tree read cannot tell the two apart; the committed read
+can: at that older commit the committed contract names ``serialize_owned_database``, which is
+in no committed source file, and the test fails.
 """
 
 from __future__ import annotations
 
+import os
 import shlex
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[2]
-_CONTRACT = _ROOT / "contracts" / "OMN-26430.yaml"
-_PROBE_ID = "dod-omn26430-deploy-owned-database-gate-live"
+_CONTRACT = "contracts/OMN-26430.yaml"
 _CONTAINER_SRC = "/app/"
 
 
+def _committed(path: str) -> str:
+    """Return ``path`` as committed at HEAD, never the working tree."""
+    return subprocess.run(
+        ["git", "show", f"HEAD:{path}"],
+        cwd=_ROOT,
+        env=scrub_git_location_env(os.environ),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
 def _probe() -> dict[str, Any]:
-    document = yaml.safe_load(_CONTRACT.read_text(encoding="utf-8"))
-    (item,) = [i for i in document["dod_evidence"] if i["id"] == _PROBE_ID]
+    document = yaml.safe_load(_committed(_CONTRACT))
+    (item,) = [
+        i
+        for i in document["dod_evidence"]
+        if any(str(c["check_value"]).startswith("docker exec ") for c in i["checks"])
+    ]
     return item
 
 
-def _pattern_and_source() -> tuple[str, Path]:
+def _pattern_and_source() -> tuple[str, str]:
     (check,) = _probe()["checks"]
     argv = shlex.split(str(check["check_value"]))
     # docker exec <container> grep -q <pattern> <path in the container>
@@ -41,7 +64,7 @@ def _pattern_and_source() -> tuple[str, Path]:
     assert argv[3:5] == ["grep", "-q"], argv
     pattern, container_path = argv[5], argv[6]
     assert container_path.startswith(_CONTAINER_SRC), container_path
-    return pattern, _ROOT / container_path.removeprefix(_CONTAINER_SRC)
+    return pattern, container_path.removeprefix(_CONTAINER_SRC)
 
 
 def test_probe_is_local_done_gate_and_binds_no_criterion() -> None:
@@ -52,5 +75,4 @@ def test_probe_is_local_done_gate_and_binds_no_criterion() -> None:
 
 def test_probe_symbol_occurs_in_the_source_file_it_greps() -> None:
     pattern, source = _pattern_and_source()
-    assert source.is_file(), source
-    assert pattern in source.read_text(encoding="utf-8"), (pattern, str(source))
+    assert pattern in _committed(source), (pattern, source)
