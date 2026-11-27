@@ -322,7 +322,7 @@ def _without_agent_broker_declaration(command: list[str]) -> list[str]:
     unset = [
         arg for name in sorted(_LEDGER_CLIENT_UNINHERITED_ENV) for arg in ("-u", name)
     ]
-    return ["env", *unset, _OPERATOR_COMMANDS_SWITCH, *command]
+    return ["env", *unset, *command]
 
 
 def _prove_work_ledger_answers(execution: ModuleType) -> None:
