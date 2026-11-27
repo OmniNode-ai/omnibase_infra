@@ -16,6 +16,8 @@ import importlib.util
 from pathlib import Path
 from types import ModuleType
 
+from deploy_agent import agent as agent_mod
+
 HANDLER_TESTS = Path(__file__).resolve().parents[4] / "tests" / "unit" / "handlers"
 # The two directories both own a ``tests`` package, so the handler modules are
 # loaded by path under their own file names, which is what keeps them importable.
@@ -36,11 +38,32 @@ _SELECTED = {
 }
 
 
+# The deploy agent's own venv pins a released omnibase_infra that predates the window
+# modules, so the handler cases import them the way the agent does: by file path out of
+# the checkout, under their dotted names, before the case modules are collected.
+_CHECKOUT_MODULES = (
+    "enums/enum_dev_recreate_verdict.py",
+    "enums/enum_dev_recreate_reason.py",
+    "models/model_dev_recreate_policy.py",
+    "models/model_dev_recreate_request.py",
+    "models/model_dev_recreate_decision.py",
+    "models/model_dev_recreate_announcement.py",
+    "handlers/dev_recreate_window/handler_dev_recreate_window.py",
+)
+
+
+def _load_checkout_modules() -> None:
+    roll_events = agent_mod.load_dev_boot_guard(agent_mod.DEV_ROLL_EVENTS)
+    for relative in _CHECKOUT_MODULES:
+        roll_events.events._load_sibling(relative)
+
+
 def _load(stem: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(
         f"omn25912_handler_cases_{stem}", HANDLER_TESTS / f"{stem}.py"
     )
     assert spec is not None and spec.loader is not None
+    _load_checkout_modules()
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
