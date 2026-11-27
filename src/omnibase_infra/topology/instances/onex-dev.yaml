@@ -129,6 +129,7 @@ databases:
               - lab_lane_health
               - lab_proof_receipts
               - lane_drift_and_stalls
+              - lane_work_workflow
               - ledger_line_citation
               - live_events
               - log_entries
@@ -165,6 +166,11 @@ databases:
               - work_outcome_units
               - worktree_reconcile_hosts
             privileges: [INSERT, SELECT, UPDATE]
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
+              - lane_work_terminal
+            privileges: [SELECT]
             schema: omninode_internal
           - object_type: TABLE
             objects:
