@@ -247,6 +247,8 @@ def test_recreate_exports_the_declared_handler_identity_and_exact_command(
             "recreate",
             str(infra),
             str(tmp_path / "missing.env"),
+            "/lane/bifrost-dir",
+            "/lane/declaration",
             "-p",
             "lane-project",
             "up",
