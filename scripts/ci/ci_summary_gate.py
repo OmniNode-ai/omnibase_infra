@@ -1428,9 +1428,10 @@ def dedup_latest(
 ) -> dict[str, JobState]:
     """Collapse the raw ``/runs/{id}/jobs`` array to one entry per job name.
 
-    When ``run_attempt`` is provided, only rows from that workflow attempt are
-    considered. This prevents stale failed/cancelled rows from an earlier
-    attempt from becoming authoritative for a current rerun. Within the same
+    When ``run_attempt`` is provided, rows from later attempts are ignored and
+    a failed/cancelled/unfinished row from an earlier attempt is dropped, so it
+    cannot become authoritative for a current rerun. A passing earlier-attempt
+    row is kept until a current-attempt row replaces it (OMN-26703). Within the same
     attempt, duplicate display names keep the most blocking state so a failed
     matrix leg cannot be hidden by a later same-name success.
     """
@@ -1440,16 +1441,21 @@ def dedup_latest(
         name = str(raw.get("name") or "")
         if not name:
             continue
-        try:
-            attempt = int(str(raw.get("run_attempt") or 1))
-        except (TypeError, ValueError):
-            attempt = 1
-        if run_attempt is not None and attempt != run_attempt:
+        raw_attempt = str(raw.get("run_attempt") or 1)
+        attempt = int(raw_attempt) if raw_attempt.isdecimal() else 1
+        conclusion = raw.get("conclusion")
+        # OMN-26703: `gh run rerun --failed` writes attempt-N rows only for the
+        # jobs it re-ran; every job that passed keeps its earlier-attempt row.
+        # A passing earlier-attempt row therefore still answers for its job
+        # until a current-attempt row replaces it (the higher attempt wins
+        # below). An earlier failure or cancellation never carries, so a stale
+        # red cannot become authoritative and an unreplaced one stays PENDING.
+        cap = attempt if run_attempt is None else run_attempt
+        if attempt > cap or (attempt < cap and conclusion not in GOOD_CONCLUSIONS):
             continue
         prev = latest.get(name)
         if prev is not None and attempt < prev.run_attempt:
             continue
-        conclusion = raw.get("conclusion")
         steps = raw.get("steps")
         current = JobState(
             name=name,

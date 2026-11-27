@@ -499,6 +499,36 @@ class TestCiSummaryGate:
         assert code == EXIT_PENDING
         assert _all_gates()[-1]["name"] in report
 
+    def test_rerun_failed_carries_earlier_attempt_success_omn26703(self) -> None:
+        # `gh run rerun --failed` writes attempt-2 rows only for the jobs it
+        # re-ran (here the summary job and the docs-only marker); every gate that
+        # passed in attempt 1 keeps its attempt-1 row. Filtering to attempt 2
+        # alone read those gates as missing, and CI Summary polled to its
+        # deadline on omnibase_infra#6351 (run 46027655660, attempt 2).
+        jobs = _all_gates("success")
+        jobs.append(_job("CI Summary", None, status="in_progress", attempt=2))
+        code, report = evaluate(jobs, run_attempt=2)
+        assert code == EXIT_SUCCESS, report
+
+    def test_rerun_failed_still_pending_on_earlier_attempt_failure_omn26703(
+        self,
+    ) -> None:
+        # Only a success carries. A gate that failed in attempt 1 and has no
+        # attempt-2 row yet is not evidence of a pass: it stays PENDING.
+        jobs = _all_gates("success")
+        jobs[0] = _job(STRICT_GATE_JOBS[0], "failure", attempt=1)
+        code, report = evaluate(jobs, run_attempt=2)
+        assert code == EXIT_PENDING
+        assert STRICT_GATE_JOBS[0] in report
+
+    def test_rerun_failed_carried_success_is_replaced_by_current_failure_omn26703(
+        self,
+    ) -> None:
+        jobs = _all_gates("success")
+        jobs.append(_job(STRICT_GATE_JOBS[0], "failure", attempt=2))
+        code, _ = evaluate(jobs, run_attempt=2)
+        assert code == EXIT_FAILURE
+
     def test_same_attempt_duplicate_job_names_keep_failure(self) -> None:
         jobs = _all_gates("success")
         jobs += [
