@@ -669,10 +669,9 @@ dod_evidence:
         retired_by: q-ev26316-97800
         retired_at: '2026-11-26T21:45:00Z'
   - id: dod-omn26316-overdue-topic-ensured
-    description: "The sender creates the overdue dev merge build event topic once before the first publish to it; the test fails at origin/dev (no topic is created)."
+    description: "The sender creates the overdue dev merge build event topic once before the first publish to it; the test fails at origin/dev (no topic is created). It serves the live ticket AC4: the deploy agent only applies a branch on dev once its overdue build event is published."
     source: manual
-    execution_scope: local_done_gate
-    binds_ac: []
+    binds_ac: [AC4]
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_overdue_topic_ensured_omn26316.py -q --no-cov -n 0 -p no:randomly
