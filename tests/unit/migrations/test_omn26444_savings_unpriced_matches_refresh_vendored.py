@@ -5,7 +5,7 @@
 Failure modes this delivery check catches:
 - the migration is absent from the infrastructure forward tree;
 - the vendored SQL file differs by even one byte from its approved source,
-  omnimarket#6629 at 5b056878ad221aecc47dc99a2c89ac7de8e813f1;
+  omnimarket#6629 at 6259ab318707683e31535b65bbf3a0bfcf50d42b;
 - its exact tenant ledger row is missing, duplicated, or has a wrong field;
 - its forward-only migration classification is missing or changed;
 - it stops granting tenant_projection_writer the table the topology declares.
