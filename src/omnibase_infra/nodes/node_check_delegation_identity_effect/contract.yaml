@@ -14,8 +14,8 @@ description: >
   EFFECT node that binds the delegation identity doctor diagnosis to its canonical infra handler. The handler agrees with onex local identity and keeps the gateway path for cloud-only tenants.
 
 input_model:
-  name: "ModelDelegationIdentityRequest"
-  module: "omnibase_infra.models.doctor.model_delegation_identity_request"
+  name: ModelDelegationIdentityRequest
+  module: omnibase_infra.doctor.model_delegation_identity_request
   description: "The onex home and local identity reading."
 output_model:
   name: "ModelDelegationDiagnosis"
