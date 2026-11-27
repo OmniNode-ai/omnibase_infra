@@ -40,6 +40,7 @@ class _Host:
         *,
         health_after: float | None,
         build_error: str = "",
+        recreate_error: str = "",
         heads: dict[str, str] | None = None,
         clock: _Clock,
     ) -> None:
@@ -47,6 +48,7 @@ class _Host:
         self.recreated: list[tuple[tuple[str, str], ...]] = []
         self._health_after = health_after
         self._build_error = build_error
+        self._recreate_error = recreate_error
         self._heads = _HEADS if heads is None else heads
         self._clock = clock
         self._live = {
@@ -81,6 +83,8 @@ class _Host:
         self, compose_project: str, services: Sequence[tuple[str, str]]
     ) -> None:
         self.calls.append("recreate")
+        if self._recreate_error:
+            raise RuntimeError(self._recreate_error)
         self.recreated.append(tuple(services))
         self._live.update(dict(services))
         self._recreated_at = self._clock.now
@@ -161,6 +165,24 @@ def test_a_failed_build_leaves_the_lane_untouched(tmp_path: Path) -> None:
     assert "no dev-merge tag" in result.detail
     assert host.recreated == []
     assert dict(result.rollback_target)["runtime-worker"] == "sha256:old-wk"
+
+
+def test_a_refused_recreate_returns_refused_and_leaves_the_lane_untouched(
+    tmp_path: Path,
+) -> None:
+    clock = _Clock()
+    host = _Host(
+        health_after=0.0,
+        recreate_error="LANDING-COMPOSE-GUARD refused: declared lane",
+        clock=clock,
+    )
+    result = _run(host, clock, tmp_path)
+    assert result.outcome == "refused"
+    assert "LANDING-COMPOSE-GUARD" in result.detail
+    assert host.recreated == []
+    assert host.calls == ["tag", "build", "recreate"]
+    assert dict(result.rollback_target)["omninode-runtime"] == "sha256:old-rt"
+    assert result.built_image_id == "sha256:new"
 
 
 def test_a_missing_integration_branch_refuses_before_any_build(tmp_path: Path) -> None:
