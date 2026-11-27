@@ -16,6 +16,8 @@ requirements:
         statement: "AC1: each visible command of this package has an onex.cli.help entry equal to its own help line at every terminal width from 10 to 139; Falsifier: tests/unit/cli/test_onex_cli_help_table_omn26615.py::test_declared_help_prints_exactly_what_the_command_prints, 9 failed on origin/dev 0ecba67c8"
       - id: AC2
         statement: "AC2: no entry exists for a command this package does not provide, and none for a hidden, deprecated or short_help command; Falsifier: tests/unit/cli/test_onex_cli_help_table_omn26615.py::test_every_help_entry_names_a_command_of_this_package"
+      - id: AC3
+        statement: "AC3: a profile of onex --help names what took the time before and after, saved as a repeatable artifact; Falsifier: the artifact is missing, or python -X importtime output in it does not show the slow imports gone"
 evidence_requirements:
   - kind: tests
     description: The declared help lines match the commands' own help lines.
@@ -42,4 +44,16 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/cli/test_onex_cli_help_table_omn26615.py::test_a_help_table_exists_when_there_are_commands tests/unit/cli/test_onex_cli_help_table_omn26615.py::test_every_help_entry_names_a_command_of_this_package -q -n 0 --no-cov -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26615-infra-ac3
+    description: "AC3: a profile of onex --help names what took the time before and after, saved as a repeatable artifact, and shows the slow imports gone."
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: file_exists
+        check_value: docs/OMN-26615-onex-help-importtime.md
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_onex_cli_help_importtime_omn26615.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: .
