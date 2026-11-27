@@ -11,7 +11,7 @@ contract_version:
 node_version: "1.0.0"
 runtime_profiles: [main]
 description: >
-  EFFECT node that binds the delegation identity doctor diagnosis to its canonical infra handler. The handler agrees with onex local identity and keeps the gateway path for cloud-only tenants.
+  EFFECT node that binds the delegation identity doctor diagnosis to its canonical infra handler. The handler agrees with onex local identity: no local identity means no identity.
 
 input_model:
   name: ModelDelegationIdentityRequest

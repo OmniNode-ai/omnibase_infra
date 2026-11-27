@@ -7,11 +7,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import DelegateTenantRefusedError
 from omnibase_infra.doctor.delegation_doctor_support import (
     GATEWAY_BLOCK_INVALID,
     GATEWAY_BLOCK_MISSING,
-    gateway_text,
 )
 from omnibase_infra.doctor.enum_delegation_doctor_fault import (
     EnumDelegationDoctorFault,
@@ -31,6 +31,7 @@ __all__ = [
     "DelegateTenantRefusedError",
     "HandlerCheckDelegationIdentity",
     "evaluate_identity",
+    "missing_gateway_reason",
 ]
 
 
@@ -57,7 +58,7 @@ class HandlerCheckDelegationIdentity:
         refusal_cause: BaseException | None,
         gateway_reader: _GATEWAY_READER,
     ) -> tuple[ModelDelegationDiagnosis, bool]:
-        """Judge the local identity first, then keep the cloud gateway path."""
+        """Judge identity from the local tenant identity alone, as onex local identity does."""
         if refusal_cause is not None:
             return (
                 ModelDelegationDiagnosis(
@@ -97,22 +98,11 @@ class HandlerCheckDelegationIdentity:
                 ),
                 True,
             )
-        tenant_slug = gateway_text(block, "tenant_slug")
-        base_url = gateway_text(block, "base_url")
-        if tenant_slug is None or base_url is None:
-            return (
-                ModelDelegationDiagnosis(
-                    fault=EnumDelegationDoctorFault.NO_IDENTITY,
-                    detail="The gateway block does not declare both tenant_slug and base_url.",
-                    fix=_LOCAL_IDENTITY_FIX,
-                ),
-                True,
-            )
         return (
             ModelDelegationDiagnosis(
-                fault=None,
-                detail="Delegation identity is configured.",
-                fix="",
+                fault=EnumDelegationDoctorFault.NO_IDENTITY,
+                detail="No delegation tenant identity is configured on this machine.",
+                fix=_LOCAL_IDENTITY_FIX,
             ),
             True,
         )
@@ -131,3 +121,26 @@ def evaluate_identity(
         refusal_cause,
         gateway_reader,
     )
+
+
+def missing_gateway_reason() -> str:
+    """Say why no gateway block exists, asking the one local-identity reader.
+
+    The identity check and every check that depends on it must agree on whether
+    this machine has an identity, so they all ask ``read_install_identity``.
+    """
+    try:
+        identity = cli_delegate.read_install_identity()
+    except DelegateTenantRefusedError as exc:
+        cause: BaseException = exc.__cause__ or exc
+        if not isinstance(cause, (ImportError, AttributeError)):
+            return (
+                "the saved tenant identity on this machine could not be read "
+                "(run: onex local init)"
+            )
+        identity = None
+    if identity is None:
+        return (
+            "no delegation identity exists on this machine yet (run: onex local init)"
+        )
+    return "no delegation gateway address is saved in config.yaml"

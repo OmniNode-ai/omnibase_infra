@@ -75,7 +75,10 @@ def test_unreadable_config_is_unknown(tmp_path: Path) -> None:
     assert check.run().status is EnumHealthStatusValue.UNKNOWN
 
 
-def test_identity_is_trimmed_and_needs_no_key(tmp_path: Path) -> None:
+def test_identity_is_configured_by_local_identity_and_needs_no_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(module, "read_install_identity", lambda: "tenant-uuid")
     (tmp_path / "config.yaml").write_text(
         "gateway:\n  tenant_slug: ' acme '\n  base_url: ' https://gateway.invalid '\n",
         encoding="utf-8",
@@ -97,6 +100,7 @@ def test_identity_is_trimmed_and_needs_no_key(tmp_path: Path) -> None:
 def test_default_home_uses_injected_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(module, "read_install_identity", lambda: "tenant-uuid")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     (tmp_path / ".onex").mkdir()
     (tmp_path / ".onex" / "config.yaml").write_text(

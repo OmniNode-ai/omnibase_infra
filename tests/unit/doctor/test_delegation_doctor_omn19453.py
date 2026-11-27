@@ -249,7 +249,13 @@ def test_each_fault_is_named_with_one_distinct_fix(
     assert f"Fix: {diagnosis.fix}" in result.message
 
 
-def test_healthy_delegation_passes_all_five_checks(tmp_path: Path) -> None:
+def test_healthy_delegation_passes_all_five_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "omnibase_infra.doctor.checks.check_delegation_identity.read_install_identity",
+        lambda: "tenant-uuid",
+    )
     home = tmp_path / "onex"
     overlay = tmp_path / "overlay.yaml"
     _save_gateway(home)

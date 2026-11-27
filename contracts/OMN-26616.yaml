@@ -33,6 +33,15 @@ dod_evidence:
       - check_type: "test_passes"
         check_value: "uv run pytest tests/unit/doctor/test_omn26616_ac2_identity_agreement.py tests/unit/doctor -q -n 0 --no-cov -p no:cacheprovider"
         cwd: "."
+  - id: "dod-omn26616-dependent-checks-agree"
+    description: "AC2: the gateway, API key and quota checks and the identity check decide identity from the one local reader, show no internal tag, and a gateway block without a local identity is not reported as configured"
+    source: "manual"
+    binds_ac:
+      - "AC2"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/doctor/test_omn26616_dependent_checks_agree.py -q -n 0 --no-cov -p no:cacheprovider"
+        cwd: "."
   - id: "dod-omn26616-integration-proof"
     description: "AC4: on a working customer install the identity check judges a readable identity healthy and an unreadable one as a plain refusal that never echoes upstream text, end to end through the contract's input model and handler."
     source: "manual"

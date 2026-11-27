@@ -102,8 +102,8 @@ def test_quota_status_and_probe_contract(
 @pytest.mark.parametrize(
     ("config", "reason"),
     [
-        (None, "delegation_identity is not configured"),
-        ("{}", "delegation_identity is not configured"),
+        (None, "no delegation gateway address is saved"),
+        ("{}", "no delegation gateway address is saved"),
         ("gateway: [", "config.yaml is unreadable or invalid"),
         ("gateway: {}", "delegation_key is not configured"),
         ("gateway:\n  api_key_ref: ' '", "delegation_key is not configured"),
@@ -117,6 +117,9 @@ def test_config_prerequisites_never_probe(
     config: str | None,
     reason: str,
 ) -> None:
+    monkeypatch.setattr(
+        "omnibase_infra.cli.cli_delegate.read_install_identity", lambda: "tenant-uuid"
+    )
     if config is not None:
         (tmp_path / "config.yaml").write_text(config, encoding="utf-8")
     store_factory = Mock(side_effect=AssertionError("must not load credentials"))
