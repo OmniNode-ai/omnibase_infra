@@ -126,6 +126,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "gate_store_steps": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "experiment_arm_results": "omnimarket OMN-24286 (node_projection_experiment_result)",
     "lab_alerts": "omnimarket OMN-26663 (node_projection_lab_alerts)",
+    "lane_work_workflow": "omnimarket OMN-26708 (node_projection_lane_work)",
     "overlay_store_revision": "omnimarket#6761 (node_projection_overlay_store)",
     "overlay_store_write": "omnimarket#6761 (node_projection_overlay_store)",
     "overlay_store_provenance": "omnimarket#6761 (node_projection_overlay_store)",

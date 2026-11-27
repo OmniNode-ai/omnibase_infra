@@ -9,21 +9,10 @@ requirements:
   - id: "req-floor-integration-rows-runtime-grants"
     statement: "Every shipped topology profile grants the runtime role floor_integration_rows, the grant derivation reports no drift against the node's contract, and both node migrations are vendored and declared."
     acceptance:
-      - id: "AC1"
-        statement: "AC1: the regenerated platform topology lists floor_integration_rows with select, insert, update and delete (the prune) for the runtime account in every instance that carries the others -- falsifier: uv run pytest tests/unit/topology/test_omn25103_floor_integration_vendor.py -q fails on dev, where declared_acl lists no grant for floor_integration_rows"
-      - id: "AC2"
-        statement: "AC2: the two migrations are vendored with their ledger rows and migration classes and the application migration manifest validator prints PASS -- falsifier: uv run python scripts/validation/validate_application_migration_manifest.py exits 1 when a ledger row's sha256 differs from the vendored file"
-      - id: "AC3"
-        statement: "AC3: failing control: with the floor_integration_rows entries removed from a profile's declared grants, the runtime's read of floor_integration_rows is an empty set -- falsifier: the control case in tests/unit/topology/test_omn25103_floor_integration_vendor.py first asserts every profile grants floor_integration_rows, so it fails on dev where no profile does"
+      - id: "AC5"
+        statement: "AC5: omnibase_infra vendors the two floor_integration_rows migrations and grants omninode_runtime the table in every topology profile -- falsifier: uv run pytest tests/unit/topology/test_omn25103_floor_integration_vendor.py -q in omnibase_infra, which fails 14 of 14 on dev 75969ce9"
   - id: "req-floor-integration-pass-runtime-grants"
     statement: "Every shipped topology profile grants the runtime role the floor_integration_pass marker exactly SELECT, INSERT and UPDATE, and both marker migrations are vendored and declared."
-    acceptance:
-      - id: "AC4"
-        statement: "AC4: the regenerated platform topology lists floor_integration_pass with select, insert and update (no delete) for the runtime account in every profile, equal to what the vendored 0003 grants -- falsifier: uv run pytest tests/unit/topology/test_omn25103_floor_integration_pass_vendor.py -q fails on dev 76ed0a9b, where no profile grants floor_integration_pass"
-      - id: "AC5"
-        statement: "AC5: 0002 and 0003 are vendored byte-identical to omnimarket's, with ledger rows and migration classes, and the application migration manifest validator prints PASS -- falsifier: a one-byte change to the vendored 0003 fails the ledger case of the pass vendor test"
-      - id: "AC6"
-        statement: "AC6: failing control: the real declared_acl derivation, run on each profile with floor_integration_pass taken out of its grant objects, reports no grant for the runtime -- falsifier: the control case fails on dev, where no profile grants floor_integration_pass"
 evidence_requirements:
   - kind: "tests"
     description: "The vendor tests pass at the head; on the merge base the test file is absent."
@@ -34,50 +23,47 @@ emergency_bypass:
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-omn25103-infra-ac1"
-    description: "AC1 hosted probe. Every profile grants the runtime role the floor_integration_rows table and both migrations are vendored."
+    description: "Rows grant hosted probe. Every profile grants the runtime role the floor_integration_rows table and both migrations are vendored."
     source: "manual"
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/topology/test_omn25103_floor_integration_vendor.py -k runtime_role_may_read -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
-    binds_ac: ["AC1"]
+    binds_ac: ["AC5"]
   - id: "dod-omn25103-infra-ac2"
-    description: "AC2 hosted probe. The two vendored migrations are present; the new test file is absent at the merge base, so the command fails there."
+    description: "Rows migrations hosted probe. The two vendored migrations are present; the new test file is absent at the merge base, so the command fails there."
     source: "manual"
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/topology/test_omn25103_floor_integration_vendor.py -k 'vendored or match_omnimarket' -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
-    binds_ac: ["AC2"]
+    binds_ac: ["AC5"]
   - id: "dod-omn25103-infra-ac3"
-    description: "AC3 hosted probe. Removing the floor_integration_rows grant empties the runtime's read; the case fails at the merge base, where no profile grants floor_integration_rows."
+    description: "Rows control hosted probe. Removing the floor_integration_rows grant empties the runtime's read; the case fails at the merge base, where no profile grants floor_integration_rows."
     source: "manual"
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/topology/test_omn25103_floor_integration_vendor.py -k control -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
-    binds_ac: ["AC3"]
+    binds_ac: ["AC5"]
   - id: "dod-omn25103-infra-ac4"
-    description: "AC4 hosted probe. Every profile grants the runtime role the floor_integration_pass marker, equal to the vendored 0003."
+    description: "Marker grant hosted probe. Every profile grants the runtime role the floor_integration_pass marker, equal to the vendored 0003."
     source: "manual"
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/topology/test_omn25103_floor_integration_pass_vendor.py -k 'upsert_the_floor_integration_pass or marker_migration_grants' -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
-    binds_ac: ["AC4"]
   - id: "dod-omn25103-infra-ac5"
-    description: "AC5 hosted probe. The two marker migrations are vendored byte-identical, with ledger rows."
+    description: "Marker migrations hosted probe. The two marker migrations are vendored byte-identical, with ledger rows."
     source: "manual"
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/topology/test_omn25103_floor_integration_pass_vendor.py -k 'match_omnimarket or bridge or expiry' -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
-    binds_ac: ["AC5"]
   - id: "dod-omn25103-infra-ac6"
-    description: "AC6 hosted probe. The real ACL derivation reports a profile without the marker grant as missing."
+    description: "Marker control hosted probe. The real ACL derivation reports a profile without the marker grant as missing."
     source: "manual"
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/unit/topology/test_omn25103_floor_integration_pass_vendor.py -k control -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
-    binds_ac: ["AC6"]
