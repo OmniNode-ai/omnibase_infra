@@ -80,6 +80,9 @@ dod_evidence:
       - check_type: command
         check_value: grep -q 'ONEX_LEDGER_BUS_READ_COMMAND.*env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT' docker/docker-compose.dev-lane.yml && grep -q 'ONEX_LEDGER_BUS_READ_COMMAND.*env ONEX_CLI_SHOW_ALL_COMMANDS=1 ONEX_WORKSPACE_CONFIG_ROOT' docker/docker-compose.dev-tenant-fold.yml
         cwd: .
+      - check_type: command
+        check_value: "! grep -q 'gh ap[i]' contracts/OMN-26227.yaml"
+        cwd: .
   - id: dod-omn26227-ac1-core-dev-20261126
     description: 'The omnibase-core pin names dev tag dev-20261126024324-05fa7e557a73 (commit 05fa7e557a73, core 0.47.81.dev2 with the migration ledger shape), the lock agrees, and the pin and lineage tests pass.'
     source: manual
