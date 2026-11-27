@@ -15,7 +15,7 @@ description: >
 
 input_model:
   name: ModelDelegationIdentityRequest
-  module: omnibase_infra.doctor.model_delegation_identity_request
+  module: omnibase_infra.models.delegation.model_delegation_identity_request
   description: "The onex home and local identity reading."
 output_model:
   name: "ModelDelegationDiagnosis"
