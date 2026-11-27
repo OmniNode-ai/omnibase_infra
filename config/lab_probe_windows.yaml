@@ -132,7 +132,7 @@ probes:
     repo: omnimarket
     workflow: .github/workflows/delegation-regression-nightly.yml
     cron: ['30 7 * * *']
-    lane: stability-test
+    lane: dev
     lane_source: run_name
     max_duration_minutes: 70
   - id: release-train
