@@ -91,3 +91,13 @@ dod_evidence:
         check_value: |-
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/dev_build_health/handler_dev_build_health.py?ref=dev" --jq .content | base64 -d | grep -q 'class HandlerDevBuildHealth'
         cwd: .
+  - id: dod-omn26703-ac1-window-not-spent
+    description: >-
+      A request the dedup or the lineage fence refuses or supersedes no longer asks the dev recreate window, which the first admitted ask spends. Known good: a duplicate then a real build request in one window, the real build is accepted. Known bad (the base consumer): the duplicate spends the window and the real build reads window_spent and is deferred an hour, as the 14:00Z and 15:00Z windows on 2026-11-27 were.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_window_not_spent_by_fenced_command_omn26703.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
