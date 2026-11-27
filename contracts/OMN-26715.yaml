@@ -84,3 +84,25 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_stability_integration_refresh_wiring_omn26715.py -q --no-cov -n 0 -p no:cacheprovider -k "lane_dirs or lane_declaration"
         cwd: .
+  - id: dod-omn26715-integration-proof
+    description: >-
+      Post-deploy probe on a live surface: the stability lane runs containers on the compose project the refresh recreates, and the refresh node's contract loads through the onex runtime. It reads the live lane, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion. The hosted proof is dod-omn26715-ac3-refresh-node.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: command
+        check_value: onex node node_stability_integration_refresh_effect --help
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: docker ps --filter name=stability --format '{{.Image}}'
+  - id: dod-omn26715-integration-socket
+    description: >-
+      The refresh's real host reads /health over a real local socket (200 and 503) and reads not-200 when nothing listens.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_stability_integration_refresh_omn26715.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
