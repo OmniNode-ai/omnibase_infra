@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-15920"
 title: "The infra MCP consumers read the contract mcp block as expose plus a tools list"
-summary: "omnibase_infra reads the contract mcp block through omnibase_core's typed model (expose plus a tools list, one entry per operation) in every consumer: the adapter's contract discovery, the server lifecycle's local discovery, the registry discovery and the node capabilities model. The infra single-tool model is deleted, the shipped orchestrator declaration and the wrapper contract emitter move to the list, and an old single-tool block is refused. Core stays at its dev tag until omnibase_core#2376 merges; pinning the dev tag that carries it is the one remaining step. This change holds the omnibase_infra half of the ticket only."
+summary: "omnibase_infra reads the contract mcp block through omnibase_core's typed model (expose plus a tools list, one entry per operation) in every consumer: the adapter's contract discovery, the server lifecycle's local discovery, the registry discovery and the node capabilities model. The infra single-tool model is deleted, the shipped orchestrator declaration and the wrapper contract emitter move to the list, and an old single-tool block is refused. Core is pinned by a uv git rev source to omnibase_core#2376 branch head f09a4500daef until that merges; the pin is then replaced by the core dev tag that carries it. This change holds the omnibase_infra half of the ticket only."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -15,6 +15,8 @@ requirements:
         statement: "AC1592002: the shipped declarations list the same tools as before, register_node with a 30 second timeout, through the adapter -- falsifier: with the shipped contract left on the old block the adapter refuses it and lists no tool"
       - id: "AC1592003"
         statement: "AC1592003: a two-entry mcp block yields one tool per entry in the adapter and in registry discovery -- falsifier: at the merge base the consumers read one tool_name per block and register no second tool"
+      - id: "AC1592004"
+        statement: "AC1592004: pyproject.toml and uv.lock pin omnibase-core to the same rev f09a4500daef1590f3826e822b397fd610f7564f, which carries ModelContractMcpTool and mcp.tools -- falsifier: at the dev tag ce48c176d269 the lock names that tag and the infra MCP modules fail type-checking"
 evidence_requirements:
   - kind: "tests"
     description: "The adapter, lifecycle, discovery and shipped-declaration tests pass at the head."
@@ -57,3 +59,11 @@ dod_evidence:
         check_value: |-
           curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/nodes/node_registration_orchestrator/contract.yaml" | grep -q '^    - tool_name: "register_node"'
         cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn15920-infra-ac4"
+    description: "Hosted probe. The core pin and the lock name the same stacked rev."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py -k 'rev_and_lock or range_and_lock' -q --no-cov"
+        cwd: "."
+    binds_ac: ["AC1592004"]

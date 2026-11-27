@@ -24,14 +24,16 @@ OMNIMARKET_LINEAGE_TAG = "dev-20261118215158-8bb5b8be7316"
 VERSION = "0.47.62"
 # The floor the retained core recording was made against; the recording is not remade.
 RECORDED_FLOOR = "0.47.58"
-LOCKED_VERSION = "0.47.81.dev3+gce48c176"
+LOCKED_VERSION = "0.47.82.dev3+gf09a4500d"
+# OMN-15920: stacked pin to omnibase_core#2376 until it merges and the dev tag returns.
+STACKED_REV = "f09a4500daef1590f3826e822b397fd610f7564f"
 GIT_URL = "https://github.com/OmniNode-ai/omnibase_core.git"
 
 
 def test_core_tag_alone_range_and_lock_agree() -> None:
     manifest = tomllib.loads((ROOT / "pyproject.toml").read_text())
     uv = manifest["tool"]["uv"]
-    assert uv["sources"]["omnibase-core"] == {"git": GIT_URL, "tag": TAG}
+    assert uv["sources"]["omnibase-core"] == {"git": GIT_URL, "rev": STACKED_REV}
     assert [
         item for item in uv["override-dependencies"] if item.startswith("omnibase-core")
     ] == []
@@ -46,9 +48,8 @@ def test_core_tag_alone_range_and_lock_agree() -> None:
     assert packages[0]["version"] == LOCKED_VERSION
     source = urlsplit(packages[0]["source"]["git"])
     assert source._replace(query="", fragment="").geturl() == GIT_URL
-    assert parse_qs(source.query) == {"tag": [TAG]}
-    assert source.fragment == COMMIT
-    assert COMMIT.startswith(TAG.rsplit("-", 1)[1])
+    assert parse_qs(source.query) == {"rev": [STACKED_REV]}
+    assert source.fragment == STACKED_REV
 
 
 def _pin_and_lock_name_different_releases(
@@ -78,15 +79,16 @@ def _pin_and_lock_name_different_releases(
     return problems
 
 
-def test_pyproject_core_tag_and_lock_core_release_name_the_same_release() -> None:
+def test_pyproject_core_rev_and_lock_core_release_name_the_same_release() -> None:
+    """OMN-15920: the stacked rev in pyproject is the commit uv.lock records."""
     manifest = tomllib.loads((ROOT / "pyproject.toml").read_text())
     lock = tomllib.loads((ROOT / "uv.lock").read_text())
-    assert (
-        _pin_and_lock_name_different_releases(
-            manifest, lock, release_version=LOCKED_VERSION
-        )
-        == []
-    )
+    rev = manifest["tool"]["uv"]["sources"]["omnibase-core"]["rev"]
+    (entry,) = (p for p in lock["package"] if p["name"] == "omnibase-core")
+    source = urlsplit(entry["source"]["git"])
+    assert parse_qs(source.query) == {"rev": [rev]}
+    assert source.fragment == rev
+    assert entry["version"] == LOCKED_VERSION
 
 
 @pytest.mark.parametrize(
@@ -209,7 +211,10 @@ def test_recorded_core_validator_response_matches_the_pin(
     assert real["core"]["exit_code"] == 0
     recorded = tomllib.loads(real["pyproject_toml"])
     manifest = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    assert recorded["tool"]["uv"]["sources"] == manifest["tool"]["uv"]["sources"]
+    # The recording is of the dev tag and is not remade for the OMN-15920 stacked rev.
+    assert recorded["tool"]["uv"]["sources"] == {
+        "omnibase-core": {"git": GIT_URL, "tag": TAG}
+    }
     assert recorded["project"]["dependencies"] == [
         f"omnibase-core>={RECORDED_FLOOR},<0.48.0"
     ]
