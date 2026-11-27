@@ -51,6 +51,7 @@ __all__ = [
     "OVERLAY_HOME_RELPATH",
     "OVERLAY_HOME_REF",
     "ModelLlmEndpointOverlay",
+    "overlay_main_missing_slots",
     "resolve_overlay_endpoints",
 ]
 
@@ -260,3 +261,24 @@ def resolve_overlay_endpoints(
         new_endpoint["endpoint_url"] = url
         result.append(new_endpoint)
     return result
+
+
+def overlay_main_missing_slots(
+    endpoints: list[dict[str, object]], clone: Path, ref: str
+) -> list[str]:
+    """Slot ids flagged ``endpoint_from_overlay`` that the overlay at ``ref`` holds no value for.
+
+    Reads the overlay home repository clone at ``ref`` (never its working tree). Every
+    flagged slot is judged, whatever any settings store holds, because the deploy
+    renders each flagged slot from this file. An unreadable clone raises
+    ``ValueError`` (``read_clone``); a ref holding no overlay file misses every
+    flagged slot.
+    """
+    overlay = ModelLlmEndpointOverlay.read_clone(clone, ref)
+    held = overlay.endpoint_urls if overlay is not None else {}
+    return [
+        str(endpoint.get("slot_id", ""))
+        for endpoint in endpoints
+        if endpoint.get("endpoint_from_overlay")
+        and str(endpoint.get("slot_id", "")) not in held
+    ]
