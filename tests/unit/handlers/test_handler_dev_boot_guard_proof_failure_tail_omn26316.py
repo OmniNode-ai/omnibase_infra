@@ -57,7 +57,7 @@ def _execution(tmp_path: Path, stderr: str) -> types.SimpleNamespace:
         return subprocess.CompletedProcess(command, 1, stdout="", stderr=stderr)
 
     return types.SimpleNamespace(
-        REPO_DIR=str(tmp_path), _run=run, subprocess=subprocess
+        deploy_repo_dir=lambda: str(tmp_path), _run=run, subprocess=subprocess
     )
 
 

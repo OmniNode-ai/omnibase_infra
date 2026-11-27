@@ -77,6 +77,18 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from dotenv import load_dotenv
 
+# OMN-24562: the deploy agent resolves its own deploy-source clone at import and the
+# settings have no default. Tests that import ``deploy_agent`` create no clone. The
+# values are assigned, never defaulted: a test run on an agent host would otherwise
+# inherit the host's real clone paths and a pinned job would reset them.
+for _name, _value in (
+    ("DEPLOY_AGENT_REPO_DIR", "/nonexistent/agent-clone/omnibase_infra"),
+    ("DEPLOY_AGENT_CANONICAL_CLONE", "/nonexistent/canonical/omnibase_infra"),
+    ("DEPLOY_AGENT_LAB_OVERLAY_SOURCE", "/nonexistent/overlay-source"),
+    ("DEPLOY_AGENT_TRACKING_REF", "dev"),
+):
+    os.environ[_name] = _value
+
 
 def _strip_inherited_git_environment() -> None:
     """Remove caller-owned Git process state before tests are collected.

@@ -199,7 +199,7 @@ def test_the_compose_env_carries_the_name_and_refuses_a_typo_before_any_recreate
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``_compose_env`` is every compose command's env, so a refusal here precedes a recreate."""
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(REPO_ROOT))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(REPO_ROOT))
     monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(tmp_path))
     monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", "dev")
     monkeypatch.delenv(NODE_EXCLUSION_KEY, raising=False)

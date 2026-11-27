@@ -1175,7 +1175,7 @@ def test_the_executor_env_file_argv_is_the_repoint_script_and_no_compose_command
     # The script it runs is the repoint script, named in the list by its constant.
     assert any(
         isinstance(element, ast.Call)
-        and ast.unparse(element) == "str(REPOINT_ONEX_API_SCRIPT)"
+        and ast.unparse(element) == "str(repoint_onex_api_script())"
         for element in argv.elts
     )
 
@@ -1353,7 +1353,7 @@ def test_the_runtime_policy_env_file_carries_no_signing_key() -> None:
         encoding="utf-8"
     )
     assert (
-        '"--runtime-policy-env",\n            f"{REPO_DIR}/docker/runtime-policy.env",'
+        '"--runtime-policy-env",\n            f"{deploy_repo_dir()}/docker/runtime-policy.env",'
         in executor
     )
 

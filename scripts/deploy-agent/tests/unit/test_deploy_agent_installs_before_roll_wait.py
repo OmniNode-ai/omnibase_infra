@@ -149,7 +149,7 @@ class Roll:
             f"Runtime roll stopped at {SERVICE}: Waiting container {SERVICE} is unhealthy",
         )
         monkeypatch.setenv(STATE_ENV, str(self.state))
-        monkeypatch.setattr(executor_mod, "REPO_DIR", str(REPO_ROOT))
+        monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(REPO_ROOT))
         monkeypatch.setattr(executor_mod, "_compose_env", lambda extra: {**os.environ})
         monkeypatch.setattr(
             executor_mod, "runtime_health_probe_budget", lambda lane, service: BUDGET

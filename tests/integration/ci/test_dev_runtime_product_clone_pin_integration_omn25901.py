@@ -70,7 +70,7 @@ def _agent(root: Path) -> ModuleType:
     """A stand-in for the deploy agent module: its source location and compose clone."""
     agent = ModuleType("deploy_agent_stand_in")
     agent.__file__ = str(AGENT_SOURCE)
-    vars(agent)["REPO_DIR"] = str(root / "omnibase_infra")
+    vars(agent)["deploy_repo_dir"] = lambda: str(root / "omnibase_infra")
     return agent
 
 

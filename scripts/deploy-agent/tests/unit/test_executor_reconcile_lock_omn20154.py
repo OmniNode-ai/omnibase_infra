@@ -30,6 +30,13 @@ _ERROR_BLOCK = (
 )
 
 
+def _declare_deploy_source(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
+    """The deploy source and the canonical clone beside it (OMN-24562 splits them)."""
+    source = executor_mod.deploy_source().model_copy(update={"canonical_clone": path})
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: path)
+    monkeypatch.setattr(executor_mod, "deploy_source", lambda: source)
+
+
 def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:
     pass
 
@@ -39,7 +46,7 @@ def test_lock_spans_every_build_and_ends_before_compose_up(
     scope: Scope, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OMNI_HOME", str(tmp_path))
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(tmp_path / "omnibase_infra"))
+    _declare_deploy_source(monkeypatch, str(tmp_path / "omnibase_infra"))
     lock = tmp_path / _LOCK_DIRNAME
     calls: list[str] = []
 
@@ -102,7 +109,7 @@ def test_lock_held_on_build_context_tree_when_omni_home_differs(
     agent_root.mkdir()
     build_root.mkdir()
     monkeypatch.setenv("OMNI_HOME", str(agent_root))
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(build_root / "omnibase_infra"))
+    _declare_deploy_source(monkeypatch, str(build_root / "omnibase_infra"))
     locks = [agent_root / _LOCK_DIRNAME, build_root / _LOCK_DIRNAME]
     calls: list[str] = []
 
@@ -149,7 +156,7 @@ def test_reconcile_lock_roots_deduplicates_build_context_tree(
 ) -> None:
     omni_home = f"{tmp_path}{suffix}"
     monkeypatch.setenv("OMNI_HOME", f" {omni_home} ")
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(tmp_path / "omnibase_infra"))
+    _declare_deploy_source(monkeypatch, str(tmp_path / "omnibase_infra"))
     assert executor_mod._reconcile_lock_roots() == [omni_home]
 
 
@@ -161,7 +168,7 @@ def test_build_exception_releases_lock_without_recreating(
     scope: Scope, fail_at: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OMNI_HOME", str(tmp_path))
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(tmp_path / "omnibase_infra"))
+    _declare_deploy_source(monkeypatch, str(tmp_path / "omnibase_infra"))
     lock = tmp_path / _LOCK_DIRNAME
     calls = 0
 
@@ -196,7 +203,7 @@ def _no_workspace_staging(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
         DeployExecutor, "_resolve_plugin_ref", lambda self, path, fallback="": "0" * 40
     )
     monkeypatch.setenv("OMNI_HOME", str(tmp_path))
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(tmp_path / "omnibase_infra"))
+    _declare_deploy_source(monkeypatch, str(tmp_path / "omnibase_infra"))
 
 
 def _pin_host(monkeypatch: pytest.MonkeyPatch) -> None:

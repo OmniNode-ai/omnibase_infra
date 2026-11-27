@@ -139,7 +139,9 @@ def layered[ConfigT: Any](execution: ModuleType, config: ConfigT) -> ConfigT:
     if layer is None:
         return config
     return config.model_copy(
-        update={"compose_files": (*files, f"{execution.REPO_DIR}/docker/{layer}")}
+        update={
+            "compose_files": (*files, f"{execution.deploy_repo_dir()}/docker/{layer}")
+        }
     )
 
 

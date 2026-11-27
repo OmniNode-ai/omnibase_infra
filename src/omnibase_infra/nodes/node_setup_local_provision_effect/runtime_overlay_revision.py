@@ -138,12 +138,12 @@ def render_product_clone_pins(
 def write_product_clone_pins(execution: ModuleType) -> Path:
     """Write the dev runtime's pin file from the clones as they are now (OMN-25901).
 
-    The registry root is the parent of ``execution.REPO_DIR``, the clone the compose
+    The registry root is the parent of ``execution.deploy_repo_dir()``, the clone the compose
     files live in, which is what ``../..`` resolves to from ``docker/``. The file is
     written beside its target and renamed into place, readable by the runtime user.
     """
     declared = product_clone_pin_declaration(execution)
-    registry_root = Path(str(vars(execution)["REPO_DIR"])).parent
+    registry_root = Path(execution.deploy_repo_dir()).parent
     path = product_clone_pin_path(registry_root, declared)
     payload = render_product_clone_pins(registry_root, declared)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -172,11 +172,11 @@ def apply(
     until the revision is verified and rendered.
     """
     try:
-        if "REPO_DIR" in vars(execution):
+        if hasattr(execution, "deploy_repo_dir"):
             write_product_clone_pins(execution)
         else:
             logger.warning(
-                "OMN-25901: the execution module names no REPO_DIR; no product clone pin written"
+                "OMN-25901: the execution module names no deploy-source clone; no product clone pin written"
             )
     except OSError:
         # The clones stay refused PRODUCT_CLONE_NOT_FRESH; the deploy is not stopped.

@@ -92,7 +92,7 @@ def lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     state.mkdir()
     execution = SimpleNamespace(
         STATE_DIR=str(state),
-        REPO_DIR=str(infra),
+        deploy_repo_dir=lambda: str(infra),
         AGENT_CLONE_ROOT=str(_REPO),
         _sibling_clone=lambda repository: tmp_path / repository,
     )
@@ -128,7 +128,7 @@ def test_sibling_build_ref_resolves_in_the_agents_own_clone(
     state.mkdir()
     execution = SimpleNamespace(
         STATE_DIR=str(state),
-        REPO_DIR=str(infra),
+        deploy_repo_dir=lambda: str(infra),
         AGENT_CLONE_ROOT=str(_REPO),
         _sibling_clone=lambda repository: tmp_path / repository,
     )

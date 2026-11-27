@@ -192,7 +192,7 @@ def test_control_the_static_tuple_drops_the_layer() -> None:
     """
     static = [
         Path(path).name
-        for path in executor_mod._LANE_CONFIGS[
+        for path in executor_mod._lane_configs()[
             EnumRuntimeLane.STABILITY_TEST
         ].compose_files
     ]

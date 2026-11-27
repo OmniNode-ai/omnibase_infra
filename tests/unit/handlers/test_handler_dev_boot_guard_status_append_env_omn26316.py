@@ -61,7 +61,7 @@ class _FakeExecution(types.ModuleType):
     """The slice of ``deploy_agent.executor`` the append uses: ``_run`` and ``subprocess``."""
 
     subprocess = subprocess
-    REPO_DIR = ""
+    deploy_repo_dir = staticmethod(lambda: "")
 
     @staticmethod
     def _run(
@@ -174,6 +174,6 @@ def test_post_roll_ledger_proof_runs_without_the_agents_sasl_declaration(
     )
     onex.chmod(onex.stat().st_mode | stat.S_IXUSR)
     execution = _FakeExecution("fake_execution")
-    execution.REPO_DIR = str(repo)
+    execution.deploy_repo_dir = lambda: str(repo)
 
     guard._prove_work_ledger_answers(execution)

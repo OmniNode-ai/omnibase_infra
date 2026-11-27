@@ -673,7 +673,7 @@ def _composed_repositories(execution: ModuleType) -> tuple[str, ...]:
 def _repository_clone(execution: ModuleType, repository: str) -> Path | None:
     """The agent's clone of ``repository``: its own checkout, else the sibling clone under ``OMNI_HOME``."""
     if repository == _OWN_REPOSITORY:
-        return Path(execution.REPO_DIR)
+        return Path(execution.deploy_repo_dir())
     clone: Path | None = execution._sibling_clone(repository)
     return clone
 
@@ -1273,7 +1273,7 @@ def _changes_no_runtime_path(
     if running is None:
         return False
     clone = (
-        Path(execution.REPO_DIR)
+        Path(execution.deploy_repo_dir())
         if repository == "omnibase_infra"
         else execution._sibling_clone(repository)
     )

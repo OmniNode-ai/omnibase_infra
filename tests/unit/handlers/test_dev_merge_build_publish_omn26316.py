@@ -197,7 +197,7 @@ def test_the_tick_requests_each_overdue_sha_once_and_never_on_a_prod_lane(
     sender = _Sender()
     monkeypatch.setattr(caller, "AgentDevMergeSender", lambda *_a: sender)
     monkeypatch.setattr(caller, "_TRACKED_HEAD", "HEAD")
-    execution = SimpleNamespace(STATE_DIR=str(state), REPO_DIR=str(repo))
+    execution = SimpleNamespace(STATE_DIR=str(state), deploy_repo_dir=lambda: str(repo))
     settings = {
         "dev_merge_build_runtime_lane": "dev",
         "dev_merge_build_overdue_topic": "topic-from-settings",

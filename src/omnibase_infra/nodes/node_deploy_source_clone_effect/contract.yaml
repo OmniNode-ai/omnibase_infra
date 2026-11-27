@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_deploy_source_clone_effect
+contract_name: node_deploy_source_clone_effect
+node_name: node_deploy_source_clone_effect
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Host-local record of the deploy agent's own deploy-source clone. It resolves the declared clone path, refuses a path that resolves to a canonical clone, and creates the clone on first start at the commit the canonical clone serves, fetching from the git mirror when one is declared and reachable and from origin otherwise.
+input_model:
+  name: ModelDeploySourceClone
+  module: omnibase_infra.models.model_deploy_source_clone
+  description: The operation (resolve or ensure) with the declared clone, canonical clone, overlay source and optional mirror url.
+output_model:
+  name: ModelDeploySourceClone
+  module: omnibase_infra.models.model_deploy_source_clone
+  description: The same settings, with whether the clone was created and how many mirror fallbacks to origin are counted.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: resolve
+      handler: {name: HandlerDeploySourceClone, module: omnibase_infra.handlers.handler_deploy_source_clone}
+    - operation: ensure
+      handler: {name: HandlerDeploySourceClone, module: omnibase_infra.handlers.handler_deploy_source_clone}
+capabilities:
+  - name: deploy_source.clone
+    description: Give the deploy agent its own deploy-source clone so a pinned job never moves a canonical clone.
+metadata:
+  ticket: OMN-24562
+  author: OmniNode Team
+  description: Host-local effect. No runtime bus dependency and no prod or customer runner admission.
+  tags: [effect, deployment]

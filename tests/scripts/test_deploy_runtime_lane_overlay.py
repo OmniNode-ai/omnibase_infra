@@ -17,7 +17,7 @@ The fix introduces ``resolve_lane_overlay_filename`` / ``resolve_compose_file_ar
 which derive the lane from the compose project suffix and LAYER the matching overlay
 (``docker-compose.<lane>.yml``) onto ``docker-compose.infra.yml`` for every non-dev
 project, mirroring the authoritative lane->compose-file mapping in
-``scripts/deploy-agent/deploy_agent/executor.py`` (_LANE_CONFIGS).
+``scripts/deploy-agent/deploy_agent/executor.py`` (_lane_configs()).
 
 These tests assert:
   - the helper functions exist,

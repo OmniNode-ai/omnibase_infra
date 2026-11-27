@@ -188,7 +188,7 @@ class _Lab:
         self.compose_calls: list[list[str]] = []
         self.pin_at_compose: list[str] = []
         self.docker_run_calls: list[list[str]] = []
-        monkeypatch.setattr(executor_mod, "REPOINT_ONEX_API_SCRIPT", _SCRIPT)
+        monkeypatch.setattr(executor_mod, "repoint_onex_api_script", lambda: _SCRIPT)
         real_script = str(_SCRIPT)
 
         def run(

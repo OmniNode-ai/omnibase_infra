@@ -93,7 +93,7 @@ def test_a_ledger_that_answers_keeps_the_roll_and_runs_the_declared_command(
     assert not any("up" in argv for argv in docker["commands"][commands_before:])
     (command,) = _ledger_commands(docker)
     assert command == [
-        f"{executor_mod.REPO_DIR}/scripts/onex",
+        f"{executor_mod.deploy_repo_dir()}/scripts/onex",
         *DECLARED["argv"],
         "--timeout",
         str(DECLARED["timeout_s"]),
@@ -148,7 +148,7 @@ def test_the_command_and_bound_come_from_the_declaration_not_the_guard(
         )
     )
     guard, mark_failed = _roll(tmp_path / "state")
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(clone))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(clone))
     with guard.protect(JOB, COMMIT, mark_failed):
         pass
     (command,) = _ledger_commands(docker)

@@ -104,7 +104,8 @@ def _freshness(clone: Path, pinned_sha: str) -> str:
 def _execution(root: Path) -> SimpleNamespace:
     """The agent module as the writer sees it: its location and its compose clone."""
     return SimpleNamespace(
-        __file__=executor_mod.__file__, REPO_DIR=str(root / "omnibase_infra")
+        __file__=executor_mod.__file__,
+        deploy_repo_dir=lambda: str(root / "omnibase_infra"),
     )
 
 

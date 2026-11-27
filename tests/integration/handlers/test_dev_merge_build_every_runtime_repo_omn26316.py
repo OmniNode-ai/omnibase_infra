@@ -97,7 +97,7 @@ def lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     state.mkdir()
     execution = SimpleNamespace(
         STATE_DIR=str(state),
-        REPO_DIR=str(infra),
+        deploy_repo_dir=lambda: str(infra),
         AGENT_CLONE_ROOT=str(_REPO),
         _sibling_clone=lambda repository: tmp_path / repository,
     )
@@ -132,7 +132,7 @@ def test_real_sibling_clone_merge_is_requested_at_its_own_head(
 def test_every_composed_clone_unread_is_skipped_not_empty(
     lane: SimpleNamespace, tmp_path: Path
 ) -> None:
-    lane.execution.REPO_DIR = str(tmp_path / "missing_infra")
+    lane.execution.deploy_repo_dir = lambda: str(tmp_path / "missing_infra")
     lane.execution._sibling_clone = lambda repository: tmp_path / "missing" / repository
     assert caller.check_overdue_dev_merges(force=True) is None
     assert lane.sender.commands == []

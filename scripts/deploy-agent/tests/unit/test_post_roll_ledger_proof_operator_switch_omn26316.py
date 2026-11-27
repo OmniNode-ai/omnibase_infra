@@ -45,7 +45,7 @@ def test_ledger_proof_carries_the_operator_switch_on_that_call_only(
     with guard.protect(JOB, boot_guard_tests.GOOD_COMMIT, Mock()):
         pass
     (raw,) = _ledger_raw(docker)
-    entry = raw.index(f"{executor_mod.REPO_DIR}/scripts/onex")
+    entry = raw.index(f"{executor_mod.deploy_repo_dir()}/scripts/onex")
     assert raw[0] == "env"
     assert SWITCH in raw[:entry], "the switch is set for the ledger call"
     others = [r for r in docker["raw_commands"] if r is not raw]

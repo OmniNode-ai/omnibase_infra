@@ -40,8 +40,8 @@ import pytest
 import yaml
 from deploy_agent.events import EnumRuntimeLane, Scope
 from deploy_agent.executor import (
-    DEV_INSTANCE_LANE_CONFIGS,
     DeployExecutor,
+    dev_instance_lane_configs,
     lane_config_for,
     select_dev_instance,
 )
@@ -164,7 +164,7 @@ def test_memgraph_dev_core_up_names_no_service_so_it_reaches_the_dependency_set(
 
 
 @pytest.mark.parametrize(
-    "instance", sorted(set(DEV_INSTANCE_LANE_CONFIGS) - {_DEFAULT_INSTANCE})
+    "instance", sorted(set(dev_instance_lane_configs()) - {_DEFAULT_INSTANCE})
 )
 def test_memgraph_every_other_dev_instance_scales_it_to_zero(instance: str) -> None:
     select_dev_instance(instance)
@@ -174,7 +174,7 @@ def test_memgraph_every_other_dev_instance_scales_it_to_zero(instance: str) -> N
         assert _merged_scale(files) == 0
     finally:
         select_dev_instance(_DEFAULT_INSTANCE)
-    default_files = DEV_INSTANCE_LANE_CONFIGS[_DEFAULT_INSTANCE].compose_files
+    default_files = dev_instance_lane_configs()[_DEFAULT_INSTANCE].compose_files
     assert _merged_scale(default_files) is None
 
 
@@ -196,7 +196,7 @@ def test_memgraph_every_overlay_that_layers_the_dev_lane_fences_it(
     """The dev-lane file empties the profile list for every composition that
     layers it, so each layering overlay must fence the service itself (scale 0 or
     an unreachable profile). One such lane is not in the routing table, so a test over
-    ``DEV_INSTANCE_LANE_CONFIGS`` alone never saw it start a 4 GiB graph store on
+    ``dev_instance_lane_configs()`` alone never saw it start a 4 GiB graph store on
     a host whose overlay promises loopback-only ports."""
     files = ["docker-compose.infra.yml", "docker-compose.dev-lane.yml", overlay]
     assert _is_fenced(files), (

@@ -47,15 +47,15 @@ def _overlay_composed_services() -> set[str]:
 
 
 def test_stability_build_names_exactly_the_overlay_composed_services() -> None:
-    stability: Any = object()
+    stability: Any = SimpleNamespace(value="stability")
     dev: Any = object()
     execution: Any = SimpleNamespace(
         EnumRuntimeLane=SimpleNamespace(STABILITY_TEST=stability, DEV=dev),
         Scope=SimpleNamespace(RUNTIME="runtime"),
-        _STABILITY_OVERLAY="overlay.yml",
         _compose_env=dict,
         lane_config_for=lambda lane: SimpleNamespace(
-            compose_files=("overlay.yml",), disabled_services=frozenset()
+            compose_files=(f"/clone/docker/docker-compose.{stability.value}.yml",),
+            disabled_services=frozenset(),
         ),
     )
     calls: list[dict[str, Any]] = []

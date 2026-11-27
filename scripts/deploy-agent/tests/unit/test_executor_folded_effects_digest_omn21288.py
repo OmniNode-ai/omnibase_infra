@@ -11,9 +11,9 @@ from uuid import uuid4
 import pytest
 from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested, Scope
 from deploy_agent.executor import (
-    _LANE_CONFIGS,
     DeployExecutor,
     ProdStabilityDigestMissingError,
+    _lane_configs,
     assert_prod_request_has_stability_digest,
     lane_config_for,
     lane_folded_profiles,
@@ -28,10 +28,10 @@ FOLDABLE_KEY = "DEV_RUNTIME_MAIN_FOLDABLE_SERVICES"
 FOLDABLE = '{"effects":"runtime-effects"}'
 # The lane's own unfolded health targets name its containers and ports, so no
 # lane container name is restated here.
-(MAIN, MAIN_PORT), (EFFECTS, EFFECTS_PORT) = _LANE_CONFIGS[
+(MAIN, MAIN_PORT), (EFFECTS, EFFECTS_PORT) = _lane_configs()[
     EnumRuntimeLane.STABILITY_TEST
 ].runtime_health_targets
-PROD_EFFECTS = _LANE_CONFIGS[EnumRuntimeLane.PROD].runtime_health_targets[1][0]
+PROD_EFFECTS = _lane_configs()[EnumRuntimeLane.PROD].runtime_health_targets[1][0]
 
 
 @pytest.fixture
@@ -145,6 +145,7 @@ def test_missing_policy_file_folds_nothing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
-        "deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", tmp_path / "missing.env"
+        "deploy_agent.executor.runtime_policy_env_file",
+        lambda: tmp_path / "missing.env",
     )
     assert lane_folded_profiles(EnumRuntimeLane.STABILITY_TEST) == frozenset()

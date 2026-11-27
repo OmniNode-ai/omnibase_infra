@@ -260,7 +260,8 @@ STABILITY_LANE_WRITER_SERVICES: tuple[str, ...] = (
 def stability_lane_writer_services(execution: ModuleType, lane: str) -> tuple[str, ...]:
     """The writers this lane runs: none unless its compose files carry the overlay."""
     config = execution.lane_config_for(lane)
-    if execution._STABILITY_OVERLAY not in config.compose_files:
+    overlay = f"docker-compose.{execution.EnumRuntimeLane.STABILITY_TEST.value}.yml"
+    if not any(Path(file).name == overlay for file in config.compose_files):
         return ()
     return tuple(
         service

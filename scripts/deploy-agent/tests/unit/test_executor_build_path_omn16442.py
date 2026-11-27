@@ -98,7 +98,7 @@ def test_prod_release_build_still_runs_the_lineage_gate(
         BuildSource.RELEASE, runtime_lane=EnumRuntimeLane.PROD
     )
 
-    assert guard.calls == [Path(executor_mod.REPO_DIR)]
+    assert guard.calls == [Path(executor_mod.deploy_repo_dir())]
 
 
 def test_prod_release_build_still_fails_closed_when_the_gate_rejects(
@@ -219,7 +219,7 @@ def test_dev_workspace_build_stages_with_the_envelopes_ref(
     repo = tmp_path / "repo"
     repo.mkdir()
     record = _install_recording_stage_script(repo)
-    monkeypatch.setattr(executor_mod, "REPO_DIR", str(repo))
+    monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(repo))
     monkeypatch.setenv("OMNI_HOME", str(tmp_path / "registry_root"))
     monkeypatch.delenv("ALLOW_UNPINNED_DEPLOY_SOURCE", raising=False)
     monkeypatch.setattr(

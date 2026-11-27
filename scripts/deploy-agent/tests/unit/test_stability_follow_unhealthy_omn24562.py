@@ -118,12 +118,14 @@ def test_a_dev_agent_starts_with_a_bad_stability_fold_policy(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from deploy_agent import agent as agent_mod
+    from deploy_agent.executor import EnumRuntimeLane
 
     resolve = Mock(side_effect=_bad_stability_policy)
     monkeypatch.setattr(agent_mod, "_runtime_container_for_lane", resolve)
     agent = _new_agent(tmp_path, monkeypatch)
-    # Built in __init__, resolved on no lane until the stability follow reads it.
-    resolve.assert_not_called()
+    # Built in __init__, resolved on the stability lane only when the follow reads it.
+    # The dev lane is read once at start, to seed the agent's own deploy-source clone.
+    assert [call.args[0] for call in resolve.call_args_list] == [EnumRuntimeLane.DEV]
     # The stability lane alone fails: its read is unanswered, nothing raises.
     assert agent._stability_read_running_ref("omnimarket") is None
 
@@ -137,6 +139,7 @@ def test_the_agent_s_stability_reader_reads_the_stability_runtime(
     read_ref = Mock(return_value=TAG.sha)
     monkeypatch.setattr(agent_mod, "read_running_ref", read_ref)
     agent = _new_agent(tmp_path, monkeypatch)
+    read_ref.reset_mock()  # the start read the dev runtime once to seed the clone
     container = agent_mod._runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST)
     with _docker_says("unhealthy\n"):
         assert agent._stability_read_running_ref("omnimarket") == ""

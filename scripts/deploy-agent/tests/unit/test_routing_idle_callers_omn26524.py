@@ -318,7 +318,7 @@ def dev_clone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     clone.mkdir()
     _git(clone, "init", "-b", "dev")
     _git(clone, "remote", "add", "origin", str(origin))
-    monkeypatch.setattr(agent_mod, "REPO_DIR", str(clone), raising=False)
+    monkeypatch.setattr(agent_mod, "deploy_repo_dir", lambda: str(clone), raising=False)
     monkeypatch.setattr(runtime_mod, "_overdue_last", [])
     return clone
 

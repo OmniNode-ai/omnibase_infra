@@ -38,8 +38,8 @@ SERVICE_LABEL = "label=com.docker.compose.service="
 def _committed_fold_overlay(monkeypatch: pytest.MonkeyPatch) -> None:
     """Read this checkout's committed fold policy, not the deploy host's clone path."""
     monkeypatch.setattr(
-        "deploy_agent.executor.RUNTIME_POLICY_ENV_FILE",
-        REPO_ROOT / "docker/runtime-policy.env",
+        "deploy_agent.executor.runtime_policy_env_file",
+        lambda: REPO_ROOT / "docker/runtime-policy.env",
     )
 
 

@@ -45,11 +45,11 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 BASE_COMPOSE = REPO_ROOT / "docker/docker-compose.infra.yml"
 STABILITY = EnumRuntimeLane.STABILITY_TEST
 DISABLED_BY_OVERLAY = {"autoheal", "context-audit-consumer"}
-# ``_LANE_CONFIGS`` is a literal table; ``lane_config_for`` also reads the runtime policy
+# ``_lane_configs()`` is a literal table; ``lane_config_for`` also reads the runtime policy
 # file, and this runs at import, before the autouse fixture below points it at this
 # checkout.
-STABILITY_PROJECT = executor_mod._LANE_CONFIGS[STABILITY].compose_project
-DEV_PROJECT = executor_mod._LANE_CONFIGS[EnumRuntimeLane.DEV].compose_project
+STABILITY_PROJECT = executor_mod._lane_configs()[STABILITY].compose_project
+DEV_PROJECT = executor_mod._lane_configs()[EnumRuntimeLane.DEV].compose_project
 
 
 def _base_container_names() -> dict[str, str]:
@@ -59,10 +59,8 @@ def _base_container_names() -> dict[str, str]:
 @pytest.fixture(autouse=True)
 def _committed_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     """Read this checkout's runtime policy, not the deploy host's clone path."""
-    monkeypatch.setattr(
-        "deploy_agent.executor.RUNTIME_POLICY_ENV_FILE",
-        REPO_ROOT / "docker/runtime-policy.env",
-    )
+    policy = REPO_ROOT / "docker/runtime-policy.env"
+    monkeypatch.setattr("deploy_agent.executor.runtime_policy_env_file", lambda: policy)
 
 
 def _docker_census(

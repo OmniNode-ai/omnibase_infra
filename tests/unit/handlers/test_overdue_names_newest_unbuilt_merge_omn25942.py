@@ -63,7 +63,9 @@ def _history(tmp_path: Path, subjects: list[str]) -> tuple[SimpleNamespace, list
     for subject in subjects:
         _git(repo, "commit", "--allow-empty", "-q", "-m", subject)
         shas.append(_git(repo, "rev-parse", "HEAD"))
-    return SimpleNamespace(STATE_DIR=str(state), REPO_DIR=str(repo)), shas
+    return SimpleNamespace(
+        STATE_DIR=str(state), deploy_repo_dir=lambda: str(repo)
+    ), shas
 
 
 def _running(built_sha: str) -> ModelOverdueDevMergeJob:

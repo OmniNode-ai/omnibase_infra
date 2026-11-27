@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import subprocess
 from contextlib import nullcontext
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -115,6 +115,18 @@ def build(
 
 def builds(state: SimpleNamespace) -> list[list[str]]:
     return [argv for argv in state.calls if argv[:2] == ["docker", "build"]]
+
+
+def _stub_boot_guard(monkeypatch: pytest.MonkeyPatch, execution: ModuleType) -> None:
+    """Stub the boot guard's fold only; every other effect loads for real (OMN-24626)."""
+    real_load = execution.load_dev_boot_guard
+
+    def load(effect: str = "handler_dev_boot_guard") -> ModuleType | SimpleNamespace:
+        if effect != "handler_dev_boot_guard":
+            return real_load(effect)
+        return SimpleNamespace(fold_compose_env=lambda policy, is_default: {})
+
+    monkeypatch.setattr(execution, "load_dev_boot_guard", load)
 
 
 def test_missing_image_is_built_with_web_revision_before_recreate(
@@ -294,13 +306,7 @@ def test_compose_env_re_reads_the_materialized_gate_secret(
     monkeypatch.setattr(execution, "resolve_lane_overlay_dir", lambda env: None)
     monkeypatch.setattr(execution, "_lane_env_overlay", dict)
     monkeypatch.setattr(execution, "_dev_broker_policy_env", lambda env: {})
-    monkeypatch.setattr(
-        execution,
-        "load_dev_boot_guard",
-        lambda: SimpleNamespace(
-            fold_compose_env=lambda policy, is_default: {},
-        ),
-    )
+    _stub_boot_guard(monkeypatch, execution)
     assert (
         execution._compose_env()["ESTIMATOR_GATE_PASSWORD"]
         == stored["ESTIMATOR_GATE_PASSWORD"]
@@ -438,11 +444,7 @@ def test_declared_source_settings_flow_from_lane_overlay_without_host_bindings(
         ),
     )
     monkeypatch.setattr(execution, "_dev_broker_policy_env", lambda env: {})
-    monkeypatch.setattr(
-        execution,
-        "load_dev_boot_guard",
-        lambda: SimpleNamespace(fold_compose_env=lambda policy, is_default: {}),
-    )
+    _stub_boot_guard(monkeypatch, execution)
     for name in source:
         monkeypatch.delenv(name, raising=False)
     environment = execution._compose_env()

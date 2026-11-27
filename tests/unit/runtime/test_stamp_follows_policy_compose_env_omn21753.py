@@ -23,7 +23,7 @@ _POLICY = Path(__file__).resolve().parents[3] / "docker" / "runtime-policy.env"
 
 @pytest.fixture
 def isolated(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(executor, "RUNTIME_POLICY_ENV_FILE", _POLICY)
+    monkeypatch.setattr(executor, "runtime_policy_env_file", lambda: _POLICY)
     monkeypatch.setattr(executor, "_lane_env_overlay", dict)
     monkeypatch.setattr(executor, "_dev_broker_policy_env", lambda env: {})
     monkeypatch.setattr(executor, "resolve_lane_overlay_dir", lambda env: None)

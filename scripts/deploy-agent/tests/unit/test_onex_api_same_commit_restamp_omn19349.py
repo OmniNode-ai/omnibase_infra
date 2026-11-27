@@ -115,7 +115,7 @@ class _Lab:
         docker = _fake_docker(tmp_path, tags=tags)
         git = _fake_git(tmp_path)
         self.compose_calls: list[list[str]] = []
-        monkeypatch.setattr(executor_mod, "REPOINT_ONEX_API_SCRIPT", _SCRIPT)
+        monkeypatch.setattr(executor_mod, "repoint_onex_api_script", lambda: _SCRIPT)
         real_script = str(_SCRIPT)
 
         def run(

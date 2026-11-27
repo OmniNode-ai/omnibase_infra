@@ -82,7 +82,9 @@ def _history(tmp_path: Path) -> tuple[SimpleNamespace, list[str]]:
     for number in (1, 2, 3):
         git("commit", "--allow-empty", "-q", "-m", f"merge (#{number})")
         shas.append(git("rev-parse", "HEAD"))
-    return SimpleNamespace(STATE_DIR=str(state), REPO_DIR=str(repo)), shas
+    return SimpleNamespace(
+        STATE_DIR=str(state), deploy_repo_dir=lambda: str(repo)
+    ), shas
 
 
 def _decision(sha: str) -> ModelOverdueDevMergeBuildDecision:
@@ -126,7 +128,7 @@ def test_a_head_the_running_build_contains_is_never_requested(
 ) -> None:
     execution, shas = _history(tmp_path)
     subprocess.run(
-        ["git", "-C", execution.REPO_DIR, "reset", "-q", "--hard", shas[1]],
+        ["git", "-C", execution.deploy_repo_dir(), "reset", "-q", "--hard", shas[1]],
         check=True,
         env=scrub_git_location_env(os.environ),
     )

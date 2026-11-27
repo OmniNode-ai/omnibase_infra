@@ -50,7 +50,9 @@ def test_compose_env_loads_contract_rendered_runtime_policy(
         "DEV_RUNTIME_MAIN_CAPABILITIES=market.skill-proof,runtime.main\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy_env)
+    monkeypatch.setattr(
+        "deploy_agent.executor.runtime_policy_env_file", lambda: policy_env
+    )
     monkeypatch.delenv("ONEX_ACTIVE_RUNTIME_PACKAGES", raising=False)
     monkeypatch.delenv("DEV_RUNTIME_MAIN_CAPABILITIES", raising=False)
 
@@ -71,7 +73,9 @@ def test_compose_env_unquotes_runtime_policy_json(
         '\'{"enable_convention_fallback":false,"mappings":[{"logical_name":"llm.openrouter.api_key","source":{"source_type":"env","source_path":"OPENROUTER_API_KEY"}}]}\'\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy_env)
+    monkeypatch.setattr(
+        "deploy_agent.executor.runtime_policy_env_file", lambda: policy_env
+    )
     monkeypatch.delenv(
         "STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON",
         raising=False,
@@ -141,7 +145,7 @@ class TestComposeGen:
         else; a generator pointed at it gives that file two writers whose
         contents differ, and the loser is whichever one ran first.
         """
-        from deploy_agent.executor import COMPOSE_FILE, COMPOSE_GEN_OUTPUT_FILE
+        from deploy_agent.executor import compose_file, compose_gen_output_file
 
         executor = DeployExecutor()
         captured_cmds: list[list[str]] = []
@@ -158,10 +162,10 @@ class TestComposeGen:
         cmd = captured_cmds[0]
         assert "--output" in cmd, f"Expected --output flag in cmd, got: {cmd}"
         output_idx = cmd.index("--output") + 1
-        assert cmd[output_idx] == COMPOSE_GEN_OUTPUT_FILE, (
-            f"Expected --output {COMPOSE_GEN_OUTPUT_FILE!r}, got {cmd[output_idx]!r}"
+        assert cmd[output_idx] == compose_gen_output_file(), (
+            f"Expected --output {compose_gen_output_file()!r}, got {cmd[output_idx]!r}"
         )
-        assert cmd[output_idx] != COMPOSE_FILE
+        assert cmd[output_idx] != compose_file()
         assert cmd[output_idx].endswith("docker/docker-compose.generated.yml")
 
     def test_compose_gen_validates_the_render_before_the_lane_stack(self) -> None:
@@ -170,7 +174,7 @@ class TestComposeGen:
         Validating only the lane stack would leave a broken catalog render
         undetected now that the render is no longer the file the lane deploys.
         """
-        from deploy_agent.executor import COMPOSE_FILE, COMPOSE_GEN_OUTPUT_FILE
+        from deploy_agent.executor import compose_file, compose_gen_output_file
 
         executor = DeployExecutor()
         captured_cmds: list[list[str]] = []
@@ -189,27 +193,27 @@ class TestComposeGen:
             f"Expected a render validation and a lane validation, got: {config_cmds}"
         )
         render_cmd, lane_cmd = config_cmds
-        assert COMPOSE_GEN_OUTPUT_FILE in render_cmd
-        assert COMPOSE_FILE not in render_cmd
+        assert compose_gen_output_file() in render_cmd
+        assert compose_file() not in render_cmd
         # The render carries ${VAR:?} names that resolve from no committed
         # source and that this agent's own environment does not hold, so an
         # interpolating check would fail every deploy. Schema validation is the
         # strongest check that is actually true here.
         assert "--no-interpolate" in render_cmd
         assert "--no-interpolate" not in lane_cmd
-        assert COMPOSE_FILE in lane_cmd
-        assert COMPOSE_GEN_OUTPUT_FILE not in lane_cmd
+        assert compose_file() in lane_cmd
+        assert compose_gen_output_file() not in lane_cmd
 
     def test_compose_gen_render_failure_is_fatal(self) -> None:
         """An unrenderable catalog stops the deploy; it never reaches a lane."""
-        from deploy_agent.executor import COMPOSE_GEN_OUTPUT_FILE
+        from deploy_agent.executor import compose_gen_output_file
 
         executor = DeployExecutor()
 
         def fake_run(
             cmd: list[str], timeout: int, **kwargs
         ) -> subprocess.CompletedProcess:
-            if "config" in cmd and COMPOSE_GEN_OUTPUT_FILE in cmd:
+            if "config" in cmd and compose_gen_output_file() in cmd:
                 return _make_result(returncode=1, stderr="required variable is unset")
             return _make_result()
 
@@ -270,7 +274,7 @@ class TestComposeGen:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """compose_gen must not import catalog code from a stale canonical clone."""
-        from deploy_agent.executor import REPO_DIR
+        from deploy_agent.executor import deploy_repo_dir
 
         executor = DeployExecutor()
         captured_envs: list[dict[str, str]] = []
@@ -287,7 +291,7 @@ class TestComposeGen:
 
         captured_env = captured_envs[0]
         assert captured_env["PYTHONPATH"].split(":")[:2] == [
-            f"{REPO_DIR}/src",
+            f"{deploy_repo_dir()}/src",
             "/stale/canonical/src",
         ]
 
@@ -375,14 +379,14 @@ class TestComposeGen:
         def track_updates(phase: Phase, status: PhaseStatus) -> None:
             phase_updates.append((phase, status))
 
-        from deploy_agent.executor import COMPOSE_FILE
+        from deploy_agent.executor import compose_file
 
         def fake_run(
             cmd: list[str], timeout: int, **kwargs
         ) -> subprocess.CompletedProcess:
             # Fail only the LANE validation, so this test keeps asserting the
             # property it was written for and not the render check beside it.
-            if "config" in cmd and COMPOSE_FILE in cmd:
+            if "config" in cmd and compose_file() in cmd:
                 return _make_result(
                     returncode=1, stderr="service x has neither image nor build"
                 )

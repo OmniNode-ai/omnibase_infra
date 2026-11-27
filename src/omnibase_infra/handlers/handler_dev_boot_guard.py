@@ -334,7 +334,7 @@ def _prove_work_ledger_answers(execution: ModuleType) -> None:
     exit 0 inside the bound with one JSON object. Anything else fails the roll, which
     ``protect`` turns into the previous image's restore.
     """
-    contract = Path(execution.REPO_DIR) / WORK_LEDGER_CONTRACT
+    contract = Path(execution.deploy_repo_dir()) / WORK_LEDGER_CONTRACT
     declared = yaml.safe_load(contract.read_text(encoding="utf-8"))["post_roll_proof"]
     argv, bound = declared["argv"], declared["timeout_s"]
     if not (
@@ -346,7 +346,7 @@ def _prove_work_ledger_answers(execution: ModuleType) -> None:
     ):
         raise DevBootFailedError("work ledger proof declaration is malformed")
     command = [
-        f"{execution.REPO_DIR}/{ONEX_ENTRY}",
+        f"{execution.deploy_repo_dir()}/{ONEX_ENTRY}",
         *argv,
         "--timeout",
         str(bound),
@@ -442,7 +442,7 @@ def apply_installs_before_wait(
     lane = execution.EnumRuntimeLane.DEV
     apply_argv = [
         sys.executable,
-        f"{execution.REPO_DIR}/{SERVICE_INSTALLS_ENTRY}",
+        f"{execution.deploy_repo_dir()}/{SERVICE_INSTALLS_ENTRY}",
         "--state-dir",
         str(state_dir),
         "--compose-project",
@@ -454,7 +454,10 @@ def apply_installs_before_wait(
         **env,
         "PYTHONPATH": ":".join(
             part
-            for part in (f"{execution.REPO_DIR}/src", env.get("PYTHONPATH", ""))
+            for part in (
+                f"{execution.deploy_repo_dir()}/src",
+                env.get("PYTHONPATH", ""),
+            )
             if part
         ),
     }

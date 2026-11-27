@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -47,9 +48,7 @@ from deploy_agent.events import (
     Scope,
 )
 from deploy_agent.executor import (
-    COMPOSE_FILE,
     COMPOSE_PROJECT,
-    DEV_INSTANCE_LANE_CONFIGS,
     RUNTIME_HEALTH_TARGETS,
     DeployExecutor,
     DevLaneMigrationPreflightError,
@@ -57,6 +56,8 @@ from deploy_agent.executor import (
     GatewayDeployScriptUnavailableError,
     _requested_services_for_up,
     active_dev_instance,
+    compose_file,
+    dev_instance_lane_configs,
     lane_config_for,
     lane_runs_phase,
     select_dev_instance,
@@ -65,6 +66,22 @@ from deploy_agent.job_state import JobStore
 from deploy_agent.routing import load_routing_table
 
 from .test_lab_overlay_omn18200 import build_passes, captured
+
+
+class _LaneConfigs(Mapping[str, Any]):
+    """The agent's per-instance lane configs, read on first use."""
+
+    def __getitem__(self, name: str) -> Any:
+        return dev_instance_lane_configs()[name]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(dev_instance_lane_configs())
+
+    def __len__(self) -> int:
+        return len(dev_instance_lane_configs())
+
+
+DEV_INSTANCE_LANE_CONFIGS = _LaneConfigs()
 
 pytestmark = pytest.mark.unit
 
@@ -184,7 +201,7 @@ class TestDev202LaneConfig:
         cfg = lane_config_for(EnumRuntimeLane.DEV)
 
         assert cfg.compose_project == "omnibase-infra-dev-202"
-        assert cfg.compose_files[0] == COMPOSE_FILE
+        assert cfg.compose_files[0] == compose_file()
         assert [Path(f).name for f in cfg.compose_files] == [
             "docker-compose.infra.yml",
             "docker-compose.dev-lane.yml",

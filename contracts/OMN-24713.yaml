@@ -1,0 +1,132 @@
+schema_version: "1.0.0"
+ticket_id: OMN-24713
+title: "Deploy agent restart-on-merge: check_host covers the prod-fenced unit and the rollback, test and receipt findings of the eee30caf4fad review are fixed"
+summary: >-
+  The blocking finding and the eight non-blocking findings of the omnibase_infra#6027 review at eee30caf4fad are answered with a test each: the per-host check lists the prod-fenced unit and the launchd instances by names only, a rollback leaves a marker that outlives its stopped caller and self_update skips the refused revision, the NRestarts non-zero case and exit 3 are driven, the two macOS-failing tests are portable, the re-exec refusal writes its STATUS row, and the four earlier LOW items are fixed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24713-review-6027
+    statement: >-
+      The findings of the omnibase_infra#6027 review at eee30caf4fad are fixed with a test each that fails on that head.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: `check_host` lists every installed agent unit's gap, the prod-fenced unit included, and reads that unit's EnvironmentFile by names only, or a `Lab: head=` comment shows `restartable=true` from h201 and h202 with that names-only reading -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k check_host_prod_fenced fails at head eee30caf4fad and passes after the fix
+      - id: AC2
+        statement: >-
+          AC2: a rollback leaves a marker naming the refused revision, `self_update` skips that revision, one STATUS row is written, and a test kills the caller -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k rollback_marker fails at head eee30caf4fad and passes after the fix
+      - id: AC3
+        statement: >-
+          AC3: the NRestarts zero branch has a non-zero stub case and one real systemd reading is recorded -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k nrestarts_nonzero fails at head eee30caf4fad and passes after the fix
+      - id: AC4
+        statement: >-
+          AC4: a test drives `self_update` with exit 3 and no longer greps source text -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k self_update_exit_3 fails at head eee30caf4fad and passes after the fix
+      - id: AC5
+        statement: >-
+          AC5: the two tests that fail on macOS use a portable stub and a platform patch -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k "restart_on_merge" passes on the launching Mac with no failure from sed or the Linux gate
+      - id: AC6
+        statement: >-
+          AC6: the re-exec refusal calls `write_refusal_status` and the marker is cleared on a pass -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k reexec_refusal_status fails at head eee30caf4fad and passes after the fix
+      - id: AC7
+        statement: >-
+          AC7: the readings name the launchd instances that re-exec unguarded at merge -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k check_host_launchd fails at head eee30caf4fad and passes after the fix
+      - id: AC8
+        statement: >-
+          AC8: the four earlier LOW items are fixed (code checkout in handler_deploy_source_clone.py, clone timeout, conftest `setdefault`, stale unit text) -- falsifier: uv run pytest scripts/deploy-agent/tests/unit -q -k deploy_source_clone fails at head eee30caf4fad and passes after the fix
+      - id: AC9
+        statement: >-
+          AC9: the full deploy-agent suite is run on the lab at the new head, in parts if a whole run times out, and the new head and results are commented on omnibase_infra#6027 -- falsifier: onex scm pr-view OmniNode-ai/omnibase_infra#6027 --source bus lists a comment naming the new head sha with the lab suite results
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The unit tests of the review findings, red at eee30caf4fad and green at the new head.
+    command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24713.py -q -p no:randomly --no-cov -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24713-ac1-check-host-prod-fenced
+    description: >-
+      The per-host check lists the prod-fenced unit with its fence and the required setting names found, never a value; a complete prod store is restartable and the merge-time restart set still excludes the unit.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24713.py -q -p no:randomly --no-cov -n 0 -k "check_host_prod_fenced"
+        cwd: .
+    binds_ac: [AC1]
+  - id: dod-omn24713-ac2-rollback-marker
+    description: >-
+      The transient-unit script writes the marker after a rollback while its caller is killed by the first restart; self_update skips the refused revision with one STATUS row, and follows the remote once it moves on.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24713.py -q -p no:randomly --no-cov -n 0 -k "rollback_marker"
+        cwd: .
+    binds_ac: [AC2]
+  - id: dod-omn24713-ac3-nrestarts-nonzero
+    description: >-
+      A unit that is active with a non-zero NRestarts is rolled back, and twice raises an agent left stopped. The real systemd reading is in the lab comment on the pull request.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24713.py -q -p no:randomly --no-cov -n 0 -k "nrestarts_nonzero"
+        cwd: .
+    binds_ac: [AC3]
+  - id: dod-omn24713-ac4-self-update-exit-3
+    description: >-
+      self_update raises the agent-left-stopped error for a transient unit that exits 3 and does not re-exec.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24713.py -q -p no:randomly --no-cov -n 0 -k "self_update_exit_3"
+        cwd: .
+    binds_ac: [AC4]
+  - id: dod-omn24713-ac5-restart-on-merge
+    description: >-
+      The stand-in systemctl uses POSIX tools only and the Linux-gated test patches the platform and the cgroup read.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit -q -p no:randomly --no-cov -n 0 -k "restart_on_merge"
+        cwd: .
+    binds_ac: [AC5]
+  - id: dod-omn24713-ac6-reexec-refusal-status
+    description: >-
+      A refused re-exec writes one STATUS row, repeats write none, a pass clears the marker, and a passing unit sync clears its own.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24713.py -q -p no:randomly --no-cov -n 0 -k "reexec_refusal_status"
+        cwd: .
+    binds_ac: [AC6]
+  - id: dod-omn24713-ac7-check-host-launchd
+    description: >-
+      Every installed launchd agent instance is named in the readings and one whose store lacks a setting is listed as a gap.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24713.py -q -p no:randomly --no-cov -n 0 -k "check_host_launchd"
+        cwd: .
+    binds_ac: [AC7]
+  - id: dod-omn24713-ac8-deploy-source-clone
+    description: >-
+      The guard refuses the agent's own code checkout, clone and fetch run under a timeout, the test settings are assigned over an ambient value, and the tracked units describe the seed correctly.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_restart_on_merge_review_omn24713.py -q -p no:randomly --no-cov -n 0 -k "deploy_source_clone"
+        cwd: .
+    binds_ac: [AC8]
+  - id: dod-omn24713-ac9-head-commented
+    description: >-
+      Reads the pull request through the bus and finds a comment naming the pushed head. Runs where the lane has the bus, not on the hosted runner.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: onex scm pr-view OmniNode-ai/omnibase_infra#6027 --source bus | grep -qF "$(git rev-parse HEAD)"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC9]

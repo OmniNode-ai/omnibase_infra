@@ -47,7 +47,7 @@ def _checkout(tmp_path: Path, script_body: str) -> types.SimpleNamespace:
         )
 
     return types.SimpleNamespace(
-        REPO_DIR=str(tmp_path), _run=run, subprocess=subprocess
+        deploy_repo_dir=lambda: str(tmp_path), _run=run, subprocess=subprocess
     )
 
 

@@ -34,7 +34,7 @@ from deploy_agent import executor as executor_mod
 from deploy_agent.events import EnumRuntimeLane
 from deploy_agent.executor import (
     DEFAULT_DEV_INSTANCE,
-    DEV_INSTANCE_LANE_CONFIGS,
+    dev_instance_lane_configs,
     lane_config_for,
     load_dev_boot_guard,
 )
@@ -63,7 +63,7 @@ pytestmark = pytest.mark.unit
 # at import: that reads ``docker/runtime-policy.env`` of the host the suite runs on
 # (the lab hosts carry one, hosted CI does not), and the autouse fixture that hides
 # the file only applies once a test is running.
-SEPARATE = DEV_INSTANCE_LANE_CONFIGS[DEFAULT_DEV_INSTANCE]
+SEPARATE = dev_instance_lane_configs()[DEFAULT_DEV_INSTANCE]
 MAIN_ONLY = SEPARATE.model_copy(
     update={"disabled_services": frozenset({"runtime-effects"})}
 )
@@ -82,7 +82,9 @@ def folded_dev(monkeypatch: pytest.MonkeyPatch) -> Any:
     The policy file is this checkout's tracked one, never the host's copy, so the
     lane reads the same on a lab host and on a hosted runner.
     """
-    monkeypatch.setattr(executor_mod, "RUNTIME_POLICY_ENV_FILE", TRACKED_RUNTIME_POLICY)
+    monkeypatch.setattr(
+        executor_mod, "runtime_policy_env_file", lambda: TRACKED_RUNTIME_POLICY
+    )
     return lane_config_for(EnumRuntimeLane.DEV)
 
 

@@ -438,7 +438,7 @@ def validate_env_contract(
     environment compose reads, and a store file's own value for a name the dev render sets
     is superseded and not checked.
     """
-    repo_dir = execution.REPO_DIR
+    repo_dir = execution.deploy_repo_dir()
     script = f"{repo_dir}/scripts/check_llm_endpoint_env_contract.py"
     venv_python = f"{repo_dir}/.venv/bin/python"
     base_cmd = (
