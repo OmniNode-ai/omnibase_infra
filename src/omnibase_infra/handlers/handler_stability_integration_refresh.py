@@ -55,7 +55,8 @@ _AUDIT_CONTEXT = "stability-integration"
 _STAGE_SCRIPT = "scripts/runtime_build/stage_workspace.sh"
 _RECREATE_SH = (
     'set -euo pipefail; set -a; source "$1/docker/runtime-policy.env"; '
-    '[ -r "$2" ] && source "$2"; set +a; shift 2; '
+    '[ -r "$2" ] && source "$2"; set +a; '
+    'export ONEX_LANE_OVERLAY_DIR="$3" ONEX_LANE_DECLARATION_DIR="$4"; shift 4; '
     "export ONEX_DECLARED_HANDLER=handler_stability_integration_refresh "
     f"ONEX_BUILD_CONTEXT={_AUDIT_CONTEXT}; "
     'exec docker compose "$@"'
@@ -97,7 +98,13 @@ class DockerStabilityIntegrationHost:
         work_dir: Path,
         operator_env_file: Path,
         health_timeout_seconds: float,
+        lane_declaration_dir: Path,
+        lane_overlay_dir: Path,
     ) -> None:
+        # The lane declaration's folders are injected, never guessed: the lane
+        # compose files refuse a recreate that names neither.
+        self._lane_declaration = lane_declaration_dir
+        self._lane_overlays = lane_overlay_dir
         self._operator_env = operator_env_file
         self._health_timeout = health_timeout_seconds
         self._registry_root = registry_root
@@ -306,6 +313,8 @@ class DockerStabilityIntegrationHost:
                 "recreate",
                 str(self._infra),
                 str(self._operator_env),
+                str(self._lane_overlays),
+                str(self._lane_declaration),
                 "-p",
                 compose_project,
                 *file_args,
