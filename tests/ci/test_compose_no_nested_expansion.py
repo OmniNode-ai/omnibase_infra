@@ -57,3 +57,24 @@ def test_no_nested_variable_expansion(compose_file: Path) -> None:
             f"Set these vars explicitly in ~/.omnibase/.env and use ${{VAR:?}} instead:\n"
             f"{lines}"
         )
+
+
+_SETTINGS_SNAPSHOT_MOUNT = (
+    "- ${HOME}/.local/state/onex/overlay-store:/etc/onex/skill-overlays-settings:ro"
+)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "compose_name",
+    [
+        "docker-compose.dev-lane.yml",
+        "docker-compose.dev-tenant-fold.yml",
+    ],
+)
+def test_settings_snapshot_mount_is_plain_home_path(compose_name: str) -> None:
+    """The settings-store snapshot mounts from plain ${HOME}, with no nested default (OMN-26117)."""
+    lines = [
+        line.strip() for line in (_DOCKER_DIR / compose_name).read_text().splitlines()
+    ]
+    assert _SETTINGS_SNAPSHOT_MOUNT in lines

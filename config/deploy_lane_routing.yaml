@@ -101,6 +101,11 @@
 # until 18:46:52Z for the default instance's converge. The bound is when the converge starts;
 # the build after it took 41 minutes that day (18:46:52Z to 19:27:58Z).
 #
+# PROBE-DEFERRAL CAP (OMN-26703). `flags.max_probe_deferral_minutes` is how long
+# a merge may wait on the guarded C15/C16 windows. They chain, so past the cap
+# the converge starts between windows (omnimarket 8a5a95e5, merged 11:49Z on
+# 2026-11-26, waited until 13:00Z). Every other refusal still holds.
+#
 # EXCLUDED HOSTS (OMN-19507). No instance may name one and no agent may run as
 # one, even with DEPLOY_AGENT_INSTANCE set (routing.resolve_instance). The key
 # is the lowercased first hostname label, the same one the router compares.
@@ -119,6 +124,7 @@ instances:
     consumer_group: onex-deploy-agent
     flags:
       max_dev_lag_minutes: 20
+      max_probe_deferral_minutes: 45
       # OMN-21629. The lab dev lane has no cloud edge. The cloud dev broker the
       # gateway forwarder dialled has been deleted by the cloud owner, the
       # forwarder failed TLS on every deploy, the gateway-deploy phase raised
@@ -159,6 +165,7 @@ instances:
     available: true
     flags:
       max_dev_lag_minutes: 20
+      max_probe_deferral_minutes: 45
     lane:
       compose_overlay: docker/docker-compose.dev-202.yml
       compose_project: omnibase-infra-dev-202

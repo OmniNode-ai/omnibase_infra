@@ -5,6 +5,18 @@ summary: 'The workflow-verdict reader of the Delegation Health Check gains an op
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn22821-ac1-accepted-20261126t2345z:
+      - label: AC1
+        criterion_hash: 0857b8897d756f2c390ccc79d84517284ceb5c875f5903431ad564814496f0a4
+        proposed_by: lane=dod-closeout-bind-2026-11-26T2345Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-26T2345Z-c3
+    dod-omn22821-ac2-accepted-20261126t2345z:
+      - label: AC2
+        criterion_hash: 6e2bd8b25eb32660ccc2e6f626a6812552886c21db5ff2ff0984f0944c087e51
+        proposed_by: lane=dod-closeout-bind-2026-11-26T2345Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-11-26T2345Z-c3
 requirements:
   - id: req-22821-1
     statement: A cancelled or skipped newest verdict run is no verdict for the Delegation Health Check, and every other caller keeps its current reading.
@@ -28,11 +40,31 @@ dod_evidence:
     binds_ac: [AC22821001]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_delegation_health_no_verdict_omn22821.py -q
+        check_value: uv run pytest tests/ci/test_delegation_health_no_verdict_omn22821.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-002
     description: A caller that does not opt in still reads a cancelled newest run as a failure
     source: generated
     binds_ac: [AC22821002]
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_delegation_health_no_verdict_omn22821.py -q
+        check_value: uv run pytest tests/ci/test_delegation_health_no_verdict_omn22821.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn22821-ac1-accepted-20261126t2345z
+    description: 'AC1: a cancelled or skipped newest verdict run is passed over and the completed verdict before it decides, and a completed failing run (the failing control) still fails. Six of the module''s eight tests fail with the product change of omnibase_infra#5758 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_delegation_health_no_verdict_omn22821.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22821-ac2-accepted-20261126t2345z
+    description: 'AC2: the shared verdict reader, called without the opt-in, still reads a cancelled newest run as a block (test_shared_reader_default_still_blocks_on_a_cancelled_newest_run).'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_delegation_health_no_verdict_omn22821.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

@@ -89,7 +89,7 @@ def _request(**over: object) -> ModelDevMergeBuildPublishRequest:
         "decision": _decision(),
         "repository": "omnibase_infra",
         "pr_number": 6191,
-        "head_sha": _HEAD,
+        "build_ref": _HEAD,
         "runtime_lane": "dev",
         "already_requested": False,
     }

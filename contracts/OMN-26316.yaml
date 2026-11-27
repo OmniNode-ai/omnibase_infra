@@ -21,127 +21,6 @@ requirements:
     acceptance:
       - id: AC4
         statement: "AC4: the contract_attach readiness detail carries a lazy_start block with the serving set, serving_count and each failed wake's reason, and ready is unchanged -- falsifier: uv run pytest tests/unit/runtime/test_lazy_start_serving_read_omn26316.py -q fails at the merge base (StoreLazyStartDormant has no record_front_door) and passes on the branch"
-  - id: req-omn26316-hotwake-first-request-wakes-dormant
-    statement: A first request on a dormant contract's HTTP mount, and a first message a client writes straight to the broker to a dormant consumer's topic, wakes that contract through the lazy-start front door; a request for no dormant contract wakes nothing.
-    acceptance:
-      - id: AC5
-        statement: "AC5: a request under the http_mount prefix of a contract the lane left dormant wakes that contract, mounts its app and is served, once, with no broker; a failed wake answers 503 and leaves the listener up -- falsifier: uv run pytest tests/integration/handlers/http_mount/test_dormant_http_wake_omn26316.py fails at origin/dev with 404 and passes on the PR branch"
-      - id: AC6
-        statement: "AC6: the first message to a topic a dormant contract subscribes to, written by a client straight to the broker, wakes that contract's consumers; the watch is group-less and reads from the end -- falsifier: uv run pytest tests/unit/handlers/test_lazy_start_bus_watch_omn26316.py fails at origin/dev (the watch module is absent) and passes on the PR branch"
-  - id: req-omn26316-own-repo-lag-bound
-    statement: The default dev instance's declared lag bound covers its own repository, so an omnibase_infra runtime merge the in-runtime trigger never delivers is converged on by the deploy agent once the bound passes, and a merge of declared not-runtime paths starts no rebuild.
-    acceptance:
-      - id: AC15
-        statement: "AC15: with max_dev_lag_minutes declared, an omnibase_infra head whose runtime paths differ from the running revision for longer than the bound yields one agent/idle-converge job on an otherwise idle lane, while inside the bound, without a bound, inside a probe window, beside a job, on an attempted head or for a not-runtime-only head it yields none -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_own_repo_lag_bound_omn26316.py fails at origin/dev and passes on the PR branch"
-  - id: req-omn26316-boot-failure-cause
-    statement: A boot failure's recorded cause is the error that ended the kernel; a per-message dispatch error logged on the kernel's logger is set apart and never recorded as the cause.
-    acceptance:
-      - id: AC10
-        statement: "AC10: a kernel that exits 1 after the dispatch engine logged Dispatch completed with errors records no kernel error was logged before the exit, naming that last dispatch error, as the boot failure cause, and a kernel error logged before that dispatch error stays the cause -- falsifier: uv run pytest tests/unit/runtime/test_boot_failure_cause_omn26316.py fails at origin/dev (the capture records the dispatch error as the cause) and passes on the PR branch"
-  - id: req-omn26316-first-heartbeat-not-held-by-serial-wake
-    statement: The runtime's first heartbeat is published within one lazy-start wake budget of the start reaching its introspection step, however many dormant consumers subscribe to the heartbeat topic, so /ready reports heartbeat ready without a minutes-long hold.
-    acceptance:
-      - id: AC9
-        statement: "AC9: the lazy-start front door wakes every dormant consumer of a published topic at once and holds the message for at most one budget -- falsifier: uv run pytest tests/unit/handlers/test_lazy_start_heartbeat_wake_omn26316.py fails at origin/dev (7.2 s against a 2.5 s window for 20 dormant heartbeat consumers, 4 of which never wake) and passes on the PR branch"
-  - id: req-omn26316-ledger-proof-answers-as-deployed
-    statement: The post-roll ledger proof of a dev roll builds its transport from the lane declaration and answers inside a bound that covers the recorded latency, so a verified dev roll is not failed and restored by its own proof.
-    acceptance:
-      - id: AC12
-        statement: "AC12: the ledger read's transport is built from the lane declaration and the stored identity when the process holds KAFKA_SASL_MECHANISM and KAFKA_SECURITY_PROTOCOL without a generic principal -- falsifier: uv run pytest tests/unit/cli/test_work_ledger_proof_omn26316.py -k half_set_env fails at origin/dev with ProtocolConfigurationError and passes on the PR branch"
-      - id: AC13
-        statement: "AC13: the declared post-roll proof bound is at least 1.5 times the slowest recorded answer in tests/fixtures/omn26316/ledger_proof_latency.json -- falsifier: uv run pytest tests/unit/cli/test_work_ledger_proof_omn26316.py -k measured_answer_latency fails at origin/dev (bound 10 s against 19.5 s) and passes on the PR branch"
-  - id: req-omn26316-overdue-dev-merge-build
-    statement: A dev runtime merge that has gone its window with no dev build is judged REQUEST with one request id per sha, and a merge a dev job carries, a job in flight, a failed head or a non-runtime merge never is.
-    acceptance:
-      - id: AC11
-        statement: "AC11: the overdue dev merge build decision judges omnibase_infra#6191 (merged 17:46:52Z, next dev job accepted 19:00:23Z) WAIT until 18:46:52Z and REQUEST from then until a dev job carries it -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_overdue_omn26316.py fails at origin/dev (the handler module is absent) and passes on the PR branch"
-  - id: req-omn26316-roll-proof-failure-names-exception
-    statement: A failed post-roll ledger proof records the exception that ended it, so the deploy job record names the cause of a restored roll and no lane has to reproduce the proof by hand.
-    acceptance:
-      - id: AC14
-        statement: "AC14: a ledger proof whose stderr opens with the runpy RuntimeWarning and ends with an exception, including a stack longer than 2000 characters, fails the roll with a message that names that exception -- falsifier: uv run pytest tests/unit/handlers/test_handler_dev_boot_guard_proof_failure_tail_omn26316.py fails at origin/dev (the message ends at the warning, cut at unpredictabl) and passes on the PR branch"
-  - id: req-omn26316-overdue-dev-merge-built-by-carry
-    statement: A dev job counts as building a merge only when its built sha descends from the merge; the stability follow job and a job whose built sha is unread never count.
-    acceptance:
-      - id: AC19
-        statement: "AC19: the overdue dev merge build decision reads omnibase_infra#6191 (merged 17:46:52Z) as not built at 18:13Z and 18:50Z with the stability follow job b32e8022 recorded as a successful dev job, and as built only by job 2098b18c -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_carried_omn26316.py fails at the 6210 head (a dev-lane b32e8022 reads SATISFIED built_by_job at 18:13Z) and passes on the PR branch"
-  - id: req-omn26316-overdue-dev-merge-build-publish
-    statement: A runtime merge judged REQUEST gets one overdue event and one signed dev build request from the deploy agent's own tick, once per sha, on the dev lane only; a prod lane is refused with a typed error.
-    acceptance:
-      - id: AC20
-        statement: "AC20: an overdue merge publishes the event and sends one signed dev build request whose correlation id is the decision's request id, sends nothing for a job in flight, the failed head, an already requested sha or a lane other than dev (typed refusal) -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_publish_omn26316.py fails at the 6210 head (the publish handler is absent) and passes on the PR branch"
-  - id: req-omn26316-image-build-cache-and-start-to-health
-    statement: A dev build reuses the image layers that do not depend on the commit, so the per-deploy build arguments no longer rebuild the apt, node and venv layers.
-    acceptance:
-      - id: AC31
-        statement: "AC31: Dockerfile.runtime declares BUILD_DATE, VCS_REF and RUNTIME_VERSION after every cache-mounted RUN, apt-get layer and builder-venv COPY that precedes the stage's COPY src, in both stages -- falsifier: uv run --frozen pytest tests/unit/docker/test_runtime_build_arg_cache_order_omn26316.py -q fails at origin/dev (13 violations) and passes on the PR branch"
-  - id: req-omn26316-status-append-ignores-agent-sasl
-    statement: The dev deploy agent's STATUS rows reach the work ledger, because the bus append command it runs, and the post-roll ledger proof, do not inherit the agent's own broker transport declaration, and a refusal in the journal names the command's last stderr line.
-    acceptance:
-      - id: AC32
-        statement: "AC32: the dev boot guard runs the bus append command and the post-roll ledger proof without the agent's KAFKA_SASL_MECHANISM, KAFKA_SECURITY_PROTOCOL and KAFKA_SASL_ENV_PREFIX, so the append and the proof are accepted where the agent's unit declares a SASL mechanism with the lane login held only under the DEV_ prefix, and a refusal is logged with the command's last stderr line -- falsifier: uv run pytest tests/unit/handlers/test_handler_dev_boot_guard_status_append_env_omn26316.py -q fails at origin/dev (the append and the proof are refused and the log names no cause) and passes on the PR branch"
-  - id: req-omn26316-coalesce-newest-containing
-    statement: The deploy agent's accept runs the newest queued command that contains every older command it passes over, including older refs that are not ancestors of one another, and records each passed-over command superseded by it with its own terminal record.
-    acceptance:
-      - id: AC16
-        statement: "AC16: with two queued refs that are each an ancestor of a newer queued ref but not of each other, the accept runs the newer ref once and records both older commands superseded by it, and a passed-over command the newer ref does not contain, one that is unproven, one for another lane or scope, or a redelivered copy stops the fold -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py -q -k 'unrelated or newest_command_that or jump' fails at origin/dev (the accept runs the oldest ref and records nothing superseded) and passes on the PR branch"
-  - id: req-omn26316-boot-report-retry-bounded
-    statement: A pass that retries the dev boot incident reports starts no incident after its declared bound, runs on its own thread so it never holds the deploy agent's consumer, its health port or its startup, and moves an incident older than the declared abandon bound to delivered-abandoned with one log line.
-    acceptance:
-      - id: AC17
-        statement: "AC17: a delivery pass over 394 incidents that the bus append command refuses ends within the pass bound plus one append, the agent's startup and retry tick return at once while that pass runs, and a second tick starts no second pass -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k 'bounded or never_holds' -q fails at origin/dev (25.9 s for the 394 incidents against a 0.5 s bound)"
-      - id: AC18
-        statement: "AC18: an incident older than the declared abandon bound is marked delivered-abandoned with one log line and is not retried, and an incident inside it is retried with a row stamped at the delivery time so the ledger's clock guard does not refuse it -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_report_pass_bound_omn26316.py -k 'abandoned or delivery_stamp' -q fails at origin/dev"
-  - id: req-omn26316-dev-build-coalesce
-    statement: Dev merge build requests are coalesced inside a window declared in the node contract, so three dev rebuilds in 28 minutes (07:09Z, 07:23Z, 07:36Z on 2026-11-25) become one build per window while every runtime merge stays on a dev build within the hour.
-    acceptance:
-      - id: AC46
-        statement: "AC46: with dev_merge_build_coalesce_seconds declared in the deploy job reading contract, three merges in 30 minutes get one build, a merge just after a build waits for the next, and a merge 50 minutes before the hour is carried by the hourly build -- falsifier: uv run pytest tests/unit/handlers/test_dev_merge_build_coalesce_omn26316.py fails at origin/dev (the setting and the coalesced decision are absent) and passes on the PR branch"
-  - id: req-omn26316-overdue-queue-folds
-    statement: Queued overdue dev merge builds fold into the newest one in the deploy agent's queue supersede, so the dev lane runs one build for them; a rollback declared by anyone else and any other scope keep their refusals.
-    acceptance:
-      - id: AC47
-        statement: "AC47: three queued commands requested by agent/overdue-dev-merge-build (scope runtime, rollback actor the same) for dev run as one build with two superseded, while an operator's rollback still ends the group and an overdue command never folds into a full-scope build -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_overdue_requests_coalesce_omn26316.py fails at origin/dev (three builds run) and passes on the PR branch"
-  - id: req-omn26316-one-overdue-request-per-check
-    statement: One overdue check asks for one build of the current dev head, which carries every overdue merge, and never asks for a head the running build already contains.
-    acceptance:
-      - id: AC48
-        statement: "AC48: three overdue merges give one build command for the dev head in one check and none in the next, and a head contained in the newest successful dev job's built sha gives none -- falsifier: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_one_request_omn26316.py fails at origin/dev (a command per merge, none withheld for a contained head) and passes on the PR branch"
-  - id: req-omn26316-boot-attach-join-limit
-    statement: The dev main runtime's boot attach joins its 70 boot contracts with a declared limit that models at most half the 127 s the recorded 2026-11-24T20:01:04Z start spent on it at a limit of 4.
-    acceptance:
-      - id: AC41
-        statement: "AC41: the dev main runtime's declared max_concurrent_contract_attach models at most half of the 127 s boot attach recorded on h201 at 2026-11-24T20:01:04Z, and the rendered runtime-policy.env carries it -- falsifier: uv run --frozen pytest tests/unit/runtime/test_boot_attach_join_limit_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly fails at origin/dev and passes on the PR branch"
-  - id: req-omn26316-dormant-projection-not-unattached
-    statement: A projection the lazy-start lane left dormant that no request has reached is not read as unattached by the runtime health check, a woken or failed-to-wake projection is judged by the live registry as before, and every unattached or dormant projection is named in full in the runtime log.
-    acceptance:
-      - id: AC42
-        statement: "AC42: with a lazy-start front door recorded, a dormant projection no request has reached leaves projection_attachment HEALTHY and is named on its detail, a dormant projection that was woken without a consumer or whose wake failed and an eager unattached projection each read DEGRADED, and the log names every unattached and every dormant projection past the detail's 8-name cap -- falsifier: uv run --frozen pytest tests/unit/services/test_runtime_health_monitor_dormant_projections_omn26316.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (4 of 8 fail: the dormant projection reads unattached, and 4 of 12 unattached names appear nowhere) and passes on the PR branch"
-  - id: req-omn26316-orphan-names-group
-    statement: An abandoned consume-loop dispatch is listed on the health endpoint and in the dispatch_deadline_exceeded log line with the consumer group that holds it, so the handler that never returned can be named from the runtime alone.
-    acceptance:
-      - id: AC44
-        statement: "AC44: the health line and the dispatch_deadline_exceeded line of an abandoned dispatch carry group=<consumer group>, and the orphan count, the limit, the deadline and every health verdict are unchanged -- falsifier: uv run --frozen pytest tests/unit/event_bus/test_orphan_names_consumer_group_omn26316.py -q fails at origin/dev (no group= in either line) and passes on the PR branch"
-  - id: req-omn26316-dev-runtime-memory-limit
-    statement: The dev main runtime's declared memory limit clears twice the anonymous memory at which h201's kernel OOM-killed it at the join limit of 16, so its boot does not loop on the restart policy.
-    acceptance:
-      - id: AC43
-        statement: "AC43: the dev main runtime's declared memory_limit is at least twice the 3,044 MiB recorded at the 2026-11-25T02:42:21Z OOM kill, and the rendered runtime-policy.env carries it -- falsifier: uv run --frozen pytest tests/unit/runtime/test_dev_runtime_memory_limit_oom_omn26316.py tests/unit/runtime/test_omn18087_boot_bound_and_policy.py -q --no-cov -n 0 -p no:randomly fails at origin/dev (3072M) and passes on the PR branch"
-  - id: req-omn26316-stale-overdue-refused-at-accept
-    statement: The deploy agent refuses at accept, with no build and a superseded record that gives the reason, a command requested by agent/overdue-dev-merge-build whose ref is at or behind the newest ref it built successfully or origin/dev's head and is in the running build; every other requester, a ref the running build lacks and a lineage the host cannot read keep their behaviour.
-    acceptance:
-      - id: AC49
-        statement: "AC49: the 18 queued overdue commands at f553b1d6 give zero builds and 18 superseded records, an operator's rollback to the same ref and an overdue command for a merge the running build lacks still build, and an unread lineage builds as before -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_stale_overdue_refused_at_accept_omn26316.py -q fails at origin/dev (the verdict and the overdue_references input are absent) and passes on the PR branch"
-  - id: req-omn26316-ledger-proof-operator-switch
-    statement: The post-roll ledger proof of a dev roll runs the operator command with the operator command switch set for that one call, so a healthy new runtime is not restored because the ledger group is hidden.
-    acceptance:
-      - id: AC50
-        statement: "AC50: the post-roll ledger proof runs under env with ONEX_CLI_SHOW_ALL_COMMANDS=1 on that call only, no other boot guard command carries it -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_post_roll_ledger_proof_operator_switch_omn26316.py fails at origin/dev (the switch is absent from the call) and passes on the PR branch"
-  - id: req-omn26316-deadline-expiry-not-replayed-in-a-loop
-    statement: A dead letter that ends a dispatch which outlived its deadline is replayed at most the replay policy's declared count across all dead letters of its correlation, then quarantined by name, so the abandoned handler it leaves running is not multiplied into orphans.
-    acceptance:
-      - id: AC51
-        statement: "AC51: four dispatch-deadline dead letters of one correlation (dod-verify-start, offsets 120620 to 120624, each with a fresh retry_count of 0) give at most deadline_exceeded_max_replays replays and quarantines naming dispatch_deadline_exceeded for the rest, the contract declares 0, and a consumer_error dead letter still replays -- falsifier: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_omn26316_deadline_replay_loop.py fails at origin/dev (the replay policy has no deadline_exceeded_max_replays and all four are replayed) and passes on the PR branch"
 evidence_requirements:
   - kind: tests
     description: The startup_health_degraded regression built from the recorded dev roll 1e15179f.
@@ -194,6 +73,9 @@ evidence_requirements:
   - kind: tests
     description: The dispatch-deadline replay loop regression built from the four dod-verify-start dead letters of 2026-11-25.
     command: uv run --frozen pytest tests/unit/nodes/node_dlq_replay_effect/test_omn26316_deadline_replay_loop.py -q --no-cov -n 0 -p no:randomly
+  - kind: tests
+    description: The build clock regression, a known good build and a fake health answering after 6 minutes.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_build_clock_omn26316.py -q -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ''
@@ -549,3 +431,237 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/dlq/test_dlq_deadline_quarantine_omn26316.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26316-build-clock
+    description: "The build clock node returns the minutes from container start to first healthy /health and a verdict; verification records it per build as a build-clock check and a fake health answering after 6 minutes fails the build and a fast one passes."
+    source: manual
+    binds_ac: [AC54]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_build_clock_omn26316.py -q -p no:cacheprovider
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_build_clock_compute -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/node_build_clock_compute -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-overdue-every-composed-repository
+    description: "An omnimarket merge (omnimarket#6872 shape) in a sibling clone with no dev job reads REQUEST, gets its event and one build request at the omnimarket head, and a dev job accepted after it satisfies it; the test fails at origin/dev, where only the agent's own clone is read."
+    source: manual
+    binds_ac: [AC52]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_every_runtime_repo_omn26316.py -k "omnimarket" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-overdue-topic-declared
+    description: "The overdue event topic is a topic row in services/topics.yaml and the generated deploy topic enum, so the provisioner creates it and the agent's publish no longer reports it missing from cluster metadata."
+    source: manual
+    binds_ac: [AC53]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_dev_merge_build_every_runtime_repo_omn26316.py -k "topic" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-integration-proof-overdue-real-clones
+    description: "Real git clones of omnimarket and omnibase_infra: the omnimarket merge is requested at its own head, and when every composed clone is unread the check is skipped (None) rather than reporting an empty verdict."
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_dev_merge_build_every_runtime_repo_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26316-retired-labels-pinned
+    description: The contract declares only the live ticket's AC1 to AC4 and retires every other bound label through supersedes_ac_binding, with a control that a retired label returning is caught.
+    source: manual
+    binds_ac: [AC1, AC2, AC3, AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_retired_labels_omn26316.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+    supersedes_ac_binding:
+      - item: dod-omn26316-hotwake-http
+        label: AC5
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-hotwake-bus
+        label: AC6
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-own-repo-lag-bound
+        label: AC15
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-boot-failure-cause
+        label: AC10
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-first-heartbeat-not-held
+        label: AC9
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-boot-failure-cause-process-exit
+        label: AC10
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-ledger-proof-transport
+        label: AC12
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-ledger-proof-bound
+        label: AC13
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-overdue-dev-merge-build
+        label: AC11
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-roll-proof-failure-names-exception
+        label: AC14
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-overdue-built-by-carry
+        label: AC19
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-overdue-publish
+        label: AC20
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-image-build-arg-order
+        label: AC31
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-status-append-ignores-agent-sasl
+        label: AC32
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-coalesce-newest-containing
+        label: AC16
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-boot-report-pass-bound
+        label: AC17
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-boot-report-abandoned
+        label: AC18
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-dev-build-coalesce
+        label: AC46
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-overdue-queue-folds
+        label: AC47
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-one-overdue-request-per-check
+        label: AC48
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-boot-attach-join-limit
+        label: AC41
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-dormant-projection-not-unattached
+        label: AC42
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-orphan-names-group
+        label: AC44
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-dev-runtime-memory-limit
+        label: AC43
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-stale-overdue-refused-at-accept
+        label: AC49
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-ledger-proof-operator-switch
+        label: AC50
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-deadline-replay-loop
+        label: AC51
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-deadline-quarantine-on-scratch-bus
+        label: AC51
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-build-clock
+        label: AC54
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-overdue-every-composed-repository
+        label: AC52
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'
+      - item: dod-omn26316-overdue-topic-declared
+        label: AC53
+        reason_kind: no_longer_applicable
+        reason: 'OMN-26316 carries only AC1 to AC4 on the live ticket (read 2026-11-26), so this label was never deleted from it: it is a criterion this repository''s contract declared on its own for another change. Its statement stays in this file''s history and its check keeps running under its own item.'
+        retired_by: q-ev26316-97800
+        retired_at: '2026-11-26T21:45:00Z'

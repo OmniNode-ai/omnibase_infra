@@ -56,7 +56,13 @@ def _overlay_home(root: Path) -> Path:
     overlay.parent.mkdir(parents=True)
     overlay.write_text(
         yaml.safe_dump(
-            {"schema_version": 1, "endpoint_urls": {SLOT_ID: OVERLAY_ADDRESS}}
+            {
+                "schema_version": 1,
+                "endpoint_urls": {
+                    "coder-5090": "http://192.0.2.50:8000",
+                    SLOT_ID: OVERLAY_ADDRESS,
+                },
+            }
         ),
         encoding="utf-8",
     )

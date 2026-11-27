@@ -1,0 +1,66 @@
+schema_version: 1.0.0
+ticket_id: OMN-26713
+title: "AWS Dev: a fresh runtime image proven to contain the delegation and gateway nodes, with its exact pin written up for the cloud owner"
+summary: >-
+  AWS Dev pins a 2025-09-25 runtime build, older than the workflow gateway node. A runtime image was built from dev commit 9f77818ea0c9 (the infra image with the marketplace layer), run on a lab host to print its node registry and to answer /health 200 in the Dev-shaped settings, and left unpushed. The pin proposal for the cloud owner is a draft change in a separate documents repository.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26713-dev-runtime-image
+    statement: A runtime image built from current dev carries the gateway and delegation nodes, starts in the Dev-shaped settings, and has its pin written up for the cloud owner.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a runtime image built from current dev (the infra image with the marketplace layer) lists node_workflow_gateway_effect, node_gateway_workflow_terminal_effect and the delegation nodes -- falsifier: a lab run of the built image prints its node registry and the three are present"
+      - id: AC2
+        statement: "AC2: the image starts in cloud mode with Dev-shaped settings and answers /health -- falsifier: a lab run reaches /health 200"
+      - id: AC3
+        statement: "AC3: a written pin proposal for the cloud owner names the build commit, the image digest and the exact Dev overlay change by tag and digest"
+evidence_requirements:
+  - kind: tests
+    description: The readback of the lab run and the declared composed-runtime build it relied on.
+    command: uv run --frozen pytest tests/unit/docker/test_runtime_image_proof_readback_omn26713.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26713-ac1-registry
+    description: The readback of the lab run of the built image records the gateway, gateway terminal and delegation nodes present in its registry and an absent-name control with zero matches; a readback missing the gateway node is refused.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_runtime_image_proof_readback_omn26713.py -k "readback" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26713-ac2-health
+    description: The readback records /health 200, Docker healthy and a restart count of 0 in the Dev-shaped settings, and a known-bad run that never answered 200; a readback with a 503 is refused. The image was built the declared way, the marketplace layer on the infra image.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_runtime_image_proof_readback_omn26713.py -k "unhealthy or composed" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26713-ac3-readback-digest
+    description: The readback names the build commit and the local image digest that the pin proposal quotes.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: 'grep -c "^build_commit: 9f77818ea0c96bc05ecffcbbfb621204bed0e6fa$" docs/readbacks/OMN-26713_runtime_image_proof.yaml'
+        cwd: .
+  - id: dod-omn26713-ac3-rebuilt-digest-tenant-fix
+    description: The readback names the rebuilt image digest that carries the tenant provisioning fix (omnimarket#6894 head) and the typed answer of a tenant provisioning call with no overlay, replacing the earlier digest.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: 'grep -c "^local_image_digest: sha256:dd093bb658b2898c4ec1209794dd53f50e0400593dcd8abf60f7f1e7ca4c34fd$" docs/readbacks/OMN-26713_runtime_image_proof.yaml'
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_runtime_image_proof_readback_omn26713.py -k "tenant" -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
