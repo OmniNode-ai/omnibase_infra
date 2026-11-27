@@ -58,6 +58,7 @@ from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
 )
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.errors.error_projection import ProjectionError
+from omnibase_infra.models.dispatch.model_dispatch_refusal import PARTIAL_STATUSES
 from omnibase_infra.models.dispatch.model_principal_topic import ModelPrincipalTopic
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
@@ -258,6 +259,8 @@ class DispatchResultApplier:
         self._projection_effect = projection_effect
         self._topic_router: dict[str, str] = topic_router or {}
         self._output_topic_map: dict[str, str] = output_topic_map or {}
+        # Exposed for health check introspection (OMN-5164).
+        self.published_events_map: dict[str, str] = self._output_topic_map
         self._output_event_handler = output_event_handler
         self._allowed_output_topic_set: set[str] = {
             topic.strip()
@@ -273,15 +276,6 @@ class DispatchResultApplier:
                 and topic.strip() != output_topic
             )
         )
-
-    @property
-    def published_events_map(self) -> dict[str, str]:
-        """Return the published_events topic routing map.
-
-        Exposes the output_topic_map for health check introspection (OMN-5164).
-        Returns the mapping of event_type names to their declared Kafka topics.
-        """
-        return self._output_topic_map
 
     def _resolve_partition_key(self, event: BaseModel) -> bytes | None:
         """Extract partition key from event model for per-entity ordering.
@@ -584,7 +578,9 @@ class DispatchResultApplier:
         has_applicable_output = bool(
             result.output_events or result.output_intents or result.projection_intents
         )
-        is_partial_handler_failure = result.status == EnumDispatchStatus.HANDLER_ERROR
+        # OMN-26026: a refused (NO_DISPATCHER) command carries its contract's
+        # failure terminal as output, which is published like a partial result.
+        is_partial_handler_failure = result.status in PARTIAL_STATUSES
         if result.status != EnumDispatchStatus.SUCCESS and (
             not is_partial_handler_failure or not has_applicable_output
         ):
@@ -680,7 +676,7 @@ class DispatchResultApplier:
                     output_intents,
                     correlation_id=effective_correlation_id,
                 )
-                logger.info(
+                logger.debug(
                     "Delegated %d intents from dispatcher=%s (correlation_id=%s)",
                     len(output_intents),
                     result.dispatcher_id,
@@ -864,7 +860,7 @@ class DispatchResultApplier:
                     # tell STARVED from IDLE without ever polling the broker).
                     _record_flow_output(resolved_topic)
 
-                    logger.info(
+                    logger.debug(
                         "Published output event to %s (correlation_id=%s)",
                         resolved_topic,
                         str(effective_correlation_id),

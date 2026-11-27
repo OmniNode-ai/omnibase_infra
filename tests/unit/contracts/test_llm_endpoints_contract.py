@@ -340,7 +340,8 @@ class TestLlmEndpointsContract:
         # "qwen3.8" now returns HTTP 404 against this endpoint.
         coder = by_slot["coder-5090"]
         assert coder["status"] == "running"
-        assert coder["endpoint_url"] == "http://192.168.86.201:8000"
+        assert coder["endpoint_url"] is None
+        assert coder["endpoint_from_overlay"] is True
         assert coder["model_hf_id"] == "Qwen/Qwen3.8-27B"
         assert coder["context_window_budgeted"] == 131072
 

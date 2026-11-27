@@ -147,6 +147,12 @@ from omnibase_infra.handlers.topic_migration_dependencies import (
     required_handler_init_params,
     warm_topic_migration_scan,
 )
+from omnibase_infra.models.dispatch.model_dispatch_refusal import (
+    bind_contract_failure_terminal,
+)
+from omnibase_infra.models.dispatch.model_dispatch_refusal import (
+    select_dispatch_result_output_topic as _select_dispatch_result_output_topic,
+)
 from omnibase_infra.models.dispatch.model_injected_request import ModelInjectedRequest
 from omnibase_infra.models.model_contract_hotload_lane_overlay import (
     lane_defers_topics_to_first_request,
@@ -386,10 +392,13 @@ class HandlerDispatchFailureError(Exception):
         *,
         failure_code: str | None = None,
         retryable: bool | None = None,
+        terminal_emitted: bool = False,
     ) -> None:
         super().__init__(message)
         self.failure_code = failure_code
         self.retryable = retryable
+        # OMN-26026: the engine's result already carried the failure terminal.
+        self.terminal_emitted = terminal_emitted
 
 
 class UndeliverableDispatchOutputError(Exception):
@@ -6866,6 +6875,7 @@ def _raise_if_no_dispatcher_drop(result: object, topic: str) -> None:
         detail,
         failure_code=error_code.value if error_code is not None else None,
         retryable=False,
+        terminal_emitted=bool(result.output_events),
     )
 
 
@@ -7695,6 +7705,9 @@ def _make_event_bus_callback(
         from omnibase_infra.runtime.boundary_failure_terminal import (
             classify_boundary_failure,
         )
+
+        if getattr(exc, "terminal_emitted", False):
+            return
 
         if _is_boundary_failure_terminal_record(message):
             # A terminal is an answer, not a request: nobody is holding a
@@ -11256,6 +11269,14 @@ async def _commit_contract_wiring(
             )
         )
 
+    bind_contract_failure_terminal(
+        dispatch_engine,
+        contract,
+        _declared_failure_terminal_topics(
+            contract, success_topic=_select_dispatch_result_output_topic(contract) or ""
+        ),
+    )
+
     # Fail-closed phantom-wiring guard (OMN-14141). A contract that declares
     # subscribe topics but registered ZERO dispatchers — and quarantined /
     # resolver-skipped NOTHING — is a silent phantom-wire: the topic would be
@@ -11764,17 +11785,9 @@ def _declared_failure_terminal_topics(
 ) -> tuple[str, ...]:
     """Return the contract's declared FAILURE terminal topics (OMN-15468 AC2).
 
-    A failure terminal is any contract-declared terminal topic that is (a) not
-    the success terminal the applier falls back to and (b) actually publishable
-    by this contract. Both conditions matter: publishing to an undeclared topic
-    would violate the contract's own publish allowlist, and re-routing to the
-    success terminal would be a no-op.
-
-    Read through :func:`load_terminal_event_topics` — the SAME reader the
-    Pattern B broker's subscription set is built from — so the applier's idea of
-    which topics are terminal cannot drift from the broker's. A second
-    hand-rolled reader here is exactly the seam mismatch that produced this
-    ticket.
+    Read through :func:`load_terminal_event_topics`, the SAME reader the Pattern B
+    broker's subscription set is built from, so the applier's idea of which
+    topics are terminal cannot drift from the broker's.
     """
     if contract.event_bus is None or not contract.event_bus.publish_topics:
         return ()
@@ -11783,24 +11796,6 @@ def _declared_failure_terminal_topics(
         success_topic=success_topic,
         publishable_topics=contract.event_bus.publish_topics,
     )
-
-
-def _select_dispatch_result_output_topic(
-    contract: ModelDiscoveredContract,
-) -> str | None:
-    """Choose the fallback output topic for generic dispatch results.
-
-    Prefer the contract's declared terminal_event when it is also publishable.
-    Otherwise fall back to the first publish topic to preserve older contracts.
-    """
-    if contract.event_bus is None or not contract.event_bus.publish_topics:
-        return None
-    if (
-        contract.terminal_event
-        and contract.terminal_event in contract.event_bus.publish_topics
-    ):
-        return contract.terminal_event
-    return contract.event_bus.publish_topics[0]
 
 
 async def _wire_single_contract(

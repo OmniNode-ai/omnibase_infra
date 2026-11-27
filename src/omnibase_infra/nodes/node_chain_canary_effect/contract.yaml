@@ -13,6 +13,9 @@
 # stability-test, judge, or prod.
 #
 # Related Tickets:
+#   - OMN-24562: the command record the canary publishes now carries the Kafka
+#     headers (correlation_id, message_id, timestamp, source, event_type) the
+#     ledger writer reads, so the command hop joins the probe's chain
 #   - OMN-18891: the consumer that reads the terminal back now subscribes to the PHYSICAL
 #     topic when a deployment namespace is configured, so a second runtime on a
 #     shared broker reads its own chain rather than the dev lane's

@@ -108,6 +108,10 @@ logger = logging.getLogger(__name__)
 #: abbreviated ref cannot be compared safely.
 SHA_RE: Final = re.compile(r"^[0-9a-f]{40}$")
 
+#: The requester of the overdue dev merge build check's commands (OMN-26316); the node's publish
+#: handler issues them under this name.
+OVERDUE_BUILD_REQUESTER: Final = "agent/overdue-dev-merge-build"
+
 #: Seconds any single git invocation in the ancestry resolver may take. A
 #: resolver that hangs would hold the poll loop, and the poll loop is what
 #: serves the queue endpoint's freshness.
@@ -266,9 +270,14 @@ def _refusal_for(
     """
     if candidate.runtime_lane != head.runtime_lane:
         return EnumCoalesceRefusal.DIFFERENT_LANE
-    if head.rollback is not None or candidate.rollback is not None:
+    # OMN-26316: two overdue-build commands are one kind of build (the dev head, with a rollback
+    # declared only to pass the lineage fence), so the newer replaces the older at one scope.
+    overdue = head.requested_by == candidate.requested_by == OVERDUE_BUILD_REQUESTER
+    if not overdue and (head.rollback is not None or candidate.rollback is not None):
         return EnumCoalesceRefusal.ROLLBACK_DECLARED
-    if head.scope is not Scope.FULL or candidate.scope is not Scope.FULL:
+    if head.scope is not candidate.scope or (
+        not overdue and head.scope is not Scope.FULL
+    ):
         return EnumCoalesceRefusal.NOT_FULL_SCOPE
     if list(candidate.services) != list(head.services):
         return EnumCoalesceRefusal.SERVICES_DIFFER
@@ -446,11 +455,7 @@ class GitAncestryResolver:
     @staticmethod
     def _default_run(argv: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            argv,
-            timeout=timeout,
-            capture_output=True,
-            text=True,
-            check=False,
+            argv, timeout=timeout, capture_output=True, text=True, check=False
         )
 
     def __call__(self, earlier: str, later: str) -> bool | None:

@@ -387,6 +387,8 @@ def test_a_dev_job_accepted_after_the_merge_satisfies_it_and_nothing_is_requeste
         "command": {"runtime_lane": "dev", "git_ref": "origin/dev", "scope": "runtime"},
         "accepted_at": (merged + timedelta(minutes=5)).isoformat(),
         "status": "success",
+        # OMN-26316: a job counts only when the sha it built is the merge or descends from it.
+        "lineage": {"resolved_ref": sha, "build_ref": sha},
     }
     (agent_env / f"{job['correlation_id']}.json").write_text(json.dumps(job))
     (agent_env / "agent-adoption.json").write_text('{"alarmed": false}')

@@ -14,6 +14,13 @@ requirements:
         statement: "AC3: with six concurrent messages through one dispatch callback, a handler that owns its adapter is never inside handle() on two threads at once and every message is still handled -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_omn26430_db_owning_projection_serial_dispatch.py fails at origin/dev with six threads inside handle() together and passes on the PR branch"
       - id: AC4
         statement: "AC4: a handler that holds no adapter of its own still runs on several threads at once -- falsifier: the control test in the same file reads a peak of 1 thread, so the serialisation is not scoped to adapter owners"
+  - id: req-omn26430-rollback-image-health
+    statement: The dev boot-good rollback image answers /health inside the compose start period, and the loop that held the answer is named from a thread dump of that image.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the loop or call that holds the HTTP answer for 16 minutes is named from a thread dump or profile of this image -- falsifier: the report holds no stack frame naming it"
+      - id: AC2
+        statement: "AC2: first /health 200 on a boot of this image reads inside the compose start period -- falsifier: a boot reading above the start period from docker logs timestamps"
 evidence_requirements:
   - kind: tests
     description: The serial-dispatch regression and the existing projection-runner dispatch tests.
@@ -38,6 +45,22 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/runtime/test_omn26430_owned_database_gate_scope.py -k passes_the_gate_in_parallel -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26430-ac1-held-frames-named
+    description: "The fixture holds the py-spy frames of the rollback image's main thread (wire_from_manifest, TopicProvisioner) and the stalled-loop answer names the holding frame."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_health_probe_acceptor_loop_frame_omn26430.py tests/unit/handlers/http_mount/test_rollback_image_first_health_inside_start_period_omn26430.py -k "names_the_held_frames or names_the_frame" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26430-ac2-boot-good-7dff-in-start-period
+    description: "Boot-good image 7dff9d9f641f: container started 01:54:30Z, first healthy probe +101 s, /health 200 read +184 s, below the smallest dev-lane start_period (1200 s); a reading of 2000 s fails the same test."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/http_mount/test_rollback_image_first_health_inside_start_period_omn26430.py -k boot_good_7dff_first_health -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26430-deploy-serial-dispatch-live
     description: >-
