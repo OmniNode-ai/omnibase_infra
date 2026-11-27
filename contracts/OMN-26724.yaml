@@ -44,7 +44,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: |-
-          .venv/bin/onex node node_build_repository_ref_compute --contract src/omnibase_infra/nodes/node_build_repository_ref_compute/contract.yaml --input tests/ci/fixtures/build_repository_ref_request_omn26724.json --backend event_bus=inmemory --state-root .onex_state/build-ref-omn26724 && grep -q '"verdict": "missing"' .onex_state/build-ref-omn26724/workflow_result.json
+          uv run --frozen onex node node_build_repository_ref_compute --contract src/omnibase_infra/nodes/node_build_repository_ref_compute/contract.yaml --input tests/ci/fixtures/build_repository_ref_request_omn26724.json --backend event_bus=inmemory --state-root .onex_state/build-ref-omn26724 && grep -q '"verdict": "missing"' .onex_state/build-ref-omn26724/workflow_result.json
         cwd: .
   - id: dod-omn26724-ac4-deploy-node-run
     description: Deploy probe; the onex runtime runs the new node and the refusal verdict is read from its terminal payload; fails if the node or contract is absent.
@@ -53,7 +53,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: |-
-          .venv/bin/onex node node_build_repository_ref_compute --contract src/omnibase_infra/nodes/node_build_repository_ref_compute/contract.yaml --input tests/ci/fixtures/build_repository_ref_request_omn26724.json --backend event_bus=inmemory --state-root .onex_state/build-ref-omn26724 && grep -q '"verdict": "missing"' .onex_state/build-ref-omn26724/workflow_result.json
+          uv run --frozen onex node node_build_repository_ref_compute --contract src/omnibase_infra/nodes/node_build_repository_ref_compute/contract.yaml --input tests/ci/fixtures/build_repository_ref_request_omn26724.json --backend event_bus=inmemory --state-root .onex_state/build-ref-omn26724 && grep -q '"verdict": "missing"' .onex_state/build-ref-omn26724/workflow_result.json
         cwd: .
   - id: dod-omn26724-ac4-real-clone-integration
     description: Integration test over a real git clone refuses a missing commit and holds a real one.
