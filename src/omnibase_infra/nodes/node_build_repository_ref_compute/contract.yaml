@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_build_repository_ref_compute
+contract_name: node_build_repository_ref_compute
+node_name: node_build_repository_ref_compute
+node_type: COMPUTE_GENERIC
+descriptor:
+  node_archetype: compute
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Overdue dev builds published at 18:16Z on 2026-11-26 by the old agent process carried a sibling repository's sha as git_ref, and nothing checked the clone held the commit, so each window ended in "Could not parse object" and one stale record was spent per window. This node decides from what the clone holds (before and after one fetch on a miss) whether the build may start; a commit the clone lacks after a fetch that succeeded is refused with a typed verdict. Pure: no clock, no I/O.
+input_model:
+  name: ModelBuildRepositoryRefRequest
+  module: omnibase_infra.models.model_build_repository_ref_request
+  description: The git ref and what the clone held for it before and after one fetch.
+output_model:
+  name: ModelBuildRepositoryRefDecision
+  module: omnibase_infra.models.model_build_repository_ref_decision
+  description: The typed verdict and, when refused, the reason.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: build_repository_ref.check
+      handler:
+        name: HandlerBuildRepositoryRef
+        module: omnibase_infra.handlers.build_repository_ref.handler_build_repository_ref
+      event_model:
+        name: ModelBuildRepositoryRefRequest
+        module: omnibase_infra.models.model_build_repository_ref_request
+capabilities:
+  - name: build_repository_ref.verdict
+    description: Refuse a queued build whose commit the clone lacks, so the next command runs.
+metadata:
+  ticket: OMN-26724
+  author: OmniNode Team
+  description: Pure decision called by the deploy agent's consumer.
+  tags: [compute, deployment, dev]

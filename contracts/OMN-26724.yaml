@@ -1,0 +1,39 @@
+schema_version: 1.0.0
+ticket_id: OMN-26724
+title: The dev deploy agent runs the merged omnibase_infra code, so today's build fixes take effect
+summary: >-
+  A queued build whose git_ref the deploy clone lacks (overdue dev builds published at 18:16Z on 2026-11-26 by the old agent process, carrying a sibling repository's sha) ended each window in "Could not parse object" and spent one stale record per window. node_build_repository_ref_compute decides, from what the clone holds before and after one fetch on a miss, whether a build may start; the consumer refuses a missing ref with the typed reason ref_not_in_clone and the next command runs in the same window. The agent restart and the hourly build readback (AC1 to AC3 of the ticket) are lab steps recorded on the ticket, not bound here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26724-missing-ref-refused-next-runs
+    statement: A queued build whose ref the deploy clone lacks is refused with a typed reason and the next command runs; a real ref builds.
+    acceptance:
+      - id: AC4
+        statement: "AC4: a record whose git_ref the clone lacks is refused with a typed reason and the next command runs in the same window; a record with a real ref builds -- falsifier: a unit test drives two queued commands through the consumer against a real git clone"
+evidence_requirements:
+  - kind: tests
+    description: The build repository ref node and the consumer refusal.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_build_ref_in_clone_omn26724.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26724-ac4-missing-ref-refused-next-runs
+    description: A missing ref is refused with ref_not_in_clone and the next queued command is accepted; a real ref is held; a failed fetch is unverifiable and not refused.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_build_ref_in_clone_omn26724.py -q -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26724-ac4-node-decision
+    description: The contract-routed handler of node_build_repository_ref_compute refuses a ref still missing after one good fetch and builds a held one.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_build_repository_ref_omn26724.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
