@@ -55,6 +55,19 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_cloud_mode_lab_address_guard_omn26709.py -q --no-cov -n 0 -p no:randomly -k "no_lab_values_starts"
         cwd: .
+  - id: dod-omn26709-endpoint-overlay-main-check
+    description: >-
+      One test whose overlay source is injected judges contracts/llm_endpoints.yaml: the known bad (overlay holding embeddings-201 only, coder-5090 flagged) reports coder-5090 missing, the known good (embeddings-201) has a value, and the same body runs against the real overlay home checkout at main in the Overlay Main Endpoints job of ci.yml.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/models/test_llm_endpoint_overlay_main_check_omn26709.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: command
+        check_value: grep -q 'overlay-main-endpoints:' .github/workflows/ci.yml
+        cwd: .
   - id: dod-omn26709-post-deploy-guard-in-image
     description: >-
       Post-deploy probe: the rebuilt dev runtime container imports the cloud lab guard this change adds and carries the address-free runner fleet file the image now bakes. It reads the live container, which carries both only after the deploy agent has rebuilt it from this change, so a pull request runner cannot pass it; only the local Done gate runs it and it binds no acceptance criterion.
