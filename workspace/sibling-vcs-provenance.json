@@ -1,4 +1,36 @@
 {
-  "siblings": {},
-  "_note": "Placeholder committed so the Dockerfile COPY always resolves. In workspace mode, stage_workspace.sh overwrites this with the real per-repo {vcs_ref, vcs_dirty, vcs_branch} provenance (OMN-13030). Release mode ignores it."
+  "siblings": {
+    "omnibase_core": {
+      "vcs_ref": "03e50eb2fade1bf90ac6eb9bd258b8f2837f3848",
+      "vcs_dirty": false,
+      "vcs_branch": "HEAD",
+      "dev_merge_tag": ""
+    },
+    "omnibase_spi": {
+      "vcs_ref": "7291f76b0d89fe38906a9b76b25a50d310d66ac0",
+      "vcs_dirty": false,
+      "vcs_branch": "HEAD",
+      "dev_merge_tag": "dev-20261121152632-7291f76b0d89"
+    },
+    "omnimarket": {
+      "vcs_ref": "2e5638bf134b6a33bbba98e0f641547919134b03",
+      "vcs_dirty": false,
+      "vcs_branch": "HEAD",
+      "dev_merge_tag": ""
+    },
+    "omniintelligence": {
+      "vcs_ref": "c4880008c37387df28f7aaf106e0f3cde34b9928",
+      "vcs_dirty": false,
+      "vcs_branch": "HEAD",
+      "dev_merge_tag": "dev-20261121152639-c4880008c373"
+    }
+  },
+  "build_context": {
+    "omnibase_infra": {
+      "vcs_ref": "2e7f72a99bffb479b952b84971caffec3f7fe609",
+      "vcs_dirty": false,
+      "vcs_branch": "HEAD",
+      "dev_merge_tag": ""
+    }
+  }
 }

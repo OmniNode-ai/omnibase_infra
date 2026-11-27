@@ -1,7 +1,66 @@
 {
-  "lock_source": "placeholder",
+  "lock_source": "/data/lab-run/runs/q-integ3/trees/2be72af14fc34d511c2fe0302580b416a4426162e10651c0bee8853813d1da79/omnimarket/uv.lock",
+  "workspace_mode": true,
   "allow_drift": false,
   "drift_count": 0,
-  "comparisons": [],
-  "_note": "Placeholder committed so the Dockerfile COPY always resolves. In workspace mode, stage_workspace.sh overwrites this with the real expected-vs-actual sibling-pin comparison (OMN-12977). Release mode ignores it."
+  "clone_ahead_count": 1,
+  "forward_drift_allowed_count": 2,
+  "comparisons": [
+    {
+      "package": "omnibase-infra",
+      "expected_version": "0.38.83",
+      "actual_version": "0.38.86",
+      "expected_git_rev": null,
+      "actual_git_sha": "48ccf8bc2450e1334be0ab47bbbe6a77bd102ce4",
+      "matches": true,
+      "drift_direction": "forward",
+      "clone_ahead": false,
+      "forward_drift_allowed": true,
+      "note": "forward-drift allowed (OMN-13902): workspace build vendors clone 0.38.86, which is forward of the registry-sourced lock pin 0.38.83 (OMN-13929 disarm-bump / unreleased-dev steady state). Recorded, non-fatal.",
+      "mismatch_reason": "",
+      "version_derived": false
+    },
+    {
+      "package": "omnibase-core",
+      "expected_version": "0.47.82.dev1+g6baa5af6",
+      "actual_version": "0.47.82.dev14+g03e50eb2f",
+      "expected_git_rev": null,
+      "actual_git_sha": "03e50eb2fade1bf90ac6eb9bd258b8f2837f3848",
+      "matches": true,
+      "drift_direction": "none",
+      "clone_ahead": true,
+      "forward_drift_allowed": false,
+      "note": "clone-ahead (OMN-13403): version 0.47.82.dev14+g03e50eb2f matches the lock; clone HEAD 03e50eb2fade1bf90ac6eb9bd258b8f2837f3848 is a descendant of locked 6baa5af6b65d998683df0a5a1250ac2b30d3a12d. Recorded, non-fatal.",
+      "mismatch_reason": "",
+      "version_derived": true
+    },
+    {
+      "package": "omnibase-spi",
+      "expected_version": "0.23.15",
+      "actual_version": "0.23.16",
+      "expected_git_rev": null,
+      "actual_git_sha": "7291f76b0d89fe38906a9b76b25a50d310d66ac0",
+      "matches": true,
+      "drift_direction": "forward",
+      "clone_ahead": false,
+      "forward_drift_allowed": true,
+      "note": "forward-drift allowed (OMN-13902): workspace build vendors clone 0.23.16, which is forward of the registry-sourced lock pin 0.23.15 (OMN-13929 disarm-bump / unreleased-dev steady state). Recorded, non-fatal.",
+      "mismatch_reason": "",
+      "version_derived": false
+    },
+    {
+      "package": "omnimarket",
+      "expected_version": "0.4.329",
+      "actual_version": "0.4.329",
+      "expected_git_rev": null,
+      "actual_git_sha": "2e5638bf134b6a33bbba98e0f641547919134b03",
+      "matches": true,
+      "drift_direction": "none",
+      "clone_ahead": false,
+      "forward_drift_allowed": false,
+      "note": "",
+      "mismatch_reason": "",
+      "version_derived": false
+    }
+  ]
 }
