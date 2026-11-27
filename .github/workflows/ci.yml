@@ -4241,7 +4241,7 @@ jobs:
 
   # OMN-26709: the endpoint version of omnimarket's Overlay Main Load (OMN-23963). omnibase_infra#6321 flagged slot coder-5090
   # endpoint_from_overlay while the overlay home's main held no value for it, and every dev build then failed at compose_gen; no check
-  # here read the real overlay home. This job runs ONE test (tests/unit/models/contracts/test_llm_endpoint_overlay_main_check_omn26709.py)
+  # here read the real overlay home. This job runs ONE test (tests/integration/models/test_llm_endpoint_overlay_main_check_omn26709.py)
   # whose overlay source is injected: the unit run uses fixture clones, this job names the real overlay home checkout at main through
   # OVERLAY_MAIN_CLONE, so the same body fails the change, naming the slot, when a flagged slot has no value there. The overlay home
   # repository is private and this one is public, so its name is the OMNI_CI_OVERLAY_REPO variable the hostile-review judge reads,
@@ -4301,7 +4301,7 @@ jobs:
         run: |
           echo "overlay home revision: $(git -C "$OVERLAY_HOME_CHECKOUT" rev-parse HEAD)"
           OVERLAY_MAIN_CLONE="$GITHUB_WORKSPACE/$OVERLAY_HOME_CHECKOUT" OVERLAY_MAIN_REF=HEAD \
-            uv run --frozen pytest tests/unit/models/contracts/test_llm_endpoint_overlay_main_check_omn26709.py -q -n 0 --no-cov -p no:randomly
+            uv run --frozen pytest tests/integration/models/test_llm_endpoint_overlay_main_check_omn26709.py -q -n 0 --no-cov -p no:randomly
 
   # OMN-20703: node-boundary import gate (operator direction 2026-10-07,
   # OMN-17427). Shrink-only baseline; same core pin as the pre-commit hook.

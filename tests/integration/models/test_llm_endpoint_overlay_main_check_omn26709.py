@@ -30,9 +30,9 @@ from omnibase_infra.models.contracts.model_llm_endpoint_overlay import (
     overlay_main_missing_slots,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _CONTRACT = _REPO_ROOT / "contracts" / "llm_endpoints.yaml"
 
 
