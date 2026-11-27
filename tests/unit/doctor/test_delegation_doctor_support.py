@@ -303,8 +303,9 @@ def test_render_diagnosis_status_message_and_category(
     else:
         assert result.status is EnumHealthStatusValue.UNHEALTHY
         assert result.message == (
-            f"[{fault.value}] Diagnostic detail. Fix: Repair the dependency."
+            "Diagnostic detail. Fix: Repair the dependency."
         )
+        assert "[" not in result.message
 
 
 def test_unknown_result_identifies_the_unjudged_dependency() -> None:

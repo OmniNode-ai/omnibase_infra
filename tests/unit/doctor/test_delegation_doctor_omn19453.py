@@ -244,7 +244,8 @@ def test_each_fault_is_named_with_one_distinct_fix(
 
     result = fault_checks[case_index].run()
     assert result.status is EnumHealthStatusValue.UNHEALTHY
-    assert result.message.startswith(f"[{expected_fault.value}] ")
+    assert not result.message.startswith("[")
+    assert result.message.startswith(diagnosis.detail)
     assert f"Fix: {diagnosis.fix}" in result.message
 
 
@@ -482,6 +483,7 @@ def test_local_server_without_served_models_is_not_healthy(
     assert diagnosis.fault is EnumDelegationDoctorFault.LOCAL_MODEL_NOT_SERVING
     assert diagnosis.fix == "Start the model server at http://model.invalid."
     assert result.status is EnumHealthStatusValue.UNHEALTHY
-    assert result.message.startswith("[local_model_not_serving] ")
+    assert not result.message.startswith("[")
+    assert result.message.startswith(diagnosis.detail)
     assert result.message.count("Fix:") == 1
     assert transport.urls == ["http://model.invalid/v1/models"] * 2

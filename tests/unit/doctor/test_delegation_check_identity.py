@@ -47,7 +47,8 @@ def test_missing_identity_has_login_remediation(
     assert diagnosis.fault is EnumDelegationDoctorFault.NO_IDENTITY
     assert diagnosis.fix == "onex local init"
     assert result.status is EnumHealthStatusValue.UNHEALTHY
-    assert "[no_identity]" in result.message
+    assert "[no_identity]" not in result.message
+    assert "[" not in result.message
     assert diagnosis.fix in result.message
 
 
@@ -86,9 +87,9 @@ def test_identity_is_trimmed_and_needs_no_key(tmp_path: Path) -> None:
 
     assert diagnosis.fault is None
     assert diagnosis.fix == ""
-    assert diagnosis.detail == (
-        "Delegation identity 'acme' is configured for https://gateway.invalid."
-    )
+    assert diagnosis.detail == "Delegation identity is configured."
+    assert "acme" not in diagnosis.detail
+    assert "gateway.invalid" not in diagnosis.detail
     assert result.status is EnumHealthStatusValue.HEALTHY
     assert result.message == diagnosis.detail
 

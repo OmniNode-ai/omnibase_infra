@@ -100,7 +100,7 @@ class HandlerCheckDelegationIdentity:
         return (
             ModelDelegationDiagnosis(
                 fault=None,
-                detail=f"Delegation identity '{tenant_slug}' is configured for {base_url}.",
+                detail="Delegation identity is configured.",
                 fix="",
             ),
             True,

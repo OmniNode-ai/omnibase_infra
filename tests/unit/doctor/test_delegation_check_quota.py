@@ -83,7 +83,8 @@ def test_quota_status_and_probe_contract(
         assert diagnosis.fix == (
             "Wait for the tenant quota window to reset, then re-run this check."
         )
-        assert "[quota_exhausted]" in result.message
+        assert "[quota_exhausted]" not in result.message
+        assert "[" not in result.message
         assert diagnosis.fix in result.message
     else:
         assert diagnosis.fault is None
