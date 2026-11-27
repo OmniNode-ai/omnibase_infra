@@ -131,3 +131,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_contracts_revision_guard_omn25856.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn25856-contracts-revision-integration
+    description: The guard refuses this checkout's real runtime contracts changed from the revision stamped by the Dockerfile's own sha256sum command, and passes the unchanged tree.
+    source: manual
+    binds_ac: [AC25856006]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/docker/test_contracts_revision_guard_real_contracts_omn25856.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
