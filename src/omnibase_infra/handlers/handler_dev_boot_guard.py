@@ -13,11 +13,14 @@ from __future__ import annotations
 import contextlib
 import copy
 import hashlib
+import importlib.util
 import json
 import logging
 import math
 import re
+import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
@@ -27,6 +30,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import NAMESPACE_URL, uuid5
 
+import yaml
 from pydantic import BaseModel, JsonValue, RootModel
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -54,6 +58,23 @@ logger = logging.getLogger(__name__)
 DEV_BOOT_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
 POLL_SECONDS = 5
 DOCKER_READ_SECONDS = 10
+# OMN-26314: the roll step applies a service's registered installs before its compose wait.
+ENV_STATE_DIR: Final = "DEPLOY_AGENT_STATE_DIR"
+# Run by path from the deploy-source clone, as the agent runs its own branch-install entry.
+SERVICE_INSTALLS_ENTRY: Final = (
+    "src/omnibase_infra/nodes/node_dev_roll_events_effect/"
+    "runtime_dev_service_installs.py"
+)
+# OMN-25942: the post-roll work-ledger proof, run by path from the deploy-source clone.
+WORK_LEDGER_CONTRACT: Final = (
+    "src/omnibase_infra/contracts/work_ledger_query_client.contract.yaml"
+)
+ONEX_ENTRY: Final = "scripts/onex"
+# A failed proof reports the end of its stderr: a Python stderr opens with warnings and
+# ends with the exception that stopped the command. The read window sits under the
+# sanitizer's own bound so that bound never cuts the end off.
+PROOF_FAILURE_READ_CHARS: Final = 1500
+PROOF_FAILURE_TAIL_CHARS: Final = 240
 REPORT_SECONDS = 20
 # A full container log (json-file rotation holds up to 30 MB) is read before recovery.
 LOG_READ_SECONDS = 60
@@ -112,6 +133,26 @@ class DevBootFailedError(RuntimeError):
     """A dev runtime failed boot, or cannot be safely replaced."""
 
 
+class DevBootSettingsDriftError(DevBootFailedError):
+    """A healthy dev container carries a compose config hash the clone no longer renders.
+
+    The container was created from the compose files the deploy read when it ran
+    ``up``. The deploy-source clone is a canonical clone that the canonical-clone sync
+    fast-forwards while a job runs (OMN-25942: job 20cf29c6 pinned commit 925858038 at
+    08:04:02Z and the sync moved the clone at 08:12:26Z and 08:18:26Z), so the
+    capture after a verified roll can render other files than ``up`` did. The family is
+    healthy; only the recovery point cannot be advanced.
+    """
+
+    def __init__(self, service: str, container_hash: str, rendered_hash: str) -> None:
+        super().__init__(
+            f"{service}: compose settings differ from the healthy container"
+        )
+        self.service = service
+        self.container_hash = container_hash
+        self.rendered_hash = rendered_hash
+
+
 class DevBootRecoveryError(RuntimeError):
     """The candidate deploy failed, including when recovery succeeded."""
 
@@ -160,11 +201,50 @@ def _roll_events_module(execution: ModuleType) -> ModuleType:
     )
 
 
-def _load_roll_events(execution: ModuleType) -> ProtocolDevRollEvents:
-    """The real events object of the running deploy agent."""
+#: The canary gate's modules in import order, loaded from this checkout by path: the
+#: deploy agent's environment carries no ``omnibase_infra`` package (OMN-26463).
+_CANARY_MODULES: Final = (
+    "enums/enum_runtime_canary_verdict.py",
+    "models/model_runtime_canary_candidate.py",
+    "models/model_runtime_canary_gate_decision.py",
+    "models/model_runtime_canary_receipt.py",
+    "models/model_runtime_canary_request.py",
+    "protocols/protocol_runtime_canary_probe.py",
+    "handlers/handler_runtime_canary.py",
+)
+
+
+def _canary_gate() -> ModuleType:
+    root = Path(__file__).resolve().parents[1]
+    for relative in _CANARY_MODULES:
+        name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
+        if name in sys.modules:
+            continue
+        spec = importlib.util.spec_from_file_location(name, root / relative)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Cannot load the runtime canary module: {relative}")
+        sys.modules[name] = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sys.modules[name])
+    return sys.modules["omnibase_infra.handlers.handler_runtime_canary"]
+
+
+def _require_canary_receipt(command: Mapping[str, JsonValue], state_dir: Path) -> None:
+    """OMN-26463: refuse a roll whose candidate has no PASS canary receipt.
+
+    This reads a receipt file and nothing else; the health gate and this guard's boot
+    supervision are as they were. The gate is off until the agent's state directory
+    holds a ``canary-receipts`` directory.
+    """
+    _canary_gate().require_for_roll(command, state_dir)
+
+
+def _load_roll_events(
+    execution: ModuleType, state_dir: Path | None = None
+) -> ProtocolDevRollEvents:
+    """The real events object of the running deploy agent (journaling under ``state_dir``)."""
     return cast(
         "ProtocolDevRollEvents",
-        _roll_events_module(execution).build_events(execution),
+        _roll_events_module(execution).build_events(execution, state_dir),
     )
 
 
@@ -212,6 +292,86 @@ def _checked(
     )
 
 
+# The agent's own consumer transport declaration (the unit's ``KAFKA_SASL_MECHANISM``,
+# ``KAFKA_SECURITY_PROTOCOL`` and ``KAFKA_SASL_ENV_PREFIX``, OMN-18012). The agent's lane login
+# lives only under that prefix, so the unprefixed pair the append command's client config reads
+# is absent, and ``ModelKafkaEventBusConfig.default()`` rejects a SASL mechanism with no
+# credentials before the lane's stored identity is bound (OMN-26316). The append command takes
+# its broker, protocol, mechanism and login from the ``dev`` lane declaration and the machine's
+# lane store, so none of these three reaches it; the post-roll ledger proof reads the same client
+# config and met the same refusal (dev job 02059fe5, 2026-11-24T06:38Z).
+_LEDGER_CLIENT_UNINHERITED_ENV: Final = frozenset(
+    {"KAFKA_SASL_MECHANISM", "KAFKA_SECURITY_PROTOCOL", "KAFKA_SASL_ENV_PREFIX"}
+)
+
+
+# omnibase_core 0.47.77 and later list the internal command groups, ``ledger`` among
+# them, only when this variable is truthy; the post-roll proof calls ``onex ledger`` and
+# exited 2 ("No such command 'ledger'") on a healthy new runtime (dev job d7149818,
+# 2026-11-25T23:27Z, OMN-26316). It is set by ``env`` for that one call, never the process.
+_OPERATOR_COMMANDS_SWITCH: Final = "ONEX_CLI_SHOW_ALL_COMMANDS=1"
+
+
+def _without_agent_broker_declaration(command: list[str]) -> list[str]:
+    """``command`` run under ``env`` for the ledger call: the agent's own broker
+    declarations unset and the operator command switch set.
+
+    Both are done by ``env`` in the child, so this handler never reads the process
+    environment (handlers take no direct environment access).
+    """
+    unset = [
+        arg for name in sorted(_LEDGER_CLIENT_UNINHERITED_ENV) for arg in ("-u", name)
+    ]
+    return ["env", *unset, _OPERATOR_COMMANDS_SWITCH, *command]
+
+
+def _prove_work_ledger_answers(execution: ModuleType) -> None:
+    """After a dev runtime recreate verified, prove one ledger read answers (OMN-25942).
+
+    The command line and the bound are ``post_roll_proof`` in
+    ``work_ledger_query_client.contract.yaml`` of the checkout the agent runs from;
+    this module types neither. The read runs from the agent's own lab host and must
+    exit 0 inside the bound with one JSON object. Anything else fails the roll, which
+    ``protect`` turns into the previous image's restore.
+    """
+    contract = Path(execution.deploy_repo_dir()) / WORK_LEDGER_CONTRACT
+    declared = yaml.safe_load(contract.read_text(encoding="utf-8"))["post_roll_proof"]
+    argv, bound = declared["argv"], declared["timeout_s"]
+    if not (
+        isinstance(argv, list)
+        and argv
+        and all(isinstance(part, str) for part in argv)
+        and isinstance(bound, int)
+        and bound > 0
+    ):
+        raise DevBootFailedError("work ledger proof declaration is malformed")
+    command = [
+        f"{execution.deploy_repo_dir()}/{ONEX_ENTRY}",
+        *argv,
+        "--timeout",
+        str(bound),
+    ]
+    try:
+        done = execution._run(_without_agent_broker_declaration(command), timeout=bound)
+    except execution.subprocess.TimeoutExpired as exc:
+        raise DevBootFailedError(f"work ledger: no answer within {bound}s") from exc
+    except OSError as exc:
+        raise DevBootFailedError(
+            f"work ledger: {argv[0]} could not start: {_safe(str(exc))}"
+        ) from exc
+    if done.returncode != 0:
+        raise DevBootFailedError(
+            f"work ledger: {argv[0]} exited {done.returncode}: "
+            f"{_safe((done.stderr or done.stdout)[-PROOF_FAILURE_READ_CHARS:])[-PROOF_FAILURE_TAIL_CHARS:]}"
+        )
+    try:
+        answer = json.loads(done.stdout)
+    except ValueError:
+        answer = None
+    if not isinstance(answer, dict):
+        raise DevBootFailedError("work ledger: the answer is not one JSON object")
+
+
 def _safe(text: str) -> str:
     return " ".join(
         sanitize_error_message(RuntimeError(text), max_length=2000)
@@ -227,6 +387,102 @@ def _step_failed(
     if service == execution.ONEX_API_SERVICE:
         return DevOnexApiStepFailedError(message, service)
     return DevBootFailedError(message)
+
+
+def _declares_installs_for(state_dir: Path, service: str) -> bool:
+    """Whether the agent's single store declares an install for ``service`` (OMN-26314).
+
+    Unreadable or absent reads as none: the roll then goes as it always did and the
+    post-rebuild apply and the idle apply still carry the install.
+    """
+    try:
+        records = json.loads(
+            (state_dir / "branch-installs" / "records.json").read_text(encoding="utf-8")
+        )
+        return any(
+            service in install["services"] for install in records.get("installs", [])
+        )
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False
+
+
+def apply_installs_before_wait(
+    argv: list[str],
+    timeout: int,
+    state_dir: Path,
+    *,
+    execution: ModuleType,
+    env: Mapping[str, str],
+) -> None:
+    """Start the replacement WITHOUT the wait and put its registered installs in (OMN-26314).
+
+    A registered install exists to make the replacement healthy, so it must be in the
+    container the compose wait reads. The caller issues the unchanged ``up --wait`` next;
+    the wait, its budget and the refusal on an unhealthy runtime are not touched here.
+    Never a verdict: an apply that fails or cannot read back whole is logged at ERROR
+    and the wait judges the runtime as it is. Dev lane only: the roll step is the dev
+    roll and the apply refuses a prod or stability compose project.
+    """
+    service = argv[-1]
+    try:
+        started = execution._run(argv, timeout=timeout, env=dict(env))
+    except execution.subprocess.TimeoutExpired as exc:
+        raise _step_failed(
+            service,
+            execution,
+            f"Runtime roll stopped at {service}: compose up timed out",
+        ) from exc
+    if started.returncode != 0:
+        raise _step_failed(
+            service,
+            execution,
+            f"Runtime roll stopped at {service}: "
+            f"{_safe(started.stderr) or 'compose up failed'}",
+        )
+    lane = execution.EnumRuntimeLane.DEV
+    apply_argv = [
+        sys.executable,
+        f"{execution.deploy_repo_dir()}/{SERVICE_INSTALLS_ENTRY}",
+        "--state-dir",
+        str(state_dir),
+        "--compose-project",
+        execution.lane_config_for(lane).compose_project,
+        "--service",
+        service,
+    ]
+    apply_env = {
+        **env,
+        "PYTHONPATH": ":".join(
+            part
+            for part in (
+                f"{execution.deploy_repo_dir()}/src",
+                env.get("PYTHONPATH", ""),
+            )
+            if part
+        ),
+    }
+    try:
+        applied = execution._run(apply_argv, timeout=timeout, env=apply_env)
+    except (OSError, execution.subprocess.TimeoutExpired):
+        logger.exception(
+            "branch install before the roll wait could not run for %s "
+            "friction_type=branch_install_failed",
+            service,
+        )
+        return
+    for line in applied.stderr.splitlines():
+        if "friction_type=" in line:
+            logger.error("%s", line)
+        elif line.strip():
+            logger.info("%s", line)
+    if applied.returncode != 0:
+        logger.error(
+            "branch install before the roll wait exited %s for %s: %s "
+            "friction_type=branch_install_failed",
+            applied.returncode,
+            service,
+            _safe(applied.stdout or applied.stderr)[-300:],
+        )
 
 
 def run_runtime_roll_step(
@@ -245,17 +501,31 @@ def run_runtime_roll_step(
     """
     service = argv[-1]
     lane = execution.EnumRuntimeLane.DEV
+    if service in execution.SERVICE_HEALTH_TARGET_INDEX:
+        # OMN-25106: a running container that stayed unhealthy is not replaced
+        # by the compose up below, so it is restarted first.
+        restart_if_wedged(
+            execution._health_target_container(lane, service),
+            timeout,
+            execution=execution,
+        )
     wait_budget = execution.runtime_health_probe_budget(lane, service)
     command = list(argv)
     index = command.index("--no-deps")
     command[index:index] = ["--wait", "--wait-timeout", str(wait_budget)]
+    env = execution._compose_env(extra_env)
+    state_dir = env.get(ENV_STATE_DIR, "").strip()
+    if state_dir and _declares_installs_for(Path(state_dir), service):
+        apply_installs_before_wait(
+            argv, timeout, Path(state_dir), execution=execution, env=env
+        )
     try:
         result = execution._run(
             command,
             timeout=max(
                 timeout, wait_budget + execution.RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS
             ),
-            env=execution._compose_env(extra_env),
+            env=env,
         )
     except execution.subprocess.TimeoutExpired as exc:
         raise _step_failed(
@@ -498,6 +768,68 @@ def folded_dev_services(
 
 #: ``docker inspect`` states of a lane container that mean it is down.
 DOWN_STATES = frozenset({"created", "exited", "dead"})
+#: OMN-25106: consecutive failed health probes after which a running container
+#: reads as wedged, which restores it like a stopped one. The dev runtime's
+#: compose healthcheck probes every 30 s, so 20 is a 10 minute non-200 window;
+#: docker does not count failed probes inside ``start_period``.
+WEDGED_FAILING_STREAK: Final = 20
+#: The state, then (when the container declares a healthcheck) its health
+#: status and failing streak, as whitespace-separated fields.
+PRESENCE_INSPECT_FORMAT: Final = (
+    "{{.State.Status}}"
+    " {{if .State.Health}}{{.State.Health.Status}} {{.State.Health.FailingStreak}}{{end}}"
+)
+
+
+def _is_wedged(fields: Sequence[str]) -> bool:
+    """Whether inspect fields read a RUNNING container that stayed unhealthy too long.
+
+    Only state ``running`` can be wedged: a paused or restarting container with
+    a failing streak is not what a restart cures, so it reads as it did before.
+    """
+    return (
+        len(fields) >= 3
+        and fields[0].lower() == "running"
+        and fields[1].lower() == "unhealthy"
+        and fields[2].isdigit()
+        and int(fields[2]) >= WEDGED_FAILING_STREAK
+    )
+
+
+def _presence_of(container: str, fields: Sequence[str]) -> tuple[str, str]:
+    """``down`` or ``running`` with its detail, from one container's inspect fields."""
+    state = fields[0].lower() if fields else ""
+    if state in DOWN_STATES:
+        return "down", f"{container} is {state}"
+    if _is_wedged(fields):
+        return "down", (
+            f"{container} is {state} but unhealthy: {fields[2]} consecutive failed "
+            f"health probes, at least {WEDGED_FAILING_STREAK} read as wedged"
+        )
+    return "running", f"{container} is {state}"
+
+
+def restart_if_wedged(container: str, timeout: int, *, execution: ModuleType) -> bool:
+    """``docker restart`` one container the presence read calls wedged (OMN-25106).
+
+    The restore's rebuild converges with ``compose up -d``, which leaves a
+    running container whose image and configuration are unchanged exactly as it
+    is, and the post-deploy verify declines to recreate a runtime that still
+    answers ``/health`` degraded. A wedged container therefore has to be
+    restarted before the roll waits on it. A read or a restart that docker
+    refuses is not an error here: the roll goes on and its own wait decides.
+    """
+    try:
+        read = execution._run(
+            ["docker", "inspect", "--format", PRESENCE_INSPECT_FORMAT, container],
+            timeout=DOCKER_READ_SECONDS,
+        )
+        if read.returncode != 0 or not _is_wedged(read.stdout.split()):
+            return False
+        restarted = execution._run(["docker", "restart", container], timeout=timeout)
+    except (OSError, execution.subprocess.TimeoutExpired):
+        return False
+    return bool(restarted.returncode == 0)
 
 
 def lane_runtime_containers(
@@ -518,6 +850,66 @@ def lane_runtime_containers(
     return (main, f"{main}-effects")
 
 
+def running_ref_if_healthy(
+    container: str,
+    repository: str,
+    read_ref: Callable[[str, str], str | None],
+) -> str | None:
+    """``read_ref``'s answer for a healthy runtime, ``""`` for an unhealthy one (OMN-24562).
+
+    A runtime that failed its boot is parked and still answers ``docker exec`` with
+    the provenance of the image it was built from, so the stability follow read it
+    as running the tag it had just built and never rebuilt it. An unhealthy runtime
+    runs no revision: ``""`` names no tag and no commit that contains one. ``None``
+    stays what docker could not answer.
+    """
+    try:
+        shown = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+                container,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=DOCKER_READ_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if shown.returncode == 0 and shown.stdout.strip() == "unhealthy":
+        return ""
+    return read_ref(container, repository)
+
+
+def healthy_ref_reader(
+    container: Callable[[], str], read_ref: Callable[[str, str], str | None]
+) -> Callable[[str], str | None]:
+    """The repository -> running ref reader of a lane's runtime, unhealthy reading ``""``.
+
+    ``container`` resolves the lane's runtime container at READ time, never when the
+    reader is built: the agent builds this reader in ``__init__`` on every lane, and a
+    lane configuration that cannot resolve (a bad stability fold policy) must stop
+    only the lane that reads it. A resolution failure is logged and reads ``None``,
+    what docker could not answer, so that lane's follow starts no job and every other
+    lane runs on.
+    """
+
+    def read(repository: str) -> str | None:
+        try:
+            name = container()
+        except (OSError, RuntimeError, ValueError) as error:
+            logger.exception(
+                "runtime container of the followed lane unresolved: %s", error
+            )
+            return None
+        return running_ref_if_healthy(name, repository, read_ref)
+
+    return read
+
+
 def read_lane_presence(
     health_targets: Sequence[tuple[str, int]],
     disabled_services: frozenset[str],
@@ -527,7 +919,8 @@ def read_lane_presence(
 ) -> tuple[str, str]:
     """``(state, detail)`` of the lane's containers: running, down, companion_down or unknown.
 
-    Main reads on its own: absent, created, exited or dead is ``down``. With
+    Main reads on its own: absent, created, exited, dead or wedged (running
+    but unhealthy for ``WEDGED_FAILING_STREAK`` probes, OMN-25106) is ``down``. With
     main running, a down container beside it is ``companion_down`` and one that
     cannot be read is ``unknown``, which never restores. ``unreadable`` is what
     ``run`` raises when docker does not answer.
@@ -536,7 +929,7 @@ def read_lane_presence(
     for container in lane_runtime_containers(health_targets, disabled_services):
         try:
             result = run(
-                ["docker", "inspect", "--format", "{{.State.Status}}", container],
+                ["docker", "inspect", "--format", PRESENCE_INSPECT_FORMAT, container],
                 timeout=DOCKER_READ_SECONDS,
             )
         except unreadable as exc:
@@ -554,13 +947,7 @@ def read_lane_presence(
                     )
                 )
         else:
-            state = result.stdout.strip().lower()
-            states.append(
-                (
-                    "down" if state in DOWN_STATES else "running",
-                    f"{container} is {state}",
-                )
-            )
+            states.append(_presence_of(container, result.stdout.split()))
     if states[0][0] != "running":
         return states[0]
     for wanted in ("down", "unknown"):
@@ -773,8 +1160,10 @@ class HandlerDevBootGuard:
             if not hashes.get(service) or hashes[service] != labels.get(
                 "com.docker.compose.config-hash"
             ):
-                raise DevBootFailedError(
-                    f"{service}: compose settings differ from the healthy container"
+                raise DevBootSettingsDriftError(
+                    service,
+                    labels.get("com.docker.compose.config-hash", ""),
+                    hashes.get(service, ""),
                 )
         # Compose's canonical JSON already escapes literal dollars for reuse.
         # Preserve those strings verbatim when writing the recovery config.
@@ -847,10 +1236,13 @@ class HandlerDevBootGuard:
         behaves as it always did and announces nothing.
         """
         if command is not None:
+            _require_canary_receipt(command, self.root.parents[1])
             self._command = command
             if self.events is None:
                 try:
-                    self.events = _load_roll_events(self.execution)
+                    self.events = _load_roll_events(
+                        self.execution, self.root.parents[1]
+                    )
                 except Exception:
                     # The events are evidence; a sender that cannot be built (no
                     # broker settings) never fails or delays a roll.
@@ -977,7 +1369,8 @@ class HandlerDevBootGuard:
             raise DevBootFailedError("no last healthy dev revision")
         try:
             yield
-            self.point.hold(self._capture())
+            _prove_work_ledger_answers(self.execution)
+            _advance_point(self, job, commit)
             _announce_start(self, job, success=True)
         except Exception as exc:
             _announce_start(self, job, success=False)
@@ -1246,10 +1639,113 @@ def causes_from_logs(logs: str) -> str:
     )
 
 
+# The receipt statuses of the bus append command that mean the ledger holds the row. A
+# ``spooled`` receipt (the durable bus was down, the row waits in the local outbox) is not one.
+_LEDGER_ACCEPTED: Final = frozenset({"accepted", "duplicate", "already-present"})
+
+# One shell, so the environment the launcher gave the agent (the bus append command with its own
+# quoting, and the host name) is read by the shell and never by this handler. The row, the lane
+# and the request id arrive as positional parameters, never inside the script text.
+_APPEND_STATUS_SCRIPT: Final = (
+    'eval "append=(${ONEX_LEDGER_BUS_APPEND_COMMAND:?})"; '
+    'printf "%s\\n" "$1" | "${append[@]}" --lane "$2" --host "${ONEX_LEDGER_HOST_NAME:?}" '
+    '--request-id "$3" --rows-file -'
+)
+
+
+def _append_status_over_bus(
+    execution: ModuleType, row: str, *, lane: str, request_id: str
+) -> bool:
+    """Append one STATUS row through the bus append command (OMN-26507).
+
+    The row goes on the stdin of the command the launcher exports, with ``--lane``, ``--host``,
+    ``--request-id`` and ``--rows-file -``; no ledger file path is passed or read. True only when
+    the command exited 0 and its receipt says the ledger took the row, so a spooled or refused
+    row stays pending for the next delivery.
+    """
+    try:
+        done = execution._run(
+            _without_agent_broker_declaration(
+                [
+                    "bash",
+                    "-c",
+                    _APPEND_STATUS_SCRIPT,
+                    "ledger-append",
+                    row,
+                    lane,
+                    request_id,
+                ]
+            ),
+            timeout=REPORT_SECONDS,
+        )
+    except (OSError, execution.subprocess.SubprocessError):
+        logger.warning("Dev boot STATUS delivery still pending: append command failed")
+        return False
+    if done.returncode != 0:
+        answer = done.stderr.strip().splitlines()[-1:]
+        logger.warning(
+            "Dev boot STATUS delivery still pending: append command refused: %s",
+            _safe(answer[0]) if answer else f"exit {done.returncode}, no stderr",
+        )
+        return False
+    try:
+        receipt = json.loads(done.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return False
+    return isinstance(receipt, dict) and receipt.get("status") in _LEDGER_ACCEPTED
+
+
+class BackgroundPass:
+    """Runs one pass at a time on its own daemon thread; a start while one runs starts none."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+
+    def start(self, work: Callable[..., None], *args: object) -> bool:
+        """Start ``work`` on the pass thread and return at once; False when a pass is running."""
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return False
+            self._thread = threading.Thread(
+                target=self._run, args=(work, args), name=self._name, daemon=True
+            )
+            self._thread.start()
+            return True
+
+    def join(self, timeout: float | None = None) -> None:
+        with self._lock:
+            thread = self._thread
+        if thread is not None:
+            thread.join(timeout)
+
+    def _run(self, work: Callable[..., None], args: tuple[object, ...]) -> None:
+        try:
+            work(*args)
+        except (OSError, ValueError, RuntimeError):
+            logger.exception("Dev boot failure reports remain pending")
+
+
+def _incident_age_seconds(at: object, now: datetime) -> float | None:
+    """Seconds since the incident's own stamp, None when the stamp cannot be read."""
+    try:
+        stamped = datetime.strptime(str(at), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+    return (now - stamped).total_seconds()
+
+
 def deliver_reports(
     root: Path, *, execution: ModuleType, config: ModelDevBootReportConfig
 ) -> None:
-    """Retry durable STATUS and exception deliveries independently of the bus."""
+    """Retry durable STATUS and exception deliveries independently of the bus.
+
+    One pass is bounded (OMN-26316): it starts no new incident once ``config.pass_seconds``
+    have passed, oldest first, so a backlog of refused incidents costs one bound per pass and
+    never an unbounded run. An incident older than ``config.abandon_after_seconds`` moves to
+    the delivered-abandoned state with one log line and is not retried again.
+    """
     if config.plugin_dir is None:
         logger.warning(
             "Dev boot reports pending: configure DEPLOY_AGENT_REPORT_PLUGIN_DIR"
@@ -1257,12 +1753,38 @@ def deliver_reports(
         return
     plugin = config.plugin_dir
     interpreter = str(config.registry_root / ".onex-dispatch-venv" / "bin" / "python")
-    for path in root.glob("incident-*.json"):
+    deadline = execution._dev_boot_clock() + config.pass_seconds
+    stamp = execution._dev_boot_timestamp()
+    now = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    paths = sorted(root.glob("incident-*.json"))
+    for index, path in enumerate(paths):
         incident = (
             RootModel[dict[str, JsonValue]]
             .model_validate_json(execution._read_private_text(path))
             .root
         )
+        if not (incident["ledger_pending"] or incident["exception_pending"]):
+            continue
+        age = _incident_age_seconds(incident["at"], now)
+        if age is None or age > config.abandon_after_seconds:
+            incident["ledger_pending"] = False
+            incident["exception_pending"] = False
+            incident["delivered_abandoned_at"] = stamp
+            execution._atomic_write_private_json(path, incident)
+            logger.warning(
+                "Dev boot incident %s delivered-abandoned: stamp %s older than the bound of %d seconds",
+                incident["job"],
+                incident["at"],
+                int(config.abandon_after_seconds),
+            )
+            continue
+        if execution._dev_boot_clock() >= deadline:
+            logger.warning(
+                "Dev boot report pass bound of %d seconds reached: %d incident files left for the next pass",
+                int(config.pass_seconds),
+                len(paths) - index,
+            )
+            return
         evidence = (
             f"commit={incident['commit']} job={incident['job']} error={incident['error']} "
             f"restored_revision={incident['restored_revision']} recovery_verified={incident['recovery_verified']}"
@@ -1272,17 +1794,16 @@ def deliver_reports(
         request_id = uuid5(
             NAMESPACE_URL, f"deploy-boot:{incident['project']}:{incident['job']}"
         )
+        # The row is stamped with the delivery time, never the incident's: the ledger refuses a
+        # row stamped more than a day behind its own clock, so a retried row carrying the
+        # incident's stamp could never land once the incident was a day old (OMN-26316). The
+        # incident's own time rides in the evidence cell.
         status_row = (
-            f"{incident['at']} | STATUS | lane=deploy-agent-{incident['project']} "
-            f"| actor=script:deploy-agent | model=none | req={request_id} | {evidence}"
+            f"{stamp} | STATUS | lane=deploy-agent-{incident['project']} "
+            f"| actor=script:deploy-agent | model=none | req={request_id} "
+            f"| incident_at={incident['at']} {evidence}"
         )
         commands = {
-            "ledger_pending": [
-                interpreter,
-                str(plugin / "scripts" / "onex_ledger.py"),
-                "--append",
-                status_row,
-            ],
             "exception_pending": [
                 interpreter,
                 str(plugin / "skills" / "queue-status" / "scripts" / "queue_status.py"),
@@ -1305,23 +1826,26 @@ def deliver_reports(
                 "--no-dispatch",
             ],
         }
-        for pending, argv in commands.items():
-            if not incident[pending]:
-                continue
-            if pending == "ledger_pending" and not config.ledger_via_bus:
+        if incident["ledger_pending"]:
+            if not config.ledger_via_bus:
                 logger.warning(
                     "Dev boot STATUS pending: declare ONEX_LEDGER_WRITE_VIA=bus"
                 )
+            elif _append_status_over_bus(
+                execution,
+                status_row,
+                lane=f"deploy-agent-{incident['project']}",
+                request_id=str(request_id),
+            ):
+                incident["ledger_pending"] = False
+                execution._atomic_write_private_json(path, incident)
+        for pending, argv in commands.items():
+            if not incident[pending]:
                 continue
             try:
                 result = execution._run(argv, timeout=REPORT_SECONDS)
-                # A ledger relay being queued is NOT an acknowledgement from
-                # the ledger. Keep the source incident until it is accepted.
                 acknowledged = result.returncode == 0 and bool(
-                    re.search(r"(?m)^OK\b", result.stdout)
-                    and "queued" not in result.stdout.lower()
-                    if pending == "ledger_pending"
-                    else re.search(
+                    re.search(
                         r"(?m)^EXCEPTION-QUEUE (appended|repeat)\b", result.stdout
                     )
                 )
@@ -1385,6 +1909,48 @@ def _announce(
         call(events)
     except Exception:
         logger.exception("dev roll event failed friction_type=dev_event_publish_failed")
+
+
+def _advance_point(guard: HandlerDevBootGuard, job: str, commit: str) -> None:
+    """Record the verified family as the recovery point, or keep the one held.
+
+    A roll that reached this call was replaced, verified and Docker healthy. A
+    compose config hash that no longer matches (the clone moved after ``up``, see
+    :class:`DevBootSettingsDriftError`) says the family cannot be re-rendered
+    exactly, not that the deploy failed: rolling a verified family back to the
+    previous image recreates the runtime a second time and leaves dev one image
+    behind on every such job. The previous recovery point stays held and the drift
+    is written beside the incidents for the next reader.
+    """
+    try:
+        guard.point.hold(guard._capture())
+    except DevBootSettingsDriftError as drift:
+        logger.warning(
+            "Dev recovery point not advanced job=%s commit=%s service=%s "
+            "container_hash=%s rendered_hash=%s",
+            job,
+            commit,
+            drift.service,
+            drift.container_hash,
+            drift.rendered_hash,
+        )
+        record: dict[str, JsonValue] = {
+            "job": job,
+            "commit": commit,
+            "service": drift.service,
+            "container_config_hash": drift.container_hash,
+            "rendered_config_hash": drift.rendered_hash,
+            "kept_recovery_revision": (
+                guard.point.current.revision if guard.point.current else ""
+            ),
+            "at": guard.execution._dev_boot_timestamp(),
+        }
+        try:
+            guard.execution._atomic_write_private_json(
+                guard.root / f"settings-drift-{job}.json", record
+            )
+        except OSError:
+            logger.warning("Cannot record dev settings drift", exc_info=True)
 
 
 def _announce_start(guard: HandlerDevBootGuard, job: str, *, success: bool) -> None:

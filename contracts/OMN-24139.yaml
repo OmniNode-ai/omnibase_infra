@@ -1,0 +1,67 @@
+schema_version: 1.0.0
+ticket_id: OMN-24139
+title: The runner image carries the onex ledger query client so the freeze check can read the live ledger on a build runner
+summary: The runner image installs the published omnibase-infra release that carries `onex ledger query` at an exact version into its own environment and puts a shim named onex on the PATH. For `onex ledger query` the shim loads the mounted read-only ledger login file (ci-ledger-read.env) as data, hands it to that one command, never prints a value, and refuses with exit 2 when the file is absent. The image version moves to 15 so the pool roll installs it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn24139-runner-ledger-reader
+    statement: A build runner carries the onex ledger query client and the mounted read-only ledger credential reaches only that command.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: integrated: a ci run on the draft pull request shows the freeze step reading the live ledger source in the running build runner -- falsifier: the step log shows no live-ledger read, or shows a pass with an unreadable ledger'
+  - id: req-omn24139-roll-registry-snapshot
+    statement: The runner image roll runs from a lab host whose GitHub shim refuses raw registry reads, by reading the org runner registry from a declared snapshot file, and refuses a stale or unreadable snapshot.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: with a snapshot file supplied, the roll reads the org runner registry from it and never calls gh, and the same test fails on the old handler -- falsifier: uv run --frozen pytest tests/unit/handlers/test_handler_runner_image_roll_registry_snapshot_omn24139.py -q -k "snapshot_and_gh_is_never_called or proves_registry_access"'
+      - id: AC6
+        statement: 'AC6: a stale, missing, symlinked or undecodable snapshot refuses the roll and never passes -- falsifier: uv run --frozen pytest tests/unit/handlers/test_handler_runner_image_roll_registry_snapshot_omn24139.py -q -k "unreadable_or_fail_closed or age_limit"'
+      - id: AC7
+        statement: 'AC7: deploy-runners.sh --rolling with RUNNER_REGISTRY_SNAPSHOT=<file> carries the file to the roll node and makes no registry call -- falsifier: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -q -k registry_snapshot'
+evidence_requirements:
+  - kind: tests
+    description: The runner image tests for the ledger client, its shim and the image identity.
+    command: uv run pytest tests/ci/test_runner_image_onex_ledger_reader_omn24139.py tests/ci/test_runner_image_identity.py -q -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn24139-image-client-and-shim
+    description: 'The Dockerfile pins the published client and installs the shim as onex; the shim refuses with exit 2 on an absent, half-filled or empty credential file, reads the file as data, never prints a value, and passes every other command through; the lock is at image version 15 with a verified identity.'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_onex_ledger_reader_omn24139.py tests/ci/test_runner_image_identity.py -q -p no:randomly
+        cwd: .
+  - id: dod-omn24139-lab-image-proof
+    description: 'Run on a lab host after the pool roll: the running h053 runner image reports the client on the PATH. It carries no hosted AC binding because it reads a lab host.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec hp053-ci-runner-1 onex --version
+        cwd: .
+  - id: dod-omn24139-roll-registry-snapshot
+    description: 'The roll reads the registry from the declared snapshot under a refusing gh, refuses a stale or unreadable snapshot, takes the online readback from the new container listener line, and the installer flag reaches the node.'
+    source: manual
+    binds_ac:
+      - AC5
+      - AC6
+      - AC7
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_runner_image_roll_registry_snapshot_omn24139.py tests/unit/scripts/test_deploy_runners_secondary_rolling.py -q -p no:randomly
+        cwd: .
+  - id: dod-omn24139-roll-registry-integration-proof
+    description: 'The real handler reads the registry from a snapshot file while a real refusing gh executable is on PATH, and records no gh call. It carries no hosted AC binding because the hosted check cannot run a local_done_gate item; AC5 is bound by the unit item.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/handlers/test_runner_image_roll_registry_snapshot_omn24139.py -q -p no:randomly
+        cwd: .

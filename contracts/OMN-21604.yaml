@@ -89,3 +89,34 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_dogfood_fault_budget_dispatch_omn21604.py -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
+  - id: dod-omn21604-ac3-accepted-20261119t0945z
+    description: >-
+      AC3: no 240 literal in the six delegate-path modules, no default budget constants, and the dispatch port refuses at load a class whose ceiling plus margin passes the dispatch deadline. Fails with the product change of omnibase_infra#5638 reverted (three cases).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_delegate_path_fixed_budget_omn21604.py tests/unit/runtime/test_delegation_budget_deadline_check_omn21604.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21604-ac2-accepted-20261119t1345z
+    description: >-
+      AC2: the receipt budget block carries the limit (budget_evidence) and budget_source names the overlay path when the terminal names an overlay, the contract entry on a contract refusal, and no budget_source when the terminal names none. With the product change of omnibase_infra#5470 reverted, the overlay and contract cases fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest "tests/unit/cli/test_delegate_terminal_budget_contract.py::test_receipt_block_names_the_overlay_the_limit_came_from" "tests/unit/cli/test_delegate_terminal_budget_contract.py::test_receipt_block_names_the_contract_on_a_refusal" "tests/unit/cli/test_delegate_terminal_budget_contract.py::test_receipt_block_invents_no_source_for_a_terminal_without_one" -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+context:
+  ac_binding_provenance:
+    dod-omn21604-ac3-accepted-20261119t0945z:
+      - label: AC3
+        criterion_hash: 52280e7ae8946bb8120239f99adbc38edc7d76c173be30b60a3ea35c64b63195
+        proposed_by: lane=dod-closeout-bind-2026-11-19T0945Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-19T0945Z-c1
+    dod-omn21604-ac2-accepted-20261119t1345z:
+      - label: AC2
+        criterion_hash: 316242841106ce5b98c4974887afc80540fd91624258f6a2f97417aaf245e274
+        proposed_by: lane=dod-closeout-bind-2026-11-19T1345Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-19T1345Z-c1
+        accepted_at: '2026-11-19T14:14:26Z'

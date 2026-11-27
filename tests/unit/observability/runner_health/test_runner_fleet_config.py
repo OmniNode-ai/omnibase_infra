@@ -47,9 +47,12 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     # its CI runners off first) cut the primary host's share 10 -> 0 once the
     # 16 runners of the second amd64 host and the 5 `hp053-ci-runner` carried its labels, so
     # the declared total is 16 + 5 = 21.
+    # OMN-25674 declares the 16 runners h051 takes over from the second amd64 host before its
+    # 16 are drained (make before break), so it is 16 + 16 + 5 = 37 until the
+    # pool there is removed, and 21 again after.
     assert config.expected_count == 0
     assert config.burst_count == 0
-    assert config.declared_total("action") == 21
+    assert config.declared_total("action") == 37
 
 
 def test_runner_compose_matches_configured_count() -> None:
@@ -102,8 +105,13 @@ def test_primary_host_declares_only_its_host_specific_runners() -> None:
     action_hosts = {
         host.host for host in config.hosts if host.declared_count("action") > 0
     }
-    assert len(action_hosts) == 2
-    assert "h053" in action_hosts
+    # OMN-25674: h051 declares the pool that takes over the second amd64 host's capacity.
+    second_host = next(
+        host
+        for host in config.hosts
+        if host.host not in {"h051", "h053"} and host.declared_count("action") > 0
+    )
+    assert action_hosts == {"h051", "h053", second_host.host}
     assert config.runner_host not in action_hosts
 
 
@@ -310,12 +318,9 @@ def test_runner_fleet_config_git_mirror_is_recorded() -> None:
 
 def test_runner_fleet_config_git_mirror_covers_every_ci_repo() -> None:
     """OMN-16056: the C2 git mirror's original 5-repo set (OMN-16053) left
-    omniweb, omnimemory, omnibase_compat, and knowledge-base doing full remote
-    fetches -- exposed to the same GnuTLS/early-EOF checkout-failure class the
-    mirror exists to remove (one of the 21 pre-mirror OMN-16030 failures was
-    exactly a sibling fetch of one of these: omnimarket's `Clone
-    omnibase_compat` step). This asserts the fix's full coverage, not just
-    membership of one repo.
+    several CI repositories doing full remote fetches. Sibling checkouts
+    saw the same GnuTLS and early-EOF failures as primary checkouts
+    (OMN-16030). This test checks the full mirror set.
 
     OMN-20597: knowledge-base-internal was the largest gap of all. Over
     2026-10-04T18:09Z..10-05T11:05Z its unmirrored depth-1 checkout spent
@@ -680,3 +685,21 @@ def test_deploy_ships_healthcheck_script_to_host() -> None:
     assert '"docker/runners/healthcheck.sh"' in deploy_script
     # And in the real rsync invocation that ships into docker/runners/.
     assert '"${REPO_ROOT}/docker/runners/healthcheck.sh" \\' in deploy_script
+
+
+def test_job_dir_host_root_is_an_absolute_path_or_absent() -> None:
+    """OMN-26093: a host row's job-directory root is absolute, and only h053 declares one."""
+    config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
+    declared = {
+        host.host: host.job_dir_host_root
+        for host in config.hosts
+        if host.job_dir_host_root is not None
+    }
+    assert declared == {"h053": "/mnt/h053-nvme/runners/hp053-ci-runner"}
+    document = yaml.safe_load(
+        (REPO_ROOT / "config" / "runner_fleet.yaml").read_text(encoding="utf-8")
+    )
+    row = next(h for h in document["hosts"] if h["host"] == "h053")
+    row["job_dir_host_root"] = "relative/path"
+    with pytest.raises(ValidationError):
+        type(config).model_validate(document)

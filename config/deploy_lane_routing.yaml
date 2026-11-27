@@ -101,6 +101,11 @@
 # until 18:46:52Z for the default instance's converge. The bound is when the converge starts;
 # the build after it took 41 minutes that day (18:46:52Z to 19:27:58Z).
 #
+# PROBE-DEFERRAL CAP (OMN-26703). `flags.max_probe_deferral_minutes` is how long
+# a merge may wait on the guarded C15/C16 windows. They chain, so past the cap
+# the converge starts between windows (omnimarket 8a5a95e5, merged 11:49Z on
+# 2026-11-26, waited until 13:00Z). Every other refusal still holds.
+#
 # EXCLUDED HOSTS (OMN-19507). No instance may name one and no agent may run as
 # one, even with DEPLOY_AGENT_INSTANCE set (routing.resolve_instance). The key
 # is the lowercased first hostname label, the same one the router compares.
@@ -119,6 +124,7 @@ instances:
     consumer_group: onex-deploy-agent
     flags:
       max_dev_lag_minutes: 20
+      max_probe_deferral_minutes: 45
       # OMN-21629. The lab dev lane has no cloud edge. The cloud dev broker the
       # gateway forwarder dialled has been deleted by the cloud owner, the
       # forwarder failed TLS on every deploy, the gateway-deploy phase raised
@@ -150,14 +156,16 @@ instances:
   dev-202:
     hostnames: [omnipc2]
     consumer_group: onex-deploy-agent-dev-202
-    # OMN-21402: this instance's host is out for hardware repair (operator,
-    # 2026-10-25), so none of its agents reads the control topic and the
-    # default instance skipped every omnimarket rebuild routed here. While it
-    # is out, the omnimarket route below resolves to the default instance. Set
-    # true when the host is back.
-    available: false
+    # OMN-21402: this instance's host was out for hardware repair (operator,
+    # 2026-10-25), so none of its agents read the control topic and the
+    # default instance skipped every omnimarket rebuild routed here; the
+    # omnimarket route below then resolved to the default instance. The host
+    # is back and this instance's agent has read the control topic since
+    # 2026-11-12 (OMN-24213): the instance is available again.
+    available: true
     flags:
       max_dev_lag_minutes: 20
+      max_probe_deferral_minutes: 45
     lane:
       compose_overlay: docker/docker-compose.dev-202.yml
       compose_project: omnibase-infra-dev-202
@@ -180,6 +188,39 @@ instances:
       effects_container: omninode-dev-202-runtime-effects
       postgres_container: omnibase-infra-dev-202-postgres
       broker_container: omnibase-infra-dev-202-redpanda
+  # OMN-26463: the runtime-only canary lane on h051 (hostname hp-gen8). One runtime
+  # container on its own Redpanda (its own topics and consumer groups) and its own
+  # Postgres, no dev, customer or prod credential. It boots a dev candidate alone, wakes
+  # every dormant contract once, holds the heartbeat and writes the PASS or FAIL receipt
+  # the dev roll reads when its lane flag `require_canary_receipt` is on
+  # (nodes/node_runtime_canary_effect). No route names it: a canary run is asked for by
+  # the canary node, never by a merge, so it proves no repository's merge and
+  # `proves` is empty.
+  canary-h051:
+    hostnames: [hp-gen8]
+    consumer_group: onex-deploy-agent-canary-h051
+    lane:
+      compose_overlay: docker/docker-compose.canary.yml
+      compose_project: omnibase-infra-canary
+      postgres_container: omnibase-infra-canary-postgres
+      runtime_container: omninode-canary-runtime
+      health_ports: {main: 62085, effects: 62086}
+      disabled_phases: [gateway-deploy, lab-overlay, onex-api-pin, infisical-seed]
+      disabled_services: [onex-api, cloud-migration-files, cloud-migration, keycloak, infisical]
+      receipt_lane: runtime-canary
+      proves: []
+    verify:
+      receipt_lane: runtime-canary
+      runner_labels: [self-hosted, omnibase-verify, host-h051]
+      deploy_agent_url: http://host.docker.internal:62098
+      main_url: http://host.docker.internal:62085
+      effects_url: http://host.docker.internal:62086
+      projection_url: http://host.docker.internal:62002
+      compose_project: omnibase-infra-canary
+      runtime_container: omninode-canary-runtime
+      effects_container: omninode-canary-runtime
+      postgres_container: omnibase-infra-canary-postgres
+      broker_container: omnibase-infra-canary-redpanda
 routes:
   - runtime_lane: dev
     requester_repository: omnimarket

@@ -1,0 +1,74 @@
+schema_version: 1.0.0
+ticket_id: OMN-26593
+title: The omnibase_infra lab alarm reads its projection-stale row and appends alarm rows over the bus, and its launchd installer and template hand no ledger file path
+summary: scripts/lab_alarm.py asks the work-ledger reader node (reader names lab-alarm-projection and lab-alarm-consent, listed in moved_readers of the overlays repository) for the newest canonical row and for the posting consent, appends its alarm rows through onex-ledger append-rows with the row on stdin, and takes no --ledger argument. The installer and the plist template hand no ledger path; the plist keeps the ledger-of-record variable for the append only until the ledger tool change (OMN-26592) that lets the bus append run without a path.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26593-lab-alarm-bus
+    statement: The lab alarm reads and appends the work ledger over the bus and never opens the ledger file.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: with the ledger path unset and no ledger file on disk, lab_alarm.py answers the projection-stale read from the work-ledger reader node and appends its alarm rows through onex-ledger append-rows with the row on stdin, and runs without a --ledger argument -- falsifier: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k "newest_row or ledger_appender or without_a_ledger_argument or hands_no_ledger_file or reader_command or shipped_config_declares_the_ledger_reader" -q'
+      - id: AC2
+        statement: 'AC2: a reader node that does not answer leaves lab_alarm.py raising the same alarm an unreadable ledger raises today -- falsifier: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k unanswered -q'
+      - id: AC3
+        statement: 'AC3: the census node over an omnibase_infra worktree lists none of install-lab-alarm.sh, the plist template and lab_alarm.py as a runtime hit, and the ratchet row of omnibase_infra is lowered, never raised -- falsifier: the census command over the worktree, run first on origin/dev as the positive control'
+  - id: req-omn26593-census-run-line
+    statement: A lane census run line names the collector revision the installed unit records.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: the lane census start line carries revision=<LANE_CENSUS_REVISION>, and revision=unrecorded when the unit records none -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_dry_run.py -k start_line -q, failing on the merge base'
+evidence_requirements:
+  - kind: tests
+    description: The lab alarm tests pass at the head.
+    command: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -o addopts='' -n 0 -k "not brew_interpreter"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26593-ac1-bus-read-and-append
+    description: The newest-row read, the append (row on stdin, no path in argv), the missing --ledger argument and the shipped config keys are held by tests that fail at the merge base, where the reader, the stdin appender and the config keys do not exist.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -o addopts='' -n 0 -k "newest_row or ledger_appender or without_a_ledger_argument or hands_no_ledger_file or reader_command or shipped_config_declares_the_ledger_reader"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26593-ac2-unanswered-reader
+    description: A reader that exits 3, 69, 1 or times out reads INDETERMINATE with the unreadable-ledger evidence, and an unanswered consent read disables delivery and names the refusal; neither reads a file.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -o addopts='' -n 0 -k unanswered
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26593-ac3-census
+    description: The census over the worktree holds none of the three files as a hit and the row is 21, down from 23 at the merge base; the launch agent and installer hold no ledger argument.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: env ONEX_LEDGER_CENSUS_ROOT=. uv run --no-project --with "omnimarket @ git+https://github.com/OmniNode-ai/omnimarket@dev-20261114215104-e9d7998d3843" python -I -m omnimarket.nodes.node_work_ledger_file_census_effect --packaged-overlay --register omnibase_infra --directory omnibase_infra=. --ratchet-file config/ledger_file_census_ratchet.yaml
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -o addopts='' -n 0 -k hands_no_ledger_file
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26593-ac4-census-run-line-revision
+    description: The census start line names the installed collector revision, and says unrecorded when none is installed; both tests fail at the merge base, where the start line carries no revision.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_dry_run.py -q --no-cov -o addopts='' -n 0 -k start_line
+        cwd: ${OMNI_HOME}/omnibase_infra

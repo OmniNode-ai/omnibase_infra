@@ -101,6 +101,30 @@ _STAGED_FOR_README_ONLY = [
     "tests/ci/test_release_cut_identity_omn18595.py",
 ]
 
+_ENTRY_0_47_75 = """## v0.47.75 (2026-11-18)
+
+### Release
+- Cut omnibase-core from dev at 0.47.75 by the scheduled release train.
+
+### Included Since v0.47.74
+- fix: a ticket-cited advisory annotation is not suppression growth (#2336)
+"""
+
+# The fold the omnibase_core yamlfmt hook (google/yamlfmt v0.21.0,
+# ``max_line_length: 100``) itself produces for the 0.47.75 item's command,
+# recorded from the Pre-commit Suite failure of omnibase_core#2338 at head
+# 88c986ac8332 (job 134644048365, OMN-25638).
+_FOLDED_0_47_75_CHECK = (
+    "      - check_type: command\n"
+    "        check_value: >-\n"
+    "          uv run --locked python -c 'from pathlib import Path;"
+    ' notes = Path("README.md").read_text();\n'
+    '          assert not Path("CHANGELOG.md").exists();'
+    ' assert "## v0.47.75 (2026-11-18)" in notes; assert\n'
+    '          "### Included Since v0.47.74" in notes;'
+    ' assert "(#2336)" in notes\'\n'
+)
+
 
 def _readme_only_clone(tmp_path: Path, *, exceptions: str = "[]") -> Path:
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -121,9 +145,10 @@ def _readme_only_clone(tmp_path: Path, *, exceptions: str = "[]") -> Path:
 
 @pytest.mark.unit
 class TestReleaseNotesTarget:
-    def test_a_repo_without_the_policy_file_keeps_the_changelog(
+    def test_a_repo_without_the_policy_file_keeps_the_changelog_it_still_has(
         self, tmp_path: Path
     ) -> None:
+        (tmp_path / "CHANGELOG.md").write_text("## v0.1.0 (2026-01-01)\n", "utf-8")
         assert release_notes_target(tmp_path) == "CHANGELOG.md"
 
     def test_a_repo_carrying_the_policy_file_takes_its_notes_in_the_readme(
@@ -228,6 +253,23 @@ class TestApplyReleaseNotes:
         assert "### Included Since v0.47.62" in source
         assert _SUBJECTS[0] in source
 
+    def test_the_written_contract_item_folds_the_way_the_yamlfmt_hook_does(
+        self, tmp_path: Path
+    ) -> None:
+        """The item's ``check_value: >-`` fold is the one yamlfmt wants (OMN-25638).
+
+        The Pre-commit Suite of omnibase_core#2338 (job 134644048365) refused the
+        0.47.75 cut because the writer folded the command at its ``; `` boundaries,
+        which google/yamlfmt re-folds: with ``max_line_length: 100`` and the block
+        content at indent 10, a row takes the next word while the row already built
+        is at most 90 characters. The writer must emit that fold itself, so the
+        contract it writes passes the hook with no hand fix on the release branch.
+        """
+        clone = _readme_only_clone(tmp_path)
+        apply_release_notes(clone, _ENTRY_0_47_75, repo_name="omnibase_core")
+        contract = (clone / "contracts" / "OMN-18595.yaml").read_text("utf-8")
+        assert _FOLDED_0_47_75_CHECK in contract
+
     def test_a_contract_that_does_not_end_in_dod_evidence_refuses_and_writes_nothing(
         self, tmp_path: Path
     ) -> None:
@@ -313,6 +355,8 @@ class TestApplyReleaseNotes:
         self, tmp_path: Path, readme_only: bool
     ) -> None:
         clone = _readme_only_clone(tmp_path) if readme_only else tmp_path
+        if not readme_only:
+            (clone / "CHANGELOG.md").write_text("## v0.47.62 (2026-11-02)\n", "utf-8")
         apply_release_notes(clone, _ENTRY)
         before = {p: p.read_bytes() for p in clone.rglob("*") if p.is_file()}
         with pytest.raises(ValueError, match="already has"):
@@ -390,7 +434,10 @@ class TestHandler:
         entry.write_text(_ENTRY, encoding="utf-8")
         result = await HandlerReleaseNotesApply().handle(
             ModelReleaseNotesApplyRequest(
-                clone_path=str(clone), entry_file=str(entry), repo_name="omnibase_core"
+                clone_path=str(clone),
+                entry_file=str(entry),
+                repo_name="omnibase_core",
+                repository_visibility="private",
             )
         )
         assert result.success is True
@@ -406,7 +453,9 @@ class TestHandler:
         entry.write_text(_ENTRY, encoding="utf-8")
         result = await HandlerReleaseNotesApply().handle(
             ModelReleaseNotesApplyRequest(
-                clone_path=str(tmp_path), entry_file=str(entry)
+                clone_path=str(tmp_path),
+                entry_file=str(entry),
+                repository_visibility="private",
             )
         )
         assert result.success is False
@@ -417,7 +466,9 @@ class TestHandler:
     async def test_handle_reports_a_missing_entry_file(self, tmp_path: Path) -> None:
         result = await HandlerReleaseNotesApply().handle(
             ModelReleaseNotesApplyRequest(
-                clone_path=str(tmp_path), entry_file=str(tmp_path / "absent.md")
+                clone_path=str(tmp_path),
+                entry_file=str(tmp_path / "absent.md"),
+                repository_visibility="private",
             )
         )
         assert result.success is False
@@ -442,12 +493,39 @@ class TestCutJobWiring:
 
     def test_the_cut_job_applies_notes_through_the_node(self) -> None:
         body = _WORKFLOW.read_text(encoding="utf-8")
-        assert f"onex node {_NODE_NAME}" in body
+        assert f"omnibase_core.cli.cli_commands node {_NODE_NAME}" in body
         assert 'pathlib.Path("CHANGELOG.md")' not in body, (
             "an inline CHANGELOG.md write is the second writer that ignores the "
             "repo's .readme-only-docs.yaml"
         )
         assert "staged=(CHANGELOG.md)" not in body
+
+    def test_the_cut_job_reads_the_hygiene_vocabulary_for_public_targets(self) -> None:
+        steps = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))["jobs"]["cut"][
+            "steps"
+        ]
+        by_name = {step["name"]: step for step in steps}
+        visibility = by_name["Resolve release repository visibility"]
+        token = by_name["Mint public hygiene vocabulary reader token"]
+        read = by_name["Read the public hygiene vocabulary"]
+        write = by_name["Open the release pull request"]
+
+        assert "gh api" in visibility["run"] and "--jq .visibility" in visibility["run"]
+        assert (
+            token["if"]
+            == read["if"]
+            == "steps.target-visibility.outputs.visibility == 'public'"
+        )
+        assert token["with"]["permission-contents"] == "read"
+        assert read["env"]["VOCABULARY_REPO"] == "${{ vars.OMNI_HYGIENE_VOCAB_REPO }}"
+        assert read["env"]["VOCABULARY_FILE"] == "${{ vars.OMNI_HYGIENE_VOCAB_FILE }}"
+        assert token["with"]["repositories"] == read["env"]["VOCABULARY_REPO"]
+        assert (
+            write["env"]["TARGET_VISIBILITY"]
+            == "${{ steps.target-visibility.outputs.visibility }}"
+        )
+        assert "repository_visibility: $visibility" in write["run"]
+        assert "hygiene_vocabulary_file: $vocabulary" in write["run"]
 
     def test_the_cut_job_reads_the_staged_paths_without_masking_a_bad_receipt(
         self,
@@ -455,7 +533,7 @@ class TestCutJobWiring:
         body = _WORKFLOW.read_text(encoding="utf-8")
         assert "mapfile -t staged" in body
         assert "jq -er '(.result.handler_result // .result)" in body
-        assert "select(.success == true)" in body
+        assert "select(.success == true and" in body
         assert "read -r -d '' -a staged < <(jq" not in body
         assert "release-notes-stderr.log" in body, (
             "a node that never reaches a receipt must still surface its stderr"
@@ -465,7 +543,7 @@ class TestCutJobWiring:
         self,
     ) -> None:
         body = _WORKFLOW.read_text(encoding="utf-8")
-        start = body.index(f"onex node {_NODE_NAME}")
+        start = body.index(f"omnibase_core.cli.cli_commands node {_NODE_NAME}")
         invocation = body[body.rindex("if ! ", 0, start) : start]
         assert "env -u GH_TOKEN -u GITHUB_TOKEN" in invocation
         assert '--project "${GITHUB_WORKSPACE}/_train"' in invocation

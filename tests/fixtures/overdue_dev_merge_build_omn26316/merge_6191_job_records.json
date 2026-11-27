@@ -1,0 +1,76 @@
+{
+  "source": "the deploy agent's job records under /data/omninode/deploy-agent/state/jobs-dev on omni-201 (fields id, runtime lane, accepted_at, status, command git_ref), read 2026-11-23T20:32Z; the merge time is the PR watcher's record of omnibase_infra#6191",
+  "followup_note": "OMN-26316 follow-up: requested_by and built_sha were added per job. The host was not reachable from the lane, so requested_by of the five dev jobs is not read (they carry the idle converge requester as a stand-in), and built_sha, the lineage record's resolved sha, is synthesized: the pre-merge head for the jobs accepted before 17:46:52Z, empty (unread) for b32e8022 and a post-merge descendant of the merge for 2098b18c. b32e8022 is the follow job the brief names (accepted 2026-11-23T18:00:21Z, requested_by agent/stability-follow-tag, git_ref origin/dev, image 425e6ea5); only the first 8 characters of its job id are read, and it is written with runtime_lane dev, the worst case the brief states, although the agent's own follow command sets another lane.",
+  "merge": {
+    "repository": "omnibase_infra",
+    "pr": 6191,
+    "merge_sha": "a27c0c218555c93421803e9f6dc4dd95c28b3da5",
+    "merged_at": "2026-11-23T17:46:52Z",
+    "runtime_class": "RUNTIME",
+    "descendant_shas": [
+      "dddddddddddddddddddddddddddddddddddddddd"
+    ]
+  },
+  "jobs": [
+    {
+      "job_id": "61df2c2c-512a-493f-ab76-35e0af2c3e9d",
+      "runtime_lane": "dev",
+      "accepted_at": "2026-11-23T15:53:33.934697Z",
+      "completed_at": "2026-11-23T16:06:40.593844Z",
+      "status": "success",
+      "git_ref": "origin/dev",
+      "requested_by": "agent/idle-converge",
+      "built_sha": "1111111111111111111111111111111111111111"
+    },
+    {
+      "job_id": "dd757818-3098-4eb5-b020-0156552b1308",
+      "runtime_lane": "dev",
+      "accepted_at": "2026-11-23T16:32:48.110306Z",
+      "completed_at": "2026-11-23T16:47:23.717193Z",
+      "status": "success",
+      "git_ref": "origin/dev",
+      "requested_by": "agent/idle-converge",
+      "built_sha": "1111111111111111111111111111111111111111"
+    },
+    {
+      "job_id": "f59d4cdf-04f1-456f-a592-1cb1c109956e",
+      "runtime_lane": "dev",
+      "accepted_at": "2026-11-23T17:00:00.113388Z",
+      "completed_at": "2026-11-23T17:12:55.609757Z",
+      "status": "success",
+      "git_ref": "origin/dev",
+      "requested_by": "agent/idle-converge",
+      "built_sha": "1111111111111111111111111111111111111111"
+    },
+    {
+      "job_id": "82d5fd01-0542-4b60-bd4a-192c46d849c5",
+      "runtime_lane": "dev",
+      "accepted_at": "2026-11-23T17:39:09.512919Z",
+      "completed_at": "2026-11-23T17:53:13.575177Z",
+      "status": "success",
+      "git_ref": "origin/dev",
+      "requested_by": "agent/idle-converge",
+      "built_sha": "1111111111111111111111111111111111111111"
+    },
+    {
+      "job_id": "b32e8022-0000-4000-8000-000000000000",
+      "runtime_lane": "dev",
+      "accepted_at": "2026-11-23T18:00:21Z",
+      "completed_at": "2026-11-23T18:13:00Z",
+      "status": "success",
+      "git_ref": "origin/dev",
+      "requested_by": "agent/stability-follow-tag",
+      "built_sha": ""
+    },
+    {
+      "job_id": "2098b18c-b02e-4721-97ec-43d744ab1120",
+      "runtime_lane": "dev",
+      "accepted_at": "2026-11-23T19:00:23.619848Z",
+      "completed_at": "2026-11-23T19:13:49.719399Z",
+      "status": "success",
+      "git_ref": "origin/dev",
+      "requested_by": "agent/idle-converge",
+      "built_sha": "dddddddddddddddddddddddddddddddddddddddd"
+    }
+  ]
+}

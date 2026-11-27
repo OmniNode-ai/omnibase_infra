@@ -1,0 +1,93 @@
+schema_version: 1.0.0
+ticket_id: OMN-26324
+title: The dev runtime's main profile wires only the contracts dev runs and the launch goal needs, declared in the profile or manifest, so startup stops holding the event loop to wire 810 contracts
+summary: >-
+  The dev lane attached every contract its main profile owned, because the one per-lane exclusion declaration lived in a private overlay and held no node key. contracts/services/runtime_lane_node_exclusion.contract.yaml now declares, per runtime profile, the contracts that profile leaves unattached and the contracts it needs (a profile is a registered runtime lane without its compose- prefix, the way runtime_policy.contract.yaml names its profiles). ModelRuntimeNodeSelection.from_env reads it for the lane the runtime declares (the declaration is found under ONEX_CONTRACTS_DIR, which the runtime image and the compose bind mount both carry), so the auto-wiring ownership filter, the health monitor and the raw ownership path read one list. A lane with no entry, a runtime with no contracts directory, and a directory with no declaration attach what they attached before. A declared name no discovered contract has is a discovery error, not a refusal to start. The dev entry lists only contracts that subscribe to at least one topic, whose every subscribed topic received no message in the dev broker's 7 day retention window, that declare no schedule or runtime tick, and that belong to the lab factory's own tooling; a contract with no subscription has no traffic to read and stays wired. No compose file, health gate, boot guard or wait setting changes.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26324-dev-profile-contract-set
+    statement: The dev runtime's main profile wires only the contracts dev runs, through a declared profile and never a contract list in code.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the contracts dev actually runs (traffic or a schedule on dev in the last 7 days) are listed in the PR body under a section headed Measured dev contract set with the before and after counts and a UTC read time"
+      - id: AC2
+        statement: "AC2: dev's main profile wires only that set through the declared profile mechanism, as a data change and never a hard-coded contract list in code"
+      - id: AC3
+        statement: "AC3: a contract dev needs that the trim drops fails a test and not dev"
+      - id: AC4
+        statement: "AC4: the startup time on a lab host under cpus=1 is measured before and after the trim and stated in the PR body under a section headed Measured startup"
+      - id: AC5
+        statement: "AC5: the health gate, the boot guard, the compose wait and the compose start period are unchanged by the PR and no hand restart of the dev runtime is made"
+evidence_requirements:
+  - kind: tests
+    description: The dev profile's declaration, filter and required-contract tests.
+    command: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q --no-cov -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26324-ac1-measured-dev-contract-set
+    description: >-
+      The declaration records the measurement its exclusion rests on (the dev broker read of 1098 distinct subscribed topics over the 7 day retention window), and every name it excludes equals a contract name the ownership filter discovers: the filter run over the declared names reports them as excluded with no stale-name discovery error. The before and after counts and the UTC read time are in the PR body under Measured dev contract set.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: grep -c "1098 distinct topics read" contracts/services/runtime_lane_node_exclusion.contract.yaml
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q --no-cov -n 0 -p no:cacheprovider -k "leaves_declared_contracts_unattached or stale_declared_name"
+        cwd: .
+  - id: dod-omn26324-ac2-declared-profile
+    description: >-
+      The dev lane's exclusion is read from the declaration: with it the filter leaves every declared contract unattached, with the pre-change reader the same tests fail. Every other lane, a runtime with no contracts directory, a directory with no declaration and a lane with no entry keep today's behaviour, the environment's own exclusion composes with the declared one and keeps its refusal of an unknown name, and no file under src spells a list of the declared names.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q --no-cov -n 0 -p no:cacheprovider -k dev_profile_contract_set
+        cwd: .
+  - id: dod-omn26324-ac3-required-contracts-wired
+    description: >-
+      The contracts dev needs are read from data (the declaration's required list plus dev main's boot priority list in runtime_policy.contract.yaml) and each is still wired for the dev lane. The control test adds one required contract to a copy of the declaration's exclusion and the check reports exactly that contract as dropped, so the trim fails a test and not dev.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q --no-cov -n 0 -p no:cacheprovider -k dev_required_contracts_wired
+        cwd: .
+  - id: dod-omn26324-ac4-measured-startup
+    description: >-
+      The wiring step is measured on a lab host under taskset -c 0 before and after the declaration and stated in the PR body under Measured startup with the host, cpus=1 and the UTC read time. The structural half is tested: the declared contracts leave the owned set, so fewer contracts reach wire_from_manifest.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q --no-cov -n 0 -p no:cacheprovider -k leaves_declared_contracts_unattached
+        cwd: .
+  - id: dod-omn26324-ac5-no-health-gate-or-compose-change
+    description: >-
+      The diff holds no compose file, no health gate, boot guard or wait setting: the declaration is data under contracts/services and the focused tests read it without touching one. The git diff origin/dev --stat on the branch lists no docker file, no runtime_policy.contract.yaml and no model_runtime_boot_policy.py.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py -q --no-cov -n 0 -p no:cacheprovider -k dev_profile_contract_set
+        cwd: .
+  - id: dod-omn26324-deploy-source-readback
+    description: >-
+      Hosted-runner source-artifact readback: fetch the declaration and the selection model at the evaluated published commit and confirm the declaration names the dev profile and the model reads the declared exclusion. A missing line fails the command, so it fails at the merge base. No lab service or credentials are required. This checks the published source and does not assert a live runtime rollout.
+    source: manual
+    binds_ac: [AC2, AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/contracts/services/runtime_lane_node_exclusion.contract.yaml" | grep -c '^  dev:$' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/models/runtime/model_runtime_node_selection.py" | grep -c 'declared_lane_node_exclusion' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra

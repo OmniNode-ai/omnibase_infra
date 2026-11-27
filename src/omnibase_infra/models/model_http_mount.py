@@ -22,6 +22,7 @@ class ModelHttpMount(BaseModel):
         http_mount:
           factory: "package.module:create_app"
           path_prefix: "/api/v1"
+          max_body_bytes: 1048576
 
     The runtime calls ``factory`` with no arguments, expects an ASGI3 application
     back, runs its lifespan, and serves every request whose path is
@@ -48,6 +49,12 @@ class ModelHttpMount(BaseModel):
             "Absolute URL path prefix served by the mounted application. Starts "
             "with '/', is never the root, and has no trailing slash."
         ),
+    )
+    max_body_bytes: int | None = Field(
+        default=None,
+        ge=0,
+        strict=True,
+        description="Maximum request body bytes delivered to the app, if declared.",
     )
 
     @field_validator("factory")

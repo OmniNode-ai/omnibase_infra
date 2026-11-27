@@ -4,15 +4,10 @@
 
 WHY THIS EXISTS
 ---------------
-OMN-19522 gave the second dev instance (``dev-202``) its own composition as a
-Python literal in ``executor.DEV_INSTANCE_LANE_CONFIGS``. The operator's
-2026-09-25 ruling puts a deploy slot on every lab host (omni_home ledger RULING
-2026-09-25T10:22:22Z, "well for parllelism anyway"), so a literal per host is a
-Python edit per host. This module reads the composition from the same table
-that already names the instances, ``config/deploy_lane_routing.yaml``: an
-instance other than the default carries a ``lane:`` block, and the executor
-builds its ``ModelLaneConfig`` from that block. A new instance is a table row
-and an overlay file, never a code change.
+A deploy slot per lab host must not mean a Python literal per host. The
+composition of each non-default instance is read from the table that already
+names the instances, ``config/deploy_lane_routing.yaml``, in a ``lane:`` block;
+a new instance is a table row and an overlay file, never a code change.
 
 WHAT A ``lane:`` BLOCK SAYS
 ---------------------------
@@ -25,10 +20,9 @@ Everything that identified dev-202 in the literal, and nothing else:
 * ``postgres_container`` and ``runtime_container`` -- its renamed containers.
 * ``health_ports`` -- ``main`` and ``effects``, the host ports its overlay
   publishes the two runtime services on. The health targets keep the SERVICE
-  names, as on the .201 dev lane (the verify recreate looks them up by label).
-* ``disabled_phases`` -- the .201-only phases it never runs. Disabling
-  ``gateway-deploy`` also disables the gateway project's services, which have
-  no lane on a host without that phase.
+  names, as on the primary dev lane.
+* ``disabled_phases`` -- the primary-lane-only phases it never runs; disabling
+  ``gateway-deploy`` also disables the gateway project's services.
 * ``disabled_services`` -- the services its overlay disables by profile.
 * ``receipt_lane`` and ``proves`` -- the lab-pass receipt name it emits and the
   repositories whose merges that receipt may prove. The executor does not read
@@ -58,7 +52,7 @@ import tarfile
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Final, NoReturn
+from typing import Any, Final, NoReturn
 
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -98,18 +92,24 @@ class ModelInstanceLane(BaseModel):
     proves: tuple[str, ...]
 
 
-def parse_instance_lanes(text: str) -> dict[str, ModelInstanceLane]:
-    """Every non-default instance's block, keyed by instance name.
-
-    Refuses when a non-default instance has no block, when the default
-    instance has one, or when a block does not validate.
-    """
+def _routing_instances(text: str) -> dict[str, Any]:
+    """The routing table's parsed document, which declares an ``instances`` map."""
     try:
         raw = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise RoutingTableError(f"routing table is not YAML: {exc}") from exc
     if not isinstance(raw, dict) or not isinstance(raw.get("instances"), dict):
         raise RoutingTableError("routing table declares no instances")
+    return raw
+
+
+def parse_instance_lanes(text: str) -> dict[str, ModelInstanceLane]:
+    """Every non-default instance's block, keyed by instance name.
+
+    Refuses when a non-default instance has no block, when the default
+    instance has one, or when a block does not validate.
+    """
+    raw = _routing_instances(text)
     default = str(raw.get("default_instance") or "").strip()
     lanes: dict[str, ModelInstanceLane] = {}
     for name, spec in raw["instances"].items():
@@ -141,38 +141,34 @@ def parse_instance_lanes(text: str) -> dict[str, ModelInstanceLane]:
     return lanes
 
 
-def load_instance_lanes(repo_root: str | Path) -> dict[str, ModelInstanceLane]:
-    """The blocks in ``repo_root``'s committed table."""
+def _read_routing_table(repo_root: str | Path) -> str:
+    """The text of ``repo_root``'s committed routing table."""
     path = Path(repo_root) / ROUTING_TABLE_RELPATH
     try:
-        text = path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8")
     except OSError as exc:
         raise RoutingTableError(f"routing table unreadable at {path}: {exc}") from exc
-    return parse_instance_lanes(text)
+
+
+def load_instance_lanes(repo_root: str | Path) -> dict[str, ModelInstanceLane]:
+    """The blocks in ``repo_root``'s committed table."""
+    return parse_instance_lanes(_read_routing_table(repo_root))
 
 
 # ---------------------------------------------------------------------------
 # A lane's env fragment from the private deployment overlay (OMN-20867)
 # ---------------------------------------------------------------------------
 #
-# Per-lane runtime settings that must differ between lanes (today: whether the
-# lane's landing orchestrator and CI-red triage act on GitHub) are deployment
-# configuration, so they live in the private deployment overlay repository, not
-# here (ledger RULING 2026-10-10T21:57:38Z). The deploy agent's compose env and
-# the dev lane's warm refresh both overlay the operator env store with the
-# fragment for their own lane, read from the host's overlay clone at
-# ``origin/dev`` -- the same clone and ref the lab-overlay apply archives.
-#
-# This module names the keys a fragment may set and nothing else: no lane id,
-# host or value of any lane is written here. A fragment is a JSON document at
-# ``<LANE_ENV_FRAGMENT_DIR>/<lane_id><LANE_ENV_FRAGMENT_SUFFIX>``; the lane id is
-# the instance's ``verify.receipt_lane`` in the routing table, the name the
-# overlay already uses for the lane.
-#
-# No clone, or no fragment at the ref, changes nothing. A fragment that sets a
-# key outside its schema's allowlist, an empty value, or anything malformed is
-# refused, naming the problem: a value nobody can see the source of is the
-# failure this exists to prevent.
+# Per-lane runtime settings are deployment configuration, so they live in the
+# private deployment overlay repository, not here (ledger RULING
+# 2026-10-10T21:57:38Z). The deploy agent's compose env and the dev lane's warm
+# refresh overlay the operator env store with the fragment for their own lane,
+# read from the host's overlay clone at ``origin/dev``. This module names the
+# keys a fragment may set and nothing else. A fragment is a JSON document at
+# ``<LANE_ENV_FRAGMENT_DIR>/<lane_id><LANE_ENV_FRAGMENT_SUFFIX>``, the lane id
+# being the instance's ``verify.receipt_lane``. No clone, or no fragment at the
+# ref, changes nothing; a key outside the allowlist, an empty value or anything
+# malformed is refused, naming the problem.
 
 #: The overlay clone's ref the fragment is read at, never its working tree.
 LANE_ENV_FRAGMENT_REF: Final = "origin/dev"
@@ -180,11 +176,14 @@ LANE_ENV_FRAGMENT_REF: Final = "origin/dev"
 LANE_ENV_FRAGMENT_DIR: Final = "deploy-overlays/runtime-lane-env/local"
 LANE_ENV_FRAGMENT_SUFFIX: Final = ".runtime.env.json"
 #: Each schema version and the only keys a fragment of that version may set.
-#: ``runtime_lane_env.v1``: omnimarket's landing orchestrator and CI-red triage
-#: act switches, read through contract ``${env.VAR:default}`` references whose
-#: inline default is the shipped behaviour; and the lane class the runtime is an
-#: instance of with the class contracts it takes, read by the auto-wiring
-#: ownership filter.
+#: ``runtime_lane_env.v1``: omnimarket's landing and CI-red triage act switches
+#: (contract ``${env.VAR:default}`` references, the inline default being the
+#: shipped behaviour); the lane class an instance takes contracts from and the
+#: nodes a lane turns off (OMN-26232), both read by the auto-wiring ownership
+#: filter; and the five provenance variables the Kafka envelope publish seam
+#: stamps from (OMN-23981; the compose anchor states the rule). Literals, not
+#: read from ``omnibase_infra``, which the agent's env need not carry; tests pin
+#: them to the models that read them.
 LANE_ENV_FRAGMENT_SCHEMA_KEYS: Final[dict[str, frozenset[str]]] = {
     "runtime_lane_env.v1": frozenset(
         {
@@ -196,6 +195,12 @@ LANE_ENV_FRAGMENT_SCHEMA_KEYS: Final[dict[str, frozenset[str]]] = {
             "ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD",
             "ONEX_RUNTIME_LANE_CLASS",
             "ONEX_RUNTIME_LANE_CLASS_CONTRACTS",
+            "ONEX_RUNTIME_NODE_EXCLUSION",
+            "ONEX_PROVENANCE_LANE",
+            "ONEX_PROVENANCE_LANE_KIND",
+            "ONEX_PROVENANCE_HOST",
+            "ONEX_PROVENANCE_INSTALL_SOURCE",
+            "ONEX_PROVENANCE_REVISION",
             "COST_ESTIMATOR_WEB_SOURCE_REPOSITORY",
             "COST_ESTIMATOR_WEB_SOURCE_URL",
             "ESTIMATOR_GATE_OPEN_SOURCES",
@@ -222,12 +227,7 @@ class ModelLaneEnvFragment(BaseModel):
 
 def instance_runtime_lanes_from_text(text: str) -> dict[str, str]:
     """Each instance's runtime lane id: its ``verify.receipt_lane``."""
-    try:
-        raw = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        raise RoutingTableError(f"routing table is not YAML: {exc}") from exc
-    if not isinstance(raw, dict) or not isinstance(raw.get("instances"), dict):
-        raise RoutingTableError("routing table declares no instances")
+    raw = _routing_instances(text)
     lanes: dict[str, str] = {}
     for name, spec in raw["instances"].items():
         verify = spec.get("verify") if isinstance(spec, dict) else None
@@ -247,12 +247,7 @@ def instance_runtime_lanes_from_text(text: str) -> dict[str, str]:
 
 def load_instance_runtime_lanes(repo_root: str | Path) -> dict[str, str]:
     """The runtime lane ids in ``repo_root``'s committed table."""
-    path = Path(repo_root) / ROUTING_TABLE_RELPATH
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise RoutingTableError(f"routing table unreadable at {path}: {exc}") from exc
-    return instance_runtime_lanes_from_text(text)
+    return instance_runtime_lanes_from_text(_read_routing_table(repo_root))
 
 
 def parse_lane_env_fragment(text: str, *, lane_id: str, source: str) -> dict[str, str]:
@@ -284,13 +279,21 @@ def parse_lane_env_fragment(text: str, *, lane_id: str, source: str) -> dict[str
             f"it may set only {', '.join(sorted(allowed))}"
         )
     for key, value in fragment.env.items():
-        if not value.strip():
+        if (
+            not value.strip() and key != "ONEX_RUNTIME_NODE_EXCLUSION"
+        ):  # blank excludes nothing
             raise LaneEnvFragmentError(
                 f"{source}: {key} is empty; leave a key out to keep its default, "
                 "an empty value is refused where it is read"
             )
         if "\n" in value or "\r" in value or "\0" in value:
             raise LaneEnvFragmentError(f"{source}: {key} spans more than one line")
+    if exclusion := fragment.env.get("ONEX_RUNTIME_NODE_EXCLUSION"):
+        from deploy_agent.executor import load_dev_boot_guard
+
+        guard = load_dev_boot_guard("models.runtime.model_node_exclusion_lane_env")
+        if refusal := guard.node_exclusion_refusal(exclusion, os.environ, __file__):
+            raise LaneEnvFragmentError(f"{source}: {refusal}")
     return dict(fragment.env)
 
 
@@ -375,8 +378,7 @@ def default_instance_lane_env_exports(repo_root: str | Path, search_root: Path) 
     does, and a refresh never undoes what the agent applied. The overlay clone
     is the one under ``search_root`` that carries fragments.
     """
-    path = Path(repo_root) / ROUTING_TABLE_RELPATH
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw = _routing_instances(_read_routing_table(repo_root))
     default = str(raw.get("default_instance") or "").strip()
     lanes = load_instance_runtime_lanes(repo_root)
     if default not in lanes:
@@ -393,24 +395,19 @@ def default_instance_lane_env_exports(repo_root: str | Path, search_root: Path) 
 #
 # The runtime's bus takes one bootstrap address for its life, so topics that
 # live on another broker reach a lane through a mirror: ``onex-gateway-forwarder``
-# (node_bus_forwarder_effect, mirror-only) consumes a source lane and republishes
-# a named topic set onto the lane's broker. The overlay that says which mirrors a
-# host runs -- the compose file, one ``forwarder.yaml`` per mirror and one
-# ``*.vars`` per host -- is deployment configuration and lives in the private
-# overlay repository under :data:`LANE_MIRROR_DIR`, never here.
+# (node_bus_forwarder_effect, mirror-only) republishes a named topic set onto the
+# lane's broker. Which mirrors a host runs -- the compose file, one
+# ``forwarder.yaml`` per mirror and one ``*.vars`` per host -- is deployment
+# configuration under :data:`LANE_MIRROR_DIR` in the private overlay repository.
 #
-# The deploy agent is the one process allowed to join a declared lane's
-# network, so it is the one that brings the mirrors up: after the runtime is
-# verified, on the lane's runtime image, every deploy. Which host vars applies is
-# not named anywhere here either: it is the one vars file whose
+# The deploy agent is the one process allowed to join a declared lane's network,
+# so it brings the mirrors up after the runtime is verified, on the lane's
+# runtime image, every deploy. The vars file that applies is the one whose
 # :data:`LANE_MIRROR_NETWORK_KEY` is a network the lane's runtime container is
-# attached to, read live. That is also the mirror's safety property (it joins
-# this lane's network and no other), so the selection and the property are one
-# fact.
-#
-# No overlay clone, no overlay directory at the ref, no vars file naming this
-# lane, or a vars file enabling no profile: a typed no-op. An enabled profile
-# that does not come up healthy on the runtime image: ``FAILED``, per forwarder.
+# attached to, read live: the mirror joins this lane's network and no other.
+# No overlay clone, directory, vars file naming this lane, or a vars file
+# enabling no profile: a typed no-op. An enabled profile that does not come up
+# healthy on the runtime image: ``FAILED``, per forwarder.
 
 LANE_MIRROR_DIR: Final = "deploy-overlays/lane-mirror"
 LANE_MIRROR_COMPOSE_FILE: Final = "docker-compose.lane-mirror.yml"
@@ -475,14 +472,12 @@ def _default_run(
 
 def parse_lane_mirror_vars(text: str) -> dict[str, str]:
     """``KEY=VALUE`` lines of a host vars file; comments and blanks skipped."""
-    values: dict[str, str] = {}
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, _, value = stripped.partition("=")
-        values[key.strip()] = value.strip().strip('"').strip("'")
-    return values
+    pairs = (line.strip().partition("=") for line in text.splitlines())
+    return {
+        key.strip(): value.strip().strip('"').strip("'")
+        for key, equals, value in pairs
+        if equals and not key.startswith("#")
+    }
 
 
 def lane_mirror_profile_services(compose_text: str) -> dict[str, list[tuple[str, str]]]:

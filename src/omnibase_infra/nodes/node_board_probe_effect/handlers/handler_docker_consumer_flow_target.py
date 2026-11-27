@@ -21,6 +21,7 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_collec
 )
 from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
     ConsumerFlowLane,
+    check_broker_login_file,
 )
 from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_boot_changed import (
     ConsumerFlowBootChangedError,
@@ -44,6 +45,37 @@ from omnibase_infra.nodes.node_board_probe_effect.models.typed_dict_consumer_flo
 from omnibase_infra.nodes.node_board_probe_effect.protocols.protocol_consumer_flow_target import (
     ProtocolConsumerFlowTarget,
 )
+
+
+def read_folded_profiles(repo_root: Path, compose_project: str) -> frozenset[str]:
+    """The roles the shipped policy folds into main on the lane of ``compose_project``.
+
+    A project the policy does not name, and a checkout that ships no policy
+    file, fold nothing, so every runtime container is expected there (the
+    strict reading). A policy file that exists and cannot be read raises
+    ``OSError``, which the probe grades INDETERMINATE. The shipped policy file
+    pairs ``<PREFIX>_COMPOSE_PROJECT`` with ``<PREFIX>_RUNTIME_MAIN_FOLDED_PROFILES``.
+    """
+    values: dict[str, str] = {}
+    try:
+        policy = (repo_root / "docker" / "runtime-policy.env").read_text(
+            encoding="utf-8"
+        )
+    except FileNotFoundError:
+        return frozenset()
+    for line in policy.splitlines():
+        key, sep, value = line.partition("=")
+        if sep and not key.startswith("#"):
+            values[key.strip()] = value.strip()
+    prefixes = [
+        key.removesuffix("_COMPOSE_PROJECT")
+        for key, value in values.items()
+        if key.endswith("_COMPOSE_PROJECT") and value == compose_project
+    ]
+    if len(prefixes) != 1:
+        return frozenset()
+    folded = values.get(f"{prefixes[0]}_RUNTIME_MAIN_FOLDED_PROFILES", "")
+    return frozenset(role.strip() for role in folded.split(",") if role.strip())
 
 
 class HandlerDockerConsumerFlowTarget(ProtocolConsumerFlowTarget):
@@ -91,12 +123,37 @@ class HandlerDockerConsumerFlowTarget(ProtocolConsumerFlowTarget):
     def _observe(
         self, request: ModelConsumerFlowRequest
     ) -> ModelConsumerFlowObservation:
+        try:
+            containers = ModelConsumerFlowLane.from_compose_project(
+                request.compose_project,
+                folded_profiles=read_folded_profiles(
+                    self._repo_root, request.compose_project
+                ),
+            )
+        except (OSError, ValueError) as exc:
+            return ModelConsumerFlowObservation(
+                read_ok=False, read_error=f"{type(exc).__name__}: {exc}"
+            )
+        if (
+            request.broker_principal is not None
+            and request.broker_password_env_file is not None
+        ):
+            # OMN-19812: a login that cannot be read is INDETERMINATE here, before
+            # any rpk call, so the probe never reaches the broker unauthenticated.
+            try:
+                check_broker_login_file(
+                    request.broker_principal, request.broker_password_env_file
+                )
+            except ConsumerFlowInputError as exc:
+                return ModelConsumerFlowObservation(
+                    read_ok=False, read_error=f"{type(exc).__name__}: {exc}"
+                )
         lane = ConsumerFlowLane(
             docker=request.docker_bin,
             base_url=request.base_url,
-            containers=ModelConsumerFlowLane.from_compose_project(
-                request.compose_project
-            ),
+            containers=containers,
+            broker_principal=request.broker_principal,
+            broker_password_env_file=request.broker_password_env_file,
             runner=self._runner,
             urlopen=self._urlopen,
             sleep=self._sleep,

@@ -58,12 +58,13 @@
 # PASSWORD FORMAT CONTRACT (OMN-19087). Checked before any container starts
 # by scripts/preflight_password_contract.py, which names every variable that
 # breaks it. A set value outside its format is refused; the placeholder
-# form __REPLACE_WITH_...__ is refused for all five.
+# form __REPLACE_WITH_...__ is refused for all six.
 #   POSTGRES_PASSWORD is url-safe (ASCII letters, digits, '.', '_' and '-' only, [A-Za-z0-9._-])
 #   VALKEY_PASSWORD is url-safe (ASCII letters, digits, '.', '_' and '-' only, [A-Za-z0-9._-])
 #   OMNINODE_RUNTIME_PASSWORD is hex (hexadecimal digits only, [0-9a-fA-F])
 #   TENANT_PROJECTION_WRITER_PASSWORD is hex (hexadecimal digits only, [0-9a-fA-F])
 #   CHAIN_CANARY_READER_PASSWORD is hex (hexadecimal digits only, [0-9a-fA-F])
+#   GATEWAY_RUNTIME_PASSWORD is hex (hexadecimal digits only, [0-9a-fA-F])
 # `openssl rand -hex 32` satisfies every format above.
 # POSTGRES_PASSWORD is fixed once the Postgres data volume initialises: a
 # changed value fails authentication against the existing volume. Set it
@@ -242,6 +243,12 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 # HMAC-SHA256 key shared by runtime-effects and deploy-agent. Required for
 # signed rebuild commands; generate once and store in ~/.omnibase/.env.
 # DEPLOY_AGENT_HMAC_SECRET=__REPLACE_WITH_SECURE_RANDOM_SECRET__
+#
+# OMN-24565: the dev deploy agent does not read the key above. Its unit
+# (deploy-agent-dev.service) reads its own dev-only key from a second file,
+# ~/.omnibase/deploy-agent-dev-signing-key.env, one DEPLOY_AGENT_HMAC_SECRET line
+# holding the secret store's DEPLOY_AGENT_DEV_HMAC_SECRET. Never copy the shared
+# key into that file.
 
 # =============================================================================
 # Worker Runtime Service Configuration

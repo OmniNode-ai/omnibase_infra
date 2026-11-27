@@ -235,7 +235,7 @@ def test_deploy_runtime_stages_every_config_copy_source() -> None:
     config_sources = _dockerfile_config_copy_sources()
     # The Dockerfile must at minimum COPY the known runner_fleet.yaml path; a
     # regex that silently matched nothing would make this guard vacuously pass.
-    assert "config/runner_fleet.yaml" in config_sources
+    assert "config/image/runner_fleet.yaml" in config_sources
 
     directory_staged = '"${repo_root}/config/"' in deploy_script
 
@@ -713,7 +713,7 @@ def test_deploy_runtime_uses_current_lock_pin_preflight_interface() -> None:
     # every workspace-mode deploy. OMN-16390 fixes the residual. Pin the
     # absence so a future re-add has to be deliberate.
     assert '--repo "onex-change-control=' not in deploy_script
-    # OMN-14108: omnibase_compat left the clone manifest and the lock-pin
+    # OMN-14108: the retired repository left the clone manifest and the lock-pin
     # authority's package set the same way, so passing it would fail argparse.
     assert '--repo "omnibase-compat=' not in deploy_script
 

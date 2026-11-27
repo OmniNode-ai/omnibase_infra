@@ -1,0 +1,172 @@
+schema_version: 1.0.0
+ticket_id: OMN-26106
+title: deploy-agent-dev.service stays running after omnibase_infra#6080 - every recreate window ask names its requester
+summary: The deploy agent is its own installer (no separate dev installer exists). The deploy agent's stability follow and forward migration converge asked the dev recreate window with an empty requester, which the window's request model refuses, so the dev agent crash-looped on every idle tick. Each caller of the gate now names the requester of what it is about to run, and the gate takes it with no default.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn26106-ac1-accepted-20261124t1345z:
+      - label: AC1
+        criterion_hash: 79a99d55a4bd42c79b35b7e8f3cfa0297ac740cf1dfbf82628c49ffc2824d949
+        proposed_by: lane=dod-closeout-bind-2026-11-24T1345Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-24T1345Z-c1
+    dod-omn26106-ac2-accepted-20261124t1345z:
+      - label: AC2
+        criterion_hash: f55b4d3a72e4f29d5b511f115ef69739b41f2ab061fe8739acae8b944325d807
+        proposed_by: lane=dod-closeout-bind-2026-11-24T1345Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-24T1345Z-c1
+    dod-omn26106-ac3-accepted-hosted-20261125t0545z:
+      - label: AC3
+        criterion_hash: c9e012f99e3a3b5fe8ba22844ef803683138ae9da73dc4b2a5289a0a78599760
+        proposed_by: lane=dod-closeout-bind-2026-11-25T0545Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-25T0545Z-c0
+requirements:
+  - id: req-omn26106-gate-requester
+    statement: Every caller of the deploy agent's recreate window gate passes a non-empty requested_by, and a bare call cannot return.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: every caller of the dev recreate window gate in the deploy agent passes a non-empty requested_by, and a unit test added by the fix fails on omnibase_infra origin/dev at cb23b5f25 and passes at the fix head -- falsifier: uv run pytest <the test file the pull request adds under scripts/deploy-agent/tests/unit or tests/unit> exits non-zero on cb23b5f25 and zero on the fix head'
+      - id: AC2
+        statement: 'AC2: a regression test built from the recorded journal text of the crash (a fixture file holding the ValidationError lines read from deploy-agent-dev.service on h201, scrubbed of secrets) fails on the broken code and passes on the fix -- falsifier: uv run pytest <that test> exits zero on cb23b5f25'
+      - id: AC3
+        statement: 'AC3: integrated: after the fix is installed on h201 through the declared dev installer, deploy-agent-dev.service is active, its NRestarts reading is the same at two reads ten minutes apart, and the health port 8098 answers on h201 -- falsifier: systemctl show -p NRestarts --value deploy-agent-dev.service on h201 differs between the two reads, or curl -sS http://127.0.0.1:8098/health on h201 is refused'
+      - id: AC4
+        statement: 'AC4: the prod deploy agent''s unit file and its key are untouched -- falsifier: sha256sum of the prod deploy agent unit file on h201 read before and after the install differs'
+  - id: req-omn26106-closer-budget
+    statement: The evidence close sweep declares the dod-verify start budget, and a verifier that refused to start is reported as a skip and never as an evidence gap.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: the evidence close sweep workflow declares DOD_VERIFY_START_BUDGET_S, and a dod_verify refusal with cause dispatch_budget_not_declared is reported as skipped_dod_verify with nothing written to Linear -- falsifier: the sweep budget tests exit non-zero on the merge base and zero on the fix head'
+  - id: req-omn26106-snappy-codec
+    statement: The deploy agent's own locked environment declares the snappy codec its kafka client imports, so a snappy-compressed fetch decodes and a failed fetch is quarantined instead of stalling the poll loop.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: the deploy agent environment declares python-snappy, a snappy record batch decodes in that environment, and a fetch that fails before a high-water mark exists is skipped -- falsifier: the snappy codec test exits non-zero on the merge base and zero at the fix head'
+evidence_requirements:
+  - kind: tests
+    description: The deploy agent gate-requester tests and the real recreate window requester tests.
+    command: uv run --frozen pytest tests/unit/handlers/test_recreate_window_requester_omn26106.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26106-ac1-requester
+    description: The stability follow and the migration converge each name their requester to the window, the gate takes it with no default, and the real window accepts every requester the idle paths name.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_recreate_window_requester_omn26106.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_idle_gate_requester_omn26106.py -q
+        cwd: .
+  - id: dod-omn26106-ac2-journal
+    description: The stability follow, which raised the journal's ValidationError on the dev host, runs against a recreate window that refuses the input the journal recorded (fixture scripts/deploy-agent/tests/unit/fixtures/dev_agent_requested_by_crash_omn26106.txt); the real model's refusal reads as the journal recorded it.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_idle_gate_requester_omn26106.py -q -k stability_follow_names_its_requester
+        cwd: .
+  - id: dod-omn26106-ac3-wiring
+    description: 'The hosted structural proof of AC3: the stability follow and the migration converge, the paths that raised on every idle tick on the dev host, run against a recreate window that refuses the recorded empty requester and complete. The integrated read of the unit on h201 is the local-gate entry below.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_idle_gate_requester_omn26106.py -q
+        cwd: .
+  - id: dod-omn26106-ac3-integrated
+    description: The integrated read of the dev agent on h201 needs the host, so it binds no criterion and the local Done gate runs it.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh h201 'systemctl --user is-active deploy-agent-dev.service && curl -sS http://127.0.0.1:8098/health'
+        cwd: .
+  - id: dod-omn26106-ac4-prod-untouched
+    description: 'The hosted structural proof of AC4: the tracked prod unit and its drop-in keep the prod port, name no dev signing key and match their recorded sha256 digests (ModelUnitFileDigest, added by this fix), and a copy with one byte changed reads as changed. At the merge base the digest model does not exist, so the control fails. The digest read of the prod unit file on h201 before and after the install is the local-gate entry below.'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_recreate_window_requester_omn26106.py -q --no-cov -n 0 -p no:randomly -k prod_unit
+        cwd: .
+  - id: dod-omn26106-ac4-integrated
+    description: The prod unit file digest on h201, read before and after a deploy-agent self-install on dev; the two reads are written in the lane's STATUS rows. No separate dev installer exists - the deploy agent is its own installer (unit_drift.sync_own_unit), so the install this read brackets is the agent's own.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh h201 'sha256sum ~/.config/systemd/user/deploy-agent.service'
+        cwd: .
+  - id: dod-omn26106-ac1-accepted-20261124t1345z
+    description: 'AC1: the deploy agent gate takes its requester with no default, and the stability follow and the migration converge each name a requester the real window accepts. Three of its four tests fail with the product change of omnibase_infra#6100 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_idle_gate_requester_omn26106.py -q
+        cwd: .
+    binds_ac:
+      - AC1
+  - id: dod-omn26106-ac2-accepted-20261124t1345z
+    description: 'AC2: the stability follow runs against a window that refuses the journal-recorded empty requester (fixture dev_agent_requested_by_crash_omn26106.txt) and completes. Fails with the product change of omnibase_infra#6100 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_idle_gate_requester_omn26106.py -q -k stability_follow_names_its_requester
+        cwd: .
+    binds_ac:
+      - AC2
+  - id: dod-omn26106-ac3-accepted-20261125t0545z
+    description: 'AC3: on h201 deploy-agent-dev.service is active, has been active for at least 600 s (so NRestarts cannot have moved between two reads ten minutes apart), and the health port 8098 returns 200. Read live on the lab host, so the local Done gate runs it.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: ssh omni-201 's=deploy-agent-dev.service; systemctl --user is-active $s && now=$(date +%s) && ent=$(date -d "$(systemctl --user show -p ActiveEnterTimestamp --value $s)" +%s) && echo active_for_s=$((now-ent)) nrestarts=$(systemctl --user show -p NRestarts --value $s) && test $((now-ent)) -ge 600 && curl -sS -m5 -o /dev/null -w '\''health_http=%{http_code}\n'\'' http://127.0.0.1:8098/health'
+        cwd: .
+  - id: dod-omn26106-ac3-accepted-hosted-20261125t0545z
+    description: 'AC3, hosted structural proof: the stability follow, which raised the journal ValidationError on every idle tick on the dev host, names its requester to the real recreate window and completes without raising. Fails with the product change of omnibase_infra#6100 reverted. The live read on h201 is the local-gate item above.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_idle_gate_requester_omn26106.py -q -k stability_follow_names_its_requester
+        cwd: .
+    binds_ac:
+      - AC3
+  - id: dod-omn26106-ac4-self-install-prod-sha
+    description: 'AC4, what holds: the deploy agent is its own installer (unit_drift.sync_own_unit replaces only its own drifting unit, reloads, never restarts; no declared dev installer exists). The test runs the real manifest dev entry over a home holding the prod unit and reads the prod unit sha256 before and after the self-install: unchanged. Control: installing the prod entry changes the sha256, so the read goes red on a known bad.'
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_self_install_prod_unit_omn26106.py -q
+        cwd: .
+  - id: dod-omn26106-autoclose-sweep-start-budget
+    description: 'The evidence close sweep (dry run 45768504347, offer OMN-26106) read 0/0 ACs verified because hosted dod_verify refused to start without DOD_VERIFY_START_BUDGET_S (status unresolved, total_checks 0, cause dispatch_budget_not_declared). The sweep and diagnose steps now declare the budget, and a refused verifier is reported as skipped_dod_verify and never posted to Linear as an evidence gap. Both tests fail on the merge base. Binds AC5, the closer criterion this change adds to the contract; the deploy agent criteria AC1 to AC4 are unchanged.'
+    source: manual
+    binds_ac:
+      - AC5
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_autoclose_sweep_dod_verify_budget_omn26106.py tests/ci/test_autoclose_sweep_budget_refusal_live_contact_omn26106.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_26106_budget_refusal.py tests/integration/nodes/test_autoclose_sweep_budget_refusal_integration_omn26106.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26106-snappy-codec-dasnappy2
+    description: The deploy agent's own environment declares the snappy codec kafka-python imports, decodes a snappy record batch with it, and quarantines a fetch that fails before a high-water mark exists instead of stalling the poll loop (measured on h201 at 2026-11-27T06:12:04Z).
+    source: manual
+    binds_ac:
+      - AC6
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_snappy_codec_omn26106.py -q
+        cwd: .

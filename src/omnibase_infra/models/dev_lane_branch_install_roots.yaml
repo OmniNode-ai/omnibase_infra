@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Where a dev-lane branch install may put a file inside the runtime container (OMN-25536).
+#
+# The installer refuses a destination that is not under one of these roots, so a
+# new root is a reviewed change to this file and nothing else.
+#
+# schema_version: 1
+# roots[].path          directory prefix, absolute, ending in "/"
+# roots[].overlay_root  true when the runtime reads overlays from it, i.e. when
+#                       ONEX_SKILL_OVERLAY_ROOTS in the dev compose files names it
+#                       (without its trailing "/"). The installer creates the
+#                       directories under such a root before it copies a file in,
+#                       because docker cp needs the parent directory to exist.
+#
+# The overlays repository store (/etc/onex/skill-overlays-store) and the frozen
+# config root (/etc/onex/skill-overlays) are read-only bind mounts: docker cp
+# cannot write there, so neither is a root. The overlay root below is a plain
+# directory in the container's writable layer, listed FIRST in
+# ONEX_SKILL_OVERLAY_ROOTS so an installed overlay wins over both mounts, and a
+# container recreate removes it like any other branch-installed file.
+schema_version: 1
+roots:
+  - path: /app/
+    overlay_root: false
+  - path: /etc/onex/skill-overlays-branch/
+    overlay_root: true

@@ -113,6 +113,7 @@ _DECLARED_CONNECT: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "omnibase_infra": ("omnibase_infra", ("role_omnibase_infra",)),
     "omniintelligence": ("omniintelligence", ("role_omniintelligence",)),
+    "omninode_cloud": ("omninode_cloud", ("tenant_identity_writer",)),
 }
 
 
@@ -167,8 +168,11 @@ _IN_REPO_PROVENANCE: dict[str, str] = {
     # ulimit on the x-runtime-base anchor (967 -> 975). OMN-20266 shifted it
     # seven more with the dev broker memory-floor note (975 -> 982). OMN-22391
     # moved it one line up with the removed intelligence-api line in the header
-    # port comment above it (995 -> 994).
-    "omnibase_infra:docker/docker-compose.infra.yml:994": "KC_DB_USERNAME: postgres",
+    # port comment above it (995 -> 994). OMN-26151 moved it eight down with the
+    # gateway_runtime password, the gateway DSN passthrough and the seams mount
+    # ahead of it (1008 -> 1016). OMN-26232 moved it nine more with the node
+    # exclusion lane env entries (1016 -> 1025).
+    "omnibase_infra:docker/docker-compose.infra.yml:1030": "KC_DB_USERNAME: postgres",
     "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4": (
         "CREATE DATABASE keycloak"
     ),
@@ -200,7 +204,7 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
             "four-column checksum ledger"
         ),
         provenance=(
-            "omnibase_infra:docker/docker-compose.infra.yml:994",
+            "omnibase_infra:docker/docker-compose.infra.yml:1030",
             "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4",
             "omninode_infra:k8s/auth/keycloak-values.yaml:32",
             "omninode_infra:scripts/init-databases.sh:603",
@@ -249,33 +253,6 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
             "omninode_infra:k8s/dev/postgres/init-databases-cm.yaml:91",
             "omninode_infra:scripts/create-shared-owner-role.sh:114",
             "omnimemory:deployment/database/migrations/001_create_subscription_tables.sql:1",
-        ),
-    ),
-    UndeclaredDeploymentDatabase(
-        physical_name="omninode_cloud",
-        owner_service="onex_api (cloud control plane)",
-        connecting_principals=(
-            (
-                "compose (.201 dev): database present, owned by the bootstrap superuser, no service role exists, nothing observed connecting",
-                (),
-            ),
-            ("onex-lab: declared and owning", ("role_omninode_cloud",)),
-            (
-                "public-cluster dev namespace: declared",
-                ("role_omninode_cloud",),
-            ),
-        ),
-        absent_from_lanes=(),
-        migration_ledger="public.schema_migrations(version, applied_at, checksum)",
-        blocked_by=(
-            "ledger carries two of the four required columns -- no stream and "
-            "no domain column -- so ledger_columns_are_distinct cannot be met"
-        ),
-        provenance=(
-            "omninode_infra:db/migrations/application-relation-ownership.yaml:6",
-            "omninode_infra:k8s/migrations/omninode-cloud-migrate.yaml:354",
-            "omninode_infra:k8s/onex-lab/substitutions/postgres.yaml:355",
-            "omninode_infra:db/migrations/00000000_migrations_tracking.sql:70",
         ),
     ),
     UndeclaredDeploymentDatabase(

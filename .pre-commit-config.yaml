@@ -64,6 +64,16 @@ repos:
         files: ^(contracts/[^/]+\.yaml|tests/ci/test_contracts_strict_load_omn20945\.py|\.pre-commit-config\.yaml)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-26418: a dod_evidence id over the core limit passed every commit hook
+      # and failed contract-validation, repo-evidence and CI Split 1/15 on the
+      # pushed head. The same test runs in the CI test splits (OMN-17427).
+      - id: contracts-dod-id-length
+        name: Ticket contract dod_evidence ids fit the core limit (OMN-17427)
+        entry: uv run --frozen pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q --no-cov -n 0 -p no:randomly
+        language: system
+        files: ^(contracts/[^/]+\.yaml|tests/ci/test_contract_dod_evidence_id_length_omn17427\.py|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: imperative-contract-guard-caller
         name: Caller-owned imperative guard regression (OMN-21004)
         entry: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
@@ -207,6 +217,13 @@ repos:
         entry: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
         language: system
         files: ^(scripts/(lab_alarm|lane_census_plan)\.py|config/lab_alarm\.json|tests/ci/test_lab_alarm_omn18867\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: wiring-report-ratchet
+        name: Wiring report counts only fall (OMN-26335)
+        entry: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        files: ^(src/omnibase_infra/(handlers/(handler_wiring_report_counts\.py|handler_wiring_report_ratchet/.*)|models/wiring_ratchet/.*|nodes/node_wiring_report_ratchet_compute/.*|runtime/auto_wiring/.*)|tests/ci/(test_wiring_report_ratchet_omn26335\.py|fixtures/wiring_report_2026_11_21\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: linear-transport-consolidation
@@ -464,6 +481,22 @@ repos:
         require_serial: true
         files: ^(scripts/deploy-runners\.sh|tests/ci/test_deploy_runners_registration_preflight\.py|tests/ci/fixtures/rolling_runner_registration_preflight\.json|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
         stages: [pre-commit]
+      - id: secondary-runner-image-roll
+        name: Secondary runner image roll (OMN-25796)
+        entry: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -q -n 0 --no-cov
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/deploy-runners\.sh|docker/runners/Dockerfile|src/omnibase_infra/(handlers/handler_runner_image_roll\.py|models/model_runner_image_roll_.*|nodes/node_runner_image_roll/.*)|tests/unit/scripts/test_deploy_runners_secondary_rolling\.py|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: runner-roll-config-drift-and-pool-retire
+        name: Runner roll config drift and pool retire (OMN-26105)
+        entry: uv run --frozen pytest tests/unit/handlers/test_handler_runner_config_drift_omn26105.py tests/unit/handlers/test_handler_runner_pool_retire_omn26105.py -q -n 0 --no-cov
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/deploy-runners\.sh|src/omnibase_infra/(handlers/handler_runner_(image_roll|pool_retire)\.py|models/model_runner_(config_drift_policy|pool_retire_.*)\.py|nodes/node_runner_pool_retire/.*)|tests/unit/handlers/test_handler_runner_(config_drift|pool_retire)_omn26105\.py|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
       # OMN-18786: same blocking scan as the CI Summary context.
       - id: seed-provenance-check
         name: Seed Provenance Check
@@ -518,7 +551,7 @@ repos:
         files: ^(\.github/workflows/|config/runner_routing_policy\.yaml|scripts/audit-runner-routing\.py|scripts/ci/(ci_summary_gate|nonrequired_check_failure_rate)\.py|tests/ci/test_runner_routing_audit\.py|\.pre-commit-config\.yaml)
       - id: ci-live-contact
         name: CI tooling carries recorded live-contact evidence (OMN-18648)
-        entry: uv run --frozen onex node node_ci_live_contact_effect --backend event_bus=inmemory --state-root .onex_state/ci-live-contact
+        entry: uv run --frozen python -m omnibase_core.cli.cli_commands node node_ci_live_contact_effect --backend event_bus=inmemory --state-root .onex_state/ci-live-contact
         language: system
         pass_filenames: false
         always_run: true
@@ -735,10 +768,32 @@ repos:
       - id: release-train-nightly-tests
         require_serial: true
         name: Release train decision surface (OMN-20715)
-        entry: uv run --frozen pytest tests/scripts/test_release_train_nightly.py tests/scripts/test_release_pr_open_omn18595.py -q --no-cov
+        entry: |-
+          uv run --frozen pytest tests/scripts/test_release_train_nightly.py
+          tests/scripts/test_release_pr_open_omn18595.py
+          tests/ci/test_release_train_live_contact_omn25794.py
+          tests/integration/cli/test_release_notes_apply_node_omn17427.py
+          tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py
+          -q --no-cov
         language: system
         pass_filenames: false
-        files: ^(config/release_train_policy\.yaml|scripts/ci/release_train\.py|\.github/workflows/release-train-nightly\.yml|tests/scripts/test_release_train_nightly\.py|tests/scripts/test_release_pr_open_omn18595\.py)$
+        files: |-
+          (?x)^(
+            config/release_train_policy\.yaml |
+            scripts/ci/release_train\.py |
+            \.github/workflows/release-train-nightly\.yml |
+            src/omnibase_infra/(
+              handlers/handler_release_notes_apply\.py |
+              models/model_release_notes_apply_request\.py |
+              nodes/node_release_notes_apply_effect/contract\.yaml
+            ) |
+            tests/(
+              scripts/(test_release_train_nightly|test_release_pr_open_omn18595)\.py |
+              ci/(test_release_train_live_contact_omn25794\.py|fixtures/ci_live_contact/omnimarket_release_changelog_omn25794\.json) |
+              integration/cli/test_release_notes_apply_node_omn17427\.py |
+              unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply\.py
+            )
+          )$
         stages: [pre-commit]
       - id: runner-disk-admission-self-pause
         require_serial: true
@@ -1200,7 +1255,7 @@ repos:
         files: ^src/.*/contract\.yaml$
         stages: [pre-commit]
       # OMN-13873: dep-provenance gate — forbid first-party git-source overrides.
-      # omnibase-core / omnibase-spi / omnibase-compat must resolve from PyPI, not
+      # omnibase-core and omnibase-spi must resolve from PyPI, not
       # git commits/branches/tags, on dev/main (recurrence guard for PR #2184's
       # UNRELEASED-commit overrides that passed all CI green). Pure static +
       # offline. Escape a single line with '# raw-override-ok: <ticket>'. SYNC
@@ -2196,7 +2251,7 @@ repos:
       - id: validate-spdx-headers
         require_serial: true
         name: ONEX SPDX Header Requirement
-        entry: uv run --frozen onex spdx validate
+        entry: env ONEX_CLI_SHOW_ALL_COMMANDS=1 uv run --frozen python -m omnibase_core.cli.cli_commands spdx validate
         language: system
         pass_filenames: true
         files: ^(src|tests|scripts|examples)/.*\.(py|sh|bash|yml|yaml|toml)$
@@ -2351,8 +2406,8 @@ repos:
       # command that was supposed to move the surface -- that makes a repair and a
       # no-op the same observation, which is how a `.201` clone with core.bare=true
       # read as "synced" while `git checkout` failed with exit 128 forever, and how
-      # a venv whose provider co-install silently downgraded omnibase-compat read as
-      # reconciled. Structural half: reconcile-host.sh must invoke the verifier, and
+      # a venv with a silent dependency downgrade was reported as reconciled.
+      # Structural half: reconcile-host.sh must invoke the verifier, and
       # verdict() must take no exit status. Ratchet half: any scripts/reconcile*.sh
       # must invoke the verifier or declare `# movement-proof:` /
       # `# movement-proof-delegated-to:`. Whole-repo by design (a reconciler can be

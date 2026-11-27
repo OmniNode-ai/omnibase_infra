@@ -1,16 +1,12 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-14108: omnibase_infra's fleet lists no longer target omnibase_compat.
+"""Guard the clone, sweep and audit lists against the retired repository.
 
-omnibase_compat is retired (RULING 2026-10-22T21:43:04Z). These repository
-lists named it as one more repository to clone, sweep or audit:
+The checked lists are:
 
 * ``scripts/pull-all.sh`` and ``scripts/lib/merge_sweep_common.sh`` ``REPOS``
 * ``scripts/audit-merge-method-on-main.sh`` and
   ``scripts/verify-merge-queue-no-bypass.sh`` ``REPOS``
-
-The CI mirror list (``docker/runners/git-mirror-refresh.sh``) keeps it until
-the workflows that still check compat out stop doing so.
 
 Falsifier: put the repository back in any one of them and the matching test
 names it.

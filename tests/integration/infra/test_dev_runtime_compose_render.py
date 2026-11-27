@@ -85,6 +85,8 @@ _RENDER_ONLY = "render-only"
 BASE_REQUIRED_ENV: dict[str, str] = {
     # OMN-20932: lane overlays are private; the mount refuses without this.
     "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
+    # OMN-24854: the dev lane mounts the config/lab folder; the render needs a non-empty name.
+    "ONEX_LANE_DECLARATION_DIR": "/nonexistent/config/lab",
     "POSTGRES_PASSWORD": "test",
     "VALKEY_PASSWORD": "test",
     "INFISICAL_ENCRYPTION_KEY": "0" * 64,
@@ -119,6 +121,9 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     "OMNINODE_RUNTIME_PASSWORD": "render-only-omninode-runtime-password",
     # OMN-15425: TENANT-domain counterpart, same `:?` seam in x-runtime-env.
     "TENANT_PROJECTION_WRITER_PASSWORD": "render-only-tenant-projection-writer-password",
+    # OMN-26151: the lab gateway login, fail-closed in the lane overlay. Render-only.
+    "GATEWAY_RUNTIME_PASSWORD": "d" * 64,
+    "TENANT_IDENTITY_WRITER_PASSWORD": "e" * 64,
     "LINEAR_API_KEY": "test-linear-api-key",
     "GITHUB_TOKEN": "test-github-token",
     "DEPLOY_AGENT_HMAC_SECRET": "render-only-deploy-agent-hmac-secret",
@@ -379,7 +384,10 @@ def test_dev_hook_events_fold_keeps_the_consumer_group_id_in_real_compose() -> N
     main = services["omninode-runtime"]  # positive control: the render really parsed
     assert writer not in services
     for name, service in services.items():
-        assert "ONEX_RUNTIME_NODE_EXCLUSION" not in service.get("environment", {}), name
+        # OMN-26232: a value-less passthrough renders absent; assert no value.
+        assert not service.get("environment", {}).get("ONEX_RUNTIME_NODE_EXCLUSION"), (
+            name
+        )
     assert main["environment"]["KAFKA_INSTANCE_ID"] == "runtime-main"
 
     # The retired declaration, rendered only under the profile no bring-up asks for.
@@ -394,6 +402,64 @@ def test_dev_hook_events_fold_keeps_the_consumer_group_id_in_real_compose() -> N
         declared["environment"]["KAFKA_INSTANCE_ID"]
         == main["environment"]["KAFKA_INSTANCE_ID"]
     ), "the fold must not change the consumer group id the projection resumes from"
+
+
+_NODE_EXCLUSION = "ONEX_RUNTIME_NODE_EXCLUSION"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "layers",
+    [
+        {},
+        {"with_dev_lane_overlay": True},
+        {"with_dev_lane_overlay": True, "with_tenant_fold": True},
+    ],
+    ids=["base", "dev-lane", "dev-lane-tenant-fold"],
+)
+def test_node_exclusion_renders_no_value_on_any_service_when_nothing_sets_it(
+    layers: dict[str, bool],
+) -> None:
+    """OMN-26232: the passthrough has no default, so an unset key renders no value."""
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    result = _run_compose_config(env, profile="runtime", **layers)
+    assert result.returncode == 0, result.stderr
+    services = yaml.safe_load(result.stdout)["services"]
+    assert "omninode-runtime" in services  # positive control: the render really parsed
+    for name, service in services.items():
+        assert not service.get("environment", {}).get(_NODE_EXCLUSION), name
+
+
+@pytest.mark.integration
+def test_node_exclusion_set_by_the_lane_env_reaches_the_runtime_services() -> None:
+    """OMN-26232: a value the deploy agent puts in the compose env reaches the kernel services."""
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **{_NODE_EXCLUSION: "node_alpha,node_beta"},
+    )
+    result = _run_compose_config(
+        env, profile="runtime", with_dev_lane_overlay=True, with_tenant_fold=True
+    )
+    assert result.returncode == 0, result.stderr
+    services = yaml.safe_load(result.stdout)["services"]
+    carried = {
+        name
+        for name, service in services.items()
+        if service.get("environment", {}).get(_NODE_EXCLUSION) == "node_alpha,node_beta"
+    }
+    assert "omninode-runtime" in carried
+    assert carried <= set(services)
+    unset = _run_compose_config(
+        _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST),
+        profile="runtime",
+        with_dev_lane_overlay=True,
+        with_tenant_fold=True,
+    )
+    assert unset.returncode == 0, unset.stderr
+    for name in carried:
+        environment = yaml.safe_load(unset.stdout)["services"][name]["environment"]
+        # Compose renders a value-less passthrough as null: nothing set in the container.
+        assert environment[_NODE_EXCLUSION] is None, name
 
 
 @pytest.mark.integration
@@ -1416,8 +1482,15 @@ _SKILL_OVERLAY_ROOTS_ENV = "ONEX_SKILL_OVERLAY_ROOTS"
 _SKILL_OVERLAY_ROOTS_TARGET = "/etc/onex/skill-overlays"
 _SKILL_OVERLAY_ROOTS_HOST_VAR = "DEV_LANE_SKILL_OVERLAY_ROOTS_DIR"
 _OVERLAY_STORE_ROOT_TARGET = "/etc/onex/skill-overlays-store"
+# OMN-25536: the dev branch installer's root, a writable directory with no mount.
+_OVERLAY_BRANCH_ROOT_TARGET = "/etc/onex/skill-overlays-branch"
 _OVERLAY_STORE_ROOT_HOST_VAR = "DEV_LANE_OVERLAY_STORE_ROOTS_DIR"
+# OMN-26117: the settings-store snapshot each host keeps (node_overlay_store_read_effect's
+# snapshot_root), the store root node_overlay_roots_resolve_effect names first.
+_OVERLAY_SETTINGS_ROOT_TARGET = "/etc/onex/skill-overlays-settings"
+_OVERLAY_SETTINGS_HOME_RELPATH = ".local/state/onex/overlay-store"
 _SKILL_OVERLAY_ROOTS_VALUE = (
+    f"{_OVERLAY_BRANCH_ROOT_TARGET}:{_OVERLAY_SETTINGS_ROOT_TARGET}:"
     f"{_OVERLAY_STORE_ROOT_TARGET}:{_SKILL_OVERLAY_ROOTS_TARGET}"
 )
 
@@ -1477,9 +1550,12 @@ def test_dev_lane_overlay_store_root_is_ahead_of_the_frozen_root() -> None:
     effects = yaml.safe_load(result.stdout)["services"]["runtime-effects"]
 
     assert effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV).split(":") == [
+        _OVERLAY_BRANCH_ROOT_TARGET,
+        _OVERLAY_SETTINGS_ROOT_TARGET,
         _OVERLAY_STORE_ROOT_TARGET,
         _SKILL_OVERLAY_ROOTS_TARGET,
     ]
+    assert _mounts_at(effects, _OVERLAY_BRANCH_ROOT_TARGET) == []
 
     store_mounts = _mounts_at(effects, _OVERLAY_STORE_ROOT_TARGET)
     assert len(store_mounts) == 1, (
@@ -1505,6 +1581,8 @@ def _resolve_node_overlay_text(service: dict[str, Any], node_name: str) -> str |
     root to the host directory mounted there, as the reader does inside the runtime.
     """
     for root in service["environment"][_SKILL_OVERLAY_ROOTS_ENV].split(":"):
+        if root == _OVERLAY_BRANCH_ROOT_TARGET:
+            continue  # a writable directory with no host mount; it holds no copy here
         (mount,) = _mounts_at(service, root)
         candidate = Path(mount["source"]) / node_name / "overlay.yaml"
         if candidate.is_file():
@@ -1619,9 +1697,12 @@ def test_tenant_fold_overlay_store_root_is_ahead_of_the_frozen_root() -> None:
     runtime = yaml.safe_load(result.stdout)["services"]["omninode-runtime"]
 
     assert runtime["environment"].get(_SKILL_OVERLAY_ROOTS_ENV).split(":") == [
+        _OVERLAY_BRANCH_ROOT_TARGET,
+        _OVERLAY_SETTINGS_ROOT_TARGET,
         _OVERLAY_STORE_ROOT_TARGET,
         _SKILL_OVERLAY_ROOTS_TARGET,
     ]
+    assert _mounts_at(runtime, _OVERLAY_BRANCH_ROOT_TARGET) == []
 
     store_mounts = _mounts_at(runtime, _OVERLAY_STORE_ROOT_TARGET)
     assert len(store_mounts) == 1, (
@@ -1864,3 +1945,89 @@ def test_reachability_flags_a_runtime_wired_to_a_failing_cloud_migration() -> No
     assert _services_reaching(
         {"list-runtime": {"depends_on": ["cloud-migration"]}}, _CLOUD_ONE_SHOTS
     ) == {"list-runtime": ["list-runtime", "cloud-migration"]}
+
+
+# OMN-26472: the gateway-lane indicator that scopes the tenant_api_keys expiry
+# seam. The dev lane overlay sets it to `dev`; the bare base file every lane
+# merges must not carry it (the tests/scripts/test_node_migration_fence_parity.py
+# pattern, over the rendered config).
+_GATEWAY_LANE_INDICATOR = "ONEX_MIGRATION_GATEWAY_LANE"
+
+
+@pytest.mark.integration
+def test_dev_lane_forward_migration_carries_the_gateway_lane_indicator() -> None:
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+    assert result.returncode == 0, result.stderr
+    service = yaml.safe_load(result.stdout)["services"]["forward-migration"]
+    assert service["environment"][_GATEWAY_LANE_INDICATOR] == "dev"
+
+
+@pytest.mark.integration
+def test_base_render_without_the_dev_overlay_carries_no_gateway_lane_indicator() -> (
+    None
+):
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=False)
+    assert result.returncode == 0, result.stderr
+    service = yaml.safe_load(result.stdout)["services"]["forward-migration"]
+    assert _GATEWAY_LANE_INDICATOR not in service.get("environment", {})
+
+
+def _write_settings_snapshot(root: Path) -> Path:
+    """A host's settings-store snapshot: one folder per overlay the store holds."""
+    for name in ("delegation_check_responders", "delegation_check_gateway"):
+        (root / name).mkdir(parents=True)
+        (root / name / "overlay.yaml").write_text(f"# {name}\n", encoding="utf-8")
+    return root
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("with_tenant_fold", [False, True])
+def test_dev_runtime_finds_the_delegation_check_rows_in_the_settings_snapshot(
+    tmp_path: Path, with_tenant_fold: bool
+) -> None:
+    """OMN-26117: the delegation_check_responders and delegation_check_gateway rows
+    exist only in the settings store. The runtime's root walk, over the rendered
+    compose, finds them in the snapshot directory under the injected HOME, while
+    the overlays-repository store and the frozen root hold neither."""
+    home = tmp_path / "home"
+    snapshot = _write_settings_snapshot(home / _OVERLAY_SETTINGS_HOME_RELPATH)
+    (tmp_path / "store").mkdir()
+    (tmp_path / "frozen").mkdir()
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **{
+            _SKILL_OVERLAY_ROOTS_HOST_VAR: str(tmp_path / "frozen"),
+            _OVERLAY_STORE_ROOT_HOST_VAR: str(tmp_path / "store"),
+            "HOME": str(home),
+        },
+    )
+    result = _run_compose_config(
+        env,
+        profile="runtime",
+        with_dev_lane_overlay=True,
+        with_tenant_fold=with_tenant_fold,
+    )
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    service = services["omninode-runtime" if with_tenant_fold else "runtime-effects"]
+
+    (mount,) = _mounts_at(service, _OVERLAY_SETTINGS_ROOT_TARGET)
+    assert mount.get("type") == "bind"
+    assert mount.get("read_only") is True
+    for name in ("delegation_check_responders", "delegation_check_gateway"):
+        assert _resolve_node_overlay_text(service, name) == f"# {name}\n"
+    # Known bad: a row the snapshot lacks resolves to nothing.
+    assert _resolve_node_overlay_text(service, "delegation_check_absent") is None
+
+
+@pytest.mark.integration
+def test_dev_settings_snapshot_root_defaults_to_the_host_home_store() -> None:
+    """Unset, the mount source is the store-read node's own home fallback,
+    <HOME>/.local/state/onex/overlay-store, from the injected HOME."""
+    services = _render_dev_lane_services()
+    (mount,) = _mounts_at(services["runtime-effects"], _OVERLAY_SETTINGS_ROOT_TARGET)
+    assert mount["source"] == str(
+        Path(os.environ["HOME"]) / _OVERLAY_SETTINGS_HOME_RELPATH
+    )

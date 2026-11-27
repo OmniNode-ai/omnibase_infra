@@ -5,6 +5,18 @@ summary: 'The container log watcher launchd plist is deleted and the unit drift 
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn22713-ac1-accepted-20261126t0745z:
+      - label: AC1
+        criterion_hash: 4c5886e36b0ba76d5e2cbc438ff76f5fe0dc1322ca87bb66518c6bbd9c764c6e
+        proposed_by: lane=dod-closeout-bind-2026-11-26T0745Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-26T0745Z-c2
+    dod-omn22713-ac2-accepted-20261126t0745z:
+      - label: AC2
+        criterion_hash: 6e8cea1791e922fbd52d9682ba4d2f2ee22b988bddece1490e33a0a8fc94c961
+        proposed_by: lane=dod-closeout-bind-2026-11-26T0745Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-26T0745Z-c2
 requirements:
   - id: req-22713-1
     statement: No declared install puts a Docker-only unit on a Mac with no Docker engine.
@@ -36,3 +48,21 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_docker_free_install_units_omn22713.py -q
+  - id: dod-omn22713-ac1-accepted-20261126t0745z
+    description: 'AC1: the monitor-logs plist is absent, the drift manifest declares no launchd plist unit, and the unit drift, wiring and installer tests of the deploy agent pass. The regression module fails at the parent of omnibase_infra#5747.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'uv run --frozen pytest tests/ci/test_docker_free_install_units_omn22713.py -q && uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py scripts/deploy-agent/tests/unit/test_unit_drift_wiring.py scripts/deploy-agent/tests/unit/test_unit_installers_omn21288.py -q'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn22713-ac2-accepted-20261126t0745z
+    description: 'AC2: the regression module passes only when the Docker log watcher plist is absent and the manifest declares no launchd plist unit; both of its tests fail at the parent of omnibase_infra#5747, where the plist and the compose lane deploy agent plist entry exist.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/ci/test_docker_free_install_units_omn22713.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

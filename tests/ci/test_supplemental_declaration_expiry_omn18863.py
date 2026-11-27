@@ -124,7 +124,21 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "gate_store_safety": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "gate_store_state": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
     "gate_store_steps": "omnimarket OMN-23055 writer half (node_gate_store_effect)",
+    "eval_item_scores": "omnimarket OMN-24171 (node_projection_eval_results)",
+    "eval_item_traces": "omnimarket OMN-24171 (node_projection_eval_results)",
+    "eval_run_closes": "omnimarket OMN-24171 (node_projection_eval_results)",
+    "eval_run_rates": "omnimarket OMN-24171 (node_projection_eval_results)",
     "experiment_arm_results": "omnimarket OMN-24286 (node_projection_experiment_result)",
+    "done_items": "omnimarket OMN-25104 (node_projection_done_items)",
+    "lab_alerts": "omnimarket OMN-26663 (node_projection_lab_alerts)",
+    "lane_work_workflow": "omnimarket OMN-26708 (node_projection_lane_work)",
+    "floor_integration_rows": "omnimarket OMN-25103 (node_projection_floor_integration)",
+    "floor_integration_pass": "omnimarket OMN-25103 (node_projection_floor_integration)",
+    "overlay_store_revision": "omnimarket#6761 (node_projection_overlay_store)",
+    "overlay_store_write": "omnimarket#6761 (node_projection_overlay_store)",
+    "overlay_store_provenance": "omnimarket#6761 (node_projection_overlay_store)",
+    "overlay_store_audit": "omnimarket#6761 (node_projection_overlay_store)",
+    "savings_priced_models": "omnimarket OMN-26444 (node_projection_metering_summary)",
 }
 
 _SKIP_REASON = (

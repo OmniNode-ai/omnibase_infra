@@ -81,6 +81,16 @@ class ModelDlqMessage(BaseModel):
     )
     retry_count: int = Field(default=0, ge=0, description="Prior retry attempts.")
     error_type: str = Field(default="Unknown", description="Classified error type.")
+    failure_class: str = Field(
+        default="",
+        description=(
+            "OMN-14492 failure classification the dead-letter publisher wrote "
+            "(``publisher_malformed``, ``no_dispatcher``, ...). Empty for a "
+            "record written before the publisher recorded it. ``should_replay`` "
+            "refuses ``publisher_malformed`` (OMN-25856): the payload fails the "
+            "same validator on every replay."
+        ),
+    )
     redacted_fields: tuple[str, ...] = Field(
         default_factory=tuple,
         description=(
@@ -191,6 +201,7 @@ class ModelDlqMessage(BaseModel):
             correlation_id=correlation_id,
             retry_count=retry_count,
             error_type=str(payload.get("error_type", "Unknown")),
+            failure_class=str(payload.get("failure_class") or ""),
             redacted_fields=_parse_redacted_fields(payload.get("redacted_fields")),
             consumer_group=_parse_consumer_group(payload.get("consumer_group")),
             dlq_offset=dlq_offset,

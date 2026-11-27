@@ -148,6 +148,9 @@ x-runtime-env: &runtime-env
   # localhost:5436 (external port); the container-side value must use postgres:5432.
   # This override ensures containers are never broken by a host-side localhost:5436 URL.
   OMNIBASE_INFRA_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra"
+  # OMN-26151: the logical secret gateway.database.dsn resolves from this env. Empty here
+  # (every lane layers this file); the dev and stability overlays set the fail-closed value.
+  GATEWAY_DATABASE_DSN: ${GATEWAY_DATABASE_DSN:-}
   # OMN-3431: Local Docker Redpanda — containers use Docker-internal redpanda:9092
   KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
   # Allowlist lets service_kernel.py's denylist accept Docker-internal redpanda: hostname
@@ -468,6 +471,11 @@ x-runtime-env: &runtime-env
   # the ref unresolved, which the provider-rung canary reads as UNRESOLVED and
   # the typed-decision effect refuses with CREDENTIAL_NOT_REGISTERED.
   LLM_TYPESAFE_API_KEY: ${LLM_TYPESAFE_API_KEY:-}
+  # OMN-26473: the runtime policy's dev resolver maps tenant_identity.database.dsn
+  # to this variable. The dev-lane overlay supplies the fail-closed value on the
+  # services that provision tenants; every other lane leaves it unset, which keeps
+  # the ref unresolved. Never a required env var in this file.
+  TENANT_IDENTITY_DATABASE_DSN: ${TENANT_IDENTITY_DATABASE_DSN:-}
   # Vertex bearer path (OMN-12971): ADDITIVE next to the Gemini API-key path. The
   # routing authority declares secret_ref=llm.vertex.access_token for
   # cloud-vertex-gemini; the secret resolver maps it to the mounted token FILE
@@ -526,6 +534,23 @@ x-runtime-env: &runtime-env
 # The lane class a runtime is an instance of and the class contracts it takes
 # (ONEX_RUNTIME_LANE_CLASS, ONEX_RUNTIME_LANE_CLASS_CONTRACTS; read by the
 # auto-wiring ownership filter). Same rule: the overlay names the instance.
+#
+# The nodes a lane turns off (OMN-26232; ONEX_RUNTIME_NODE_EXCLUSION, a comma
+# list of contract names, read by the auto-wiring ownership filter). No value is
+# set here, in any lane file or in any catalog entry: a lane's overlay names the
+# node, and the deploy agent refuses a name no contract has before it recreates
+# anything. Safe on every service because each kernel service discovers the same
+# contracts (the manifest does not depend on the runtime profile); the two
+# services that never run the kernel (projection-api, contract-resolver) ignore it.
+#
+# The deployment's provenance overlay (OMN-23981; ONEX_PROVENANCE_LANE,
+# ONEX_PROVENANCE_LANE_KIND, ONEX_PROVENANCE_HOST, ONEX_PROVENANCE_INSTALL_SOURCE,
+# ONEX_PROVENANCE_REVISION), read by the Kafka envelope publish seam. It stamps
+# when LANE, HOST, INSTALL_SOURCE and REVISION are all set; LANE_KIND is empty
+# for lane dev or stability and one of mac_unit, lane_worktree, hand_run for lane
+# other. A missing one of the four or any other LANE_KIND stamps nothing, so an
+# unset host value must stay unset in the container; same rule, and the private
+# overlay names the deployment.
 x-runtime-passthrough-env: &runtime-passthrough-env
   ONEX_PR_LANDING_GITHUB_MODE:
   ONEX_PR_LANDING_ARM_ACTION_MODE:
@@ -535,6 +560,12 @@ x-runtime-passthrough-env: &runtime-passthrough-env
   ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD:
   ONEX_RUNTIME_LANE_CLASS:
   ONEX_RUNTIME_LANE_CLASS_CONTRACTS:
+  ONEX_RUNTIME_NODE_EXCLUSION:
+  ONEX_PROVENANCE_LANE:
+  ONEX_PROVENANCE_LANE_KIND:
+  ONEX_PROVENANCE_HOST:
+  ONEX_PROVENANCE_INSTALL_SOURCE:
+  ONEX_PROVENANCE_REVISION:
 # ==========================================================================
 # Services
 # ==========================================================================
@@ -622,6 +653,11 @@ services:
       # on the lanes that already have the runner, and skip on the one lane that
       # would otherwise apply it.
       CHAIN_CANARY_READER_PASSWORD: ${CHAIN_CANARY_READER_PASSWORD:-}
+      # OMN-26151: the fourth LOGIN_ONLY_ROLE_MAP entry -- gateway_runtime, the lab
+      # workflow gateway's login on omninode_cloud. Empty-means-skip, as above; the
+      # fail-closed `:?` lives on the CONSUMER (GATEWAY_DATABASE_DSN in the dev and
+      # stability overlays, not in x-runtime-env: every lane layers this file).
+      GATEWAY_RUNTIME_PASSWORD: ${GATEWAY_RUNTIME_PASSWORD:-}
     ports:
       - "${POSTGRES_EXTERNAL_PORT:-5436}:5432"
     volumes:
@@ -1101,6 +1137,11 @@ services:
       # on the lanes that already have the runner, and skip on the one lane that
       # would otherwise apply it.
       CHAIN_CANARY_READER_PASSWORD: ${CHAIN_CANARY_READER_PASSWORD:-}
+      # OMN-26151: the fourth LOGIN_ONLY_ROLE_MAP entry -- gateway_runtime, the lab
+      # workflow gateway's login on omninode_cloud. Empty-means-skip, as above; the
+      # fail-closed `:?` lives on the CONSUMER (GATEWAY_DATABASE_DSN in the dev and
+      # stability overlays, not in x-runtime-env: every lane layers this file).
+      GATEWAY_RUNTIME_PASSWORD: ${GATEWAY_RUNTIME_PASSWORD:-}
       # OMN-18438: role_omninode, and the FIRST entry that is not a
       # LOGIN_ONLY_ROLE_MAP principal. It is a SERVICE_DB_MAP principal in
       # 000_create_multiple_databases.sh -- the MAPPED SERVICE ROLE of
@@ -1139,6 +1180,8 @@ services:
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
       - ../docker/migrations/forward:/migrations/forward:ro
+      # OMN-26151: the re-asserted gateway_runtime grants (a data file, not a migration).
+      - ../docker/migrations/seams:/migrations/seams:ro
     entrypoint: ["sh", "/run-forward-migrations.sh"]
     networks:
       - omnibase-infra-network

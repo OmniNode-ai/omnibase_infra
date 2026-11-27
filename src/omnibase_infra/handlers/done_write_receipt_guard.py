@@ -31,7 +31,9 @@ import importlib
 import importlib.resources
 import json
 import logging
+import os
 import sys
+import tempfile
 from collections.abc import Awaitable, Callable, Mapping
 from functools import lru_cache
 from pathlib import Path
@@ -173,6 +175,10 @@ LINEAR_COMPLETED_STATE_TYPE = "completed"
 LINEAR_DONE_STATE_NAME = "done"
 #: A verifier run executes the contract's checks, so it is slow by design.
 DEFAULT_DOD_VERIFY_TIMEOUT_SECONDS = TIMEOUTS.done_write_verify_seconds
+#: Longest verifier stderr kept in a refusal reason. A traceback's cause is its
+#: tail, so an over-long text keeps its last characters, with the omitted count
+#: stated at the head (OMN-25667).
+MAX_VERIFIER_ERROR_CHARS = 4000
 
 # Injectable runner signature (the real one execs the dispatch venv's `onex`;
 # tests inject fakes with the same shape).
@@ -181,7 +187,9 @@ TypeRunDodVerifyCommand = Callable[
 ]
 
 
-def dod_verify_argv(ticket_id: str, *, contract_path: str = "") -> list[str]:
+def dod_verify_argv(
+    ticket_id: str, *, contract_path: str = "", state_root: str = ""
+) -> list[str]:
     """Argv that dispatches the verifier from THIS process's own environment.
 
     OMN-16846. This used to be ``["uv", "run", "onex", "skill", "dod_verify",
@@ -201,27 +209,57 @@ def dod_verify_argv(ticket_id: str, *, contract_path: str = "") -> list[str]:
     ``FAILED ... Canonical venv is IMPURE``, ``behavior_proving=0``, without
     a single test having executed.
 
-    Dispatching through ``sys.executable``'s sibling ``onex`` makes the
-    verifier's environment a property of how the SWEEP was composed rather
-    than of where it happens to be standing. The dispatch venv can then carry
-    the co-installed omnimarket while the product clone's venv stays pure and
-    the behaviour checks actually run. It is also strictly more determinate
-    for the existing local path, where both resolved to the same venv anyway.
+    Dispatching through ``sys.executable`` itself makes the verifier's
+    environment a property of how the SWEEP was composed rather than of where
+    it happens to be standing. The dispatch venv can then carry the
+    co-installed omnimarket while the product clone's venv stays pure and the
+    behaviour checks actually run. It is also strictly more determinate for
+    the existing local path, where both resolved to the same venv anyway.
 
-    A missing sibling ``onex`` raises ``FileNotFoundError`` at exec time,
-    which the caller already converts into a named per-ticket error; the
-    sweep job additionally asserts the binary resolves before any ticket is
-    scanned, so the loud failure comes first.
+    OMN-25070. The ``onex`` launcher moves out of omnibase-core into the
+    customer package omninode-onex, so a runtime or dispatch venv that carries
+    omnibase-core alone has no ``onex`` beside its interpreter. The argv
+    therefore runs omnibase-core's own CLI module, ``sys.executable -m
+    omnibase_core.cli.cli_commands``, the same form the sweep workflow uses,
+    and needs no launcher file.
+
+    A venv without omnibase-core fails the import at exec time with a non-zero
+    exit, which the caller already converts into a named per-ticket error; the
+    sweep job's "Compose the dispatch venv" step additionally imports the
+    module in the dispatch venv and fails before any ticket is scanned, so the
+    loud failure comes first.
+
+    OMN-25667. ``onex skill`` writes its input payload under ``--state-root``,
+    whose default is the cwd-relative ``.onex_state``. The runtime's cwd is
+    ``/app``, which its unprivileged user cannot write, so every Done write
+    died on ``PermissionError: '.onex_state'`` before the verifier produced a
+    verdict. ``state_root`` names a directory the caller owns; with none the
+    CLI default applies, as before.
     """
     return [
-        str(Path(sys.executable).parent / "onex"),
+        sys.executable,
+        "-m",
+        "omnibase_core.cli.cli_commands",
         "skill",
         "dod_verify",
         ticket_id,
         "--execution-audience",
         "hosted",
         *(["--contract-path", contract_path] if contract_path else []),
+        *(["--state-root", state_root] if state_root else []),
     ]
+
+
+def bound_verifier_error(text: str) -> str:
+    """The verifier's stderr, whole up to ``MAX_VERIFIER_ERROR_CHARS``.
+
+    Over the bound it keeps the tail (the exception line of a traceback) and
+    says how many leading characters it dropped.
+    """
+    if len(text) <= MAX_VERIFIER_ERROR_CHARS:
+        return text
+    omitted = len(text) - MAX_VERIFIER_ERROR_CHARS
+    return f"[{omitted} chars omitted] ...{text[-MAX_VERIFIER_ERROR_CHARS:]}"
 
 
 async def reap_timed_out_process(proc: asyncio.subprocess.Process) -> None:
@@ -243,16 +281,106 @@ async def reap_timed_out_process(proc: asyncio.subprocess.Process) -> None:
         )
 
 
+def materialised_product_clone(contract_root: str, registry_root: str) -> str:
+    """The full product clone beside ``OMNI_HOME`` for a contract-reading root, or ``""``.
+
+    OMN-26650. The hosted sweep reads contracts from a sparse, contracts-only
+    clone (``contract-roots/<repo>``: ``git sparse-checkout set contracts``,
+    which in cone mode keeps the repository's root files such as ``conftest.py``
+    and ``pyproject.toml`` and nothing else). The verifier anchors a relative
+    check ``cwd`` at the repository that owns the contract file, so a contract
+    that says ``cwd: .`` ran ``uv run pytest`` inside that sparse tree: pytest
+    loaded the root ``conftest.py``, which imports ``scripts.hooks...``, and
+    died with ``ModuleNotFoundError: No module named 'scripts'`` (exit 4, no
+    test collected) on every such check. The checks' own code lives in the
+    clone the workflow materialises at ``${OMNI_HOME}/<repo>``; that is the
+    tree a relative ``cwd`` has to mean.
+
+    Returns that clone's path when ``contract_root`` is a different directory
+    with the same repository name under ``registry_root`` (the caller's
+    ``OMNI_HOME``) and it exists. Returns ``""`` (no override, the verifier's
+    own anchoring stands) when ``registry_root`` is empty, no such clone exists,
+    or the contract root already is it, which is every operator-machine run.
+    """
+    if not contract_root or not registry_root:
+        return ""
+    root = Path(contract_root).resolve()
+    clone = (Path(registry_root) / root.name).resolve()
+    if clone == root or not clone.is_dir():
+        return ""
+    return str(clone)
+
+
+def process_registry_root(environ: Mapping[str, str] | None = None) -> str:
+    """The registry root (``OMNI_HOME``) of the process, or ``""`` when it names none.
+
+    OMN-26650. The one place the product-clone anchor reads the environment:
+    handlers take the registry root as an injected value and fall back to this
+    reader only when none was injected, so a handler file never touches
+    ``os.environ`` itself. ``environ`` is injectable for the same reason.
+    """
+    source = os.environ if environ is None else environ
+    return source.get("OMNI_HOME", "")
+
+
+def product_clone_verifier_env(
+    contract_root: str,
+    registry_root: str,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, str] | None:
+    """The verifier's environment with ``CONTRACT_REPO_DIR`` at the product clone.
+
+    ``None`` (the subprocess inherits the process environment unchanged) when
+    ``materialised_product_clone`` finds no clone to anchor at.
+    """
+    clone = materialised_product_clone(contract_root, registry_root)
+    if not clone:
+        return None
+    source = os.environ if environ is None else environ
+    return {**source, "CONTRACT_REPO_DIR": clone}
+
+
 async def run_dod_verify_command(
-    ticket_id: str, cwd: str, timeout: float, *, contract_path: str = ""
+    ticket_id: str,
+    cwd: str,
+    timeout: float,
+    *,
+    contract_path: str = "",
+    env: Mapping[str, str] | None = None,
+) -> tuple[dict[str, object] | None, int, str]:
+    # The verifier's payload and capture files live in a scratch directory of
+    # this call, never under the cwd (OMN-25667): the verdict comes back on
+    # stdout and no caller reads a file the verifier wrote.
+    with tempfile.TemporaryDirectory(prefix="onex-dod-verify-") as state_root:
+        return await _run_dod_verify_in(
+            ticket_id,
+            cwd,
+            timeout,
+            contract_path=contract_path,
+            state_root=state_root,
+            env=env,
+        )
+
+
+async def _run_dod_verify_in(
+    ticket_id: str,
+    cwd: str,
+    timeout: float,
+    *,
+    contract_path: str,
+    state_root: str,
+    env: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, object] | None, int, str]:
     # OMN-16846: resolved from THIS process's interpreter, not re-resolved
     # by `uv run` from the cwd. See `dod_verify_argv`.
-    args = dod_verify_argv(ticket_id, contract_path=contract_path)
+    args = dod_verify_argv(
+        ticket_id, contract_path=contract_path, state_root=state_root
+    )
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,
             cwd=cwd or None,
+            env=dict(env) if env is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -287,7 +415,9 @@ async def run_dod_verify_command(
         return (
             None,
             exit_code,
-            stderr_text if exit_code != 0 else f"Invalid dod_verify JSON: {exc}",
+            bound_verifier_error(stderr_text)
+            if exit_code != 0
+            else f"Invalid dod_verify JSON: {exc}",
         )
     if not isinstance(parsed, dict):
         return None, exit_code, "dod_verify output was not a JSON object"
@@ -384,6 +514,8 @@ class DoneWriteReceiptGuard:
 
 __all__ = [
     "DEFAULT_DOD_VERIFY_TIMEOUT_SECONDS",
+    "MAX_VERIFIER_ERROR_CHARS",
+    "bound_verifier_error",
     "DoneWriteReceiptGuard",
     "DoneWriteGateResolutionError",
     "resolve_done_write_receipt_gate",
@@ -393,6 +525,9 @@ __all__ = [
     "TypeRunDodVerifyCommand",
     "dod_verify_argv",
     "is_done_state",
+    "materialised_product_clone",
+    "process_registry_root",
+    "product_clone_verifier_env",
     "reap_timed_out_process",
     "run_dod_verify_command",
 ]

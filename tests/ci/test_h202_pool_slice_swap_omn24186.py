@@ -52,11 +52,18 @@ def _limits(unit: Path) -> dict[str, str]:
 
 
 def _shared_host_pool_prefixes() -> list[str]:
-    """Every pool the inventory lists under a host's ``pools:`` key that ships its own slice file."""
+    """Every pool of the model-server host (the one this file's measurement was read on) that ships its own slice file.
+
+    OMN-25674 declares a pool on h051 that ships a slice file of its own: that host serves no model, and its slice unit
+    is the host aggregate the measurement in the pool's compose header sizes.
+    """
     document = cast("dict[str, Any]", yaml.safe_load(FLEET.read_text(encoding="utf-8")))
+    # the model-server host is the one that is not h051 and carries an action pool
     prefixes = [
         str(pool["runner_name_prefix"])
         for host in document["hosts"]
+        if host["host"] != "h051"
+        and any("action" in p["classes"] for p in host.get("pools", []))
         for pool in host.get("pools", [])
     ]
     return [p for p in prefixes if (POOLS / p / SLICE_NAME).is_file()]

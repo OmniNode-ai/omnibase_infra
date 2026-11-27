@@ -19,6 +19,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -117,8 +118,7 @@ class TopicStartupValidator:
     ) -> ModelTopicValidationResult:
         """Validate that all required platform topics exist on the broker.
 
-        Collects required topics from contract extraction and checks their
-        existence via ``AIOKafkaAdminClient.list_topics()``.
+        Reads contract topics on a worker thread (OMN-26322), then lists the broker's.
 
         Args:
             correlation_id: Optional correlation ID for tracing.
@@ -131,7 +131,7 @@ class TopicStartupValidator:
             ``ModelTopicValidationResult`` with validation outcome.
         """
         correlation_id = correlation_id or uuid4()
-        required = self._required_topics()
+        required = await asyncio.to_thread(self._required_topics)
 
         # Guard: aiokafka not installed
         try:

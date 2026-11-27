@@ -22,8 +22,14 @@ _GRANT = "0001_grant_omninode_runtime_overlay_store.sql"
 _GRANT_SHA256 = "796344234e9bb22f007a517ce63e7a48feb62c68d52a6aa47dd851f4039ded9d"
 
 
-def test_only_the_create_and_grant_files_are_vendored() -> None:
-    assert sorted(path.name for path in _VENDOR.glob("*")) == [_CREATE, _GRANT]
+def test_only_the_create_grant_and_overlay_store_files_are_vendored() -> None:
+    assert sorted(path.name for path in _VENDOR.glob("*")) == [
+        _CREATE,
+        _GRANT,
+        "0002_add_operator_paths.sql",
+        "0003_overlay_store_revision_provenance_audit.sql",
+        "0004_grant_omninode_runtime_overlay_store_write.sql",
+    ]
 
 
 @pytest.mark.parametrize(

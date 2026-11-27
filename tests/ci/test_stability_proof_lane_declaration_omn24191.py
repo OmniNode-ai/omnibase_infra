@@ -15,10 +15,11 @@ the resolver and the three workflows:
 * each workflow's resolver step requires exactly the fields the golden value
   declares (a workflow that adds a required field fails here, so the
   declaration is revisited);
-* the declared lane satisfies exactly the proofs it can satisfy today (C28);
-  C15 and C16 need ``gateway_url``, which the stability lane does not declare
-  until the runtime serves the tenant route (one-runtime plan T18);
-* a lane that declares ``gateway_url`` satisfies all three (control);
+* the declared lane satisfies exactly the proofs it can satisfy today (C28
+  and C16); C15 still needs ``tenant_id`` (the tenant its bus submission is stamped
+  with, OMN-23566), which the stability lane does not declare; C16 reads the runtime's own ``ingress_url``, which serves the tenant
+  route ``POST /v1/workflows`` (OMN-26122);
+* a lane that declares ``tenant_id`` satisfies all three (control);
 * a workflow requiring an undeclared field is refused (control);
 * a loopback or host-alias URL is refused by the resolver (control).
 """
@@ -51,16 +52,19 @@ GOLDEN_VALUE = (
 )
 
 PROOF_REQUIRES: dict[str, str] = {
-    "chain-canary.yml": "ingress_url gateway_url bus_lane",
-    "chain-canary-c16-receipt-identity.yml": "gateway_url bus_lane",
+    "chain-canary.yml": "ingress_url tenant_id bus_lane",
+    "chain-canary-c16-receipt-identity.yml": "ingress_url bus_lane",
     "chain-canary-c28-consumer-flow.yml": (
         "projection_url docker_runs_on compose_project"
     ),
 }
 
-# C15 and C16 need gateway_url, which the stability lane does not declare
-# until the runtime serves the tenant route (one-runtime plan T18).
-PROOFS_SATISFIED_TODAY = {"chain-canary-c28-consumer-flow.yml"}
+# C15 still needs tenant_id, which the stability lane does not declare.
+# C16 reads the runtime's own ingress_url (OMN-26122).
+PROOFS_SATISFIED_TODAY = {
+    "chain-canary-c16-receipt-identity.yml",
+    "chain-canary-c28-consumer-flow.yml",
+}
 
 STABILITY_MATCH = "lane_role=stability"
 
@@ -132,22 +136,45 @@ def test_the_declared_lane_satisfies_exactly_the_proofs_satisfied_today() -> Non
     )
     for workflow in PROOF_REQUIRES:
         if workflow not in PROOFS_SATISFIED_TODAY:
-            assert "does not declare gateway_url" in tried_by_workflow[workflow], (
+            assert "does not declare tenant_id" in tried_by_workflow[workflow], (
                 f"{workflow}: the refusal does not name the missing field"
             )
 
 
-def test_a_lane_with_gateway_url_satisfies_all_three() -> None:
+def test_a_lane_with_tenant_id_satisfies_all_three() -> None:
     lanes = _lanes()
-    lanes[0]["gateway_url"] = "http://192.0.2.10:18090"
+    lanes[0]["tenant_id"] = "820272f9-4aaf-5add-a2df-0af942852ab2"
     for workflow, required in PROOF_REQUIRES.items():
         lane, _tried = resolver.choose_lane(
             lanes, required.split(), lambda url: None, {"lane_role": "stability"}
         )
         assert lane is not None, (
-            f"{workflow}: a lane that declares gateway_url still does not "
+            f"{workflow}: a lane that declares tenant_id still does not "
             f"satisfy the proof; PROOFS_SATISFIED_TODAY must be updated"
         )
+
+
+def test_c16_is_refused_naming_ingress_url_when_the_lane_declares_none() -> None:
+    lanes = _lanes()
+    del lanes[0]["ingress_url"]
+    lane, tried = resolver.choose_lane(
+        lanes,
+        PROOF_REQUIRES["chain-canary-c16-receipt-identity.yml"].split(),
+        lambda url: None,
+        {"lane_role": "stability"},
+    )
+    assert lane is None
+    assert "does not declare ingress_url" in " | ".join(tried), (
+        "the refusal does not name the missing field"
+    )
+
+
+def test_c16_is_driven_from_the_ingress_url_the_resolver_exports() -> None:
+    text = (WORKFLOWS / "chain-canary-c16-receipt-identity.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "${GATEWAY_URL_OVERRIDE:-${LANE_INGRESS_URL:-}}" in text
+    assert "LANE_GATEWAY_URL" not in text
 
 
 def test_a_workflow_requiring_an_undeclared_field_is_refused() -> None:

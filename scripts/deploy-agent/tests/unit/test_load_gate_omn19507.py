@@ -334,7 +334,7 @@ class _Gate:
         self.due = due
         self.checks = 0
 
-    def check(self) -> object:
+    def check(self, cmd: object | None = None) -> object:
         self.checks += 1
         return decide(
             THRESHOLDS,
@@ -444,11 +444,13 @@ def test_load_gate_idle_converge_waits_while_the_gate_is_shut() -> None:
     agent._idle_converge_attempted = set()
     agent._load_gate_last_verdict = None
 
-    assert agent._idle_converge_gate_open() is False
+    assert agent._idle_converge_gate_open("agent/idle-converge") is False
     assert agent._idle_converge_attempted == set(), "the head is retried later"
 
     agent._load_gate = _Gate(EnumLoadGateVerdict.OPEN)  # type: ignore[assignment]
-    assert agent._idle_converge_gate_open() is True
+    assert agent._idle_converge_gate_open("agent/idle-converge") is True
 
     agent._load_gate = None
-    assert agent._idle_converge_gate_open() is True, "no gate, no wait"
+    assert agent._idle_converge_gate_open("agent/idle-converge") is True, (
+        "no gate, no wait"
+    )

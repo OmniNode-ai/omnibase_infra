@@ -50,10 +50,16 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolCapabilityProjection": "protocols/protocol_capability_projection.py",
     "ProtocolCapabilityQuery": "protocols/protocol_capability_query.py",
     "ProtocolCostEstimatorBuildIO": "protocols/protocol_cost_estimator_build_io.py",  # [DI] OMN-21487 host I/O (command execution, workspace, image build) the provisioning effect injects into estimator build policy. Infra-local: bound to this repo's setup-local provisioning effect and cost-estimator build handler, not a cross-repo contract
+    "CompletedProcessLike": "handlers/build_repository_ref/agent_entry.py",  # [DI] OMN-26724 the one attribute (returncode) the deploy agent entry reads from the runner it is handed, so the check takes the agent's own subprocess runner without importing subprocess into a non-EFFECT package. Infra-local, not spi: it narrows this handler's agent seam
     "ProtocolClock": "protocols/protocol_clock.py",  # [DI] OMN-21698 the clock a non-EFFECT node package reads time through (wall now() and a monotonic() duration reading), injected by dispatcher constructor and on the typed handler request so the registration orchestrator never calls datetime.now or time.perf_counter itself. Infra-local, not spi: core's ProtocolTimeService (omnibase_core.protocols.replay) carries now()/utc_now() only and has no monotonic reading the handlers' processing_time_ms needs
     "ProtocolContainerAware": "protocols/protocol_container_aware.py",
+    "ProtocolDevMergeBuildSender": "protocols/protocol_dev_merge_build_sender.py",  # [DI] OMN-26316 the two sends an overdue dev merge makes (the overdue event and the signed build request), injected into the publish handler so tests use a fake sender instead of opening a bus connection. Infra-local, not spi: it narrows this repo's deploy agent send path and is not a cross-repo contract.
     "ProtocolDevPreflightRunner": "protocols/protocol_dev_preflight_runner.py",  # [DI] OMN-24048 what the dev roll's preflight step needs of the deploy executor, so the failure announcement wraps the call without importing the agent. Infra-local, not spi: it narrows this repo's deploy executor
     "ProtocolDevRollEvents": "protocols/protocol_dev_roll_events.py",  # [DI] OMN-24013 the events seam the dev boot guard and the branch-install reapply announce a roll through (manifest, started, incident); tests inject a fake publisher. Infra-local, not spi: it narrows this repo's dev roll events publisher and is not a cross-repo contract
+    "ProtocolQueuedCommand": "protocols/protocol_queued_command.py",  # [DI] OMN-26718 the fields of a queued deploy command the operator request priority reads, so the node does not import the deploy agent's command model. Infra-local, not spi: it narrows this repo's deploy agent command and is not a cross-repo contract
+    "ProtocolQueuedDeploy": "protocols/protocol_queued_deploy.py",  # [DI] OMN-26718 the fields of a queued deploy the operator request priority reads. Infra-local, not spi: it narrows this repo's deploy agent queue entry and is not a cross-repo contract
+    "ProtocolValued": "protocols/protocol_valued.py",  # [DI] OMN-26718 an enum-like value carrier (a .value attribute) the queued-deploy protocols read lane, scope and build source through. Infra-local, not spi: it exists only to type those protocols
+    "ProtocolRecreateGate": "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",  # [NODE] OMN-25912 what the dev recreate window gate offers its callers (allow); node-internal seam so the roll events runtime and its tests inject a fake gate. Infra-local, not spi: it narrows this repo's recreate window handler
     # ProtocolDispatchEngine relocated to omnibase_spi.protocols.runtime (OMN-12549).
     "ProtocolEventBusLike": "protocols/protocol_event_bus_like.py",
     "ProtocolIntrospectionEventBus": "protocols/protocol_introspection_event_bus.py",  # [RUNTIME] OMN-16979 consumer-owned Pattern B publish/subscribe contract plus envelope publishing, kept infra-local because it uses infra event-header and receipt models.
@@ -71,6 +77,8 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolWhoamiTransport": "gateway/client/gateway_identity_verifier.py",  # [DI] OMN-17028 one-method seam (a single authenticated GET) for the credential-identity check `onex auth status` runs. Declared beside its only consumer for the same reason as ProtocolCloudLedgerTransport above -- ProtocolGatewayTransport is runtime_checkable and structurally satisfied by every existing in-memory fake, so widening it would silently un-satisfy all of them. Infra-local, not cross-repo: bound to this repo's ~/.onex credential store and httpx adapter
     "ProtocolHookVenvReconcileHost": "protocols/protocol_hook_venv_reconcile_host.py",  # [DI] OMN-19998 host effect boundary (installed/carries/uv) HandlerReconcileWorkspaceVenvs resolves from the container so the reconcile logic runs against an in-memory fake. Infra-local, not spi: bound to the hook venv reconcile handler and its request model
     "ProtocolConsumerGroupLister": "protocols/protocol_consumer_group_lister.py",  # [DI] OMN-19998 one-method seam (list_consumer_groups) the contract-subscribe preflight asks a stateful bus for predecessor group ids so a consumer-group version bump can seed the successor group. Infra-local, not spi: bound to the version handover in this repo and satisfied structurally by the Kafka bus
+    "ProtocolLazyStartBus": "protocols/protocol_lazy_start_bus.py",  # [DI] OMN-21592 the runtime bus surface (subscribe/publish/get_consumer_groups) a lazy start attaches through. Infra-local, not spi: it narrows this repo's event bus for the lazy-start front door
+    "ProtocolLazyStartTransaction": "protocols/protocol_lazy_start_transaction.py",  # [DI] OMN-21592 one runtime's start steps (build/attach/rollback/deliver) for a dormant contract, injected into the lazy-start front door. Infra-local, not spi: bound to this repo's kernel wiring
     "ProtocolIdempotencyStore": "protocols/protocol_idempotency_store.py",
     "ProtocolLedgerSink": "protocols/protocol_ledger_sink.py",
     "ProtocolMessageDispatcher": "protocols/protocol_message_dispatcher.py",
@@ -226,6 +234,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # routed around (OMN-18833 lane).
     "ProtocolDriftGuardVerdict": "cli/protocol_drift_guard_verdict.py",
     "ProtocolExecutionBudget": "cli/protocol_execution_budget.py",  # [DI] OMN-19407 reads a task class's execution ceiling and delivery margin.
+    "ProtocolStabilityIntegrationHost": "protocols/protocol_stability_integration_host.py",  # [DI] OMN-26715 git/docker/http host operations the stability integration refresh handler injects. Infra-local: bound to this repo's stability host refresh node, not a cross-repo contract
     "ProtocolSelectionFallback": "cli/protocol_selection_fallback.py",  # [DI] OMN-19407 reads the fallback class for an unclaimed prompt.
     "ProtocolTaskClassAuthority": "cli/protocol_task_class_authority.py",  # [DI] OMN-19407 reads the task-class authority contract.
     "ProtocolTaskTypeResolution": "cli/protocol_task_type_resolution.py",  # [DI] OMN-19407 reads a resolved task type and decision rationale.
@@ -260,6 +269,17 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # [NODE] OMN-14819 narrow correlation_id envelope view; keeps the def-B replay
     # handler core free of ModelEventEnvelope (canonical handler-shape C-core).
     "ProtocolReplayEnvelope": "nodes/node_kafka_replay_compute/protocols/protocol_replay_envelope.py",
+    # [RUNTIME] OMN-26429 narrow views of the deploy agent's command, job store and
+    # lane flags that the post-failure converge rule reads; the rule imports nothing
+    # from deploy_agent, so the agent hands itself in through these.
+    "ProtocolCommand": "protocols/protocol_command.py",
+    "ProtocolJobStore": "protocols/protocol_job_store.py",
+    "ProtocolLaneFlags": "protocols/protocol_lane_flags.py",
+    "ProtocolPostFailureHost": "protocols/protocol_post_failure_host.py",
+    # [RUNTIME] OMN-25942 narrow view of one dev-merge tag (its sha) that the untagged-head
+    # idle build rule reads from the agent's tag reader; the rule imports nothing from
+    # deploy_agent, so the agent's own tag model satisfies this structurally.
+    "ProtocolDevTag": "protocols/protocol_dev_tag.py",
     # [RUNTIME] OMN-12632 narrows the AIOKafkaConsumer.end_offsets surface so
     # AdapterKafkaAdminLag can serve log-end offsets the pinned aiokafka 0.13.0
     # admin omits, without a hard aiokafka import at parse time.

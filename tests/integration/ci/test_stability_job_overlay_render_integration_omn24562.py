@@ -56,7 +56,13 @@ def _overlay_home(root: Path) -> Path:
     overlay.parent.mkdir(parents=True)
     overlay.write_text(
         yaml.safe_dump(
-            {"schema_version": 1, "endpoint_urls": {SLOT_ID: OVERLAY_ADDRESS}}
+            {
+                "schema_version": 1,
+                "endpoint_urls": {
+                    "coder-5090": "http://192.0.2.50:8000",
+                    SLOT_ID: OVERLAY_ADDRESS,
+                },
+            }
         ),
         encoding="utf-8",
     )
@@ -71,6 +77,8 @@ def _execution(lane: _Lane | None) -> SimpleNamespace:
         __file__=str(REPO_ROOT / "scripts/deploy-agent/deploy_agent/executor.py"),
         ENV_ALLOWED_LANES=ALLOWED_LANES_ENV,
         LANE_OVERLAY_DIR_ENV="ONEX_LANE_OVERLAY_DIR",
+        # No lane overlay directory is configured here (OMN-25202: render_dev_lane reads it).
+        resolve_lane_overlay_dir=lambda environ: None,
         EnumRuntimeLane=_Lane,
         _ActiveDeployLane=SimpleNamespace(lane=lane),
         parse_allowed_lanes=lambda raw: raw,

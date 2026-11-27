@@ -32,12 +32,25 @@ from typing import Literal, cast
 import yaml
 from pydantic import BaseModel, field_validator
 
+from omnibase_infra.contracts.contract_yaml import read_contract_yaml
+from omnibase_infra.models.event_bus.model_contract_topic_entry import (
+    TENANT_SLUG_PATTERN,
+    ModelContractTopicEntry,
+)
 from omnibase_infra.utils.util_runtime_packages import (
     get_active_runtime_packages,
     normalize_runtime_package_name,
 )
 
 logger = logging.getLogger(__name__)
+
+# ModelContractTopicEntry is the return type of this module's public methods.
+__all__ = [
+    "ContractTopicExtractor",
+    "ModelContractTopicEntry",
+    "RawTopicDecl",
+    "read_projection_api_topics",
+]
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -57,6 +70,10 @@ _VALID_DLQ_CATEGORIES: frozenset[str] = frozenset({"intents", "events", "command
 _RE_VERSION = re.compile(r"^v\d+$")
 _RE_EVENT_NAME = re.compile(r"^[a-z0-9._-]+$")
 _RE_PRODUCER = re.compile(r"^[a-z0-9-]+$")  # no underscores allowed
+
+# OMN-25548: exactly one ``tenant-<slug>.`` prefix, then a canonical ``onex.`` topic,
+# so a nested prefix is malformed.
+_RE_TENANT_PREFIX = re.compile(rf"^tenant-({TENANT_SLUG_PATTERN})\.")
 
 # Regex to identify ONEX topic string literals in Python source code.
 # Matches either:
@@ -93,75 +110,6 @@ _EVENT_BUS_SECTION_KEYS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
-
-
-class ModelContractTopicEntry(BaseModel):
-    """A single validated topic extracted from one or more contract.yaml files.
-
-    Per-topic provisioning config (``partitions``, ``replication_factor``,
-    ``kafka_config``) is carried from a contract's optional ``topic_config``
-    block (OMN-13238). When a contract does not declare ``topic_config`` for a
-    topic, these fields stay ``None`` and the provisioner falls back to the
-    ``ModelTopicSpec`` defaults.
-    """
-
-    topic: str
-    kind: Literal["evt", "cmd", "intent", "dlq", "snapshot"]
-    producer: str
-    event_name: str
-    version: str  # e.g. "v1"
-    source_contracts: tuple[Path, ...]
-    provisioning_priority: int = 100
-    partitions: int | None = None
-    replication_factor: int | None = None
-    kafka_config: Mapping[str, str] | None = None
-
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
-
-    @field_validator("kafka_config", mode="before")
-    @classmethod
-    def _freeze_kafka_config(
-        cls, v: Mapping[str, str] | None
-    ) -> Mapping[str, str] | None:
-        """Freeze a mutable dict supplied at construction time."""
-        if isinstance(v, dict):
-            return MappingProxyType(dict(v))
-        return v
-
-    def merge_sources(self, other: ModelContractTopicEntry) -> ModelContractTopicEntry:
-        """Return a new entry with source_contracts merged (deduped, sorted).
-
-        Per-topic config is merged by taking the first non-``None`` value for
-        each field, so a topic declared in two contracts (one carrying
-        ``topic_config``, one not) keeps the declared config. When BOTH carry
-        conflicting config, ``self`` wins (deterministic by topic-string sort
-        order in the caller).
-        """
-        combined = tuple(
-            sorted(set(self.source_contracts) | set(other.source_contracts))
-        )
-        return self.model_copy(
-            update={
-                "source_contracts": combined,
-                "provisioning_priority": min(
-                    self.provisioning_priority,
-                    other.provisioning_priority,
-                ),
-                "partitions": (
-                    self.partitions if self.partitions is not None else other.partitions
-                ),
-                "replication_factor": (
-                    self.replication_factor
-                    if self.replication_factor is not None
-                    else other.replication_factor
-                ),
-                "kafka_config": (
-                    self.kafka_config
-                    if self.kafka_config is not None
-                    else other.kafka_config
-                ),
-            }
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +238,29 @@ def _parse_topic(raw: str, source: Path) -> ModelContractTopicEntry | None:
         version=version,
         source_contracts=(source,),
     )
+
+
+def _parse_declared_topic(raw: str, source: Path) -> ModelContractTopicEntry | None:
+    """Parse a declared topic: a canonical topic or ``tenant-<slug>.<canonical>``.
+
+    ``_parse_topic`` stays canonical-only because the topic enums bind one member
+    to one canonical topic. A topic that starts with ``tenant-`` must carry a valid
+    slug and a canonical remainder (one prefix, never nested); anything else is
+    warned and skipped exactly as a malformed canonical topic is.
+    """
+    if not raw.startswith("tenant-"):
+        return _parse_topic(raw, source)
+    match = _RE_TENANT_PREFIX.match(raw)
+    if match is None:
+        _warn(
+            f"Skipping malformed topic (tenant prefix must be 'tenant-<slug>.' with a "
+            f"1 to 32 character lowercase slug): {raw!r} in {source}"
+        )
+        return None
+    entry = _parse_topic(raw[match.end() :], source)
+    if entry is None:
+        return None
+    return entry.model_copy(update={"topic": raw, "tenant_slug": match.group(1)})
 
 
 def _topic_priority(item: dict[object, object]) -> int:
@@ -767,8 +738,7 @@ class ContractTopicExtractor:
 
         for contract_path in contract_files:
             try:
-                with contract_path.open(encoding="utf-8") as fh:
-                    raw_yaml = yaml.safe_load(fh)
+                raw_yaml = read_contract_yaml(contract_path)
             except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                 _warn(f"Could not parse {contract_path}: {exc} — skipping")
                 continue
@@ -781,7 +751,7 @@ class ContractTopicExtractor:
 
             for decl in raw_topics:
                 raw = decl.topic
-                entry = _parse_topic(raw, contract_path)
+                entry = _parse_declared_topic(raw, contract_path)
                 if entry is None:
                     # Warned inside _parse_topic; skip
                     continue
@@ -953,7 +923,7 @@ class ContractTopicExtractor:
                 _warn(f"Skipping non-string or empty topic entry in {topics_yaml}")
                 continue
 
-            entry = _parse_topic(raw.strip(), topics_yaml)
+            entry = _parse_declared_topic(raw.strip(), topics_yaml)
             if entry is None:
                 # Malformed — warned inside _parse_topic
                 continue
@@ -1051,8 +1021,7 @@ class ContractTopicExtractor:
 
             for contract_path in contract_paths:
                 try:
-                    with contract_path.open(encoding="utf-8") as fh:
-                        raw_yaml = yaml.safe_load(fh)
+                    raw_yaml = read_contract_yaml(contract_path)
                 except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                     _warn(
                         f"Could not parse {contract_path} from package "
@@ -1071,7 +1040,7 @@ class ContractTopicExtractor:
 
                 for decl in raw_topics:
                     raw = decl.topic
-                    entry = _parse_topic(raw, contract_path)
+                    entry = _parse_declared_topic(raw, contract_path)
                     if entry is None:
                         continue
                     entry = entry.model_copy(

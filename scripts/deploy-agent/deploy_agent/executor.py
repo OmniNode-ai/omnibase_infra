@@ -127,9 +127,13 @@ SCOPE_BUNDLES: dict[Scope, list[str]] = {
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers.handler_dev_boot_guard import HandlerDevBootGuard
+    from omnibase_infra.models.model_answering_degraded import ModelAnsweringDegraded
     from omnibase_infra.models.model_deploy_source_clone import ModelDeploySourceClone
     from omnibase_infra.models.model_dev_boot_report_config import (
         ModelDevBootReportConfig,
+    )
+    from omnibase_infra.models.model_runtime_health_judgement import (
+        ModelRuntimeHealthJudgement,
     )
 
 
@@ -161,8 +165,7 @@ for package in os.environ.get("ONEX_ACTIVE_RUNTIME_PACKAGES", "").split(","):
 
 def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
     """Load host-effect modules from the standalone agent's own checkout."""
-    prefix = "omnibase_infra." if "." in effect else "omnibase_infra.handlers."
-    name = prefix + effect
+    name = ("omnibase_infra." if "." in effect else "omnibase_infra.handlers.") + effect
     if name in sys.modules:
         return sys.modules[name]
     root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
@@ -180,9 +183,17 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/model_dev_boot_request.py",
         "models/model_dev_boot_result.py",
         "handlers/handler_dev_boot_guard.py",
+        "models/model_answering_degraded.py",
+        "models/model_runtime_health_reading.py",
+        "models/model_runtime_health_judgement.py",
+        "handlers/runtime_health_reading/handler_runtime_health_reading.py",
+        "models/model_build_clock.py",
+        "models/model_build_clock_request.py",
+        "handlers/build_clock/handler_build_clock.py",
         "nodes/node_dev_roll_events_effect/runtime_dev_roll_events.py",
         "models/model_deploy_source_clone.py",
         "handlers/handler_deploy_source_clone.py",
+        "nodes/node_dev_roll_events_effect/runtime_dev_agent_adoption.py",
         "models/model_agent_unit.py",
         "models/model_unit_settings_gap.py",
         "models/model_restart_on_merge.py",
@@ -198,12 +209,14 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "handlers/handler_onex_api_image_build.py",
         "models/model_dev_lane_pin_staleness.py",
         "handlers/handler_dev_lane_pin_compose_guard.py",
+        "handlers/handler_stability_rollback_waiver.py",
         "models/model_cost_estimator_build_config.py",
         "models/model_cost_estimator_build_request.py",
         "models/model_cost_estimator_build_result.py",
         "protocols/protocol_cost_estimator_build_io.py",
         "handlers/handler_cost_estimator_build.py",
         "nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py",
+        "models/runtime/model_node_exclusion_lane_env.py",
         "nodes/node_setup_local_provision_effect/runtime_lane_env_overlay.py",
         "models/contracts/enum_llm_endpoint_status.py",
         "models/contracts/model_llm_endpoint_lane_overlay_binding.py",
@@ -212,6 +225,7 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         "models/contracts/model_llm_endpoint_overlay.py",
         "nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py",
         "nodes/node_setup_local_provision_effect/runtime_overlay_revision.py",
+        "nodes/node_setup_local_provision_effect/runtime_host_broker_layer.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
         if module_name in sys.modules:
@@ -224,6 +238,14 @@ def load_dev_boot_guard(effect: str = "handler_dev_boot_guard") -> ModuleType:
         module = sys.modules[module_name] = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     return sys.modules[name]
+
+
+# The runtime cost estimator build module, which also rolls the stability writers.
+_RCB = "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
+
+
+def _rcb() -> ModuleType:
+    return load_dev_boot_guard(_RCB)
 
 
 def dev_boot_report_config() -> ModelDevBootReportConfig:
@@ -532,6 +554,10 @@ PhaseCallback = Callable[[Phase, PhaseStatus], None]
 # this path builds would abort on `no such service` there in any case.
 VERIFY_RECREATE_LANES: frozenset[EnumRuntimeLane] = frozenset({EnumRuntimeLane.DEV})
 
+# OMN-24562: where verify() waits out a runtime's declared start (it only re-probes
+# and reads Docker); a recreate stays dev only (above).
+VERIFY_START_WAIT_LANES = VERIFY_RECREATE_LANES | {EnumRuntimeLane.STABILITY_TEST}
+
 # The ceiling on the recreate command itself. The same number
 # ``deliver_onex_api_pin`` uses for the same shape of command: one service,
 # ``--no-deps``, nothing to build.
@@ -687,10 +713,6 @@ _BUILD_PROVENANCE_BY_SOURCE: dict[BuildSource, tuple[str, str]] = {
 # Promotion-lineage guard (OMN-12626, R1). Loaded from scripts/ by file path
 # because scripts/ is not an importable package. The guard refuses to build a
 # prod-bound (release-mode) image from a dirty or non-promoted source tree.
-def _promotion_guard_path() -> Path:
-    return _in_clone("scripts", "check_prod_promotion_lineage.py")
-
-
 def _load_optional_tracking_remote_ref_from_env() -> str | None:
     """Return the declared remote tracking ref, or none when it is undeclared."""
     try:
@@ -710,7 +732,7 @@ def _load_promotion_guard() -> ModuleType:
     mod_name = "check_prod_promotion_lineage"
     if mod_name in sys.modules:
         return sys.modules[mod_name]
-    guard = _promotion_guard_path()
+    guard = _in_clone("scripts", "check_prod_promotion_lineage.py")
     if not guard.is_file():
         raise RuntimeError(
             "prod promotion-lineage guard not found at "
@@ -814,13 +836,9 @@ class ModelLaneConfig(BaseModel):
     non-dev lanes layer their overlay (``docker-compose.<lane>.yml``) on top so
     the overlay's container names, project, and host port bindings win.
 
-    OMN-19522 adds four fields, each defaulting to what every lane did before,
+    OMN-19522 adds three fields, each defaulting to what every lane did before,
     so only a config that sets them behaves differently:
 
-    * ``build_project`` -- the project ``docker compose build`` runs under.
-      Compose names a built image ``<project>-<service>``, so a lane that brings
-      its runtime up under its own project must build under it too, or the up
-      finds no image and builds a second one without the build args.
     * ``main_runtime_container`` override -- the container whose image records
       the running build (the lineage fence reads it). On the .201 dev lane the
       first health target's service name is also its container name; on a lane
@@ -839,7 +857,6 @@ class ModelLaneConfig(BaseModel):
     compose_project: str
     postgres_container: str
     runtime_health_targets: tuple[tuple[str, int], ...]
-    build_project: str = COMPOSE_PROJECT
     runtime_container: str = ""
     disabled_phases: frozenset[EnumInstancePhase] = frozenset()
     disabled_services: frozenset[str] = frozenset()
@@ -849,6 +866,12 @@ class ModelLaneConfig(BaseModel):
         """The lane's main runtime container name."""
         return self.runtime_container or self.runtime_health_targets[0][0]
 
+
+_LAYER_MODULE = "nodes.node_setup_local_provision_effect.runtime_host_broker_layer"
+_PIN_GUARD = "handler_dev_lane_pin_compose_guard"
+_LANE_ENV = "nodes.node_setup_local_provision_effect.runtime_lane_env_overlay"
+_CODE_REF_PIN_MODULE = "handler_dev_lane_code_ref_pin"
+ADOPTION_MODULE = "nodes.node_dev_roll_events_effect.runtime_dev_agent_adoption"
 
 # OMN-15181 round 3 (Finding 9): maps each prod runtime service to the compose
 # env var that repoints its `image:` field (docker-compose.prod.yml). This is
@@ -961,7 +984,6 @@ def dev_instance_lane_config(
             f"{repo_dir or deploy_repo_dir()}/{spec.compose_overlay}",
         ),
         compose_project=spec.compose_project,
-        build_project=spec.compose_project,
         postgres_container=spec.postgres_container,
         runtime_health_targets=(
             ("omninode-runtime", spec.health_ports.main),
@@ -1041,16 +1063,19 @@ def active_dev_instance() -> str:
 
 def _folded_dev_services(lane: EnumRuntimeLane) -> set[str]:
     policy = _load_runtime_policy_env()  # one snapshot for the profiles and the map
-    services: set[str] = load_dev_boot_guard().folded_dev_services(
-        policy, lane_folded_profiles(lane, policy), LANE_POLICY_PREFIX.get(lane, "")
+    return set(
+        load_dev_boot_guard().folded_dev_services(
+            policy, lane_folded_profiles(lane, policy), LANE_POLICY_PREFIX.get(lane, "")
+        )
     )
-    return services
 
 
 def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
     if lane is EnumRuntimeLane.DEV:
-        config = dev_instance_lane_configs()[_DevInstanceSelection.name]
+        config: ModelLaneConfig = dev_instance_lane_configs()[
+            _DevInstanceSelection.name
+        ]
     else:
         config = _lane_configs()[lane]
     if retired := _folded_dev_services(lane):
@@ -1067,6 +1092,7 @@ def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
         main, _ = targets[SERVICE_HEALTH_TARGET_INDEX["omninode-runtime"]]
         targets[index] = (main, port)
         config = config.model_copy(update={"runtime_health_targets": tuple(targets)})
+    config = load_dev_boot_guard(_LAYER_MODULE).layered(sys.modules[__name__], config)
     return config
 
 
@@ -1831,10 +1857,9 @@ def _lane_env_overlay() -> dict[str, str]:
     """This agent's lane env fragment, or nothing (OMN-20867).
 
     Only a process fenced to the dev lane alone reads one: ``_compose_env``
-    serves every lane, and a deploy of any other lane must never take a dev
-    lane's settings. The fragment is the active dev instance's, read from
-    the overlay clone at its ``origin/dev`` on every call, so a merged overlay
-    change reaches the next compose command without an agent restart.
+    serves every lane, and no other lane's deploy may take a dev lane's
+    settings. The active dev instance's fragment is read from the overlay clone
+    at ``origin/dev`` on every call, so a merged change needs no agent restart.
     """
     clone = _LaneOverlayClone.path
     raw = os.environ.get(ENV_ALLOWED_LANES, "").strip()
@@ -1849,9 +1874,7 @@ def _lane_env_overlay() -> dict[str, str]:
     lane_id = DEV_INSTANCE_RUNTIME_LANES[active_dev_instance()]
     # OMN-22634: the overlay home's runtime_lane_env overlay is a second source for
     # the same keys, through the same allowlist; a key the two set differently refuses.
-    overlay: dict[str, str] = load_dev_boot_guard(
-        "nodes.node_setup_local_provision_effect.runtime_lane_env_overlay"
-    ).lane_env_with_overlay_home(
+    overlay: dict[str, str] = load_dev_boot_guard(_LANE_ENV).lane_env_with_overlay_home(
         sys.modules[__name__],
         read_lane_env_fragment(clone, lane_id),
         os.environ,
@@ -2074,8 +2097,11 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     # before anything below reads the environment.
     env.update(operator_store_overlay())
     policy = _load_runtime_policy_env()
-    for key, value in policy.items():
-        env.setdefault(key, value)
+    # OMN-21753: the image's prebuilt node manifest is stamped from the policy's
+    # ONEX_ACTIVE_RUNTIME_PACKAGES and boot compares it with the container's, so no operator
+    # store or process value may widen it; every other policy key only fills a gap.
+    owned = {k: policy[k] for k in ("ONEX_ACTIVE_RUNTIME_PACKAGES",) if k in policy}
+    env = {**policy, **env, **owned}
     # OMN-20932: resolve the private lane-overlay directory every lane compose
     # file mounts. Left unset when none exists, so compose refuses loudly.
     lane_overlay_dir = resolve_lane_overlay_dir(env)
@@ -2166,123 +2192,6 @@ def _runtime_version_from_pyproject(repo_dir: str | None = None) -> str:
     if not version:
         raise RuntimeError(f"Empty RUNTIME_VERSION in {pyproject}")
     return version
-
-
-def _runtime_health_reason(result: subprocess.CompletedProcess[str]) -> str:
-    """Return why a runtime /health response is not a pass, or "" when it is.
-
-    OMN-18640 AC8. The predicate this replaced returned a bare bool, so the
-    executor knew a probe had failed and could not say ANYTHING about why. A
-    verdict that fails the job has to name its own reason -- the reason is what
-    reaches ``errors`` on the terminal event and what a reader of the job
-    record has instead of going to the host.
-
-    Every branch below is a distinct fact about the runtime and they take
-    different next steps: curl could not reach it at all, it answered something
-    that is not a health document, or it answered a health document that says
-    it is not ready.
-    """
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()[:200]
-        return f"curl exited {result.returncode}: {detail or 'no output'}"
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return f"health response is not JSON: {result.stdout.strip()[:200]!r}"
-    if not isinstance(payload, dict):
-        return f"health response is not a JSON object: {type(payload).__name__}"
-    details = payload.get("details")
-    if not isinstance(details, dict):
-        return "health response carries no details object"
-    status = payload.get("status")
-    is_running = details.get("is_running")
-    prefetch = details.get("config_prefetch_status")
-    if status == "healthy" and is_running is True and prefetch in {"ok", "skipped"}:
-        return ""
-    return (
-        f"health response is not ready: status={status!r} "
-        f"is_running={is_running!r} config_prefetch_status={prefetch!r}"
-    )
-
-
-class ModelAnsweringDegraded(BaseModel):
-    """A runtime that answered ``/health`` running, with its monitor degraded.
-
-    OMN-20864. ``observed_at`` is the health monitor's own timestamp for the
-    reading, so two probes inside one monitor cycle read as ONE observation.
-    ``dimensions`` names every monitor dimension that is not ``HEALTHY``.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-    observed_at: str
-    dimensions: frozenset[str]
-
-    def describe(self) -> str:
-        return (
-            f"monitor DEGRADED on {', '.join(sorted(self.dimensions))} "
-            f"(observed {self.observed_at or 'at an unread time'})"
-        )
-
-
-def _answering_degraded(
-    result: subprocess.CompletedProcess[str],
-) -> ModelAnsweringDegraded | None:
-    """The monitor-degraded reading of a runtime that is up, or ``None``.
-
-    OMN-20864. MEASURED on the lab dev lane 2026-10-11: job 72e74ec6's
-    runtime answered ``status=degraded is_running=True`` on every probe; its
-    health monitor (``onex.evt.omnibase-infra.runtime-health-check.v1``) named
-    ``projection_dlq_saturation`` on every cycle from 13:28Z, the same finding
-    the container it replaced had carried since at least 12:41Z. The agent
-    force-recreated it at 13:50Z, the recreate timed out, and the lane was down
-    until 19:41Z.
-
-    The runtime's own contract (``ServiceHealth``: degraded and operational is
-    HTTP 200, "automatic restarts may mask recurring issues") is that such a
-    runtime stays in service. So this is NARROW, and everything outside it
-    keeps the OMN-18640 recreate: the probe answered JSON, ``status`` is
-    ``degraded``, ``details.is_running`` is true, the runtime is attached and
-    not starting, the event bus is not reported unhealthy, and the monitor
-    block names at least one non-``HEALTHY`` dimension. A dead port, a
-    timeout, an ``unhealthy`` runtime, a stopped one, one whose bus is down,
-    or a degraded one whose monitor names nothing is not this.
-    """
-    if result.returncode != 0:
-        return None
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    details = payload.get("details")
-    if not isinstance(details, dict):
-        return None
-    if (
-        payload.get("status") != "degraded"
-        or details.get("is_running") is not True
-        or details.get("runtime_attached") is False
-        or details.get("startup_in_progress") is True
-        or details.get("event_bus_healthy") is False
-    ):
-        return None
-    monitor = details.get("runtime_health")
-    if not isinstance(monitor, dict):
-        return None
-    raw_dimensions = monitor.get("dimensions")
-    dimensions = frozenset(
-        str(dimension["name"])
-        for dimension in (raw_dimensions if isinstance(raw_dimensions, list) else [])
-        if isinstance(dimension, dict)
-        and dimension.get("name")
-        and dimension.get("status") != "HEALTHY"
-    )
-    if not dimensions:
-        return None
-    return ModelAnsweringDegraded(
-        observed_at=str(monitor.get("observed_at") or ""),
-        dimensions=dimensions,
-    )
 
 
 def monitor_settled_degraded(
@@ -3424,6 +3333,7 @@ class DeployExecutor:
         # whether that repaired them. Read by the agent when it builds the
         # terminal event, for the same reason residue and supervision are.
         self.verify_recreate: list[ModelVerifyRecreate] = []
+        self._first_pass_at: dict[int, datetime] = {}
         # OMN-19911: the control-plane one-shots a runtime rebuild re-ran
         # because their config hash moved, with each exit code. Read by the
         # agent when it writes the job's terminal record and event.
@@ -3465,9 +3375,9 @@ class DeployExecutor:
         # signed command and _compose_build exports it to the staging script.
         self.sibling_tags: dict[str, str] = {}
         # OMN-19220: ONE BUILD_DATE per rebuild, shared by every compose build
-        # in it. Dockerfile.runtime declares ARG BUILD_DATE at the top of both
-        # stages, so every RUN after it takes the value as build environment
-        # and a new timestamp misses the cache for the whole image. The
+        # in it. Dockerfile.runtime declares ARG BUILD_DATE late in both stages
+        # (OMN-26316), so every RUN after it takes the value as build
+        # environment and a new timestamp misses the cache for those layers. The
         # dev-lane-only build (OMN-18108) is a second `compose build` of the
         # same Dockerfile and args; stamping it with its own clock re-ran the
         # full build from scratch (2% cached, 46 min at load 163 on .201,
@@ -3482,6 +3392,7 @@ class DeployExecutor:
         self.deploy_build_date = None
         self.recreate_supervision = []
         self.verify_recreate = []
+        self._first_pass_at = {}
         self.oneshot_reruns = []
         self.cloud_migration_failure = ""
         self.deps_convergence = []
@@ -3578,37 +3489,14 @@ class DeployExecutor:
         * the sha recorded at startup by ``deploy_agent.loaded_code`` versus the
           clone's HEAD decides whether to RE-EXEC.
 
-        Collapsing them into the first is what this method did until now, and
-        it is wrong in one direction that matters. Something other than this
-        method can advance the clone -- on the lab host an hourly reconciler
-        resets it to ``origin/dev`` at :19 past -- and past each of those ticks
-        the clone is current, so the method reported ``already at origin/dev,
-        nothing to do`` and skipped the re-exec while the process went on
-        executing the code it had imported days earlier. Measured
-        2026-09-14T08:00Z: the ``#3520`` fix to this agent's own lab-overlay
-        build sat on disk at ``ead1f59b1`` while a process from 2026-09-09
-        14:06 EDT kept failing ``images_pinned`` on every automated api build.
+        Collapsing them into the first skipped the re-exec whenever something else advanced the
+        clone (on the lab host an hourly reconciler resets it to ``origin/dev``), while the
+        process went on executing the code it had imported days earlier (measured 2026-09-14).
 
-        A fix to the deploy agent could not reach the deploy agent, which is
-        the same sentence ``#3522`` had to write about the rebuild trigger one
-        step upstream.
-
-        Called ONLY at a boundary where nothing is in flight, never between the
-        phases of a deploy (OMN-16442). ``boundary`` is required and has no
-        default: every call site names where it fired, the journal line carries
-        that name, and a future mid-deploy caller cannot quietly omit it.
-
-        Why the boundary is the whole contract. This method replaces the
-        process image. Until 2026-09-08 it was invoked as the first statement
-        of ``rebuild_scope`` -- that is, after preflight, git, compose_gen and
-        seed had already run for an accepted command. Command
-        ``8d0c861a-f91e-4ca2-954e-a073759dd39d`` on the .201 dev lane is the
-        live proof of what that costs: those four phases succeeded, this method
-        logged ``behind origin/dev ... pulling and re-execing``, and the
-        replacement process logged ``Recovered 1 crashed job(s)`` and published
-        the command as ``status=failed``. A process that re-execs mid-deploy
-        cannot finish the deploy it is executing, so a deploy that starts on
-        version X must be allowed to complete on version X.
+        Called ONLY at a boundary where nothing is in flight, never between the phases of a
+        deploy (OMN-16442): ``boundary`` is required, so every journal line names where it fired.
+        A process that re-execs mid-deploy cannot finish the deploy it is executing, so a deploy
+        that starts on version X must complete on version X.
 
         The legal boundaries are declared in ``EnumSelfUpdateBoundary``:
         ``PRE_ACCEPT`` (before a polled command is marked started),
@@ -3690,7 +3578,7 @@ class DeployExecutor:
             return
 
         # OMN-23039: a live code-ref pin names the branch whose code this agent loads.
-        branch = load_dev_boot_guard("handler_dev_lane_code_ref_pin").followed_branch(
+        branch = load_dev_boot_guard(_CODE_REF_PIN_MODULE).followed_branch(
             load_tracking_ref_from_env(), os.environ, boundary.value
         )
 
@@ -3712,23 +3600,11 @@ class DeployExecutor:
         agent_dir = os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR)
         timeout = 60
 
-        # Discard a job's rewrite of the known TRACKED byproducts BEFORE the
-        # dirty-check, one path at a time, so it is never counted as a tracked
-        # modification and never blocks the pull below (OMN-19376). Only a
-        # path that is actually dirty is touched, and only when it is; a clean
-        # placeholder is left alone. The ":/<path>" magic pathspec resolves
-        # against the repo root regardless of ``agent_dir`` being a
-        # subdirectory of it -- a bare relative pathspec resolves against
-        # ``agent_dir`` instead and fails to match (measured: ``git -C
-        # scripts/deploy-agent checkout -- workspace/x.json`` errors
-        # "pathspec ... did not match any file(s)" even though the same path
-        # shows up in ``git -C scripts/deploy-agent status --porcelain``,
-        # because status paths are always repo-root-relative but a checkout
-        # pathspec is resolved against the ``-C`` directory). Discarding is
-        # safe because this content is never work worth keeping: the next job
-        # overwrites the same paths from scratch, and self_update() is never
-        # called while a job is in flight (see boundary discussion above), so
-        # there is no in-progress job depending on what is here right now.
+        # Discard a job's rewrite of the known TRACKED byproducts BEFORE the dirty-check, one
+        # dirty path at a time, so it never blocks the pull below (OMN-19376). The ":/<path>"
+        # pathspec resolves against the repo root; a bare relative one resolves against
+        # ``agent_dir`` and fails to match. Safe: the next job rewrites these paths from
+        # scratch, and no job is in flight at a self_update boundary.
         for byproduct_path in SELF_UPDATE_KNOWN_BYPRODUCT_PATHS:
             pathspec = f":/{byproduct_path}"
             byproduct_status = _run(
@@ -3951,8 +3827,15 @@ class DeployExecutor:
         if guard.reexec_blocked_by_settings(sys.modules[__name__], os.environ):
             return
 
-        # Sync deps so new imports are available after re-exec.
-        _uv_sync_after_pull(agent_dir, boundary)
+        # Adopt only a ref whose one-shot self-check passes; else stay on the loaded ref (OMN-26494).
+        if not load_dev_boot_guard(ADOPTION_MODULE).adopts(
+            agent_dir,
+            self._migration_record_dir,
+            (loaded_sha, disk_sha),
+            _run,
+            lambda clone: _uv_sync_after_pull(clone, boundary),
+        ):
+            return
 
         # Hand off immediately before the process image is replaced, and ONLY
         # when it is about to be. The PRE_ACCEPT caller rewinds its committed
@@ -4700,10 +4583,11 @@ class DeployExecutor:
             )
             return services
 
+        # OMN-24903: a stability roll with no sha is refused before any build.
+        roll = _rcb().writer_roll(sys.modules[__name__], lane, scope, git_sha)
+
         # OMN-23368: before any build, refuse a service the lane's compose lacks.
-        self.pin_staleness_report = load_dev_boot_guard(
-            "handler_dev_lane_pin_compose_guard"
-        ).guard_before_build(
+        self.pin_staleness_report = load_dev_boot_guard(_PIN_GUARD).guard_before_build(
             _without_disabled_services(
                 without_gateway_services(
                     services or services_for_scope(scope, lane=lane)
@@ -4714,9 +4598,7 @@ class DeployExecutor:
             env=os.environ,
             agent_dir=os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR),
             read_services=_read_compose_services,
-            read_pin=load_dev_boot_guard(
-                "handler_dev_lane_code_ref_pin"
-            ).read_active_pin,
+            read_pin=load_dev_boot_guard(_CODE_REF_PIN_MODULE).read_active_pin,
             git_timeout=PHASE_TIMEOUTS[Phase.GIT],
         )
 
@@ -4728,9 +4610,7 @@ class DeployExecutor:
             # staged provenance a reconcile checkout would reset to a placeholder.
             # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
             with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
-                settings = load_dev_boot_guard(
-                    "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-                ).dev_lane_build_settings(sys.modules[__name__], lane)
+                settings = _rcb().dev_lane_build_settings(sys.modules[__name__], lane)
                 for build_scope in (Scope.CORE, Scope.RUNTIME):
                     self._compose_build(
                         build_scope,
@@ -4767,7 +4647,7 @@ class DeployExecutor:
             )
             # OMN-18143: every image was built above; compose must not build
             # them again inside the up ceiling.
-            self._compose_up(
+            _rcb().handed_over(self._compose_up, roll)(
                 Phase.RUNTIME,
                 Scope.RUNTIME,
                 [],
@@ -4793,12 +4673,8 @@ class DeployExecutor:
         # cannot reset staged provenance before the dev-only build consumes it.
         # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
         with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
-            settings = (
-                load_dev_boot_guard(
-                    "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-                ).dev_lane_build_settings(sys.modules[__name__], lane)
-                if scope == Scope.RUNTIME
-                else None
+            settings = _rcb().dev_lane_build_settings(
+                sys.modules[__name__], lane, scope
             )
             self._compose_build(
                 scope,
@@ -4819,7 +4695,7 @@ class DeployExecutor:
                     read_settings=lambda: settings,
                 )
                 self._preflight_runtime_boot(services, on_phase_update, lane=lane)
-        self._compose_up(
+        _rcb().handed_over(self._compose_up, roll)(
             phase,
             scope,
             services,
@@ -5131,9 +5007,7 @@ class DeployExecutor:
         git_ref: str,
         read_settings: Callable[[], Any] | None = None,
     ) -> dict[str, str]:
-        environment: dict[str, str] = load_dev_boot_guard(
-            "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
-        ).build_dev_lane_services(
+        environment: dict[str, str] = _rcb().build_dev_lane_services(
             sys.modules[__name__],
             self._compose_build,
             git_sha,
@@ -5691,9 +5565,11 @@ class DeployExecutor:
             "compose",
             *compose_file_args,
             "-p",
-            # OMN-19522: the lane's build project, which is COMPOSE_PROJECT on
-            # every lane but one that brings its runtime up under its own.
-            lane_config_for(runtime_lane).build_project,
+            # OMN-24562: compose names a built image ``<project>-<service>`` and
+            # the runtime up runs --no-build under the lane's own project, so the
+            # build runs under it too (it ran under the default project: the
+            # stability up found stale images, or none).
+            lane_config_for(runtime_lane).compose_project,
             "--profile",
             profile,
             "build",
@@ -6235,6 +6111,7 @@ class DeployExecutor:
         force_recreate: bool = True,
         build: bool = True,
         compose_may_build: bool = True,
+        after_migrations: Callable[..., object] = lambda *_: None,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
 
@@ -6282,6 +6159,9 @@ class DeployExecutor:
             self.rerun_changed_oneshots(
                 lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME], build=build
             )
+            # OMN-24903: the stability writers roll here, on the migrated schema,
+            # before the runtime up and outside the build-context lock.
+            after_migrations(extra_env)
             if self.cloud_migration_failure:
                 had_requested_services = bool(requested_services)
                 requested_services = self._without_failed_cloud_consumers(
@@ -7007,7 +6887,7 @@ class DeployExecutor:
                 earlier_target_failed = True
             if (
                 check.status == "fail"
-                and lane in VERIFY_RECREATE_LANES
+                and lane in VERIFY_START_WAIT_LANES
                 and recover_runtime
             ):
                 self._assert_boot_can_progress(lane=lane, service=service, failed=check)
@@ -7048,7 +6928,9 @@ class DeployExecutor:
                 verdict_failures.append(check)
             if timed_out is not None and pending_timeout is None:
                 pending_timeout = timed_out
-        checks.extend(settled)
+        clock = self._build_clock_checks(lane)
+        checks.extend(settled + clock)
+        verdict_failures.extend(c for c in clock if c.status == "fail")
 
         # The probings are over; record them on the executor BEFORE any
         # refusal (OMN-18640 AC8). The agent's own ``health_checks`` local is
@@ -7147,7 +7029,8 @@ class DeployExecutor:
             )
             self._last_answering_degraded[port] = None
         else:
-            reason = _runtime_health_reason(result)
+            judged = self._judge_health(result)
+            reason = judged.reason
             # Docker executes the compose-declared healthcheck, including its
             # policy and consecutive-failure threshold. A separate JSON
             # predicate must not label an answering Docker-healthy service
@@ -7167,9 +7050,11 @@ class DeployExecutor:
                     reason = ""
                     docker_healthy = True
             self._last_answering_degraded[port] = (
-                _answering_degraded(result) if reason else None
+                judged.answering_degraded if reason else None
             )
         latency = int((time.monotonic() - start) * 1000)
+        if not reason:
+            self._first_pass_at.setdefault(port, datetime.now(UTC))
         return (
             ModelHealthCheck(
                 service=service,
@@ -7184,6 +7069,46 @@ class DeployExecutor:
             ),
             timed_out,
         )
+
+    def _judge_health(
+        self, result: subprocess.CompletedProcess[str]
+    ) -> ModelRuntimeHealthJudgement:
+        """OMN-18640, OMN-20864: the health reading node judges one /health probe."""
+        node = load_dev_boot_guard(
+            "handlers.runtime_health_reading.handler_runtime_health_reading"
+        )
+        reading = node.ModelRuntimeHealthReading(
+            returncode=result.returncode, stdout=result.stdout, stderr=result.stderr
+        )
+        handler = node.HandlerRuntimeHealthReading()
+        return cast("ModelRuntimeHealthJudgement", handler.handle(reading))
+
+    def _build_clock_checks(self, lane: EnumRuntimeLane) -> list[ModelHealthCheck]:
+        """OMN-26316: the build clock node judges container start to first healthy."""
+        if lane is not EnumRuntimeLane.DEV:
+            return []
+        service, port = lane_config_for(lane).runtime_health_targets[0]
+        box = self._compose_service_container(lane, service)
+        began = _runtime_health_helper("runtime_started_at", box) if box else ""
+        if port not in self._first_pass_at or not began:
+            return []
+        node = load_dev_boot_guard("handlers.build_clock.handler_build_clock")
+        handler = node.HandlerBuildClock()
+        clock = handler.handle(
+            node.ModelBuildClockRequest(
+                container_started_at=began, first_healthy_at=self._first_pass_at[port]
+            )
+        )
+        if clock.verdict == "unread":
+            return []
+        return [
+            ModelHealthCheck(
+                service="build-clock",
+                endpoint="container start to first healthy /health",
+                status=clock.verdict,
+                detail=clock.detail,
+            )
+        ]
 
     def _await_declared_start(
         self,
@@ -7313,29 +7238,25 @@ class DeployExecutor:
     def _compose_service_container(self, lane: EnumRuntimeLane, service: str) -> str:
         """Resolve one compose service on this lane to its container id, or ``""``.
 
-        By compose's own labels rather than a container name, because on the
-        dev lane ``runtime_health_targets`` carries SERVICE names. More than one
-        match is ambiguous and reads as unresolved.
+        By compose's labels; only stability, whose targets are CONTAINER names,
+        also tries the exact name. More than one match reads as unresolved.
         """
+        label = "label=com.docker.compose"
+        project = f"{label}.project={lane_config_for(lane).compose_project}"
+        selectors = [f"{label}.service={service}"]
+        if lane is EnumRuntimeLane.STABILITY_TEST:
+            selectors.append(f"name=^/{re.escape(service)}$")
         try:
-            result = _run(
-                [
-                    "docker",
-                    "ps",
-                    "--all",
-                    "-q",
-                    "--no-trunc",
-                    "--filter",
-                    f"label=com.docker.compose.project={lane_config_for(lane).compose_project}",
-                    "--filter",
-                    f"label=com.docker.compose.service={service}",
-                ],
-                timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS,
-            )
+            for selector in selectors:
+                argv = ["docker", "ps", "--all", "-q", "--no-trunc"]
+                argv += ["--filter", project, "--filter", selector]
+                result = _run(argv, timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS)
+                ids = result.stdout.split() if result.returncode == 0 else []
+                if ids:
+                    return ids[0] if len(ids) == 1 else ""
         except (OSError, subprocess.TimeoutExpired):
-            return ""
-        ids = result.stdout.split() if result.returncode == 0 else []
-        return ids[0] if len(ids) == 1 else ""
+            pass
+        return ""
 
     def _force_recreate_and_reverify(
         self,

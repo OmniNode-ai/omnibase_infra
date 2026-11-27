@@ -27,6 +27,18 @@ auxiliary_services_omnimemory_enabled: false
 # fields, and the model and preflight accept exactly a 12 GiB arena and a 16 GiB cap.
 dev_redpanda_memory: 12G
 dev_redpanda_mem_limit: 16g
+# OMN-25912: the dev runtime is recreated at most once per window, at the window's start
+# (within the start grace), unless a requester with a pinned-fix prefix asks. The window,
+# its offset and the grace are seconds; the deploy agent reads them, never a literal.
+# OMN-26369: agent/merge-restore is the agent's restore of a DOWN lane for a runtime-image
+# merge no dev job has built; the window is why 6131 and 6133 waited until 15:00Z.
+dev_recreate_window:
+  window_seconds: 3600
+  offset_seconds: 0
+  start_grace_seconds: 300
+  pinned_fix_requester_prefixes:
+    - operator/pinned-fix/
+    - agent/merge-restore
 profiles:
   dev:
     compose_project: omnibase-infra
@@ -219,6 +231,25 @@ profiles:
         source:
           source_type: env
           source_path: OMNIDASH_ANALYTICS_DB_URL
+      # OMN-26151: the lab workflow gateway's database (omnimarket
+      # node_workflow_gateway_effect overlay key database.dsn_secret). Unmapped, every
+      # request that needs the database answered 503 "authentication is temporarily
+      # unavailable". The container env carries the DSN (docker-compose.dev-lane.yml,
+      # GATEWAY_DATABASE_DSN, role gateway_runtime on this lane's own omninode_cloud).
+      # The value never appears here.
+      - logical_name: gateway.database.dsn
+        source:
+          source_type: env
+          source_path: GATEWAY_DATABASE_DSN
+      # OMN-26473: the tenant and key writer's database (omnimarket node_tenant_provision_effect,
+      # placed on the effects runtime profile). Unmapped, the node cannot resolve its DSN and every
+      # command is refused. The container env carries the DSN (docker-compose.dev-lane.yml,
+      # TENANT_IDENTITY_DATABASE_DSN, role tenant_identity_writer on this lane's own omninode_cloud),
+      # on the main and the effects runtime. The value never appears here.
+      - logical_name: tenant_identity.database.dsn
+        source:
+          source_type: env
+          source_path: TENANT_IDENTITY_DATABASE_DSN
     services:
       main:
         runtime_id: dev-main
@@ -352,7 +383,11 @@ profiles:
         # 2,367 MiB, so 3072M is that figure plus ~30% headroom.
         boot:
           ready_bound_seconds: 600
-          max_concurrent_contract_attach: 4
+          # OMN-26316: 16 contracts in flight. The 2026-11-24T20:01:04Z start on h201 joined
+          # 70 contracts at boot in 127 s of its 210 s to the first /health 200, with 4
+          # in flight and about 7.3 s per contract slot (tests/fixtures/boot_start_omn26316).
+          # Sixteen in flight models 5 waves, about 36 s.
+          max_concurrent_contract_attach: 16
           # Delegation and hook-event consumers subscribe before every other
           # contract's, in this order. The work-ledger query node answers the
           # board's readings and the seam probe by bus request, with a 30 s
@@ -368,6 +403,10 @@ profiles:
           # The dev roll window gate holds every dev deploy command on one hold
           # topic; a consumer group that joins after a command was sent skips
           # it, so the gate joins in the first wave too (OMN-24447).
+          # The GitHub repo gateway answers every `onex scm` read and pull
+          # request creation by bus request; on 2026-11-19 its consumer group
+          # joined 234 s and 247 s after two container starts, and a request
+          # sent 5 s after one start got no reply (OMN-26356).
           priority_contracts:
             - node_delegate_skill_orchestrator
             - node_delegation_orchestrator
@@ -381,8 +420,13 @@ profiles:
             - node_host_drift_plugin_revision_orchestrator
             - node_delegated_code_edit_orchestrator
             - node_delegation_routing_order_compute
+            - node_github_repo_gateway_effect
             - node_dev_roll_window_gate_effect
-          memory_limit: 3072M
+          # OMN-26316: 6144M. The join limit of 16 above joined the boot
+          # consumers four times as fast and the 3072M sized for a limit of 4 was
+          # OOM-killed at 3.10 to 3.12 GB on h201 (02:38:51Z, 02:42:21Z), 15
+          # restarts; 6144M is 2x the larger kill floor (tests/fixtures/dev_runtime_oom_omn26316).
+          memory_limit: 6144M
         # OMN-22930 (T8): the BYOK credential READ that only the separate
         # effects service resolved (OMN-20533) now happens in main, because the
         # provider call runs there once the role is folded. The rule is the
@@ -558,6 +602,16 @@ profiles:
         source:
           source_type: env
           source_path: KEYCLOAK_ADMIN_CLIENT_SECRET
+      # OMN-26151: the lab workflow gateway's database (omnimarket
+      # node_workflow_gateway_effect overlay key database.dsn_secret). Unmapped, every
+      # request that needs the database answered 503 "authentication is temporarily
+      # unavailable". The container env carries the DSN (the stability overlay compose file,
+      # GATEWAY_DATABASE_DSN, role gateway_runtime on this lane's own omninode_cloud).
+      # The value never appears here.
+      - logical_name: gateway.database.dsn
+        source:
+          source_type: env
+          source_path: GATEWAY_DATABASE_DSN
     services:
       main:
         runtime_id: stability-test-main
@@ -572,6 +626,19 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: true
+        # OMN-26566: the BYOK credential READ on the stability lane. The canary
+        # tenant's key was found and the route chose byok-openrouter, but the
+        # registered ref could not be resolved: this lane's resolver config had
+        # no tenant_inference_credentials namespace and INFISICAL_PROJECT_ID was
+        # empty. Same rule and folder as the dev lane's process-level rule. It
+        # renders as STABILITY_TEST_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON;
+        # the lane's compose file binds it with the lane identity references
+        # (STABILITY_TEST_RUNTIME_INFISICAL_*), never a value.
+        secret_resolver_namespaces:
+          - namespace: tenant_inference_credentials
+            ref_pattern: "^cred_[A-Za-z0-9._:-]+_[A-Za-z0-9_-]+_[0-9a-f]{32}$"
+            source_type: infisical
+            source_path_template: "/tenant-inference-credentials/{ref}"
       effects:
         runtime_id: stability-test-effects
         runtime_address: runtime://omninode-pc/stability-test/effects
@@ -583,6 +650,19 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: false
+        # OMN-26566: the BYOK credential READ on the stability lane. The canary
+        # tenant's key was found and the route chose byok-openrouter, but the
+        # registered ref could not be resolved: this lane's resolver config had
+        # no tenant_inference_credentials namespace and INFISICAL_PROJECT_ID was
+        # empty. Same rule and folder as the dev lane's process-level rule. It
+        # renders as STABILITY_TEST_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON;
+        # the lane's compose file binds it with the lane identity references
+        # (STABILITY_TEST_RUNTIME_INFISICAL_*), never a value.
+        secret_resolver_namespaces:
+          - namespace: tenant_inference_credentials
+            ref_pattern: "^cred_[A-Za-z0-9._:-]+_[A-Za-z0-9_-]+_[0-9a-f]{32}$"
+            source_type: infisical
+            source_path_template: "/tenant-inference-credentials/{ref}"
       # OMN-18114: the TENANT-domain projection CARRIER. Optional per lane and
       # declared only by the two lab lanes that deploy it.
       #

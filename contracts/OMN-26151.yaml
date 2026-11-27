@@ -1,0 +1,120 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26151"
+title: "The lab gateway database secret gateway.database.dsn is mapped from a lab database in the dev and stability runtimes, or the cloud-only reading is named with code lines"
+summary: >-
+  The workflow gateway names its database by the logical secret gateway.database.dsn, which no runtime policy profile mapped, so a presented key answered 503 on the dev and stability gateways. This change adds the login-only role gateway_runtime (nine grants on omninode_cloud, none wider), the fail-closed GATEWAY_DATABASE_DSN in the dev and stability overlays, and the gateway.database.dsn mapping in those two profiles.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26151-gateway-lab-database"
+    statement: "The dev and stability runtimes resolve gateway.database.dsn to their own lab omninode_cloud through a least-grant login role, and the gateway answers a presented key with something other than 503."
+    acceptance:
+      - id: "AC2"
+        statement: >-
+          AC2: if a lab database is intended, the dev-201 and stability runtimes map gateway.database.dsn to it through the overlay or runtime secret contract with a generated password stored by name in the secret store and never printed, one restart ran through the declared deploy path, and the newest run of c11-negative-paths, chain-canary or c16-receipt-identity after the restart reads green with no submit=503 -- falsifier: onex scm run-list on the probe workflow shows the newest run after the restart red, or the log still holds gateway_http_503
+      - id: "AC4"
+        statement: >-
+          AC4: the lane writes one STATUS row `crit=C16 probe=c16-receipt-identity verdict=<green|red> read_at=<UTC>` beside the same row for C11 and C15 -- falsifier: a ledger grep for `crit=C11 probe=c11-negative-paths` finds no STATUS row after this ticket's creation
+  - id: "req-omn26151-intent-is-a-lab-database"
+    statement: "The gateway's database intent is read from the code: the overlay key database.dsn_secret resolves through gateway.database.dsn to the lane's own lab omninode_cloud, so the cloud-only reading does not hold."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the report names, with file and line, what gateway.database.dsn is for (overlay key, WorkflowPostgresPool, the tables the gateway reads and writes), which lanes' gateways read it, and whether the gateway is meant to use the cloud database or a lab database -- falsifier: the report states the intent with no file and line for the overlay key, the pool code and the runtime policy profile
+      - id: "AC3"
+        statement: >-
+          AC3: if only the cloud database is valid for the gateway, the lane stops with no write and returns the code lines that say so, and the cloud owner ask stands -- falsifier: the report names a cloud-only reading with no file and line, or any write to a database or the secret store was made
+evidence_requirements:
+  - kind: "tests"
+    description: "The role mints login only, the grant seam declares exactly the nine items and nothing broader, both lane overlays render the DSN fail-closed while the shared base never requires the password, and the runtime policy maps the logical name in the dev and stability profiles only."
+    command: "uv run --frozen pytest tests/unit/infra/test_gateway_runtime_login_role_omn26151.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn26151-ac2-mapping-and-grants"
+    description: "AC2 (hosted part): the pinned files hold the role in both login-only maps, the nine-item grant seam with its readback, the fail-closed DSN in the dev-lane and stability overlays, the mapping of gateway.database.dsn in exactly those two profiles, and a committed policy env equal to a fresh render."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_gateway_runtime_login_role_omn26151.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26151-ac2-hosted-deploy-probe"
+    description: "Deploy scope: the pushed head maps gateway.database.dsn in the runtime policy contract and carries the nine-item gateway grants file the migration runner applies, read from GitHub at the checked-out revision so the hosted runner can run it."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "command"
+        check_value: "bash -o pipefail -c 'gh api \"repos/OmniNode-ai/omnibase_infra/contents/contracts/services/runtime_policy.contract.yaml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F \"logical_name: gateway.database.dsn\" >/dev/null'"
+        cwd: "."
+      - check_type: "command"
+        check_value: "bash -o pipefail -c 'gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/seams/gateway_runtime_grants.sql?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F \"GRANT UPDATE (last_used_at) ON public.tenant_api_keys\" >/dev/null'"
+        cwd: "."
+  - id: "dod-omn26151-ac2-installed-and-probe-green"
+    description: "AC2 (lab part): the lane's STATUS row names the installed revision and the newest probe run after the restart. Needs the work ledger, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: []
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep OMN-26151 | grep STATUS | grep -F installed= | grep -F verdict=green'"
+        cwd: "."
+  - id: "dod-omn26151-ac4-status-rows"
+    description: "AC4: the lane's STATUS rows for C11, C15 and C16 are on the work ledger. Needs the ledger, so only the local Done gate runs it."
+    source: "manual"
+    binds_ac: []
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep \"crit=C16 | probe=c16-receipt-identity\" | grep STATUS'"
+        cwd: "."
+      - check_type: "command"
+        check_value: "bash -c 'python3 \"$OMNI_PLUGIN_ROOT/skills/lane-brief/scripts/lane_brief.py\" grep \"crit=C11 | probe=c11-negative-paths\" | grep STATUS'"
+        cwd: "."
+  - id: "dod-omn26151-ac2-newest-probe-runs-green"
+    description: "AC2 (hosted part): the pinned runtime policy contract maps gateway.database.dsn, which is what lets the gateway answer a presented key with something other than 503."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "command"
+        check_value: "bash -c 'grep -F \"logical_name: gateway.database.dsn\" contracts/services/runtime_policy.contract.yaml >/dev/null'"
+        cwd: "."
+  - id: "dod-omn26151-ac2-newest-probe-runs-green-live"
+    description: "AC2 (after the restart): the newest scheduled run of c11-negative-paths and of chain-canary on dev concluded success, read from GitHub at the check, so the gateway answers a presented key with something other than 503. A workflow whose newest scheduled run is red fails this shape of check."
+    source: "manual"
+    binds_ac: []
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "bash -o pipefail -c 'gh run list --repo OmniNode-ai/omnibase_infra --workflow chain-canary-c11-negative-paths.yml --event schedule --limit 1 --json conclusion --jq \".[0].conclusion\" | grep -x success'"
+        cwd: "."
+      - check_type: "command"
+        check_value: "bash -o pipefail -c 'gh run list --repo OmniNode-ai/omnibase_infra --workflow chain-canary.yml --event schedule --limit 1 --json conclusion --jq \".[0].conclusion\" | grep -x success'"
+        cwd: "."
+  - id: "dod-omn26151-ac4-hosted-proxy"
+    description: "Hosted proxy for AC4: the STATUS rows need the work ledger, so the hosted check runs the new tests, which fail at the merge base where the role, the grants file and the mapping do not exist and pass at the head."
+    source: "manual"
+    binds_ac: ["AC4"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_gateway_runtime_login_role_omn26151.py -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26151-ac1-intent-named-in-policy"
+    description: "AC1 (hosted part): each of the dev and stability profiles' gateway.database.dsn mapping in contracts/services/runtime_policy.contract.yaml (lines 240 and 611 at the pinned head) carries the comment naming the overlay key database.dsn_secret and the gateway_runtime role on the lane's own omninode_cloud, and maps the name in exactly those two profiles. The overlay key and WorkflowPostgresPool live in other repositories, so the report names them there."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_gateway_runtime_login_role_omn26151.py -k \"cites_the_overlay_key or on_no_other_profile\" -q -n 0 --no-cov"
+        cwd: "."
+  - id: "dod-omn26151-ac3-cloud-only-reading-does-not-hold"
+    description: "AC3 (not applicable, lab database intended): the cloud-only branch is not taken. Both lane compose files point the gateway DSN at the lane's own postgres service, never a cloud host, and the gateway_runtime role is login-only with nine grants, so no cloud database or cloud secret was written."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_gateway_runtime_login_role_omn26151.py -k \"own_postgres_service or exactly_the_nine_items\" -q -n 0 --no-cov"
+        cwd: "."
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""

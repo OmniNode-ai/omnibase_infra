@@ -44,11 +44,10 @@ from deploy_agent.agent import DeployAgent
 from deploy_agent.events import EnumRuntimeLane, EnumVerifyRecreateOutcome, Phase, Scope
 from deploy_agent.executor import (
     DeployExecutor,
-    ModelAnsweringDegraded,
     VerificationFailedError,
-    _answering_degraded,
     finish_recreate_renames,
     lane_config_for,
+    load_dev_boot_guard,
     monitor_settled_degraded,
     remove_recreate_leftovers,
     run_compose_recreate,
@@ -122,6 +121,20 @@ def _phase(_phase: Phase, _status: object) -> None:
 # --- rule 1: what counts as "answering, monitor degraded" ---------------------
 
 
+_HEALTH_NODE = load_dev_boot_guard(
+    "handlers.runtime_health_reading.handler_runtime_health_reading"
+)
+ModelAnsweringDegraded = _HEALTH_NODE.ModelAnsweringDegraded
+
+
+def _answering_degraded(result: subprocess.CompletedProcess[str]) -> Any:
+    reading = _HEALTH_NODE.ModelRuntimeHealthReading(
+        returncode=result.returncode, stdout=result.stdout, stderr=result.stderr
+    )
+    handler = _HEALTH_NODE.HandlerRuntimeHealthReading()
+    return handler.handle(reading).answering_degraded
+
+
 def _curl(stdout: str, returncode: int = 0) -> subprocess.CompletedProcess[str]:
     return _completed(["curl"], returncode=returncode, stdout=stdout)
 
@@ -180,7 +193,7 @@ def test_everything_else_is_not_answering_degraded(
 
 
 def test_settled_means_two_cycles_on_the_same_dimensions() -> None:
-    def r(at: str, *dims: str) -> ModelAnsweringDegraded:
+    def r(at: str, *dims: str) -> Any:
         return ModelAnsweringDegraded(observed_at=at, dimensions=frozenset(dims))
 
     dlq = "projection_dlq_saturation"

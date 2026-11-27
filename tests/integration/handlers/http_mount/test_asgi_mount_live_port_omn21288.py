@@ -50,7 +50,7 @@ async def test_mounted_app_answers_on_the_runtime_port(tmp_path: Path) -> None:
         assert server._mount_task is not None
         await server._mount_task
         assert server._runner is not None
-        port = int(server._runner.addresses[0][1])
+        port = int(server._site.port)
         async with aiohttp.ClientSession() as session:
             url = f"http://127.0.0.1:{port}/api/v1/patterns?domain=code"
             async with session.get(url) as response:

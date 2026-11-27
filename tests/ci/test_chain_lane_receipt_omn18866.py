@@ -24,6 +24,8 @@ from __future__ import annotations
 import contextlib
 import http.server
 import json
+import os
+import subprocess
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -494,3 +496,72 @@ def test_nothing_gates_on_the_chain_receipt_yet() -> None:
         line for line in delivery.splitlines() if not line.lstrip().startswith("#")
     )
     assert _CHAIN.value not in executable
+
+
+def _run_emit_step_as_the_runner_does(
+    tmp_path: Path, uv_script: str
+) -> subprocess.CompletedProcess[str]:
+    """Run the emit step's own script under the runner's default shell.
+
+    A step with no `shell:` key runs as `bash -e {0}`, so errexit is ON before
+    the script's own `set -uo pipefail` (which cannot clear it). `uv` is a
+    stand-in that behaves as `uv_script` says, so only the step's shell
+    handling is under test, never the CLI it calls.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake_uv = bindir / "uv"
+    fake_uv.write_text(uv_script, encoding="utf-8")
+    fake_uv.chmod(0o755)
+    script = tmp_path / "emit_step.sh"
+    script.write_text(str(_step(_EMIT_STEP)["run"]), encoding="utf-8")
+    env = {
+        "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(tmp_path),
+        "CHAIN_RECEIPT_DIR": str(tmp_path / "receipt"),
+        "CHAIN_RECEIPT_STARTED_AT": _STARTED,
+        "DEPLOY_AGENT_URL": "http://agent.invalid",
+        "GITHUB_OUTPUT": str(tmp_path / "output"),
+    }
+    return subprocess.run(
+        ["bash", "-e", str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+def test_a_lane_with_no_code_sha_leaves_the_run_conclusion_alone(
+    tmp_path: Path,
+) -> None:
+    """OMN-26122. `lane-revision` exits 1 when the lane reports no code sha.
+
+    The step's own comment says a step that cannot write a receipt warns and
+    exits 0. Under the runner's default `bash -e`, the failing command
+    substitution ended the step with exit 1 before the empty-sha branch could
+    run, and run 45291437443 (2026-11-23T23:44Z) read red at this step as well
+    as at the verdict step, so a lane mid-deploy turned C15 red on its own.
+    """
+    result = _run_emit_step_as_the_runner_does(
+        tmp_path,
+        '#!/bin/sh\necho "::error::the lane reported no code sha" >&2\nexit 1\n',
+    )
+    assert result.returncode == 0, result.stderr
+    assert "no chain-lane receipt" in result.stdout
+
+
+def test_a_receipt_that_cannot_be_written_leaves_the_run_conclusion_alone(
+    tmp_path: Path,
+) -> None:
+    """Control: with a sha, a failing emit is still only a warning."""
+    result = _run_emit_step_as_the_runner_does(
+        tmp_path,
+        "#!/bin/sh\n"
+        f'if [ "$4" = lane-revision ]; then echo {_SHA}; exit 0; fi\n'
+        "exit 1\n",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "was not written" in result.stdout

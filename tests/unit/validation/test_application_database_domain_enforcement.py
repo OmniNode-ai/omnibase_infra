@@ -1634,6 +1634,38 @@ def test_tenant_schema_is_retired_so_nothing_bridges_or_resolves_through_it(
     )
 
 
+@pytest.mark.parametrize("name", ["plan_tiers", "plan_entitlements"])
+def test_platform_catalog_gateway_relations_bridge_to_public(
+    tmp_path: Path, name: str
+) -> None:
+    """OMN-26151: the gateway grants seam names public.plan_tiers/plan_entitlements.
+
+    The ownership manifest declares both at `platform_catalog`; the live database holds
+    them in `public`, so the SQL target must resolve to one declaration.
+    """
+    manifest = _physically_public_bridge_manifest(
+        tmp_path, schema="platform_catalog", name=name
+    )
+    located = set(_located_identities(manifest, name))
+    assert located == {("platform_catalog", name), ("public", name)}
+
+
+def test_tenant_event_outbox_bridges_to_public(tmp_path: Path) -> None:
+    """OMN-26121: the tenant identity seam creates public.tenant_event_outbox.
+
+    The ownership manifest declares it at `omninode_internal`; the cloud database
+    holds it in `public` (the warm dev volume and the cloud migration both create
+    `public.tenant_event_outbox`), so the seam's SQL target must resolve to one
+    declaration. The bridge names this one relation, not the family.
+    """
+    name = "tenant_event_outbox"
+    manifest = _physically_public_bridge_manifest(
+        tmp_path, schema="omninode_internal", name=name
+    )
+    located = set(_located_identities(manifest, name))
+    assert located == {("omninode_internal", name), ("public", name)}
+
+
 def test_relation_outside_the_internal_family_does_not_bridge_to_public(
     tmp_path: Path,
 ) -> None:

@@ -216,6 +216,61 @@ def test_declaration_check_passes_the_real_dev_lane_pair() -> None:
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
 
 
+_DECLARATION_DIR = "ONEX_LANE_DECLARATION_DIR"
+_FOLD_COMPOSE = _REPO_ROOT / "docker" / "docker-compose.dev-tenant-fold.yml"
+_FOLD_MANIFEST = _REPO_ROOT / "docker" / "dev-tenant-fold-required-env.manifest.txt"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("compose", "manifest"),
+    [(_DEV_LANE_COMPOSE, _DEV_LANE_MANIFEST), (_FOLD_COMPOSE, _FOLD_MANIFEST)],
+)
+def test_the_declaration_dir_manifest_entry_is_enforced_by_its_consumer(
+    tmp_path: Path, compose: Path, manifest: Path
+) -> None:
+    """OMN-25202: the readers of the two manifests are scripts/check_required_env_vars.py
+    (the pre-commit hooks of ``.pre-commit-config.yaml``, committed files only) and this
+    file. No runtime path reads a manifest: the deploy-time preflight parses the compose
+    files, so the entry has no stored-env reader to block a deploy. Dropping the entry
+    makes the declaration check fail, and keeping it passes.
+    """
+    assert _DECLARATION_DIR in _declared_names(manifest)
+    assert _run_check(compose, manifest).returncode == 0
+    without = tmp_path / "without-entry.manifest.txt"
+    without.write_text(
+        "".join(
+            f"{line}\n"
+            for line in manifest.read_text(encoding="utf-8").splitlines()
+            if line.strip() != _DECLARATION_DIR
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run_check(compose, without)
+
+    assert result.returncode == 1
+    assert _DECLARATION_DIR in (result.stdout + result.stderr)
+
+
+@pytest.mark.unit
+def test_the_preflight_reads_the_declaration_dir_from_the_environment_not_a_manifest() -> (
+    None
+):
+    """OMN-25202: the agent and the refresh hand the preflight an environment that holds the
+    folder (render_dev_lane, refresh_exports), so a dev deploy is not blocked; an environment
+    without it is named, so the entry is not dead."""
+    base = {"PATH": "/usr/bin:/bin"}
+    composes = [_BASE_COMPOSE, _DEV_LANE_COMPOSE, _FOLD_COMPOSE]
+
+    missing = _run_preflight(composes, env=base)
+    named = _run_preflight(composes, env={**base, _DECLARATION_DIR: "/srv/config/lab"})
+
+    assert missing.returncode == 1
+    assert _DECLARATION_DIR in missing.stderr
+    assert _DECLARATION_DIR not in named.stderr
+
+
 @pytest.mark.unit
 def test_dev_lane_manifest_declares_names_only() -> None:
     """Names only — never a value, never a secret."""
@@ -508,6 +563,8 @@ def test_tenant_fold_required_names_match_its_manifest() -> None:
             "DEV_RUNTIME_MAIN_FOLDED_PROFILES",
             "DEV_RUNTIME_MAIN_FOLD_HANDOVERS",
             "DEV_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON",
+            # OMN-24854: the config/lab folder the folded main mounts for the ledger source.
+            "ONEX_LANE_DECLARATION_DIR",
         }
     )
     assert "docker-compose.dev-tenant-fold.yml" in _REFRESH_DEV_LANE.read_text()

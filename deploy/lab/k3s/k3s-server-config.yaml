@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# The pinned keys of the single-node lab k3s server configuration (OMN-24956).
+#
+# A retired lab cluster ran 188 days with no node-ip pin: k3s auto-detected the then-live NIC at first
+# registration, the NIC later went down, the node never re-registered, and the apiserver endpoint, the ClusterIP
+# DNAT and CoreDNS all pointed at a dead address, so every service-name lookup failed.
+#
+# Here node-ip, advertise-address and flannel-iface are pinned. The two placeholders are filled on the host at
+# start by the declared host unit (the host net-units installer; the unit and the host's storage paths are host
+# configuration and live in the private config overlays):
+#   __INTERFACE__ the interface that carries the lowest-metric IPv4 default route, filled at install time
+#   __NODE_IP__   that interface's IPv4 address, recorded once in a pin file and refused on every later start
+#                 when no live (UP) interface holds it
+# No address is written in this repository. node_k3s_lab_preflight_effect holds the checks
+# (tests/unit/handlers/test_handler_k3s_lab_preflight.py).
+#
+# traefik, servicelb and the network policy controller are off, so the cluster publishes no ingress and no host
+# port of its own, and the NodePort range is the k3s default.
+node-ip: __NODE_IP__
+advertise-address: __NODE_IP__
+flannel-iface: __INTERFACE__
+write-kubeconfig-mode: "0600"
+disable:
+  - traefik
+  - servicelb
+disable-network-policy: true
+kubelet-arg:
+  - max-pods=60
+  - system-reserved=cpu=1,memory=2Gi

@@ -117,16 +117,18 @@ def _dispatch_indices(steps: list[dict[str, Any]]) -> list[int]:
 # --------------------------------------------------------------------------
 
 
-def test_dod_verify_argv_uses_the_sweep_interpreters_own_onex() -> None:
+def test_dod_verify_argv_uses_the_sweep_interpreters_own_core_cli() -> None:
     argv = _dod_verify_argv("OMN-16759")
 
-    assert argv[0] == str(Path(sys.executable).parent / "onex"), (
+    assert argv[:3] == [sys.executable, "-m", "omnibase_core.cli.cli_commands"], (
         "the verifier must be dispatched from the interpreter the sweep is "
         "itself running in, so the sweep's dispatch venv (which carries the "
         "co-installed omnimarket) is decided by composition rather than by "
-        "whatever project the process cwd happens to resolve to"
+        "whatever project the process cwd happens to resolve to; it runs "
+        "omnibase-core's CLI module because the onex launcher file leaves "
+        "omnibase-core (OMN-25070)"
     )
-    assert argv[1:] == [
+    assert argv[3:] == [
         "skill",
         "dod_verify",
         "OMN-16759",
@@ -185,7 +187,10 @@ async def test_real_runner_execs_the_resolved_argv(
     await handler._run_dod_verify_command_real("OMN-16759", cwd="", timeout=5.0)
 
     assert captured, "the real runner never spawned a subprocess"
-    assert list(captured[0]) == _dod_verify_argv("OMN-16759")
+    # The runner adds one scratch ``--state-root`` of its own (OMN-25667).
+    argv = list(captured[0])
+    assert argv[:-2] == _dod_verify_argv("OMN-16759")
+    assert argv[-2] == "--state-root"
 
 
 # --------------------------------------------------------------------------

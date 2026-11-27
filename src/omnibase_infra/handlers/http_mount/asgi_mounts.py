@@ -21,18 +21,40 @@ import asyncio
 import contextlib
 import importlib
 import logging
-from collections.abc import Awaitable, Callable, Iterable, MutableMapping
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Mapping,
+    MutableMapping,
+)
+from pathlib import Path
 from typing import Any, cast
 
-from aiohttp import web
+from aiohttp import hdrs, web
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.handlers.http_mount.bounded_body import (
+    BodyTooLargeError,
+    BoundedInflater,
+    MalformedBodyError,
+    UnsupportedCodingError,
+    content_coding,
+    decoded_chunks,
+    replay,
+)
+from omnibase_infra.handlers.lazy_start_boot_split import (
+    StoreLazyStartDormant,
+    StoreLazyStartWaker,
+)
 from omnibase_infra.models.model_http_mount import ModelHttpMount
 from omnibase_infra.runtime.auto_wiring.discovery import read_contract_yaml
 from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import (
     ModelDiscoveredContract,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +65,32 @@ _AsgiSend = Callable[[_AsgiMessage], Awaitable[None]]
 _AsgiApp = Callable[[_AsgiScope, _AsgiReceive, _AsgiSend], Awaitable[None]]
 
 _SKIPPED_RESPONSE_HEADERS = frozenset({"transfer-encoding", "connection"})
+
+
+def listener_runner(
+    app: web.Application, *, shutdown_timeout: float | None = None
+) -> web.AppRunner:
+    """The runner for an application that carries mounts (OMN-26085).
+
+    ``auto_decompress=False`` leaves a request body as it came off the socket, so
+    the bridge decodes it under the mount's cap; aiohttp's parser would expand up
+    to a read buffer of it ahead of any check. ``lingering_time=0`` stops aiohttp
+    from reading and discarding the rest of a refused body before it closes.
+    """
+    if shutdown_timeout is None:
+        return web.AppRunner(app, auto_decompress=False, lingering_time=0)
+    return web.AppRunner(
+        app,
+        auto_decompress=False,
+        lingering_time=0,
+        shutdown_timeout=shutdown_timeout,
+    )
+
+
+def _refuse(status: type[web.HTTPClientError], reason: str) -> web.HTTPClientError:
+    error = status(text=reason)
+    error.force_close()
+    return error
 
 
 class LifespanDriver:
@@ -95,6 +143,16 @@ class LifespanDriver:
         self._task = None
 
 
+def _names_http_mount(contract_path: Path) -> bool:
+    """Whether the contract text names ``http_mount`` (OMN-26430).
+
+    The kernel's manifest attach runs on the event loop thread, and parsing every
+    discovered contract there held the loop for 10.3 s on a 0.5 CPU boot. A
+    contract whose text never names the key cannot declare the block.
+    """
+    return "http_mount" in contract_path.read_text(encoding="utf-8")
+
+
 class AsgiMounts:
     """The set of ASGI applications a runtime serves for its contracts."""
 
@@ -102,6 +160,11 @@ class AsgiMounts:
         self._mounts: list[tuple[ModelHttpMount, _AsgiApp, LifespanDriver]] = []
         self._started = False
         self._attached = False
+        self._reserved: list[str] = []
+        self._dormant: dict[str, ModelHttpMount] = {}
+        """Dormant contract name to the mount it declares, served once it wakes (OMN-26316)."""
+        self._dormant_locks: dict[str, asyncio.Lock] = {}
+        self._dormant_index_task: asyncio.Task[None] | None = None
         self.failure = ""
         """Why the mounts failed to start; empty while none has failed."""
 
@@ -145,6 +208,7 @@ class AsgiMounts:
                 )
             )
             for c in contracts
+            if _names_http_mount(c.contract_path)
         )
         return tuple(block for block in blocks if block is not None)
 
@@ -176,6 +240,7 @@ class AsgiMounts:
                 ),
             ) from exc
         reserved = [resource.canonical for resource in router.resources()]
+        self._reserved = reserved
         for index, mount in enumerate(declared):
             for other in declared[index + 1 :]:
                 if mount.covers(other.path_prefix) or other.covers(mount.path_prefix):
@@ -202,9 +267,124 @@ class AsgiMounts:
             return None
         declared = self.prepare(contracts, router)
         self._attached = True
-        return (
-            asyncio.get_running_loop().create_task(self.start()) if declared else None
+        dormant = StoreLazyStartDormant.contracts()
+        if dormant:
+            self._dormant_index_task = asyncio.get_running_loop().create_task(
+                asyncio.to_thread(self.index_dormant, dormant),
+                name="asgi-mounts-index-dormant",
+            )
+        if not declared:
+            # Nothing of the boot set to start; a dormant mount may still wake.
+            self._started = True
+            return None
+        return asyncio.get_running_loop().create_task(self.start())
+
+    def index_dormant(self, contracts: Mapping[str, ModelDiscoveredContract]) -> None:
+        """Remember the mounts that dormant contracts declare (OMN-26316).
+
+        A lazy-start lane leaves a contract out of the boot manifest, so its
+        ``http_mount`` is not served and a request under its prefix would answer
+        404 without ever reaching the front door. The request that names such a
+        prefix wakes the contract and mounts it (`_wake_and_mount`). A
+        declaration that is malformed, or whose prefix overlaps a mount of the
+        boot set, another dormant mount or a runtime route, is dropped and
+        logged: it can never be served, and one contract's bad block never
+        takes a boot down.
+        """
+        indexed: dict[str, ModelHttpMount] = {}
+        for name, contract in contracts.items():
+            try:
+                if not _names_http_mount(contract.contract_path):
+                    continue
+                block = ModelHttpMount.from_contract_block(
+                    cast(
+                        "dict[str, object]", read_contract_yaml(contract.contract_path)
+                    ).get("http_mount")
+                )
+            except (OSError, ValueError):
+                logger.exception(
+                    "Dormant contract '%s' declares an http_mount that cannot be "
+                    "read; it will not wake on a request (OMN-26316)",
+                    name,
+                )
+                continue
+            if block is None:
+                continue
+            taken = [m for m, _, _ in self._mounts] + list(indexed.values())
+            if any(
+                block.covers(m.path_prefix) or m.covers(block.path_prefix)
+                for m in taken
+            ) or any(block.covers(path) for path in self._reserved):
+                logger.error(
+                    "Dormant contract '%s' http_mount %s overlaps a mount or a "
+                    "runtime route; it will not wake on a request (OMN-26316)",
+                    name,
+                    block.path_prefix,
+                )
+                continue
+            indexed[name] = block
+        self._dormant = indexed
+        logger.info(
+            "HTTP mounts: %d dormant contract(s) declare a mount that wakes on its "
+            "first request (OMN-26316)",
+            len(indexed),
         )
+
+    async def _wake_and_mount(self, name: str, mount: ModelHttpMount) -> _AsgiApp:
+        """Wake the dormant contract that declares ``mount``, then serve its app.
+
+        One wake and one lifespan start per mount: concurrent requests wait on
+        the first. A failure leaves the mount dormant and unmounted, so the next
+        request wakes it again; it never sets `failure`, which takes the whole
+        server out of service.
+        """
+        async with self._dormant_locks.setdefault(name, asyncio.Lock()):
+            for live, app, _ in self._mounts:
+                if live.path_prefix == mount.path_prefix:
+                    return app
+            waker = StoreLazyStartWaker.waker()
+            if waker is None:
+                raise self._failure(mount, "the lazy-start ingress is not wired")
+            await waker(name)
+            app = self._build(mount)
+            lifespan = LifespanDriver(app)
+            try:
+                await lifespan.startup()
+            except Exception as exc:
+                await lifespan.shutdown()
+                raise self._failure(mount, f"lifespan startup: {exc}") from exc
+            self._mounts.append((mount, app, lifespan))
+            logger.info(
+                "HTTP mount started on its first request: %s -> %s (contract %s) "
+                "(OMN-26316)",
+                mount.path_prefix,
+                mount.factory,
+                name,
+            )
+            return app
+
+    async def _serve_dormant(
+        self, name: str, mount: ModelHttpMount, request: web.Request
+    ) -> web.StreamResponse:
+        """Answer a request under a dormant contract's mount: wake, mount, serve."""
+        try:
+            app = await self._wake_and_mount(name, mount)
+        except TimeoutError:
+            return web.json_response(
+                {"status": "starting", "detail": f"contract {name} is starting"},
+                status=503,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Dormant contract '%s' did not wake for a request on %s (OMN-26316)",
+                name,
+                mount.path_prefix,
+            )
+            return web.json_response(
+                {"status": "unavailable", "detail": sanitize_error_message(exc)},
+                status=503,
+            )
+        return await self._serve(app, request, mount.max_body_bytes)
 
     async def start(self) -> None:
         """Run every prepared mount's lifespan startup, or none.
@@ -251,11 +431,53 @@ class AsgiMounts:
             if mount.covers(request.path):
                 if not self._started:
                     return web.json_response({"status": "starting"}, status=503)
-                return await self._serve(app, request)
+                return await self._serve(app, request, mount.max_body_bytes)
+        if self._started:
+            for name, mount in self._dormant.items():
+                if mount.covers(request.path):
+                    return await self._serve_dormant(name, mount, request)
+        try:
+            coding = content_coding(request.headers.get(hdrs.CONTENT_ENCODING))
+        except UnsupportedCodingError as exc:
+            raise _refuse(web.HTTPUnsupportedMediaType, str(exc)) from exc
+        if coding is not None:
+            # The listener does not decode bodies; only a mount's bridge does.
+            raise _refuse(web.HTTPUnsupportedMediaType, f"content-encoding {coding}")
         return await handler(request)
 
     @staticmethod
-    async def _serve(app: _AsgiApp, request: web.Request) -> web.StreamResponse:
+    async def _serve(
+        app: _AsgiApp, request: web.Request, max_body_bytes: int | None
+    ) -> web.StreamResponse:
+        def reject_body(limit: int, size: int) -> web.HTTPRequestEntityTooLarge:
+            error = web.HTTPRequestEntityTooLarge(max_size=limit, actual_size=size)
+            error.force_close()
+            return error
+
+        if max_body_bytes is not None:
+            content_length = request.content_length
+            if content_length is not None and content_length > max_body_bytes:
+                raise reject_body(max_body_bytes, content_length)
+
+        # A compressed body is decoded here, under the cap, before dispatch.
+        decoded: AsyncIterator[bytes] | None = None
+        try:
+            coding = content_coding(request.headers.get(hdrs.CONTENT_ENCODING))
+            if coding is not None:
+                decoded = decoded_chunks(
+                    request.content,
+                    BoundedInflater(coding, max_body_bytes),
+                    max_body_bytes,
+                )
+                if max_body_bytes is not None:
+                    decoded = replay([chunk async for chunk in decoded])
+        except UnsupportedCodingError as exc:
+            raise _refuse(web.HTTPUnsupportedMediaType, str(exc)) from exc
+        except BodyTooLargeError as exc:
+            raise reject_body(exc.limit, exc.size) from exc
+        except MalformedBodyError as exc:
+            raise _refuse(web.HTTPBadRequest, str(exc)) from exc
+
         peer = (
             request.transport.get_extra_info("peername") if request.transport else None
         )
@@ -276,12 +498,39 @@ class AsgiMounts:
         }
         finished = asyncio.Event()
         body_done = False
+        body_size = 0
+        body_rejection: web.HTTPClientError | None = None
         response: web.StreamResponse | None = None
 
         async def receive() -> _AsgiMessage:
-            nonlocal body_done
+            nonlocal body_done, body_size, body_rejection
+            if body_rejection is not None:
+                raise body_rejection
+            if decoded is not None and not body_done:
+                try:
+                    piece = await anext(decoded, None)
+                except BodyTooLargeError as exc:
+                    body_rejection = reject_body(exc.limit, exc.size)
+                    raise body_rejection from exc
+                except MalformedBodyError as exc:
+                    body_rejection = _refuse(web.HTTPBadRequest, str(exc))
+                    raise body_rejection from exc
+                body_done = piece is None
+                return {
+                    "type": "http.request",
+                    "body": piece or b"",
+                    "more_body": not body_done,
+                }
             if not body_done:
-                chunk = await request.content.readany()
+                if max_body_bytes is None:
+                    chunk = await request.content.readany()
+                else:
+                    # Read at most the remaining allowance and one overflow byte.
+                    chunk = await request.content.read(max_body_bytes - body_size + 1)
+                    body_size += len(chunk)
+                    if body_size > max_body_bytes:
+                        body_rejection = reject_body(max_body_bytes, body_size)
+                        raise body_rejection
                 body_done = request.content.at_eof()
                 return {
                     "type": "http.request",
@@ -293,6 +542,8 @@ class AsgiMounts:
 
         async def send(message: _AsgiMessage) -> None:
             nonlocal response
+            if body_rejection is not None:
+                return
             if message["type"] == "http.response.start":
                 response = web.StreamResponse(status=message["status"])
                 for name, value in message.get("headers", ()):
@@ -311,15 +562,22 @@ class AsgiMounts:
         try:
             await app(scope, receive, send)
         except Exception:
-            logger.exception("mounted ASGI app raised for %s", request.path)
-            if response is None or not response.prepared:
-                return web.Response(status=500, text="Internal Server Error")
-            raise
+            if body_rejection is None:
+                logger.exception("mounted ASGI app raised for %s", request.path)
+                if response is None or not response.prepared:
+                    return web.Response(status=500, text="Internal Server Error")
+                raise
         finally:
             finished.set()
+        if body_rejection is not None:
+            if response is not None and response.prepared:
+                # An app streaming its response may already have sent the status.
+                request.protocol.force_close()
+                return response
+            raise body_rejection
         if response is None:
             return web.Response(status=500, text="Internal Server Error")
         return response
 
 
-__all__ = ["AsgiMounts"]
+__all__ = ["AsgiMounts", "listener_runner"]

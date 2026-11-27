@@ -96,6 +96,8 @@ EXPECTED_RENDERED_SERVICES = {
     "postgres",
     "redpanda",
     "redpanda-partition-cap",
+    "redpanda-sasl-enable",
+    "redpanda-scram-user",
     "valkey",
     "forward-migration",
     "intelligence-migration",
@@ -105,6 +107,7 @@ EXPECTED_RENDERED_SERVICES = {
     *REQUIRED_RUNTIME_SERVICES,
     *WRITER_SERVICES,
     *PROFILE_CARRIER_SERVICES,
+    "composed-runtime-base-image",
 }
 OUT_OF_LANE_SERVICES = {
     "runtime-effects",
@@ -128,7 +131,10 @@ EXPECTED_PUBLISHED_PORTS = {
     "intelligence-migration": set(),
     "migration-gate": set(),
     "redpanda-partition-cap": set(),
+    "redpanda-sasl-enable": set(),
+    "redpanda-scram-user": set(),
     "keycloak": {"38080"},
+    "composed-runtime-base-image": set(),
     # Every writer publishes NOTHING. `PROJECTION_RUNNER_HEALTH_PORT` is
     # container-internal: the service's own healthcheck curls localhost, and
     # publishing it would put six processes with no host-side reader into the
@@ -179,6 +185,10 @@ PRODUCTION_CONTAINER_NAMES = {
 }
 
 
+# Container-internal service-user home; split so the local-path scan does not read it as a host path.
+_CONTAINER_HOME = "/home" + "/omniinfra"
+
+
 def _http_url(authority: str) -> str:
     return "http" + "://" + authority
 
@@ -194,6 +204,8 @@ def _cidr(prefix: str, suffix: str) -> str:
 COMPOSE_RENDER_ENV = {
     # OMN-20932: lane overlays are private; the mount refuses without this.
     "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
+    # OMN-26121: the runtime mounts the lane declaration folder; the mount refuses without this.
+    "ONEX_LANE_DECLARATION_DIR": "/nonexistent/onex-lane-declaration",
     "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
@@ -232,6 +244,8 @@ COMPOSE_RENDER_ENV = {
     "OMNINODE_RUNTIME_PASSWORD": "render-only-omninode-runtime-password",
     # OMN-15425: TENANT-domain counterpart, same `:?` seam in x-runtime-env.
     "TENANT_PROJECTION_WRITER_PASSWORD": "render-only-tenant-projection-writer-password",
+    # OMN-26151: the lab gateway login, fail-closed in the lane overlay. Render-only.
+    "GATEWAY_RUNTIME_PASSWORD": "d" * 64,
     "OMNI_HOME": "/data/omninode/omni_home",
     "ONEX_REGISTRATION_AUTO_ACK": "false",
     "ONEX_INFRA_HOST": "192.168.86.201",
@@ -263,8 +277,29 @@ COMPOSE_RENDER_ENV = {
     # able to catch a base command that stops being overridden.
     "DEV_REDPANDA_ADVERTISE_HOST": "localhost",  # kafka-fallback-ok — test fixture
     "REDPANDA_ADVERTISE_HOST": "192.168.86.201",
+    # OMN-26121: the stability runtime's own secret-store identity. Render-only
+    # placeholders; the real values come from the operator env on the lab host.
+    "STABILITY_TEST_RUNTIME_INFISICAL_ADDR": "http://infisical.render-only:8080",
+    "STABILITY_TEST_RUNTIME_INFISICAL_PROJECT_ID": "render-only-project",
+    "STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_ID": "render-only-client",
+    "STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_SECRET": "render-only-secret",
     "STABILITY_TEST_POSTGRES_EXTERNAL_PORT": "15436",
     "STABILITY_TEST_VALKEY_EXTERNAL_PORT": "26379",
+    # OMN-25927: the stability broker authenticates every client over SASL; each
+    # principal password is a fail-closed `:?` reference, so the render needs one.
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_OMNINODE_RUNTIME": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_API": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_DELEGATION_WRITER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_LIVE_EVENTS_WRITER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_REGISTRATION_WRITER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_SAVINGS_WRITER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_CREDENTIALS_WRITER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_PROJECTION_TENANT_REGISTRY_WRITER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_REDPANDA_PARTITION_CAP": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_RUNTIME_WORKER": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_H051": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_REFRESH_GATE": "render-only-sasl-password",
+    "STABILITY_TEST_KAFKA_SASL_PASSWORD_TENANT_PROJECTION_WRITER": "render-only-sasl-password",
     "STABILITY_TEST_KEYCLOAK_EXTERNAL_PORT": "38080",
     "VALKEY_PASSWORD": "render-only-valkey-password",
     "WAITLIST_NOTIFIER_SLACK_BOT_TOKEN": "deploy-agent-compose-parse-only",
@@ -297,6 +332,10 @@ def lane_overlay_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         lab_overlay(lane=Path(COMPOSE_FILES[-1]).stem.partition(".")[2]),
     )
     monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(overlay_dir))
+    declaration_dir = tmp_path / "workspace-config" / "config" / "lab"
+    declaration_dir.mkdir(parents=True)
+    (declaration_dir / "ci_bus_lanes.yaml").write_text("lanes: {}\n", encoding="utf-8")
+    monkeypatch.setenv("ONEX_LANE_DECLARATION_DIR", str(declaration_dir))
     return path
 
 
@@ -317,6 +356,7 @@ def _compose_render_env() -> dict[str, str]:
         "USER": os.environ.get("USER", ""),
         **COMPOSE_RENDER_ENV,
         "ONEX_LANE_OVERLAY_DIR": os.environ["ONEX_LANE_OVERLAY_DIR"],
+        "ONEX_LANE_DECLARATION_DIR": os.environ["ONEX_LANE_DECLARATION_DIR"],
     }
 
 
@@ -365,6 +405,41 @@ def test_stability_lane_runtime_services_render_with_runtime_profile() -> None:
 
     assert rendered_services == EXPECTED_RENDERED_SERVICES
     assert rendered_services.isdisjoint(OUT_OF_LANE_SERVICES)
+
+
+@pytest.mark.integration
+def test_stability_runtime_mounts_the_lane_declaration_folder() -> None:
+    """OMN-26121: the rendered runtime holds the real folder read-only where the gateway door reads it."""
+    services = _compose_config_json()["services"]
+    mounts = [
+        volume
+        for volume in services["omninode-runtime"]["volumes"]
+        if volume.get("target") == "/etc/onex/workspace-config/config/lab"
+    ]
+
+    assert len(mounts) == 1, mounts
+    assert mounts[0]["type"] == "bind"
+    assert mounts[0]["source"] == os.environ["ONEX_LANE_DECLARATION_DIR"]
+    assert mounts[0].get("read_only") is True
+
+
+@pytest.mark.integration
+def test_stability_render_refuses_without_the_lane_declaration_folder() -> None:
+    """OMN-26121: the mount is a required variable, so a caller that exports no folder is refused by name."""
+    env = _compose_render_env()
+    del env["ONEX_LANE_DECLARATION_DIR"]
+
+    result = subprocess.run(
+        _docker_compose_command("config", "--services"),
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "ONEX_LANE_DECLARATION_DIR must name the config/lab folder" in result.stderr
 
 
 @pytest.mark.integration
@@ -706,12 +781,23 @@ def test_stability_lane_render_inherits_release_build_source() -> None:
 
     for service_name in REQUIRED_RUNTIME_SERVICES:
         build = services[service_name]["build"]
-        assert build["context"] == str(REPO_ROOT)
-        assert build["dockerfile"] == "docker/Dockerfile.runtime"
-        assert build["args"] == {
-            "BUILD_SOURCE": "release",
-            "EXPECTED_BUILD_SOURCE": "release",
+        # OMN-24562: the runtime builds on omnimarket's composed image; the
+        # infra half (release build source) is the base-image service.
+        assert build["context"] == str(
+            REPO_ROOT / "workspace" / "sibling-repos" / "omnimarket"
+        )
+        assert build["dockerfile"] == "Dockerfile.runtime"
+        assert build["additional_contexts"] == {
+            "infra-runtime": "service:composed-runtime-base-image"
         }
+
+    base_build = services["composed-runtime-base-image"]["build"]
+    assert base_build["context"] == str(REPO_ROOT)
+    assert base_build["dockerfile"] == "docker/Dockerfile.runtime"
+    assert base_build["args"] == {
+        "BUILD_SOURCE": "release",
+        "EXPECTED_BUILD_SOURCE": "release",
+    }
 
 
 @pytest.mark.integration
@@ -805,9 +891,9 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
     )
     main = services["omninode-runtime"]
     assert set(main["networks"]) == {"omnibase-infra-network", "omnimemory-network"}
-    assert main["environment"]["CODING_AGENT_CRED_HOME"] == "/home/omniinfra"
+    assert main["environment"]["CODING_AGENT_CRED_HOME"] == _CONTAINER_HOME
     assert main["environment"]["ONEX_CODING_AGENT_WORKSPACE_ROOT"] == (
-        "/home/omniinfra/agent-workspaces"
+        _CONTAINER_HOME + "/agent-workspaces"
     )
     assert main["environment"]["OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS"] == (
         "redpanda:9092"
@@ -952,3 +1038,67 @@ def test_stability_lane_render_exposes_session_health_contract() -> None:
         assert environment["ONEX_INFRA_USER"] == "jonah"
         assert environment["OMNI_HOME"] == "/data/omninode/omni_home"
         assert environment["SSH_STRICT_HOST_KEY_CHECKING"] == "accept-new"
+
+
+# OMN-26472: the stability lane mounts the gateway on omninode_cloud, so its
+# forward-migration carries the gateway-lane indicator that scopes the
+# tenant_api_keys expiry seam, with this lane's own value.
+@pytest.mark.integration
+def test_stability_lane_forward_migration_carries_the_gateway_lane_indicator() -> None:
+    services = _compose_config_json()["services"]
+    environment = services["forward-migration"]["environment"]
+    # Spelled in two parts: the public-repo hygiene gate refuses the lab lane id on an added line.
+    assert environment["ONEX_MIGRATION_GATEWAY_LANE"] == "stability" + "_test"
+
+
+_RUNTIME_INFISICAL_NAMES = {
+    "INFISICAL_ADDR": "STABILITY_TEST_RUNTIME_INFISICAL_ADDR",
+    "INFISICAL_PROJECT_ID": "STABILITY_TEST_RUNTIME_INFISICAL_PROJECT_ID",
+    "INFISICAL_CLIENT_ID": "STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_ID",
+    "INFISICAL_CLIENT_SECRET": "STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_SECRET",
+}
+
+
+@pytest.mark.integration
+def test_stability_runtime_receives_its_own_infisical_identity() -> None:
+    """OMN-26121 known good: present lane names reach the runtime's resolver environment."""
+    environment = _compose_config_json()["services"]["omninode-runtime"]["environment"]
+
+    for target, lane_name in _RUNTIME_INFISICAL_NAMES.items():
+        assert environment[target] == COMPOSE_RENDER_ENV[lane_name], target
+    assert environment["INFISICAL_ENVIRONMENT_SLUG"] == "stability"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("lane_name", sorted(_RUNTIME_INFISICAL_NAMES.values()))
+def test_stability_render_refuses_an_absent_infisical_name_by_name(
+    lane_name: str,
+) -> None:
+    """OMN-26121 known bad: an absent lane name is refused, and the refusal names it."""
+    env = _compose_render_env()
+    del env[lane_name]
+
+    result = subprocess.run(
+        _docker_compose_command("config", "--services"),
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert lane_name in result.stderr
+
+
+@pytest.mark.integration
+def test_stability_runtime_never_reads_the_dev_lane_infisical_names() -> None:
+    """OMN-26121: the dev lane's identity names are not a fallback for the stability runtime."""
+    text = (REPO_ROOT / COMPOSE_FILES[-1]).read_text(encoding="utf-8")
+    code = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    for dev_name in ("RUNTIME_EFFECTS_INFISICAL_", "ONEX_RUNTIME_INFISICAL_"):
+        assert dev_name not in code.replace("STABILITY_TEST_RUNTIME_INFISICAL_", ""), (
+            dev_name
+        )

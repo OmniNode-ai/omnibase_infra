@@ -307,6 +307,54 @@ jobs:
           fetch-depth: 0
           path: _target
 
+      - name: Resolve release repository visibility
+        id: target-visibility
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_REPO: ${{ matrix.decision.repo }}
+          VOCABULARY_REPO: ${{ vars.OMNI_HYGIENE_VOCAB_REPO }}
+          VOCABULARY_FILE: ${{ vars.OMNI_HYGIENE_VOCAB_FILE }}
+        run: |
+          set -euo pipefail
+          visibility=$(gh api "repos/OmniNode-ai/${TARGET_REPO}" --jq .visibility)
+          case "${visibility}" in
+            public)
+              if [[ ! "${VOCABULARY_REPO}" =~ ^[a-zA-Z0-9_.-]+$ || -z "${VOCABULARY_FILE}" ]]; then
+                echo '::error::Set OMNI_HYGIENE_VOCAB_REPO and OMNI_HYGIENE_VOCAB_FILE for public release notes'
+                exit 1
+              fi
+              ;;
+            private | internal) ;;
+            *) echo "::error::Cannot determine the release repository's visibility"; exit 1 ;;
+          esac
+          echo "visibility=${visibility}" >> "$GITHUB_OUTPUT"
+
+      # OMN-25794: use the same organization-configured vocabulary as the
+      # public-repo hygiene gate, with a separate read-only installation token.
+      - name: Mint public hygiene vocabulary reader token
+        id: vocabulary-token
+        if: steps.target-visibility.outputs.visibility == 'public'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: ${{ vars.OMNI_HYGIENE_VOCAB_REPO }}
+          permission-contents: read
+
+      - name: Read the public hygiene vocabulary
+        if: steps.target-visibility.outputs.visibility == 'public'
+        env:
+          GH_TOKEN: ${{ steps.vocabulary-token.outputs.token }}
+          VOCABULARY_REPO: ${{ vars.OMNI_HYGIENE_VOCAB_REPO }}
+          VOCABULARY_FILE: ${{ vars.OMNI_HYGIENE_VOCAB_FILE }}
+        run: |
+          set -euo pipefail
+          gh api "repos/OmniNode-ai/${VOCABULARY_REPO}/contents/${VOCABULARY_FILE}" \
+            --jq 'select(.type == "file" and .encoding == "base64") | .content' \
+            | base64 --decode > "${RUNNER_TEMP}/release-hygiene-vocabulary.yaml"
+          test -s "${RUNNER_TEMP}/release-hygiene-vocabulary.yaml"
+
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
@@ -314,6 +362,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TARGET_REPO: ${{ matrix.decision.repo }}
+          TARGET_VISIBILITY: ${{ steps.target-visibility.outputs.visibility }}
           VERSION: ${{ matrix.decision.candidate_version }}
           NEEDS_BUMP: ${{ matrix.decision.needs_bump }}
           CANDIDATE_SHA: ${{ matrix.decision.candidate_sha }}
@@ -376,13 +425,19 @@ jobs:
           # PR red from the day dev deleted that file (OMN-17427). The behaviour is
           # the node_release_notes_apply_effect node, run from the checked-out
           # train by its locked environment; the app token is not in its env.
+          vocabulary=""
+          if [ "${TARGET_VISIBILITY}" = public ]; then
+            vocabulary="${RUNNER_TEMP}/release-hygiene-vocabulary.yaml"
+          fi
           jq -n --arg clone "${PWD}" --arg entry "${RUNNER_TEMP}/changelog-entry.md" \
-            --arg repo "${TARGET_REPO}" \
-            '{clone_path: $clone, entry_file: $entry, repo_name: $repo}' \
+            --arg repo "${TARGET_REPO}" --arg visibility "${TARGET_VISIBILITY}" \
+            --arg vocabulary "${vocabulary}" \
+            '{clone_path: $clone, entry_file: $entry, repo_name: $repo,
+              repository_visibility: $visibility, hygiene_vocabulary_file: $vocabulary}' \
             >"${RUNNER_TEMP}/release-notes-request.json"
           if ! env -u GH_TOKEN -u GITHUB_TOKEN uv run --frozen --no-dev \
             --project "${GITHUB_WORKSPACE}/_train" \
-            onex node node_release_notes_apply_effect \
+            python -m omnibase_core.cli.cli_commands node node_release_notes_apply_effect \
             --input "${RUNNER_TEMP}/release-notes-request.json" \
             --state-root "${RUNNER_TEMP}/release-notes-state" \
             --output receipt >"${RUNNER_TEMP}/release-notes-receipt.json" \
@@ -394,12 +449,24 @@ jobs:
             exit 1
           fi
           # One path per line. The receipt must say success and carry at least one
-          # path; jq -e fails on anything else, so a malformed receipt fails here.
-          if ! staged_lines=$(jq -er '(.result.handler_result // .result) | select(.success == true) | .staged[]' "${RUNNER_TEMP}/release-notes-receipt.json"); then
+          # path, except for the release-pr-body target; jq -e fails on anything
+          # else, so a malformed receipt fails here.
+          # A repo that keeps no changelog file on its default branch (target
+          # release-pr-body, OMN-25958) stages nothing: its block rides in the
+          # receipt's notes and goes into the release pull request body below.
+          if ! staged_lines=$(jq -er '(.result.handler_result // .result) | select(.success == true and ((.staged | length) > 0 or .target == "release-pr-body")) | (.staged | join("\n"))' "${RUNNER_TEMP}/release-notes-receipt.json"); then
             echo "::error::the release-notes receipt does not report success with staged paths"
             exit 1
           fi
           mapfile -t staged <<<"${staged_lines}"
+          if [ -z "${staged_lines}" ]; then
+            staged=()
+          fi
+          notes_section=""
+          if [ "$(jq -r '(.result.handler_result // .result).target' "${RUNNER_TEMP}/release-notes-receipt.json")" = "release-pr-body" ]; then
+            notes_block=$(jq -r '(.result.handler_result // .result).notes' "${RUNNER_TEMP}/release-notes-receipt.json")
+            notes_section=$(printf 'Release notes (this repository keeps no changelog file on its default branch, so they are carried here and written nowhere in the tree):\n\n%s\n' "${notes_block}")
+          fi
           if [ "${NEEDS_BUMP}" = "true" ]; then
             # The manifest and the lockfile move together: uv.lock records the
             # root package's own version, so a bump of pyproject.toml alone
@@ -427,8 +494,10 @@ jobs:
 
           git config user.name "onexbot-occ-writer[bot]"
           git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
-          git add -- "${staged[@]}"
-          git commit -m "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})" \
+          if [ "${#staged[@]}" -gt 0 ]; then
+            git add -- "${staged[@]}"
+          fi
+          git commit --allow-empty -m "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})" \
             --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
             --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           # publish the rebuilt branch
@@ -452,6 +521,8 @@ jobs:
           The refresh moved uv.lock only, ran once for this run, and is covered by
           the same lab evidence as the release (the release PR's own required CI
           for repositories declaring lab_evidence none).
+
+          ${notes_section:-}
 
           The train opened this because the repository's declared premises held for
           that exact commit: it carries unreleased release-relevant work since the

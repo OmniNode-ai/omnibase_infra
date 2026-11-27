@@ -62,9 +62,8 @@ from collections.abc import Callable, Mapping, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
 
-from omnibase_infra.handlers.handler_boot_failure_ledger import (
-    HandlerBootFailureLedger,
-)
+from omnibase_infra.handlers.handler_boot_failure_ledger import HandlerBootFailureLedger
+from omnibase_infra.handlers.handler_cloud_lab_guard import refuse_in_cloud_mode
 from omnibase_infra.models.health.model_boot_attempt_outcome import (
     ModelBootAttemptOutcome,
 )
@@ -99,6 +98,9 @@ DEFAULT_HEALTHY_AFTER_SECONDS: float = 600.0
 #: kernel's ``logging.basicConfig`` is a no-op once the root has a handler.
 _KERNEL_LOGGER_NAME: str = "omnibase_infra.runtime.service_kernel"
 _MAX_CAUSE_CHARS: int = 500
+_NO_KERNEL_ERROR: str = (
+    "no kernel error was logged before the exit; last dispatch error: "
+)
 _PARK_SLEEP_SECONDS: float = 3600.0
 _PUBLISH_TIMEOUT_SECONDS: float = 8.0
 
@@ -119,17 +121,12 @@ def _safe_dsn(db_url: str) -> str:
     """Strip scheme and userinfo from a DSN, leaving ``host:port/db``.
 
     Mirrors the shell's ``sed 's|^[^/]*//[^@]*@||'`` so the log line is
-    byte-identical and no credential is ever printed.
+    byte-identical and no credential is ever printed; without both ``//`` and
+    ``@`` sed substitutes nothing and the DSN is echoed unchanged.
     """
-    scheme_split = db_url.split("//", 1)
-    if len(scheme_split) == 1:
-        return db_url
-    remainder = scheme_split[1]
-    if "@" not in remainder:
-        # sed's `s|^[^/]*//[^@]*@||` does not substitute at all without an `@`,
-        # so the DSN is echoed unchanged. Match that exactly.
-        return db_url
-    return remainder.split("@", 1)[1]
+    _, scheme, remainder = db_url.partition("//")
+    _, userinfo, tail = remainder.partition("@")
+    return tail if scheme and userinfo else db_url
 
 
 def stamp_fingerprint(
@@ -205,30 +202,23 @@ def stamp_fingerprint(
 
 def stamp_all_fingerprints(env: Mapping[str, str]) -> int:
     """Stamp both declared databases. Returns a non-zero boot-abort code."""
-    infra_db_url = env.get("OMNIBASE_INFRA_DB_URL", "")
-    if infra_db_url:
-        rc = stamp_fingerprint(
-            manifest_name="omnibase_infra", db_url=infra_db_url, required=True
-        )
-        if rc != 0:
-            return rc
-    else:
-        _echo(
-            "[entrypoint] OMNIBASE_INFRA_DB_URL not set -- skipping fingerprint stamp"
-        )
-
-    intel_db_url = env.get("OMNIINTELLIGENCE_DB_URL", "")
-    if intel_db_url:
-        rc = stamp_fingerprint(
-            manifest_name="omniintelligence", db_url=intel_db_url, required=False
-        )
-        if rc != 0:
-            return rc
-    else:
-        _echo(
-            "[entrypoint] OMNIINTELLIGENCE_DB_URL not set -- skipping "
-            "omniintelligence fingerprint stamp"
-        )
+    for manifest, variable, required, skipped in (
+        ("omnibase_infra", "OMNIBASE_INFRA_DB_URL", True, "fingerprint stamp"),
+        (
+            "omniintelligence",
+            "OMNIINTELLIGENCE_DB_URL",
+            False,
+            "omniintelligence fingerprint stamp",
+        ),
+    ):
+        if db_url := env.get(variable, ""):
+            rc = stamp_fingerprint(
+                manifest_name=manifest, db_url=db_url, required=required
+            )
+            if rc != 0:
+                return rc
+        else:
+            _echo(f"[entrypoint] {variable} not set -- skipping {skipped}")
     return 0
 
 
@@ -251,15 +241,14 @@ def render_bifrost_contract(env: Mapping[str, str]) -> int:
 
 
 def render_resolver_config(env: Mapping[str, str]) -> int:
-    """Render the secret-resolver config when its target path is declared."""
-    if not env.get("ONEX_SECRET_RESOLVER_CONFIG_PATH"):
-        return 0
-    from omnibase_infra.runtime.render_secret_resolver_config import (
-        main as render_resolver_main,
-    )
+    """Render the secret-resolver config when its target path is declared or in cloud mode."""
+    from omnibase_infra.models.runtime import model_cloud_secret_names as cloud
+    from omnibase_infra.runtime import render_secret_resolver_config as render
 
+    if not cloud.ModelCloudSecretNames.render_required(env):
+        return 0
     _echo("[entrypoint] Rendering secret resolver config...")
-    return render_resolver_main()
+    return render.main()
 
 
 def run_preflight(env: MutableMapping[str, str]) -> int:
@@ -267,16 +256,12 @@ def run_preflight(env: MutableMapping[str, str]) -> int:
 
     Returns ``0`` when the kernel may start, or the boot-abort exit code.
     """
-    rc = stamp_all_fingerprints(env)
-    if rc != 0:
-        return rc
-    rc = render_bifrost_contract(env)
-    if rc != 0:
-        return rc
-    rc = render_resolver_config(env)
-    if rc != 0:
-        return rc
-    return 0
+    return (
+        refuse_in_cloud_mode(env)
+        or stamp_all_fingerprints(env)
+        or render_bifrost_contract(env)
+        or render_resolver_config(env)
+    )
 
 
 def handoff(argv: list[str]) -> int:
@@ -303,7 +288,12 @@ def handoff(argv: list[str]) -> int:
 
 
 class KernelErrorCapture(logging.Handler):
-    """Remembers the kernel's last ERROR record as a sanitized one-line cause."""
+    """Remembers the kernel's last ERROR record as a sanitized one-line cause.
+
+    The dispatch engine logs each failed message on the kernel's logger while the kernel carries
+    on, so one of its records is only the cause of an exit when no kernel error was logged, and
+    says so (OMN-26316).
+    """
 
     def __init__(self) -> None:
         super().__init__(level=logging.ERROR)
@@ -318,6 +308,10 @@ class KernelErrorCapture(logging.Handler):
         exc = record.exc_info[1] if record.exc_info else None
         if isinstance(exc, Exception):
             cause = f"{cause} | {sanitize_error_message(exc)}"
+        if record.module == "message_dispatch_engine":
+            if self.cause and not self.cause.startswith(_NO_KERNEL_ERROR):
+                return
+            cause = _NO_KERNEL_ERROR + cause
         self.cause = cause[:_MAX_CAUSE_CHARS]
 
 

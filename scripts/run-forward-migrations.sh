@@ -91,6 +91,16 @@
 #     which only the dev/lab project loads — deliberately NOT set in
 #     docker-compose.infra.yml, which every lane overlay merges. See the
 #     LANE-SCOPED FENCE RELEASE block below.
+#   ONEX_MIGRATION_GATEWAY_LANE (default: unset = the gateway identity schema is skipped, OMN-26121).
+#     Lane indicator for the tenant identity schema seams under docker/migrations/seams/.
+#     Recognised values are `dev` and `stability_test`, the two lanes that mount the gateway
+#     on omninode_cloud; unset or unknown skips them by name. It is read by
+#     tenant_identity_gateway_lane.sql (psql \getenv), which gateway_runtime_grants.sql
+#     includes first, so the create step, the expiry seam and the readback run before the
+#     grants, inside the slot-guarded grant seam and never under a slot. Set in
+#     docker-compose.dev-lane.yml and the stability lane overlay only, never in
+#     docker-compose.infra.yml, the catalog or the collaborator lane (its cloud one-shot
+#     runs after this runner).
 
 set -e
 
@@ -227,7 +237,7 @@ slot_skip_role_seam() {
 # SLOT_MANAGED_ROLES mirrors the roles scripts/provision_db_slot.sh derives,
 # SERVICE_DB_MAP's roles and LOGIN_ONLY_ROLES, and is pinned equal to them by
 # tests/unit/infra/test_forward_migration_slot_role_confinement.py.
-SLOT_MANAGED_ROLES="role_omnibase role_omniintelligence role_omniclaude role_omnimemory role_omninode role_omnidash omninode_runtime tenant_projection_writer chain_canary_reader"
+SLOT_MANAGED_ROLES="role_omnibase role_omniintelligence role_omniclaude role_omnimemory role_omninode role_omnidash omninode_runtime tenant_projection_writer chain_canary_reader gateway_runtime"
 
 # The caller runs this in a command substitution, so a refusal is signalled by
 # exit status and the caller must stop on it; the copy is the caller's to
@@ -504,10 +514,7 @@ is_skipped_by_manifest() {
 # operator env var must not be able to supply or empty this list — see
 # test_fence_is_not_overridable_by_environment.
 FENCE_MANIFEST="${MIGRATIONS_DIR}/fenced-node-migrations.yaml"
-if [ ! -f "${FENCE_MANIFEST}" ]; then
-  echo "FATAL: operator fence manifest not found: ${FENCE_MANIFEST}" >&2
-  exit 1
-fi
+[ -f "${FENCE_MANIFEST}" ] || { echo "FATAL: operator fence manifest not found: ${FENCE_MANIFEST}" >&2; exit 1; }
 FENCED_NODE_MIGRATION_IDS="$(sed -n \
   's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*"\([^"]*\)".*/\1/p' \
   "${FENCE_MANIFEST}")"
@@ -1061,10 +1068,7 @@ validate_client_file_path() {
       exit 1
       ;;
   esac
-  if [ ! -f "$client_file_path" ]; then
-    echo "[forward-migration] FATAL: psql client file is missing: ${client_file_path}" >&2
-    exit 1
-  fi
+  [ -f "$client_file_path" ] || { echo "[forward-migration] FATAL: psql client file is missing: ${client_file_path}" >&2; exit 1; }
 }
 
 file_sha256() {
@@ -1849,6 +1853,7 @@ else
     "omninode_runtime:OMNINODE_RUNTIME_PASSWORD" \
     "tenant_projection_writer:TENANT_PROJECTION_WRITER_PASSWORD" \
     "chain_canary_reader:CHAIN_CANARY_READER_PASSWORD" \
+    "gateway_runtime:GATEWAY_RUNTIME_PASSWORD" \
   ; do
     entry_role_name=${login_role_entry%%:*}
     entry_password_var=${login_role_entry#*:}
@@ -2411,6 +2416,18 @@ else
     reassert_login_only_role_grants \
       "$entry_grant_role" "$entry_grant_relation" "$entry_grant_columns"
   done
+  # OMN-26151: the gateway_runtime grants are a data file, not shell. They are
+  # writes on a DIFFERENT database (omninode_cloud), which the column-scoped
+  # function above cannot express and its tests forbid it to. The file gates on
+  # the role, the database and the seven tables, resets then grants the nine
+  # items, and reads them back (it fails the run on any difference). A runner
+  # started without the file (a test harness, a lane that does not mount it) logs
+  # a named skip: the role is not provisioned there either.
+  # OMN-26471: the same psql run applies tenant_identity_writer_grants.sql second
+  # (one more -f, no new line): that seam also mints the writer's credential from
+  # TENANT_IDENTITY_WRITER_PASSWORD, so it is in none of the credential lists above.
+  gateway_grants_file=/migrations/seams/gateway_runtime_grants.sql
+  if [ -f "$gateway_grants_file" ]; then psql -f "$gateway_grants_file" -f /migrations/seams/tenant_identity_writer_grants.sql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -X -q -v ON_ERROR_STOP=1; else echo "[forward-migration]   skip  gateway_runtime grants (no grants file at ${gateway_grants_file})"; fi
 fi
 # ---- END login-only role grant seam (OMN-18060) ----
 

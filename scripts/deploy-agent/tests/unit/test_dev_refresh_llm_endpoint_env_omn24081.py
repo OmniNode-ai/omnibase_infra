@@ -29,9 +29,20 @@ pytestmark = [pytest.mark.unit, pytest.mark.llm_endpoint_env_render]
 
 STALE_ADDRESS = "http://192.0.2.50:8002"
 OVERLAY_ADDRESS = "http://192.0.2.50:8100"
+# the coder slot is also overlay-addressed (OMN-26709), so every overlay names it
+CODER_SLOT_ID = "coder-5090"
+CODER_ADDRESS = "http://192.0.2.50:8000"
 EMBEDDING_PATH = "/v1/embeddings"
 SLOT_ID = "embeddings-201"
 ENV_STATE_DIR = "DEPLOY_AGENT_STATE_DIR"
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_lane_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A host that already applied a refresh holds these; a pin beats the tmp folders built here."""
+    monkeypatch.delenv("ONEX_LANE_DECLARATION_DIR", raising=False)
+    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("ONEX_SKILL_OVERLAY_ROOTS", raising=False)
 
 
 def dev_llm_endpoint_env_exports(
@@ -39,7 +50,13 @@ def dev_llm_endpoint_env_exports(
 ) -> str:
     """What the refresh script sources: the node module's ``refresh_exports`` over the executor."""
     guard = executor_mod.load_dev_boot_guard(executor_mod._LLM_ENV_MODULE)
-    exports: str = guard.refresh_exports(executor_mod, environ, search_root, state_dir)
+    exports: str = guard.refresh_exports(
+        executor_mod,
+        environ,
+        search_root,
+        state_dir,
+        mounts_lane_declaration=True,
+    )
     return exports
 
 
@@ -60,7 +77,12 @@ def _overlay_home(root: Path, endpoint_urls: dict[str, str]) -> Path:
     overlay = repo / "overlays" / "llm_endpoints" / "overlay.yaml"
     overlay.parent.mkdir(parents=True)
     overlay.write_text(
-        yaml.safe_dump({"schema_version": 1, "endpoint_urls": endpoint_urls}),
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "endpoint_urls": {CODER_SLOT_ID: CODER_ADDRESS, **endpoint_urls},
+            }
+        ),
         encoding="utf-8",
     )
     _git(repo, "add", str(overlay.relative_to(repo)))
@@ -72,6 +94,8 @@ def _overlay_home(root: Path, endpoint_urls: dict[str, str]) -> Path:
 def _lane_overlays(root: Path) -> Path:
     lane_dir = root / "lane-overlays"
     lane_dir.mkdir()
+    # OMN-24854: the folder above the lane overlays holds the lane declaration.
+    (root / "ci_bus_lanes.yaml").write_text("lanes: {}\n", encoding="utf-8")
     (lane_dir / "dev.bifrost.yaml").write_text(
         yaml.safe_dump(
             {

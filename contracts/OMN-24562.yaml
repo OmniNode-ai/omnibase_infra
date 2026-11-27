@@ -30,18 +30,18 @@ requirements:
     statement: >-
       The deploy agent runs git fetch, reset and checkout only in its own clone, creates it on start without losing the served commit, and refuses a canonical clone as its deploy source.
     acceptance:
-      - id: AC15
+      - id: AC31
         statement: >-
-          AC15: A pinned job through the real git_pull leaves the canonical clone's HEAD, branch and working tree unchanged and puts the agent's own clone on the pinned ref; a deploy source configured as the canonical clone runs nothing. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k PinnedJob -q
-      - id: AC16
+          AC31: A pinned job through the real git_pull leaves the canonical clone's HEAD, branch and working tree unchanged and puts the agent's own clone on the pinned ref; a deploy source configured as the canonical clone runs nothing. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k PinnedJob -q
+      - id: AC32
         statement: >-
-          AC16: First start with no agent clone creates it at the previously served commit; a second start leaves it and its pin untouched. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k MigrationOnStart -q
-      - id: AC17
+          AC32: First start with no agent clone creates it at the previously served commit; a second start leaves it and its pin untouched. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k MigrationOnStart -q
+      - id: AC33
         statement: >-
-          AC17: An unreachable mirror falls back to origin, is counted and logged; a reachable mirror is the fetch url and origin stays the push url. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k Mirror -q
-      - id: AC18
+          AC33: An unreachable mirror falls back to origin, is counted and logged; a reachable mirror is the fetch url and origin stays the push url. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k Mirror -q
+      - id: AC34
         statement: >-
-          AC18: A deploy-source path that resolves to a canonical clone (equal, symlinked, or the OMNI_HOME clone) is refused with a typed error, and unset settings have no default. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k Guard -q
+          AC34: A deploy-source path that resolves to a canonical clone (equal, symlinked, or the OMNI_HOME clone) is refused with a typed error, and unset settings have no default. -- falsifier: pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -k Guard -q
   - id: req-omn24562-stability-job-renders-overlay-address
     statement: A stability job of a dev-fenced deploy agent takes LLM_EMBEDDING_URL, BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL and the rewritten lane overlay directory from the llm_endpoints overlay, in its compose environment and in its env contract guard, and a prod job takes nothing from the render.
     acceptance:
@@ -58,6 +58,68 @@ requirements:
         statement: 'AC4: for the stability lane the agent''s lane configuration disables the runtime-effects service, the runtime phase retires its old container with a stop and a remove that carry no volume flag, removes nothing when none exists, and prod retires nothing -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_retires_folded_effects_omn24562.py -q fails when the retirement call in the runtime phase or the census branch of _retire_folded_dev_services is deleted'
       - id: AC5
         statement: 'AC5: the pull request branch''s executor.py carries the guard line `if "runtime-effects" in retired:` (in lane_config_for, where a lane that retires the effects role reads the effects health target from main), a line the merge base does not carry -- falsifier: that line is absent from the branch''s executor.py, or present at the merge base 6deccc76f9768b2be6b4ba8939eb0a9d52cd1082'
+  - id: req-omn24562-stability-rollback-waiver
+    statement: The deploy agent runs a stability runtime deploy that has no retained rollback point only when its own probe reads every runtime target of the lane failed with no timeout and Docker reads every target container unhealthy or gone after its declared start window, records that it ran without one, and never applies the waiver to the prod or dev lane.
+    acceptance:
+      - id: AC22
+        statement: 'AC22: a stability runtime deploy with no retained rollback point runs when every runtime target fails the guard probe and Docker reads each target container unhealthy or absent, and the job records it ran without one -- falsifier: pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py -k unhealthy_lane_without_point fails at the merge base'
+      - id: AC23
+        statement: 'AC23: the deploy is refused when the lane is degraded-serving (a target passes, or a failing target is Docker-healthy) or still starting (Docker reads a target starting inside its start period), or the probe times out or errors -- falsifier: the degraded_serving and still_starting tests in the same file fail when the waiver ignores the Docker state'
+      - id: AC24
+        statement: 'AC24: the waiver is never granted to the prod or dev lane and probes nothing for them -- falsifier: the prod and dev control test fails at the head'
+  - id: req-omn24562-boost-unit
+    statement: The cpu-boost-off unit is tracked in the repository with After=sysinit.target and WantedBy=multi-user.target.
+    acceptance:
+      - id: AC15
+        statement: 'AC15: deploy/systemd/cpu-boost-off.service carries After=sysinit.target and WantedBy=multi-user.target -- falsifier: grep -F After=sysinit.target deploy/systemd/cpu-boost-off.service'
+  - id: req-omn24562-stability-build-project
+    statement: The stability job of the dev-fenced deploy agent builds the runtime images under the stability compose project that its runtime up runs, and does not name autoheal, which the stability overlay disables.
+    acceptance:
+      - id: AC16
+        statement: 'AC16: the build command of a stability job runs under the stability compose project and the stability lane configuration disables autoheal -- falsifier: scripts/deploy-agent/tests/unit/test_stability_build_project_omn24562.py fails at the merge base'
+      - id: AC17
+        statement: 'AC17: integrated: after the agent is installed from the integration branch, one stability-follow job on h201 builds the omninode-runtime image of the stability project at the job time and names no autoheal -- falsifier: the image list of h201 shows that image older than the job, or the job record errors name autoheal'
+  - id: req-omn24562-stability-start-wait
+    statement: verify() waits out a stability runtime's declared start the way it does on dev, reading the budget from the container's own compose healthcheck, so a runtime that takes about five minutes to start is not failed on its first probe and rolled back. A spent budget still fails the job, no lane but dev may recreate, and dev and prod behave as before.
+    acceptance:
+      - id: AC19
+        statement: 'AC19: a stability runtime that fails its first probe while Docker reports it starting is re-probed within its declared start budget and passes without a recreate -- falsifier: pytest scripts/deploy-agent/tests/unit/test_verify_stability_start_wait_omn24562.py -k "waited_for_and_passes" fails when VERIFY_START_WAIT_LANES in executor.py drops the stability lane'
+      - id: AC20
+        statement: 'AC20: a stability runtime still failing past its declared start budget fails the job, which the agent turns into the rollback, and nothing is recreated; a shorter declared budget gives fewer probes than a longer one, so the wait is read from the container and not from a constant -- falsifier: the outlives-its-budget and wait-length tests fail when the wait length is a fixed number or the failed job passes'
+      - id: AC21
+        statement: 'AC21: dev behaves as before (the same one service-label lookup, the same wait, the recreate allowlist still dev only) and prod gets neither the wait nor a recreate -- falsifier: the dev lookup, fence and prod tests of the same file fail when stability or prod joins VERIFY_RECREATE_LANES or prod joins VERIFY_START_WAIT_LANES'
+  - id: req-omn24562-stability-composed-build
+    statement: The stability lane builds the runtime, worker, projection api and projection writers on omnimarket's composed image, as the dev lane does, so the kernel boots with BIFROST_BASE_CONTRACT_PATH set; the dev build is unchanged.
+    acceptance:
+      - id: AC18
+        statement: 'AC18: the stability overlay renders every runtime-profile service on the composed omnimarket build and the stability build names the overlay and those services, while the dev build argv is unchanged -- falsifier: scripts/deploy-agent/tests/unit/test_stability_composed_build_omn24562.py or tests/unit/docker/test_stability_composed_runtime_image_omn24562.py fails at the merge base'
+      - id: AC25
+        statement: 'AC25: integrated: after the agent is installed from the integration branch, one stability-follow job on h201 ends with outcome success and the stability omninode-runtime container reports healthy -- falsifier: the job record shows another outcome, or the container restarts with BIFROST_BASE_CONTRACT_PATH unset'
+  - id: req-omn24562-stability-follow-unhealthy
+    statement: The stability follow reads an unhealthy stability runtime as running no revision, so a parked runtime built from the followed tag is rebuilt instead of reading up to date.
+    acceptance:
+      - id: AC26
+        statement: 'AC26: the stability follow decides FOLLOW when the stability runtime is unhealthy and UP_TO_DATE when it is healthy on the tag -- falsifier: scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py fails at the merge base'
+  - id: req-omn24562-stability-config-lazy
+    statement: The deploy agent resolves the stability lane's runtime container only when the stability follow reads it, never in its constructor, so a bad stability fold policy fails the stability follow alone and every agent still starts.
+    acceptance:
+      - id: AC27
+        statement: 'AC27: a dev agent whose stability fold policy cannot resolve starts, and its stability reader answers None without raising; the agent''s own stability reader reads the stability runtime container and reads an unhealthy one as the empty ref -- falsifier: pytest scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py -k "bad_stability_fold_policy or stability_reader_reads" fails at the merge base'
+  - id: req-omn24562-canary-command-headers
+    statement: The chain canary's published command record carries the Kafka headers the ledger writer reads, so the command hop joins the probe's chain.
+    acceptance:
+      - id: AC28
+        statement: 'AC28: the canary publishes the delegate-skill command with correlation_id, message_id, timestamp, source and event_type Kafka headers taken from its envelope, and the ledger projection of that record carries the probe correlation id and envelope id -- falsifier: tests/integration/chain_canary/test_publish_command_headers_ledger_omn24562.py fails at the merge base'
+  - id: req-omn24562-credential-revoked-machine-binding
+    statement: The machine principal profile may write the credential-revoked event on the dev broker, declared in the bindings and the derived grants.
+    acceptance:
+      - id: AC29
+        statement: 'AC29: deploy/lab/machine-principal-bindings.yaml produces onex.evt.omnimarket.credential-revoked.v1 on the dev broker and the committed derived grants carry its WRITE and DESCRIBE rows -- falsifier: the machine supplement test in test_developer_principal_grants_omn19975.py fails without the binding'
+  - id: req-omn24562-summary-poll-running-conclusion
+    statement: CI Summary counts an in-run job whose conclusion is set as completed with that conclusion whatever its status says, and fails closed, naming the job, when a job still has no conclusion a declared time after the last other in-run job completed.
+    acceptance:
+      - id: AC30
+        statement: 'AC30: an in-run job with status in_progress and conclusion success is done and green, in_progress with failure is red, in_progress with no conclusion waits, and a job with no conclusion 45 minutes after the last other job completed is named by the poll step stall filter, and the jobs read pages at 30 then 10 -- falsifier: uv run --frozen pytest tests/ci/test_ci_summary_running_conclusion_omn24562.py -q -n 0 --no-cov fails on the merge-base ci_summary_gate.py'
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -72,6 +134,15 @@ evidence_requirements:
     description: >-
       Pinned job leaves the canonical clone byte-identical, migration on start, mirror fallback counted, and the canonical-clone guard.
     command: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0
+  - kind: tests
+    description: The tracked unit holds the ordering line.
+    command: grep -F After=sysinit.target deploy/systemd/cpu-boost-off.service
+  - kind: tests
+    description: Stability start wait within and past the declared budget, with the dev lookup, the two fences and prod unchanged.
+    command: cd scripts/deploy-agent && uv run --frozen --extra dev python -m pytest tests/unit/test_verify_stability_start_wait_omn24562.py -q -p no:cacheprovider
+  - kind: tests
+    description: The machine supplement binds credential-revoked and the derived grants match.
+    command: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q --no-cov -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ""
@@ -204,7 +275,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k PinnedJob
         cwd: .
-    binds_ac: [AC15]
+    binds_ac: [AC31]
   - id: dod-omn24562-ac8-migration
     description: >-
       Creation is seeded from the canonical clone's HEAD, including an unpushed head, and an existing clone is never reset.
@@ -213,7 +284,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k MigrationOnStart
         cwd: .
-    binds_ac: [AC16]
+    binds_ac: [AC32]
   - id: dod-omn24562-ac9-mirror-fallback
     description: >-
       The fallback count is kept in a file beside the clone.
@@ -222,7 +293,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k Mirror
         cwd: .
-    binds_ac: [AC17]
+    binds_ac: [AC33]
   - id: dod-omn24562-ac10-guard
     description: >-
       The guard compares real paths.
@@ -231,4 +302,142 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_agent_own_clone_omn24562.py -q -p no:randomly --no-cov -n 0 -k Guard
         cwd: .
-    binds_ac: [AC18]
+    binds_ac: [AC34]
+  - id: dod-omn24562-ac19-ac21-rollback-waiver
+    description: 'AC22, AC23 and AC24: an UNHEALTHY lane past its start window is waived and recorded; a degraded-serving, still-starting, HEALTHY or UNKNOWN lane is refused; prod and dev are never waived; the existing rollback tests still pass.'
+    source: manual
+    binds_ac:
+      - AC22
+      - AC23
+      - AC24
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_rollback_waiver_omn24562.py scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -p no:randomly --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/handlers/test_handler_stability_rollback_waiver_omn24562.py -q -p no:randomly --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-unit
+    description: AC15 proven by reading the tracked unit at the checked-out commit.
+    source: manual
+    binds_ac:
+      - AC15
+    checks:
+      - check_type: command
+        check_value: grep -F After=sysinit.target deploy/systemd/cpu-boost-off.service
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_cpu_boost_off_unit_omn24562.py -q -p no:randomly --no-cov
+        cwd: .
+  - id: dod-omn24562-ac16-stability-build-project
+    description: The build command of a stability job runs under the stability compose project, dev still builds under its own, the stability lane disables autoheal and keeps the services it runs by name, and the executor builds under the lane's compose project.
+    source: manual
+    binds_ac:
+      - AC16
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_build_project_omn24562.py tests/unit/test_stability_retires_folded_effects_omn24562.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -q 'lane_config_for(runtime_lane).compose_project,' scripts/deploy-agent/deploy_agent/executor.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac17-stability-follow-readback
+    description: Hosted stand-in for AC17, which is read on h201 after the agent is installed from the integration branch. The executor on the branch no longer carries the build_project field, so the lane build runs under the lane's compose project; the merge base still names build_project.
+    source: manual
+    binds_ac:
+      - AC17
+    checks:
+      - check_type: command
+        check_value: "! grep -q 'build_project' scripts/deploy-agent/deploy_agent/executor.py"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac15-ac17-stability-start-wait
+    description: A stability runtime is waited for within its declared start budget and passes, fails and is not recreated past it, and dev, the two fences and prod behave as before.
+    source: manual
+    binds_ac:
+      - AC19
+      - AC20
+      - AC21
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_verify_stability_start_wait_omn24562.py tests/unit/test_verify_honours_declared_start_omn19374.py tests/unit/test_verify_force_recreate_omn18640.py tests/unit/test_auto_rollback.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac18-h201-job-record-verification
+    description: 'Unbound local Done gate for AC18 (not a hosted criterion): reads the stability-follow job record on h201 (the deploy agent state file /data/omninode/deploy-agent/state/jobs-dev/<job id>*.json) and exits 0 only when exactly one record matches the job id prefix in STABILITY_FOLLOW_JOB_ID, its phase_results.verification is success and its status is success (a job rolled back to the retained image ends failed). It is read-only, prints no secret, and exits non-zero when the variable is unset, no record matches, or verification or the job is anything other than success. The hosted runner cannot reach h201, so the item is local_done_gate and runs on h201 after the agent is installed from this branch.'
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "python3 -c 'import glob, json, sys; hits = glob.glob(\"/data/omninode/deploy-agent/state/jobs-dev/\" + sys.argv[1] + \"*.json\"); rec = json.load(open(hits[0])) if len(hits) == 1 else {}; sys.exit(0 if rec.get(\"phase_results\", {}).get(\"verification\") == \"success\" and rec.get(\"status\") == \"success\" else 1)' \"${STABILITY_FOLLOW_JOB_ID:?set STABILITY_FOLLOW_JOB_ID to the stability-follow job id}\""
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac13-stability-composed-build
+    description: The stability overlay builds on the composed image, the stability build argv names the overlay and the composed services under the stability project, and the dev build is unchanged.
+    source: manual
+    binds_ac:
+      - AC18
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_stability_composed_runtime_image_omn24562.py tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_composed_build_omn24562.py tests/unit/test_dev_lane_composed_build_omn21279.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/docker/test_stability_composed_build_services_omn24562.py -q -p no:cacheprovider --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac14-stability-follow-green
+    description: Hosted stand-in for AC25, which is read on h201 after the agent is installed from the integration branch. The overlay on the branch carries the composed build anchor; the merge base has none.
+    source: manual
+    binds_ac:
+      - AC25
+    checks:
+      - check_type: command
+        check_value: grep -q 'x-composed-runtime-build' docker/docker-compose.stability-t*.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac26-stability-follow-unhealthy
+    description: An unhealthy stability runtime reads as running no revision and the follow rebuilds it; a healthy one on the tag reads up to date.
+    source: manual
+    binds_ac:
+      - AC26
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_stability_follow_unhealthy_omn24562.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/test_dev_boot_guard_unhealthy_runtime_omn24562.py -q -p no:cacheprovider --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac27-stability-config-lazy
+    description: 'AC27: an agent with a bad stability fold policy starts and only its stability read fails; the agent''s stability reader is wired to the stability runtime container.'
+    source: manual
+    binds_ac:
+      - AC27
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest scripts/deploy-agent/tests/unit/test_stability_follow_unhealthy_omn24562.py -q -p no:randomly --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac28-canary-command-headers
+    description: 'AC28: the canary command record carries identity headers and projects under the probe correlation id'
+    source: manual
+    binds_ac:
+      - AC28
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_chain_canary_effect/test_publish_command_headers_omn24562.py tests/integration/chain_canary/test_publish_command_headers_ledger_omn24562.py -q -p no:randomly --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac29-credential-revoked-binding
+    description: The machine supplement produces credential-revoked on the dev broker and the derived grants match the derivation.
+    source: manual
+    binds_ac:
+      - AC29
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -k machine_supplement -q --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac30-summary-poll-running-conclusion
+    description: 'AC30: the CI Summary gate treats an in-run job with a set conclusion as completed and bounds a job with none.'
+    source: manual
+    binds_ac:
+      - AC30
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_ci_summary_running_conclusion_omn24562.py tests/ci/test_ci_summary_gate.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra

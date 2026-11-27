@@ -1,0 +1,70 @@
+schema_version: 1.0.0
+ticket_id: OMN-26360
+title: The dev lane's omninode-runtime CPU limit is declared at 3.0 (from 2.0) in docker-compose.dev-lane.yml only, after a read of omni-201's idle cores, with the cpu-cap test asserting the declared value
+summary: >-
+  The dev lane overlay raised omninode-runtime from the base 1.0 to 2.0 under OMN-19513. A read of omni-201 on 2026-11-21 (32 cores; the lowest idle at any 10-minute sar interval of the last hour was 19.9 cores and at the busiest second of a 300 s vmstat window 14.4 cores) is at or above the 6 idle cores the ticket sets as the bar, so the overlay's limit moves to 3.0. Only docker/docker-compose.dev-lane.yml and its cpu-cap test change; the base file, the catalog manifest, memory, reservations and the start period do not.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26360-dev-runtime-cpus
+    statement: The dev lane's omninode-runtime declares a 3.0 CPU limit in the dev lane overlay alone, justified by a live read of the host's idle cores.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the host core count, the load average over the last hour, the idle cores at its peak and the NanoCpus of every container on omni-201 (names and NanoCpus only) are read live and written in the PR body under a section headed Measured host capacity with the UTC read time -- falsifier: onex scm pr-view of the PR shows no section headed Measured host capacity holding the core count, idle cores at peak and the NanoCpus list with a UTC read time"
+      - id: AC2
+        statement: "AC2: the dev lane's omninode-runtime declared limit is 3.0 when the host had at least 6 idle cores at peak and stays 2.0 otherwise, changed in docker/docker-compose.dev-lane.yml only, with the base file, the catalog manifest, the stability lane and the cloud lane declarations unchanged -- falsifier: git diff origin/dev --stat on the branch lists a compose or catalog file other than docker/docker-compose.dev-lane.yml, run with uv run pytest tests/unit/docker/test_omn19513_dev_lane_runtime_cpu_cap.py -q"
+      - id: AC3
+        statement: "AC3: tests/unit/docker/test_omn19513_dev_lane_runtime_cpu_cap.py reads the declared value from the rendered dev lane overlay and asserts the new limit, while the base-keeps-1.0 and no-cap-on-runtime-effects-or-runtime-worker tests still pass -- falsifier: uv run pytest tests/unit/docker/test_omn19513_dev_lane_runtime_cpu_cap.py -q fails at origin/dev with the new limit asserted and passes on the branch"
+      - id: AC4
+        statement: "AC4: the lane STATUS row names the host cores, the idle cores at peak, the old and new limit, the file, the pushed branch with the path of its ready PR body, and whether the cloud lane's declared omninode-runtime limit differs from the dev lane's -- falsifier: grep of the rolling work ledger for lane=devcpu-1530 shows no STATUS row with the host cores, idle at peak, old and new limit, the file and the cloud lane's limit"
+evidence_requirements:
+  - kind: tests
+    description: The dev lane runtime CPU cap tests, which assert 3.0 for the overlay, 1.0 for the base and no cap on runtime-effects or runtime-worker.
+    command: uv run --frozen pytest tests/unit/docker/test_omn19513_dev_lane_runtime_cpu_cap.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26360-ac1-measured-capacity
+    description: "The overlay comment records the 2026-11-21 read (32 cores, sar and vmstat peaks) beside the new limit; the PR body carries the full Measured host capacity section."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: 'grep -q "OMN-26360: raised from 2.0 to 3.0 after a read on" docker/docker-compose.dev-lane.yml'
+        cwd: .
+  - id: dod-omn26360-ac2-overlay-only
+    description: "The cpu-cap test reads the base limits merged with the overlay's and asserts 3.0, so the declared overlay value is 3.0 and the base stays 1.0."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_omn19513_dev_lane_runtime_cpu_cap.py -k dev_lane_raises_omninode_runtime_cpu_cap -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26360-ac3-cpu-cap-test
+    description: "All three cpu-cap tests pass on the branch (3.0 for the overlay, 1.0 for the base, no cap on runtime-effects or runtime-worker); the first fails against the 2.0 overlay at origin/dev."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_omn19513_dev_lane_runtime_cpu_cap.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26360-ac4-status-row
+    description: "The committed overlay comment records the old limit, the new limit and the file the lane's STATUS row names; the row itself (host cores, idle cores at peak, old and new limit, file, branch, PR body path, cloud lane limit) is on the rolling ledger, which a committed check does not read."
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: 'grep -q "OMN-26360: raised from 2.0 to 3.0" docker/docker-compose.dev-lane.yml'
+        cwd: .
+  - id: dod-omn26360-deploy
+    description: Hosted-runner probe that reads the committed dev lane overlay from GitHub at the checked-out commit and requires the omninode-runtime limit under the OMN-26360 comment to be 3.0.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import sys; src = sys.stdin.read(); i = src.index("OMN-26360: raised from 2.0 to 3.0"); assert "cpus: \x273.0\x27" in src[i:i + 1500]'
+        cwd: ${OMNI_HOME}/omnibase_infra

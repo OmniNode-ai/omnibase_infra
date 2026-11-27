@@ -265,6 +265,22 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e": {
+      "category": "command",
+      "contract_name": "node_build_repository_ref_compute",
+      "event_model_module": "omnibase_infra.models.model_build_repository_ref_request",
+      "event_model_name": "ModelBuildRepositoryRefRequest",
+      "handler_id": "dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e",
+      "handler_module": "omnibase_infra.handlers.build_repository_ref.handler_build_repository_ref",
+      "handler_name": "HandlerBuildRepositoryRef",
+      "message_types": [
+        "ModelBuildRepositoryRefRequest",
+        "deploy.build-repository-ref-check",
+        "${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_c11_delegation_legs_effect.HandlerC11DelegationLegs.c11_delegation_legs_check_3c848af6": {
       "category": "command",
       "contract_name": "node_c11_delegation_legs_effect",
@@ -678,6 +694,22 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_deploy_runners.HandlerRunnerCacheOwnershipRestore.runner_cache_ownership_restore_74b91b24": {
+      "category": "command",
+      "contract_name": "node_deploy_runners",
+      "event_model_module": "omnibase_infra.models.model_runner_cache_ownership_restore_request",
+      "event_model_name": "ModelRunnerCacheOwnershipRestoreRequest",
+      "handler_id": "dispatcher.auto.node_deploy_runners.HandlerRunnerCacheOwnershipRestore.runner_cache_ownership_restore_74b91b24",
+      "handler_module": "omnibase_infra.handlers.handler_runner_cache_ownership_restore",
+      "handler_name": "HandlerRunnerCacheOwnershipRestore",
+      "message_types": [
+        "ModelRunnerCacheOwnershipRestoreRequest",
+        "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}",
+        "platform.runner-tmp-prepare"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2": {
       "category": "command",
       "contract_name": "node_deploy_runners",
@@ -932,6 +964,22 @@
         "ModelLaneEntryPointCensusRequest",
         "omnibase-infra.lane-entry-point-census",
         "${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11": {
+      "category": "command",
+      "contract_name": "node_lazy_start_ingress",
+      "event_model_module": "omnibase_infra.models.lazy_start.model_lazy_start_request",
+      "event_model_name": "ModelLazyStartRequest",
+      "handler_id": "dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11",
+      "handler_module": "omnibase_infra.handlers.handler_lazy_start_ingress",
+      "handler_name": "HandlerLazyStartIngress",
+      "message_types": [
+        "ModelLazyStartRequest",
+        "${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}",
+        "platform.node-start-requested"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -3338,6 +3386,38 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37": {
+      "category": "command",
+      "contract_name": "node_runner_image_roll",
+      "event_model_module": "omnibase_infra.models.model_runner_image_roll_request",
+      "event_model_name": "ModelRunnerImageRollRequest",
+      "handler_id": "dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37",
+      "handler_module": "omnibase_infra.handlers.handler_runner_image_roll",
+      "handler_name": "HandlerRunnerImageRoll",
+      "message_types": [
+        "ModelRunnerImageRollRequest",
+        "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}",
+        "platform.runner-image-roll"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce": {
+      "category": "command",
+      "contract_name": "node_runner_pool_retire",
+      "event_model_module": "omnibase_infra.models.model_runner_pool_retire_request",
+      "event_model_name": "ModelRunnerPoolRetireRequest",
+      "handler_id": "dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce",
+      "handler_module": "omnibase_infra.handlers.handler_runner_pool_retire",
+      "handler_name": "HandlerRunnerPoolRetire",
+      "message_types": [
+        "ModelRunnerPoolRetireRequest",
+        "${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}",
+        "platform.runner-pool-retire"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_runner_usage_effect.HandlerRunnerUsageSavings.runner_usage_estimate_savings_7c9f313b": {
       "category": "event",
       "contract_name": "node_runner_usage_effect",
@@ -3366,6 +3446,30 @@
         "omnibase-infra.runtime-error",
         "${topic:contract:omnibase-infra.EVT_RUNTIME_ERROR_V1}"
       ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
+    "dispatcher.auto.node_runtime_loop_reading_effect.HandlerContractCostShardProposal.runtime_loop_reading_propose_shards_cc6b74d7": {
+      "category": "event",
+      "contract_name": "node_runtime_loop_reading_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_runtime_loop_reading_effect.HandlerContractCostShardProposal.runtime_loop_reading_propose_shards_cc6b74d7",
+      "handler_module": "omnibase_infra.handlers.handler_contract_cost_shard_proposal",
+      "handler_name": "HandlerContractCostShardProposal",
+      "message_types": null,
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
+    "dispatcher.auto.node_runtime_loop_reading_effect.HandlerRuntimeLoopLagSampler.runtime_loop_reading_close_window_bf26a892": {
+      "category": "event",
+      "contract_name": "node_runtime_loop_reading_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_runtime_loop_reading_effect.HandlerRuntimeLoopLagSampler.runtime_loop_reading_close_window_bf26a892",
+      "handler_module": "omnibase_infra.handlers.handler_runtime_loop_lag_sampler",
+      "handler_name": "HandlerRuntimeLoopLagSampler",
+      "message_types": null,
       "package": "omnibase_infra",
       "type_scoped": false
     },
@@ -3859,15 +3963,15 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 164
+        "omnibase_infra": 182
       },
-      "contracts_discovered": 185,
+      "contracts_discovered": 203,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 104,
-      "probe_count": 1141,
-      "registered_dispatchers": 140,
-      "registered_routes": 123,
-      "type_scoped_dispatchers": 87
+      "distinct_subscribe_topics": 108,
+      "probe_count": 1154,
+      "registered_dispatchers": 147,
+      "registered_routes": 128,
+      "type_scoped_dispatchers": 92
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3913,10 +4017,10 @@
       "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-11-19T02:07:31.637560+00:00",
+    "generated_at_utc": "2026-11-27T23:10:35.467193+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.47.73.dev9+ga09066ca",
-      "omnibase-infra": "0.38.77",
+      "omnibase-core": "0.47.81.dev3+gce48c176d",
+      "omnibase-infra": "0.38.87",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
@@ -3997,6 +4101,21 @@
         "status": "success"
       },
       "topic": "${topic:contract:core.CMD_COMPLIANCE_SCAN_REQUESTED_V1}"
+    },
+    "P1a::${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "deploy.build-repository-ref-check",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:dlq:deploy}",
+        "message_category": "command",
+        "message_type": "deploy.build-repository-ref-check",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}"
     },
     "P1a::${topic:contract:omnibase-core.CMD_SHARED_TOKEN_POLICY_REQUESTED_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -4625,6 +4744,21 @@
       },
       "topic": "${topic:contract:platform.CMD_NODE_REGISTRATION_ACKED_V1}"
     },
+    "P1a::${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.node-start-requested",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_PLATFORM_V1}",
+        "message_category": "command",
+        "message_type": "platform.node-start-requested",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}"
+    },
     "P1a::${topic:contract:platform.CMD_REQUEST_INTROSPECTION_V1}": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -4639,6 +4773,36 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:contract:platform.CMD_REQUEST_INTROSPECTION_V1}"
+    },
+    "P1a::${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.runner-image-roll",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_PLATFORM_V1}",
+        "message_category": "command",
+        "message_type": "platform.runner-image-roll",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}"
+    },
+    "P1a::${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.runner-pool-retire",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_PLATFORM_V1}",
+        "message_category": "command",
+        "message_type": "platform.runner-pool-retire",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}"
     },
     "P1a::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -5624,6 +5788,21 @@
       },
       "topic": "${topic:contract:core.CMD_COMPLIANCE_SCAN_REQUESTED_V1}"
     },
+    "P1b::${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}"
+    },
     "P1b::${topic:contract:omnibase-core.CMD_SHARED_TOKEN_POLICY_REQUESTED_V1}": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -6209,6 +6388,21 @@
       },
       "topic": "${topic:contract:platform.CMD_NODE_REGISTRATION_ACKED_V1}"
     },
+    "P1b::${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}"
+    },
     "P1b::${topic:contract:platform.CMD_REQUEST_INTROSPECTION_V1}": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -6223,6 +6417,36 @@
         "status": "no_dispatcher"
       },
       "topic": "${topic:contract:platform.CMD_REQUEST_INTROSPECTION_V1}"
+    },
+    "P1b::${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}"
+    },
+    "P1b::${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "${topic:contract:omnibase-infra.DLQ_COMMANDS_V1}",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}"
     },
     "P1b::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
       "family": "P1_topic_event_type_matrix",
@@ -7337,6 +7561,26 @@
       },
       "topic": "${topic:contract:omnibase-core.CMD_SHARED_TOKEN_POLICY_REQUESTED_V1}"
     },
+    "P4::dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e::${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e",
+      "event_model": "omnibase_infra.models.model_build_repository_ref_request.ModelBuildRepositoryRefRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "deploy.build-repository-ref-check",
+        "payload": "ModelBuildRepositoryRefRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "deploy.build-repository-ref-check",
+        "status": "success"
+      },
+      "topic": "${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}"
+    },
     "P4::dispatcher.auto.node_c11_delegation_legs_effect.HandlerC11DelegationLegs.c11_delegation_legs_check_3c848af6::${topic:contract:platform.CMD_C11_DELEGATION_LEGS_CHECK_V1}": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_c11_delegation_legs_effect.HandlerC11DelegationLegs.c11_delegation_legs_check_3c848af6",
@@ -7824,6 +8068,26 @@
       },
       "topic": "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}"
     },
+    "P4::dispatcher.auto.node_deploy_runners.HandlerRunnerCacheOwnershipRestore.runner_cache_ownership_restore_74b91b24::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_deploy_runners.HandlerRunnerCacheOwnershipRestore.runner_cache_ownership_restore_74b91b24",
+      "event_model": "omnibase_infra.models.model_runner_cache_ownership_restore_request.ModelRunnerCacheOwnershipRestoreRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runner-tmp-prepare",
+        "payload": "ModelRunnerCacheOwnershipRestoreRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_deploy_runners.HandlerRunnerCacheOwnershipRestore.runner_cache_ownership_restore_74b91b24"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.runner-tmp-prepare",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}"
+    },
     "P4::dispatcher.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2::${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2",
@@ -7883,6 +8147,26 @@
         "status": "success"
       },
       "topic": "${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}"
+    },
+    "P4::dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11::${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11",
+      "event_model": "omnibase_infra.models.lazy_start.model_lazy_start_request.ModelLazyStartRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.node-start-requested",
+        "payload": "ModelLazyStartRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.node-start-requested",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86::${topic:contract:omnibase-infra.CMD_BUILD_LOOP_APPEND_V1}": {
       "construct_only": true,
@@ -24613,6 +24897,46 @@
       },
       "topic": "${topic:contract:omnibase-infra.CMD_RUNNER_FLEET_SNAPSHOT_GATHER_V1}"
     },
+    "P4::dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37::${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37",
+      "event_model": "omnibase_infra.models.model_runner_image_roll_request.ModelRunnerImageRollRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runner-image-roll",
+        "payload": "ModelRunnerImageRollRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.runner-image-roll",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}"
+    },
+    "P4::dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce::${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce",
+      "event_model": "omnibase_infra.models.model_runner_pool_retire_request.ModelRunnerPoolRetireRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.runner-pool-retire",
+        "payload": "ModelRunnerPoolRetireRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.runner-pool-retire",
+        "status": "success"
+      },
+      "topic": "${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}"
+    },
     "P4::dispatcher.auto.node_runner_usage_effect.HandlerRunnerUsageSavings.runner_usage_estimate_savings_7c9f313b::${topic:contract:omninode.EVT_RUNNER_USAGE_RECORDED_V1}": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_runner_usage_effect.HandlerRunnerUsageSavings.runner_usage_estimate_savings_7c9f313b",
@@ -25890,6 +26214,16 @@
       "type_scoped": false
     },
     {
+      "contract_name": "node_build_repository_ref_compute",
+      "dispatcher_id": "dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e",
+      "handler_id": "dispatcher.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e",
+      "message_category": "command",
+      "route_id": "route.auto.node_build_repository_ref_compute.HandlerBuildRepositoryRef.build_repository_ref_check_947c166e.onex_cmd_deploy_build_repository_ref_check_v1",
+      "topic": "${topic:contract:deploy.CMD_BUILD_REPOSITORY_REF_CHECK_V1}",
+      "topic_pattern": "*.cmd.deploy.build-repository-ref-check.*",
+      "type_scoped": true
+    },
+    {
       "contract_name": "node_c11_delegation_legs_effect",
       "dispatcher_id": "dispatcher.auto.node_c11_delegation_legs_effect.HandlerC11DelegationLegs.c11_delegation_legs_check_3c848af6",
       "handler_id": "dispatcher.auto.node_c11_delegation_legs_effect.HandlerC11DelegationLegs.c11_delegation_legs_check_3c848af6",
@@ -26101,6 +26435,16 @@
     },
     {
       "contract_name": "node_deploy_runners",
+      "dispatcher_id": "dispatcher.auto.node_deploy_runners.HandlerRunnerCacheOwnershipRestore.runner_cache_ownership_restore_74b91b24",
+      "handler_id": "dispatcher.auto.node_deploy_runners.HandlerRunnerCacheOwnershipRestore.runner_cache_ownership_restore_74b91b24",
+      "message_category": "command",
+      "route_id": "route.auto.node_deploy_runners.HandlerRunnerCacheOwnershipRestore.runner_cache_ownership_restore_74b91b24.onex_cmd_platform_runner_tmp_prepare_v1",
+      "topic": "${topic:contract:platform.CMD_RUNNER_TMP_PREPARE_V1}",
+      "topic_pattern": "*.cmd.platform.runner-tmp-prepare.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_deploy_runners",
       "dispatcher_id": "dispatcher.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2",
       "handler_id": "dispatcher.auto.node_deploy_runners.HandlerRunnerHookMountDrift.runner_hook_mount_check_2b805ab2",
       "message_category": "command",
@@ -26227,6 +26571,16 @@
       "route_id": "route.auto.node_lane_entry_point_census_effect.HandlerLaneEntryPointCensus.lane_entry_point_census_run_8b4784a4.onex_cmd_omnibase_infra_lane_entry_point_census_v1",
       "topic": "${topic:contract:omnibase-infra.CMD_LANE_ENTRY_POINT_CENSUS_V1}",
       "topic_pattern": "*.cmd.omnibase-infra.lane-entry-point-census.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_lazy_start_ingress",
+      "dispatcher_id": "dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11",
+      "handler_id": "dispatcher.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11",
+      "message_category": "command",
+      "route_id": "route.auto.node_lazy_start_ingress.HandlerLazyStartIngress.node_start_requested_edceef11.onex_cmd_platform_node_start_requested_v1",
+      "topic": "${topic:contract:platform.CMD_NODE_START_REQUESTED_V1}",
+      "topic_pattern": "*.cmd.platform.node-start-requested.*",
       "type_scoped": true
     },
     {
@@ -26727,6 +27081,26 @@
       "route_id": "route.auto.node_runner_health_snapshot_effect.HandlerRunnerFleetSnapshot.onex_cmd_omnibase_infra_runner_fleet_snapshot_gather_v1",
       "topic": "${topic:contract:omnibase-infra.CMD_RUNNER_FLEET_SNAPSHOT_GATHER_V1}",
       "topic_pattern": "*.cmd.omnibase-infra.runner-fleet-snapshot-gather.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_runner_image_roll",
+      "dispatcher_id": "dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37",
+      "handler_id": "dispatcher.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37",
+      "message_category": "command",
+      "route_id": "route.auto.node_runner_image_roll.HandlerRunnerImageRoll.runner_image_roll_27e54b37.onex_cmd_platform_runner_image_roll_v1",
+      "topic": "${topic:contract:platform.CMD_RUNNER_IMAGE_ROLL_V1}",
+      "topic_pattern": "*.cmd.platform.runner-image-roll.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_runner_pool_retire",
+      "dispatcher_id": "dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce",
+      "handler_id": "dispatcher.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce",
+      "message_category": "command",
+      "route_id": "route.auto.node_runner_pool_retire.HandlerRunnerPoolRetire.runner_pool_retire_b6aa79ce.onex_cmd_platform_runner_pool_retire_v1",
+      "topic": "${topic:contract:platform.CMD_RUNNER_POOL_RETIRE_V1}",
+      "topic_pattern": "*.cmd.platform.runner-pool-retire.*",
       "type_scoped": true
     },
     {

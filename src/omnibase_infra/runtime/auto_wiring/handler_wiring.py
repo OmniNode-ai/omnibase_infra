@@ -89,6 +89,7 @@ from omnibase_core.services.service_handler_resolver import ServiceHandlerResolv
 from omnibase_core.services.service_local_handler_ownership_query import (
     ServiceLocalHandlerOwnershipQuery,
 )
+from omnibase_infra.contracts.contract_completion_bound import read_completion_bound
 from omnibase_infra.contracts.contract_yaml import read_contract_yaml
 from omnibase_infra.errors import (
     ProjectionNotMaterializedError,
@@ -119,18 +120,40 @@ from omnibase_infra.event_bus.model_topic_set_readiness import (
 from omnibase_infra.event_bus.topic_constants import (
     derive_event_type_alias_for_topic,
 )
+from omnibase_infra.handlers.boot_demand_split import split_boot_set_by_demand
 from omnibase_infra.handlers.boot_topic_provisioning import (
     ensure_topics_exist,
     provision_unattached_publish_topics,
 )
-from omnibase_infra.handlers.entry_method_offload import invoke_entry_method
+from omnibase_infra.handlers.contract_dispatch_cost import attach_contract_dispatcher
+from omnibase_infra.handlers.entry_method_offload import invoke_entry_method, yield_each
 from omnibase_infra.handlers.handler_projection_derived_write import (
     HandlerProjectionDerivedWrite,
 )
 from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
+from omnibase_infra.handlers.projection_database_ownership import (
+    owned_database_gate,
+    serves_its_own_database,
+)
 from omnibase_infra.handlers.projection_failure_classification import is_content_failure
+from omnibase_infra.handlers.projection_noop_classification import (
+    ROWS_REFUSED_KEY,
+    is_windowless_consumer_flow_heartbeat,
+    read_attested_noop_reason,
+)
+from omnibase_infra.handlers.topic_migration_dependencies import (
+    TOPIC_MIGRATION_EXECUTOR_DEPS,
+    required_handler_init_params,
+    warm_topic_migration_scan,
+)
+from omnibase_infra.models.dispatch.model_dispatch_refusal import (
+    bind_contract_failure_terminal,
+)
+from omnibase_infra.models.dispatch.model_dispatch_refusal import (
+    select_dispatch_result_output_topic as _select_dispatch_result_output_topic,
+)
 from omnibase_infra.models.dispatch.model_injected_request import ModelInjectedRequest
 from omnibase_infra.models.model_contract_hotload_lane_overlay import (
     lane_defers_topics_to_first_request,
@@ -370,10 +393,13 @@ class HandlerDispatchFailureError(Exception):
         *,
         failure_code: str | None = None,
         retryable: bool | None = None,
+        terminal_emitted: bool = False,
     ) -> None:
         super().__init__(message)
         self.failure_code = failure_code
         self.retryable = retryable
+        # OMN-26026: the engine's result already carried the failure terminal.
+        self.terminal_emitted = terminal_emitted
 
 
 class UndeliverableDispatchOutputError(Exception):
@@ -509,7 +535,6 @@ _BOUND_SWEEP_MIN_INTERVAL_SECONDS = 15.0
 # identifier (the row's primary-key column), so it is validated the same way
 # StateStoreAdapter validates its table name before interpolating it into SQL.
 _STATE_IO_KEY_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-_TOPIC_MIGRATION_EXECUTOR_DEPS = frozenset({"provisioner", "drain_proof_gate"})
 _DELEGATION_INFERENCE_INTENT_MODULE = "omnibase_core.models.delegation.wire"
 _DELEGATION_INFERENCE_INTENT_NAME = "ModelInferenceIntent"
 _DELEGATION_INFERENCE_INTENT_DISCRIMINATOR = "llm_inference"
@@ -3108,41 +3133,6 @@ def _read_state_io(contract_path: Path) -> dict[str, object]:
     return state_io if isinstance(state_io, dict) else {}
 
 
-def _read_completion_bound(contract_path: Path) -> ModelCompletionBound | None:
-    """Read and validate the top-level ``completion_bound`` block (OMN-18296).
-
-    Returns ``None`` when the block is absent — a ``state_io`` contract that
-    declares no bound keeps the pre-OMN-18296 behaviour (the environment-variable
-    give-up TTL, row-only), so this is additive for every contract that has not
-    opted in. A block that IS present but malformed raises: a bound the runtime
-    cannot read is worse than no bound at all, because a reader would believe one
-    was being enforced.
-
-    Shape and rationale live in
-    :mod:`omnibase_infra.runtime.state_io.model_completion_bound`.
-    """
-    try:
-        raw = read_contract_yaml(contract_path)
-    except FileNotFoundError:
-        return None
-    if not isinstance(raw, dict):
-        return None
-    block = raw.get("completion_bound")
-    if block is None:
-        return None
-    if not isinstance(block, dict):
-        raise ModelOnexError(
-            f"handler_wiring: completion_bound in {contract_path} must be a "
-            f"mapping — got {type(block).__name__}."
-        )
-    try:
-        return ModelCompletionBound.model_validate(block)
-    except ValidationError as exc:
-        raise ModelOnexError(
-            f"handler_wiring: completion_bound in {contract_path} is invalid: {exc}"
-        ) from exc
-
-
 def _contract_declares_state_io(contract: ModelDiscoveredContract) -> bool:
     return bool(_read_state_io(contract.contract_path))
 
@@ -4134,23 +4124,6 @@ PROJECTION_INPROCESS_DISPATCH_ATTR = "onex_runtime_inprocess_dispatch"
 PROJECTION_OWNED_DATABASE_BIND_ATTR = "bind_projection_database_url"
 
 
-def _serves_its_own_database(handler_instance: object) -> bool:
-    """Whether the handler carries a DB adapter it opened itself.
-
-    A handler on the DB-injection arm receives its adapter from the runtime as
-    ``input_data["_db"]`` and holds none of its own. A runner-shaped handler
-    constructs an async pool adapter in ``__init__`` and reaches it through
-    ``self.db`` — the runtime never sees that adapter's construction and cannot
-    scope its lifetime.
-    """
-    db = getattr(handler_instance, "db", None)
-    if db is None:
-        return False
-    return callable(getattr(db, "connect", None)) and callable(
-        getattr(db, "close", None)
-    )
-
-
 def _is_standalone_projection_runner(handler_instance: object) -> bool:
     """Whether this handler_routing entry is a standalone runner, not a target.
 
@@ -4175,7 +4148,7 @@ def _is_standalone_projection_runner(handler_instance: object) -> bool:
         callable(getattr(handler_instance, "project_event", None))
         and callable(getattr(handler_instance, "run", None))
         and hasattr(handler_instance, "topics")
-        and _serves_its_own_database(handler_instance)
+        and serves_its_own_database(handler_instance)
     )
     if not runner_shaped:
         return False
@@ -4222,7 +4195,7 @@ def _bind_handler_owned_projection_database(
     Standalone runners never reach here — the runtime does not dispatch them,
     so it does not own their configuration either.
     """
-    if not _serves_its_own_database(handler_instance):
+    if not serves_its_own_database(handler_instance):
         return
     handler_name = type(handler_instance).__name__
     binding_refs = sorted({binding.binding_ref for binding in target.bindings})
@@ -4248,11 +4221,13 @@ def _bind_handler_owned_projection_database(
     bind(db_urls[binding_refs[0]])
 
 
-#: OMN-18992. The optional field a projection handler uses to say "I wrote
-#: nothing ON PURPOSE, and here is how many rows an ordering guard refused".
-#: Optional by construction: a handler omitting it is read exactly as it is
-#: today, which is what makes this consumer-first across the repo boundary.
-ROWS_REFUSED_KEY: Final[str] = "rows_refused_by_ordering_guard"
+# OMN-26520. The optional field a projection handler uses to say "my contract's
+# filter owes this event no row" (a work-ledger TERMINAL that is not done). An
+# event so reported is not counted as consumed, the way a runtime tick is not
+# (OMN-26419): the apply-divergence dimension grades events that owed a row, so a
+# filtering writer is not read as a silent one. A handler that omits the field,
+# or a writer that raises, is graded exactly as before.
+EVENTS_NOT_APPLICABLE_KEY: Final[str] = "events_not_applicable"
 
 
 #: OMN-18910. The optional field a projection writer uses to report its
@@ -4292,62 +4267,29 @@ def _extract_deltas_dropped_total(result: object) -> int | None:
     return None
 
 
+def _extract_count(result: object, key: str) -> int:
+    """A non-negative integer a handler reported under ``key``, else 0."""
+    value = result.get(key, 0) if isinstance(result, dict) else 0
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _extract_rows_refused(result: object) -> int:
-    """Rows a projection handler DECLINED to write, as its own count.
-
-    OMN-18992. A zero-row return has two causes the runtime cannot tell apart,
-    and it has been logging both as the same ERROR.
-
-    The first is a writer that silently wrote nothing -- a real defect, and the
-    one the error line exists to surface. The second is an ordering guard doing
-    its job: the consumer-flow writer's upsert carries
-    ``OR ingest_sequence <= EXCLUDED.ingest_sequence`` on its conflict arm and a
-    ``RETURNING`` clause, so an older same-node sequence is refused by SQL
-    and legitimately returns no rows. Equality is accepted by this predicate.
-    The guard is deliberate: read-compare-write would race under concurrent
-    consumers and let an older redelivery win.
-
-    The captured 33-minute window contains 26 zero-row ERROR lines, four
-    from the consumer-flow writer. Those bytes do not establish whether SQL
-    refused a row or the heartbeat carried no flow window (B23 correction).
-    Refusals must be established by the real upsert's RETURNING outcome.
-
-    A writer that does not report refusals returns 0 here and is treated
-    exactly as it is today, which is what lets this land in ``omnibase_infra``
-    before any writer in ``omnimarket`` sends the field. The consumer tolerates
-    the absence; the producer follows.
-    """
-    if isinstance(result, dict) and ROWS_REFUSED_KEY in result:
-        try:
-            refused = int(result[ROWS_REFUSED_KEY])
-        except (TypeError, ValueError):
-            return 0
-        return refused if refused > 0 else 0
-    return 0
-
-
-def _is_windowless_consumer_flow_heartbeat(
-    *, contract_name: str, event_type: str, payload: object, result: object
-) -> bool:
-    """Recognize the consumer-flow contract's deliberate empty heartbeat.
-
-    OMN-18992 / B23. This contract projects ``flow_window``, not node liveness.
-    Only its new, explicit zero/refusal result shape can attest the no-op;
-    legacy or malformed results keep the zero-write ERROR. Other heartbeat
-    projections may still owe rows, so event type alone cannot exempt them.
-    """
-    return (
-        contract_name == "projection_consumer_flow"
-        and event_type == "heartbeat"
-        and isinstance(payload, dict)
-        and payload.get("flow_window") is None
-        and isinstance(result, dict)
-        and type(result.get("rows_upserted")) is int
-        and result["rows_upserted"] == 0
-        and result.get("flow_rows") == []
-        and type(result.get(ROWS_REFUSED_KEY)) is int
-        and result[ROWS_REFUSED_KEY] == 0
-    )
+    """Rows a projection handler DECLINED to write, as its own count (OMN-18992)."""
+    # A zero-row return has two causes the runtime cannot tell apart: a writer
+    # that silently wrote nothing (a real defect, the one the error line exists
+    # to surface) and an ordering guard doing its job -- the consumer-flow
+    # writer's upsert carries ``OR ingest_sequence <= EXCLUDED.ingest_sequence``
+    # and a ``RETURNING`` clause, so an older same-node sequence is refused by
+    # SQL and legitimately returns no rows. The guard is deliberate:
+    # read-compare-write would race under concurrent consumers and let an older
+    # redelivery win. Refusals are established by the real upsert's RETURNING
+    # outcome (B23 correction). A writer that does not report refusals returns 0
+    # here and is treated exactly as it is today, which is what lets this land
+    # in ``omnibase_infra`` before any writer in ``omnimarket`` sends the field.
+    return _extract_count(result, ROWS_REFUSED_KEY)
 
 
 def _record_projection_apply(
@@ -4357,6 +4299,7 @@ def _record_projection_apply(
     rows_upserted: int,
     rows_refused: int,
     deltas_dropped_total: int | None = None,
+    not_applicable: int = 0,
 ) -> None:
     """Record one projection dispatch on the process apply accumulator.
 
@@ -4384,7 +4327,7 @@ def _record_projection_apply(
         counters.record_apply(
             projection,
             topic,
-            consumed=1,
+            consumed=0 if not_applicable else 1,
             upserted=max(rows_upserted, 0),
             refused_by_guard=max(rows_refused, 0),
         )
@@ -5224,7 +5167,12 @@ def _make_projection_dispatch_callback(
             # budget above. Held only across the blocking call, so it caps
             # concurrent materialisation without serialising the async work
             # on either side of it.
-            async with _projection_inflight_gate():
+            # OMN-26430: an adapter owner is admitted one message at a time,
+            # ahead of the shared gate so its wait holds no inflight slot.
+            async with (
+                owned_database_gate(handler_instance),
+                _projection_inflight_gate(),
+            ):
                 result = await asyncio.to_thread(_invoke_projection_handler)
             if asyncio.iscoroutine(result):
                 result = await cast("Awaitable[object]", result)
@@ -5252,6 +5200,7 @@ def _make_projection_dispatch_callback(
                 rows_upserted=rows_upserted,
                 rows_refused=_extract_rows_refused(result),
                 deltas_dropped_total=_extract_deltas_dropped_total(result),
+                not_applicable=_extract_count(result, EVENTS_NOT_APPLICABLE_KEY),
             )
             if projected:
                 logger.debug(
@@ -5278,7 +5227,16 @@ def _make_projection_dispatch_callback(
                         event_type,
                         rows_refused,
                     )
-                elif _is_windowless_consumer_flow_heartbeat(
+                elif _extract_count(result, EVENTS_NOT_APPLICABLE_KEY):
+                    logger.info(
+                        "Projection handler filtered the event, no row owed "
+                        "(expected): outcome=EVENT_NOT_APPLICABLE handler=%s "
+                        "topic=%s event_type=%s",
+                        type(handler_instance).__name__,
+                        topic or "unknown",
+                        event_type,
+                    )
+                elif is_windowless_consumer_flow_heartbeat(
                     contract_name=contract_name,
                     event_type=event_type,
                     payload=projection_payload,
@@ -5290,6 +5248,18 @@ def _make_projection_dispatch_callback(
                         "outcome=WINDOW_LESS_HEARTBEAT "
                         "handler=%s topic=%s event_type=%s",
                         handler_name,
+                        topic or "unknown",
+                        event_type,
+                    )
+                elif (
+                    noop := read_attested_noop_reason(result, topic=topic)
+                ) is not None:
+                    logger.info(
+                        "Projection handler wrote zero rows, attested no-op "
+                        "(expected, no terminal owed): outcome=NOOP_ATTESTED "
+                        "reason=%s handler=%s topic=%s event_type=%s",
+                        noop.value,
+                        type(handler_instance).__name__,
                         topic or "unknown",
                         event_type,
                     )
@@ -6906,6 +6876,7 @@ def _raise_if_no_dispatcher_drop(result: object, topic: str) -> None:
         detail,
         failure_code=error_code.value if error_code is not None else None,
         retryable=False,
+        terminal_emitted=bool(result.output_events),
     )
 
 
@@ -7735,6 +7706,9 @@ def _make_event_bus_callback(
         from omnibase_infra.runtime.boundary_failure_terminal import (
             classify_boundary_failure,
         )
+
+        if getattr(exc, "terminal_emitted", False):
+            return
 
         if _is_boundary_failure_terminal_record(message):
             # A terminal is an answer, not a request: nobody is holding a
@@ -8576,22 +8550,6 @@ def _derive_handler_entry_key(entry: ModelHandlerRoutingEntry) -> str:
     return f"{handler_name}.{safe_op}"
 
 
-def _required_handler_init_params(handler_cls: type) -> frozenset[str]:
-    """Return required constructor parameter names for a handler class."""
-    sig = inspect.signature(handler_cls)
-    return frozenset(
-        name
-        for name, param in sig.parameters.items()
-        if name != "self"
-        and param.kind
-        in {
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        }
-        and param.default is inspect.Parameter.empty
-    )
-
-
 def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
     """Return True when sync container resolution is unnecessary for handler_cls.
 
@@ -8600,7 +8558,7 @@ def _should_skip_sync_container_resolution(handler_cls: type) -> bool:
     dependencies. In both cases, calling a sync container from runtime-managed
     async boot is unnecessary and can trip ``asyncio.run()`` crashes.
     """
-    required_params = _required_handler_init_params(handler_cls)
+    required_params = required_handler_init_params(handler_cls)
     return not required_params or required_params <= frozenset(
         {
             "event_bus",
@@ -8918,12 +8876,16 @@ def _contracts_root_for_runtime_dependencies() -> Path:
     return Path(__file__).resolve().parents[2] / "nodes"
 
 
-def _build_topic_migration_executor_dependencies() -> dict[str, object]:
+def _build_topic_migration_executor_dependencies(
+    provisioner: object | None = None,
+) -> dict[str, object]:
     """Build concrete collaborators for HandlerTopicMigrationExecutor.
 
     The handler declares these as required constructor services. Materializing
     them here keeps generic resolver Step 2 deterministic while preserving the
-    handler's strict constructor contract.
+    handler's strict constructor contract. A ``provisioner`` the caller already
+    holds (the kernel's, built once per boot, OMN-26359) is reused instead of
+    building a second one, which scanned every installed contract again.
     """
     from aiokafka import AIOKafkaConsumer
     from aiokafka.admin import AIOKafkaAdminClient
@@ -8943,7 +8905,8 @@ def _build_topic_migration_executor_dependencies() -> dict[str, object]:
     lag_admin = AdapterKafkaAdminLag(admin, consumer)
     observer = ServiceConsumerLagObserver(lag_admin)
     return {
-        "provisioner": TopicProvisioner(
+        "provisioner": provisioner
+        or TopicProvisioner(
             bootstrap_servers=bootstrap_servers,
             contracts_root=_contracts_root_for_runtime_dependencies(),
         ),
@@ -8974,7 +8937,7 @@ def _materialize_known_handler_dependencies(
     event_bus: object | None,
     container: object | None,
     ownership_query: object | None,
-    terminal_topics: frozenset[str] = frozenset(),
+    terminal_topics_for: Callable[[], frozenset[str]] = frozenset,
 ) -> dict[str, dict[str, object]] | None:
     """Materialize infra-known constructor deps for core resolver Step 2.
 
@@ -8995,7 +8958,7 @@ def _materialize_known_handler_dependencies(
         }
     )
     requires_delegation_port = _handler_requires_delegation_dispatch_port(handler_cls)
-    required_params = _required_handler_init_params(handler_cls)
+    required_params = required_handler_init_params(handler_cls)
     requires_event_publisher = "event_publisher" in constructor_params
     requires_event_consumer = "event_consumer" in constructor_params
     if (
@@ -9018,7 +8981,7 @@ def _materialize_known_handler_dependencies(
         available["event_publisher"] = _make_sync_event_publisher(
             event_bus=event_bus,
             handler_name=handler_name,
-            terminal_topics=terminal_topics,
+            terminal_topics=terminal_topics_for(),
         )
     if requires_event_consumer and event_bus is not None:
         available["event_consumer"] = _make_sync_event_consumer(
@@ -9027,14 +8990,20 @@ def _materialize_known_handler_dependencies(
         )
     # An empty set is a subset too. Optional runtime ports must not construct
     # migration services: the provisioner scans the installed contract tree.
-    if required_params and required_params <= _TOPIC_MIGRATION_EXECUTOR_DEPS:
-        available.update(_build_topic_migration_executor_dependencies())
+    if required_params and required_params <= TOPIC_MIGRATION_EXECUTOR_DEPS:
+        available.update(
+            _build_topic_migration_executor_dependencies(
+                (materialized_explicit_dependencies or {})
+                .get(handler_name, {})
+                .get("provisioner")
+            )
+        )
     if not (
         requires_event_publisher
         or requires_event_consumer
         or required_params & {"container", "ownership_query", "dispatch_port"}
         or ("dispatch_port" in constructor_params and requires_delegation_port)
-        or (required_params and required_params <= _TOPIC_MIGRATION_EXECUTOR_DEPS)
+        or (required_params and required_params <= TOPIC_MIGRATION_EXECUTOR_DEPS)
     ):
         return materialized_explicit_dependencies
     if "dispatch_port" in constructor_params and requires_delegation_port:
@@ -9972,7 +9941,7 @@ async def wire_from_manifest(
     # can skip its container Step 3 entirely for these handlers.
     pre_resolved_handlers: dict[str, object] = {}
     if container is not None:
-        for contract in manifest.contracts:
+        async for contract in yield_each(manifest.contracts):
             if _is_raw_event_projection_contract(
                 contract
             ) and not _raw_event_projection_enabled(
@@ -10015,8 +9984,13 @@ async def wire_from_manifest(
     prepared_contracts: list[PreparedContractWiring] = []
     failed_results: list[ModelContractWiringResult] = []
     dispatcher_coverage_failed_gaps: list[str] = []
-    for contract in manifest.contracts:
+    async for contract in yield_each(manifest.contracts):
         try:
+            await warm_topic_migration_scan(
+                contract,
+                _contracts_root_for_runtime_dependencies(),
+                materialized_explicit_dependencies,
+            )
             prepared = _prepare_contract_wiring(
                 contract=contract,
                 dispatch_engine=dispatch_engine,
@@ -10295,8 +10269,16 @@ async def subscribe_wired_contract_topics(
     core_runtime_owners: Mapping[str, str] | None = None,
     demand_source: HandlerKafkaTopicDemandSource | None = None,
     demand_watch_stops_out: list[Callable[[], Awaitable[None]]] | None = None,
+    defer_retained: bool = False,
 ) -> dict[str, tuple[str, ...]]:
     """Subscribe Kafka topics for contracts that already wired successfully.
+
+    OMN-25856 — with *defer_retained* (policy ``gate_required``) a
+    contract that subscribes no command topic stays off the boot path even when
+    its topics hold a retained record; the demand watch reads those topics from
+    their high watermark and starts the contract, from ``earliest``, when the next
+    record arrives. Priority contracts, command contracts in use and contracts
+    with a topic that cannot be read still attach at boot.
 
     OMN-18087 — when *demand_source* is supplied, only contracts with a
     subscribe topic in use (holding a retained record at boot, as the broker
@@ -10502,13 +10484,15 @@ async def subscribe_wired_contract_topics(
     # topics to its first request; any other lane creates them at boot (OMN-23951).
     scheduled = {c.name for _, c in eligible if lane_defers_topics_to_first_request()}
     if demand_source is not None:
-        eligible = await _split_boot_set_by_demand(
+        eligible = await split_boot_set_by_demand(
             eligible,
             priority_contracts=knobs.priority_contracts,
-            demand_source=demand_source,
+            watch_idle_topics=demand_source.watch_idle_topics,
             start=partial(_provision_ready_attach, auto_offset_reset="earliest"),
             exclude=_exclude,
             watch_stops_out=demand_watch_stops_out,
+            defer_retained=defer_retained,
+            retry_backoff_seconds=DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS,
         )
 
     attach_results = await asyncio.gather(
@@ -10533,113 +10517,6 @@ async def subscribe_wired_contract_topics(
         if ar.status is EnumContractAttachStatus.ATTACHED:
             subscribed[ar.contract_name] = ar.topics_subscribed
     return subscribed
-
-
-async def _split_boot_set_by_demand(
-    eligible: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]],
-    *,
-    demand_source: HandlerKafkaTopicDemandSource,
-    start: Callable[
-        [ModelContractWiringResult, ModelDiscoveredContract],
-        Awaitable[ModelContractAttachResult],
-    ],
-    exclude: Callable[[str, EnumContractAttachExclusionReason, str], None],
-    watch_stops_out: list[Callable[[], Awaitable[None]]] | None,
-    priority_contracts: Sequence[str] = (),
-) -> list[tuple[ModelContractWiringResult, ModelDiscoveredContract]]:
-    """Boot priority contracts and contracts whose topics hold retained records.
-
-    The rest are watched by one group-less reader, which costs
-    no group join, and each is attached by *start* when a record first reaches
-    one of its topics. Each start runs as its own task, so a slow join never
-    holds up the watch, and a start that does not attach is retried with the
-    unattached-contract reconciliation's bounded backoff.
-    """
-    # Clients can require a live first hop before publishing. Priority consumers
-    # therefore take the normal provision->ready->attach path without waiting
-    # for demand, and only nonpriority contracts need a first-record watch.
-    topics_of = {
-        contract.name: tuple(contract.event_bus.subscribe_topics)
-        if contract.event_bus is not None
-        else ()
-        for _, contract in eligible
-        if contract.name not in priority_contracts
-    }
-    all_topics = {topic for topics in topics_of.values() for topic in topics}
-    deferred_by_topic: dict[
-        str, list[tuple[ModelContractWiringResult, ModelDiscoveredContract]]
-    ] = {}
-    started: set[str] = set()
-    start_tasks: set[asyncio.Task[None]] = set()
-
-    async def start_until_attached(
-        topic: str,
-        result: ModelContractWiringResult,
-        contract: ModelDiscoveredContract,
-    ) -> None:
-        for attempt in range(1, TIMEOUTS.not_ready_retry_max_attempts + 1):
-            outcome = await start(result, contract)
-            if outcome.status is EnumContractAttachStatus.ATTACHED:
-                logger.info(
-                    "Demand start: contract '%s' attached on its first request "
-                    "(topic=%s, topics=%s, attempt=%d) (OMN-18087)",
-                    contract.name,
-                    topic,
-                    list(outcome.topics_subscribed),
-                    attempt,
-                )
-                return
-            logger.warning(
-                "Demand start: contract '%s' did not attach on its first request "
-                "(topic=%s, status=%s, detail=%s, attempt=%d of %d) (OMN-18087)",
-                contract.name,
-                topic,
-                outcome.status.value,
-                outcome.detail,
-                attempt,
-                TIMEOUTS.not_ready_retry_max_attempts,
-            )
-            await asyncio.sleep(DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS)
-
-    async def on_first_record(topic: str) -> None:
-        for result, contract in deferred_by_topic.get(topic, ()):
-            if contract.name in started:
-                continue
-            started.add(contract.name)
-            task = asyncio.create_task(
-                start_until_attached(topic, result, contract),
-                name=f"demand-start-{contract.name}",
-            )
-            start_tasks.add(task)
-            task.add_done_callback(start_tasks.discard)
-
-    in_use, stop = await demand_source.watch_idle_topics(all_topics, on_first_record)
-    if watch_stops_out is not None:
-        watch_stops_out.append(stop)
-    boot: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]] = []
-    for result, contract in eligible:
-        topics = topics_of.get(contract.name, ())
-        if contract.name in priority_contracts or in_use.intersection(topics):
-            boot.append((result, contract))
-            continue
-        for topic in topics:
-            deferred_by_topic.setdefault(topic, []).append((result, contract))
-        exclude(
-            contract.name,
-            EnumContractAttachExclusionReason.DEMAND_DEFERRED,
-            f"idle_topics={list(topics)}",
-        )
-    logger.info(
-        "Boot subscription split: %d priority or in-use contract(s) attach at boot, %d "
-        "start on their first request; %d of %d topic(s) are in use (hold a "
-        "record, or cannot be read here); watched_topics=%s (OMN-18087)",
-        len(boot),
-        len(eligible) - len(boot),
-        len(in_use),
-        len(all_topics),
-        sorted(deferred_by_topic),
-    )
-    return boot
 
 
 async def _interleave_contract(
@@ -11122,6 +10999,11 @@ def _prepare_contract_wiring(
     _check_fanout_publish_coverage(contract)
 
     prepared_wirings: list[PreparedWiring] = []
+    # OMN-26359: declared once per contract, and only read by an entry whose
+    # constructor takes an event_publisher.
+    terminal_topics_for = cache(
+        partial(load_terminal_event_topics, contract.contract_path)
+    )
     for entry in contract.handler_routing.handlers:
         try:
             prepared = _prepare_handler_wiring(
@@ -11137,6 +11019,7 @@ def _prepare_contract_wiring(
                 topology=topology,
                 catalog_binding_policy=catalog_binding_policy,
                 secret_resolver=secret_resolver,
+                terminal_topics_for=terminal_topics_for,
             )
             prepared_wirings.append(prepared)
         except TypeError:
@@ -11289,6 +11172,14 @@ async def _commit_contract_wiring(
                 skipped_reason=prepared.skip_reason,
             )
         )
+
+    bind_contract_failure_terminal(
+        dispatch_engine,
+        contract,
+        _declared_failure_terminal_topics(
+            contract, success_topic=_select_dispatch_result_output_topic(contract) or ""
+        ),
+    )
 
     # Fail-closed phantom-wiring guard (OMN-14141). A contract that declares
     # subscribe topics but registered ZERO dispatchers — and quarantined /
@@ -11533,6 +11424,11 @@ async def _subscribe_contract_topics(
     declared_dlq_topics = contract.event_bus.dlq_topics or tuple(
         _read_dlq_topics(contract.contract_path)
     )
+    # OMN-26359: both are per-contract, so read them once, not once per topic.
+    propagate_publish_failures = _contract_declares_state_io(contract)
+    failure_terminal_topics = _declared_failure_terminal_topics(
+        contract, success_topic=output_topic or ""
+    )
     for topic in contract.event_bus.subscribe_topics:
         # OMN-14758 (S6) / OMN-14771 (S8 §D1=4b): the ONE core RuntimeDispatch owns this
         # topic's OWNER route. Skip the legacy push callback for the OWNER only, so
@@ -11591,7 +11487,7 @@ async def _subscribe_contract_topics(
                 # publish-from-row failure + conflict-retry exhaustion PROPAGATE
                 # (redeliver) instead of being log-and-discarded. Non-state_io
                 # contracts keep the historical swallow behavior unchanged.
-                propagate_publish_failures=_contract_declares_state_io(contract),
+                propagate_publish_failures=propagate_publish_failures,
                 allowed_dispatcher_ids=dispatcher_scope,
                 # OMN-16777: this is the only layer that holds BOTH the group id
                 # and the topic while a message is in flight, so it is where
@@ -11604,9 +11500,7 @@ async def _subscribe_contract_topics(
                 # so the applier guard can never fire for it -- the boundary is
                 # the only surface that can answer, and this is the address it
                 # answers at.
-                failure_terminal_topics=_declared_failure_terminal_topics(
-                    contract, success_topic=output_topic or ""
-                ),
+                failure_terminal_topics=failure_terminal_topics,
                 # OMN-17432: the address of last resort when the contract
                 # declares no separate failure terminal — its own declared
                 # terminal/output topic, which is where the caller is already
@@ -11795,17 +11689,9 @@ def _declared_failure_terminal_topics(
 ) -> tuple[str, ...]:
     """Return the contract's declared FAILURE terminal topics (OMN-15468 AC2).
 
-    A failure terminal is any contract-declared terminal topic that is (a) not
-    the success terminal the applier falls back to and (b) actually publishable
-    by this contract. Both conditions matter: publishing to an undeclared topic
-    would violate the contract's own publish allowlist, and re-routing to the
-    success terminal would be a no-op.
-
-    Read through :func:`load_terminal_event_topics` — the SAME reader the
-    Pattern B broker's subscription set is built from — so the applier's idea of
-    which topics are terminal cannot drift from the broker's. A second
-    hand-rolled reader here is exactly the seam mismatch that produced this
-    ticket.
+    Read through :func:`load_terminal_event_topics`, the SAME reader the Pattern B
+    broker's subscription set is built from, so the applier's idea of which
+    topics are terminal cannot drift from the broker's.
     """
     if contract.event_bus is None or not contract.event_bus.publish_topics:
         return ()
@@ -11814,24 +11700,6 @@ def _declared_failure_terminal_topics(
         success_topic=success_topic,
         publishable_topics=contract.event_bus.publish_topics,
     )
-
-
-def _select_dispatch_result_output_topic(
-    contract: ModelDiscoveredContract,
-) -> str | None:
-    """Choose the fallback output topic for generic dispatch results.
-
-    Prefer the contract's declared terminal_event when it is also publishable.
-    Otherwise fall back to the first publish topic to preserve older contracts.
-    """
-    if contract.event_bus is None or not contract.event_bus.publish_topics:
-        return None
-    if (
-        contract.terminal_event
-        and contract.terminal_event in contract.event_bus.publish_topics
-    ):
-        return contract.terminal_event
-    return contract.event_bus.publish_topics[0]
 
 
 async def _wire_single_contract(
@@ -11925,6 +11793,7 @@ def _prepare_handler_wiring(
     topology: ModelDeploymentTopology | None = None,
     catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
     secret_resolver: SecretResolver | None = None,
+    terminal_topics_for: Callable[[], frozenset[str]] | None = None,
 ) -> PreparedWiring:
     """Prepare one handler entry — delegates construction to the resolver.
 
@@ -12015,7 +11884,8 @@ def _prepare_handler_wiring(
         # read through the same function route discovery uses, so the wiring's
         # notion of "this publish is a terminal" cannot drift from the set the
         # Pattern B broker subscribes to.
-        terminal_topics=load_terminal_event_topics(contract.contract_path),
+        terminal_topics_for=terminal_topics_for
+        or partial(load_terminal_event_topics, contract.contract_path),
     )
 
     def _quarantine_prepared(
@@ -12319,7 +12189,7 @@ def _prepare_handler_wiring(
             state_io,
             event_bus=event_bus,
             output_topic_map=_outbox_topic_map,
-            completion_bound=_read_completion_bound(contract.contract_path),
+            completion_bound=read_completion_bound(contract.contract_path),
             pre_dispatch_guard=_delegation_fault_pre_dispatch_guard(
                 contract=contract,
                 entry=entry,
@@ -12458,6 +12328,7 @@ def _commit_handler_wiring(
         MessageDispatchEngine,
     )
 
+    dispatcher = attach_contract_dispatcher(owner_contract_name, prepared.dispatcher)
     engine = dispatch_engine
     if isinstance(engine, MessageDispatchEngine):
         if engine.is_frozen:
@@ -12469,7 +12340,7 @@ def _commit_handler_wiring(
                 )
             engine._register_dispatcher_dynamic(
                 dispatcher_id=prepared.dispatcher_id,
-                dispatcher=prepared.dispatcher,
+                dispatcher=dispatcher,
                 category=prepared.category,
                 message_types=prepared.message_types,
                 payload_type_matcher=prepared.payload_type_matcher,
@@ -12480,7 +12351,7 @@ def _commit_handler_wiring(
         else:
             engine.register_dispatcher(
                 dispatcher_id=prepared.dispatcher_id,
-                dispatcher=prepared.dispatcher,
+                dispatcher=dispatcher,
                 category=prepared.category,
                 message_types=prepared.message_types,
                 payload_type_matcher=prepared.payload_type_matcher,
@@ -12490,43 +12361,3 @@ def _commit_handler_wiring(
                 engine.register_route(route)
 
     return prepared.dispatcher_id, prepared.route_ids
-
-
-def _wire_handler_entry(
-    *,
-    contract: ModelDiscoveredContract,
-    entry: ModelHandlerRoutingEntry,
-    dispatch_engine: object,
-    event_bus: object | None = None,
-    container: object | None = None,
-    topology: ModelDeploymentTopology | None = None,
-    catalog_binding_policy: ProjectionCatalogBindingPolicy | None = None,
-) -> tuple[str, list[str]]:
-    """Prepare and immediately commit one handler entry (single-contract shortcut).
-
-    Kept for backwards compatibility with call sites that don't need the
-    two-phase split.  New code should call _prepare_handler_wiring +
-    _commit_handler_wiring directly.
-    """
-    resolver = ServiceHandlerResolver()
-    ownership_query: object = ServiceLocalHandlerOwnershipQuery(
-        local_node_names=frozenset({contract.name})
-    )
-    _assert_is_ownership_query(ownership_query)
-
-    prepared = _prepare_handler_wiring(
-        contract=contract,
-        entry=entry,
-        dispatch_engine=dispatch_engine,
-        resolver=resolver,
-        ownership_query=ownership_query,
-        event_bus=event_bus,
-        container=container,
-        topology=topology,
-        catalog_binding_policy=catalog_binding_policy,
-    )
-    return _commit_handler_wiring(
-        prepared,
-        dispatch_engine,
-        owner_contract_name=contract.name,
-    )

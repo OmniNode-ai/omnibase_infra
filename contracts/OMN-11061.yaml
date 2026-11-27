@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-11061"
 title: "Refresh runtime delegation compatibility"
 summary: >
-  Refresh the runtime omnibase_compat source pin so delegation wire DTOs are available in the runtime image, and keep the stability-test Bifrost verifier override aligned with live runtime lane behavior.
+  Refreshed the runtime source pin for delegation wire DTOs and aligned the verifier configuration with the live runtime.
 
 is_seam_ticket: false
 interface_change: false

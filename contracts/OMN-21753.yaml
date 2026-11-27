@@ -31,11 +31,33 @@ requirements:
       - id: AC4
         statement: |-
           AC4: a second start of the runtime after the handover copies nothing and resumes from the runtime group's own committed offsets -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -k idempotent -q
+  - id: req-omn21753-lazy-wake
+    statement: "A lazy wake of a handover-declaring contract attaches with the handover applied, and a lazy wake failure fails that contract only."
+    acceptance:
+      - id: AC5
+        statement: |-
+          AC5: a lazy wake of a contract that declares consumer_group_handover attaches and applies the handover, where at origin/dev head f498ef20f it raised the recorded refusal -- falsifier: uv run pytest tests/unit/runtime/test_lazy_start_handover_wake_omn21753.py -k handover_declaring_contract_attaches fails at f498ef20f and passes on the branch
+      - id: AC6
+        statement: |-
+          AC6: a lazy wake that fails for a message published to a dormant consumer's topic is recorded as that contract's outcome, and the publish, the other contracts and the heartbeat topic stay up -- falsifier: uv run pytest tests/unit/runtime/test_lazy_start_handover_wake_omn21753.py -k failed_wake_fails_that_contract_only fails at f498ef20f and passes on the branch
+      - id: AC7
+        statement: |-
+          AC7: a composed boot with a start-only boot set wakes a handover-declaring contract through the front door and survives a failing second wake -- falsifier: uv run pytest tests/integration/runtime/test_lazy_start_composed_boot_handover_omn21753.py -q fails at f498ef20f and passes on the branch
+  - id: req-omn21753-prebuilt-stamp-source
+    statement: "The runtime's active package set is the policy's, so the prebuilt node manifest stamped at image build reads fresh at boot."
+    acceptance:
+      - id: AC8
+        statement: |-
+          AC8: the deploy agent's compose env carries the policy's ONEX_ACTIVE_RUNTIME_PACKAGES whatever the operator store or process env holds, so the stamp built from docker/runtime-policy.env equals the boot-time stamp, and a stamp missing a package is refused by field name -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_active_packages_policy_owned_omn21753.py tests/unit/runtime/test_stamp_follows_policy_compose_env_omn21753.py fails at the merge base and passes on the branch
 evidence_requirements:
   - kind: tests
     description: "The handover scenario on the in-process group-offset substrate, and the moved consume-concurrency wiring tests."
     command: |-
       uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py tests/unit/runtime/test_omn18852_wiring_declares_concurrency.py -q --no-cov
+  - kind: tests
+    description: "The lazy-start wake regression tests, the composed-boot test and the existing lazy-start first-request tests."
+    command: |-
+      uv run --frozen pytest tests/unit/runtime/test_lazy_start_handover_wake_omn21753.py tests/integration/runtime/test_lazy_start_composed_boot_handover_omn21753.py tests/unit/runtime/test_lazy_start_first_request.py -q --no-cov -n 0 -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ""
@@ -80,5 +102,44 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -k idempotent -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
+  - id: dod-omn21753-ac5-lazy-wake-attaches
+    description: >-
+      A contract file with a consumer_group_handover block, woken through LazyStartRuntimeTransaction build and attach over a bus whose class hands offsets over, attaches and the bus records the handover; over a bus with no handover the wake is still refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_handover_wake_omn21753.py -q --no-cov -n 0 -p no:randomly -k 'handover_declaring_contract_attaches or exposes_only_the_capabilities'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
+  - id: dod-omn21753-ac6-failed-wake-confined
+    description: >-
+      A publish to the topic of a dormant consumer whose attach fails returns, the failure is kept under the contract name, nothing of it is left subscribed, the other contract wakes and serves, and the heartbeat topic publishes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_lazy_start_handover_wake_omn21753.py -q --no-cov -n 0 -p no:randomly -k failed_wake_fails_that_contract_only
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
+  - id: dod-omn21753-ac7-composed-boot
+    description: >-
+      A boot split with the ingress as the boot set, the real ingress contract wired on the in-process bus, a handover-declaring dormant contract woken through the front door with the handover recorded, and a failing second wake that leaves the bus publishing.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_lazy_start_composed_boot_handover_omn21753.py -q --no-cov -n 0 -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC7]
+  - id: dod-omn21753-ac8-stamp-source-policy-owned
+    description: >-
+      The compose env the deploy agent hands the runtime container takes ONEX_ACTIVE_RUNTIME_PACKAGES from docker/runtime-policy.env over an operator store or process value; the real stamp built under the policy value compares equal to the boot-time stamp, and the widened four-package set is named as an active_packages difference.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit/test_active_packages_policy_owned_omn21753.py -q --no-cov -n 0 -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_stamp_follows_policy_compose_env_omn21753.py -q --no-cov -n 0 -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC8]
 context:
   remaining_after_this_change: "The five folded omnimarket writer contracts (live-events, registration, savings, tenant-credentials, tenant-registry) must declare consumer_group_handover with their retired groups before the fold's deploy retires their containers; that is an omnimarket change."

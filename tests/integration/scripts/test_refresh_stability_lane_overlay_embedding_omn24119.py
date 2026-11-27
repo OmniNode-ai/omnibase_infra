@@ -82,6 +82,8 @@ def _make_sandbox(
 
     lane_overlays = tmp_path / "cfg" / "config" / "lab" / "lane-overlays"
     lane_overlays.mkdir(parents=True)
+    # OMN-26121: the stability refresh exports the lane declaration folder (config/lab), which must hold the declaration.
+    (lane_overlays.parent / "ci_bus_lanes.yaml").write_text("lanes: {}\n")
     (lane_overlays / f"{LANE}.release-pin.yaml").write_text(
         f"schema_version: 1\nlane: {LANE}\npin:\n"
         "  omnibase_infra: v1.2.3\n  omnibase_core: v1.2.3\n  omnimarket: v1.2.3\n",
@@ -134,7 +136,15 @@ def _make_sandbox(
         overlay_root = tmp_path / "overlay-root"
         (overlay_root / "llm_endpoints").mkdir(parents=True)
         (overlay_root / "llm_endpoints" / "overlay.yaml").write_text(
-            yaml.safe_dump({"schema_version": 1, "endpoint_urls": endpoint_urls}),
+            yaml.safe_dump(
+                {
+                    "schema_version": 1,
+                    "endpoint_urls": {
+                        "coder-5090": "http://192.0.2.50:8000",
+                        **endpoint_urls,
+                    },
+                }
+            ),
             encoding="utf-8",
         )
         env["ONEX_SKILL_OVERLAY_ROOTS"] = str(overlay_root)

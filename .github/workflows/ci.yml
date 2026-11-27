@@ -324,6 +324,12 @@ jobs:
       - name: Rolling runner registration preflight (OMN-18877)
         run: uv run --frozen pytest tests/ci/test_deploy_runners_registration_preflight.py -q
 
+      - name: Secondary runner image roll (OMN-25796)
+        run: uv run --frozen pytest tests/unit/scripts/test_deploy_runners_secondary_rolling.py -q -n 0 --no-cov
+
+      - name: Runner roll config drift and pool retire (OMN-26105)
+        run: uv run --frozen pytest tests/unit/handlers/test_handler_runner_config_drift_omn26105.py tests/unit/handlers/test_handler_runner_pool_retire_omn26105.py -q -n 0 --no-cov
+
       - name: Caller-owned imperative guard regression (OMN-21004)
         run: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
 
@@ -1068,7 +1074,7 @@ jobs:
       # whole-tree CI counterpart so the header requirement still holds
       # over the entire tree, not only a developer's staged diff.
       - name: SPDX header check (OMN-19612)
-        run: uv run --frozen onex spdx validate src tests scripts
+        run: env ONEX_CLI_SHOW_ALL_COMMANDS=1 uv run --frozen python -m omnibase_core.cli.cli_commands spdx validate src tests scripts
 
       - name: Census health and shared restart bounds (OMN-19416)
         run: |
@@ -1733,12 +1739,12 @@ jobs:
       - name: Verify dev-merge tag lineage (OMN-17427)
         # SPI and compat still hold release pins; enforce every iteration rule for core.
         run: |
-          # The validator is the core this repository pins, read from pyproject.toml: a
-          # validator older than the pin cannot read a core that takes its version from git
-          # (lineage_unresolved: no project.version string).
-          CORE_REF=$(python3 -c 'import tomllib; s = tomllib.load(open("pyproject.toml", "rb"))["tool"]["uv"]["sources"]["omnibase-core"]; print(s["git"] + "@" + s["tag"])')
-          uv run --no-project --with "omnibase-core @ git+${CORE_REF}" \
-            python -m omnibase_core.nodes.node_dev_tag_lineage_effect.runtime_dev_tag_lineage \
+          # Core 0.47.76 no longer ships the lineage node: it moved into omnimarket. The
+          # validator runs from the omnimarket dev merge tag that core's own
+          # check-dev-tag-lineage hook pins; that tag carries the git-derived version
+          # reader, so it reads a core that takes its version from git.
+          uv run --no-project --with "omnimarket @ git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY_OWNER}/omnimarket.git@dev-20261118215158-8bb5b8be7316" \
+            python -m omnimarket.nodes.node_dev_tag_lineage_effect.runtime_dev_tag_lineage \
             pyproject.toml --package omnibase-core
 
       - name: Dev-merge tag lineage and core pin regressions (OMN-17427)
@@ -2545,7 +2551,13 @@ jobs:
       # job's result feeds the required "CI Summary" through "CI Tests Gate".
       - name: Verify release train decision surface (OMN-20715)
         if: matrix.split == 1
-        run: uv run --frozen pytest tests/scripts/test_release_train_nightly.py tests/scripts/test_release_pr_open_omn18595.py -q --no-cov
+        run: >-
+          uv run --frozen pytest tests/scripts/test_release_train_nightly.py
+          tests/scripts/test_release_pr_open_omn18595.py
+          tests/ci/test_release_train_live_contact_omn25794.py
+          tests/integration/cli/test_release_notes_apply_node_omn17427.py
+          tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py
+          -q --no-cov
 
       # OMN-21279: the change-aware selector does not pick tests/scripts/ for a
       # contracts/ change. omnibase_infra#5370 repeated a criterion label that
@@ -2738,7 +2750,7 @@ jobs:
       - name: Check if onex compliance command exists
         id: check-command
         run: |
-          if uv run onex compliance check --help >/dev/null 2>&1; then
+          if env ONEX_CLI_SHOW_ALL_COMMANDS=1 uv run python -m omnibase_core.cli.cli_commands compliance check --help >/dev/null 2>&1; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::onex compliance check command not available yet — skipping"
@@ -2750,7 +2762,7 @@ jobs:
         if: steps.check-command.outputs.available == 'true'
         run: |
           mkdir -p .onex_state/compliance
-          if uv run onex compliance check --repo-root . --output .onex_state/compliance/report.yaml; then
+          if env ONEX_CLI_SHOW_ALL_COMMANDS=1 uv run python -m omnibase_core.cli.cli_commands compliance check --repo-root . --output .onex_state/compliance/report.yaml; then
             echo "result=pass" >> "$GITHUB_OUTPUT"
           else
             echo "result=fail" >> "$GITHUB_OUTPUT"
@@ -4198,6 +4210,102 @@ jobs:
               python -m omnibase_core.nodes.node_canonical_file_shape_check_compute.runtime_canonical_file_shape_check --rules file-shape --head HEAD
           fi
 
+  # OMN-26335: the boot wiring report's failed, duplicate and quarantined counts
+  # and its subscriptions with no producer may only fall. The node
+  # node_wiring_report_ratchet_compute reads them statically from the installed
+  # boot catalog and the handler sources, and compares each to the baseline in
+  # its contract; a baseline above the base ref's is refused. Unconditional: no
+  # needs/if. The test file holds the positive controls (a rise and a duplicate
+  # registration are refused).
+  wiring-report-ratchet:
+    name: Wiring Report Ratchet (OMN-26335)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+      - name: Check wiring-report counts against the contract baseline
+        env:
+          WIRING_RATCHET_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: uv run --frozen pytest tests/ci/test_wiring_report_ratchet_omn26335.py -q -n 0 --no-cov -p no:randomly
+
+  # OMN-26709: the endpoint version of omnimarket's Overlay Main Load (OMN-23963). omnibase_infra#6321 flagged slot coder-5090
+  # endpoint_from_overlay while the overlay home's main held no value for it, and every dev build then failed at compose_gen; no check
+  # here read the real overlay home. This job runs ONE test (tests/integration/models/test_llm_endpoint_overlay_main_check_omn26709.py)
+  # whose overlay source is injected: the unit run uses fixture clones, this job names the real overlay home checkout at main through
+  # OVERLAY_MAIN_CLONE, so the same body fails the change, naming the slot, when a flagged slot has no value there. The overlay home
+  # is the repository that holds the llm_endpoints overlay file, not the CI overlay repository that OMNI_CI_OVERLAY_REPO names
+  # (that one holds the lane census and the bus lane table), so the first run of this job, which read the CI overlay repository
+  # through that variable, found no value for any flagged slot. The repository is private and this one is public, so its name is the
+  # OMNI_CI_ENDPOINT_OVERLAY_REPO variable, never a literal; an unset variable fails the job closed. It is read at main through a
+  # read-only App token. Unconditional for a pull request (no needs); a failure fails CI Summary
+  # through its default-deny sweep. A fork pull request holds no secrets and cannot read the private repository; its job is skipped.
+  overlay-main-endpoints:
+    name: Overlay Main Endpoints (OMN-26709)
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OVERLAY_HOME_REPO: ${{ vars.OMNI_CI_ENDPOINT_OVERLAY_REPO }}
+      OVERLAY_HOME_CHECKOUT: .overlay-home-main
+    steps:
+      - name: Checkout this pull request
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Refuse an unset or malformed overlay home name
+        run: |
+          set -euo pipefail
+          if [ -z "$OVERLAY_HOME_REPO" ]; then
+            echo "::error::OMNI_CI_ENDPOINT_OVERLAY_REPO is unset, so the overlay home cannot be read; the check fails closed"
+            exit 1
+          fi
+          if [[ ! "$OVERLAY_HOME_REPO" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::OMNI_CI_ENDPOINT_OVERLAY_REPO must be a bare repository name"
+            exit 1
+          fi
+      - name: Mint a read-only overlay home token
+        id: overlay-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ env.OVERLAY_HOME_REPO }}
+          permission-contents: read
+      - name: Checkout the overlay home at its main branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.repository_owner }}/${{ env.OVERLAY_HOME_REPO }}
+          ref: main
+          path: ${{ env.OVERLAY_HOME_CHECKOUT }}
+          token: ${{ steps.overlay-token.outputs.token }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+      # A checkout holding no endpoints file is not a green no-op: the test reads every flagged slot as missing and fails naming it.
+      - name: Every slot flagged endpoint_from_overlay has a value on the overlay home main
+        run: |
+          echo "overlay home revision: $(git -C "$OVERLAY_HOME_CHECKOUT" rev-parse HEAD)"
+          OVERLAY_MAIN_CLONE="$GITHUB_WORKSPACE/$OVERLAY_HOME_CHECKOUT" OVERLAY_MAIN_REF=HEAD \
+            uv run --frozen pytest tests/integration/models/test_llm_endpoint_overlay_main_check_omn26709.py -q -n 0 --no-cov -p no:randomly
+
   # OMN-20703: node-boundary import gate (operator direction 2026-10-07,
   # OMN-17427). Shrink-only baseline; same core pin as the pre-commit hook.
   # Unconditional: no needs/if. The positive control must refuse a new edge.
@@ -4457,12 +4565,13 @@ jobs:
   # (1c9566e2c249) from the 14-tag bound until 2026-11-24 and nothing else; the migration
   # ticket OMN-22867 bumps that rev and deletes this input in the same change.
   # OMN-25506 (RULING 2026-11-18T01:29:21Z): the one-week extension merged in
-  # omnibase_core#2333 (dev-20261118030813-4f0a188ab62c); the input names that tag so this
-  # job reads the extended date, because the tag it replaced still held the date 2026-11-16.
+  # omnibase_core#2333 (dev-20261118030813-4f0a188ab62c). The second extension, to 2026-12-04, merged in
+  # omnibase_core#2367 (dev-20261125040409-050022962f2e); the input names that tag so this
+  # job reads the extended date, because the tag it replaced still held the date 2026-11-24.
   dependency-pins:
     uses: OmniNode-ai/omnibase_core/.github/workflows/dependency-pins.yml@dev-20261110125852-e6bc5e13e9e7
     with:
-      omnibase-core-ref: dev-20261118030813-4f0a188ab62c
+      omnibase-core-ref: dev-20261125040409-050022962f2e
     permissions:
       contents: read
 
@@ -4564,6 +4673,21 @@ jobs:
           # 24.9 min after this job started, so 90 min is not a new timeout risk.
           DEADLINE_MINUTES: "90"
           POLL_INTERVAL_SECONDS: "45"
+          # OMN-24562: bound on a job that never gets a conclusion. Once every
+          # other in-run job has completed, a job still without one this many
+          # minutes after the LAST of them completed fails closed, named. It
+          # sits above the 30m budgets of the gating jobs.
+          STALL_MINUTES: "45"
+          # OMN-24562: names, from the jobs listing, each job without a
+          # conclusion that has outlived STALL_MINUTES since the last other
+          # job completed. Empty output means nothing is stalled.
+          STALL_JQ: |
+            [.[] | select(.run_attempt == $attempt and .name != $self)] as $j
+            | ([$j[] | select(.conclusion != null and .completed_at != null)
+                | .completed_at | fromdateiso8601] | max) as $last
+            | [$j[] | select(.conclusion == null) | .name] as $waiting
+            | if $last != null and ($waiting | length) > 0 and ($now - $last) >= $stall
+              then $waiting | unique | .[] else empty end
         run: |
           # GitHub invokes this step as `bash -e {0}`; disable errexit because the
           # gate script's non-zero exit codes are handled explicitly below
@@ -4608,9 +4732,22 @@ jobs:
             # the pipeline runs, so a failed fetch leaves an empty listing that
             # reads as "no gate has reported" — the same trap the check-runs
             # fetch below already avoids by removing its file outright.
-            if ! { gh api --paginate \
-                "repos/${GH_REPO}/actions/runs/${RUN_ID}/jobs?filter=all&per_page=100" \
-                --jq '.jobs[]' 2>jobs_fetch.err | jq -s '.' > jobs.json.tmp; }; then
+            # OMN-24562: page small. GET actions/runs/<id>/jobs?per_page=100
+            # answered HTTP 502 three of three tries on a 91-job run (run
+            # 45566676848) while per_page=30 answered at once, so a failed read
+            # is retried with a smaller page before it counts as failed.
+            jobs_read=false
+            for jobs_page in 30 10; do
+              if { gh api --paginate \
+                  "repos/${GH_REPO}/actions/runs/${RUN_ID}/jobs?filter=all&per_page=${jobs_page}" \
+                  --jq '.jobs[]' 2>jobs_fetch.err | jq -s '.' > jobs.json.tmp; }; then
+                jobs_read=true
+                break
+              fi
+              echo "jobs read at per_page=${jobs_page} failed"
+              sed -e 's/^/  gh: /' jobs_fetch.err || true
+            done
+            if [ "${jobs_read}" != "true" ]; then
               jobs_fetch_failures=$((jobs_fetch_failures + 1))
               rm -f jobs.json.tmp
               echo "gh api fetch failed (attempt ${attempt}, failures ${jobs_fetch_failures}); retrying after ${POLL_INTERVAL_SECONDS}s"
@@ -4672,7 +4809,26 @@ jobs:
             case "${rc}" in
               0) echo "::notice::CI Summary = SUCCESS (all gating jobs and asserted external contexts provably passed)"; exit 0 ;;
               1) echo "::error::CI Summary = FAILURE (fail-closed: a gating job or an asserted external context failed/cancelled)"; exit 1 ;;
-              2) : ;;  # PENDING — gating jobs or external contexts still running; keep polling
+              2)
+                # PENDING — keep polling, unless a job with no conclusion has
+                # outlived STALL_MINUTES past the last other job's completion.
+                # The clock is the bash builtin, not `date`: the deadline logic
+                # above counts `date` calls (OMN-23027 tests drive it), and the
+                # stall read must not consume one. Both inputs come from this
+                # step's env; an absent filter means no stall check.
+                stall_minutes="${STALL_MINUTES:-45}"
+                stalled=""
+                if [ -n "${STALL_JQ:-}" ]; then
+                  printf -v now_epoch '%(%s)T' -1
+                  stalled=$(jq -r --argjson attempt "${RUN_ATTEMPT}" --arg self "CI Summary" \
+                    --argjson now "${now_epoch}" --argjson stall "$((stall_minutes * 60))" \
+                    "${STALL_JQ}" jobs.json | paste -sd, -)
+                fi
+                if [ -n "${stalled}" ]; then
+                  echo "::error::CI Summary = FAILURE (fail-closed, OMN-24562): job(s) ${stalled} still have no conclusion ${stall_minutes}m after the last other job completed"
+                  exit 1
+                fi
+                ;;
               *) echo "::error::ci_summary_gate.py returned unexpected code ${rc}; failing closed"; exit 1 ;;
             esac
             sleep "${POLL_INTERVAL_SECONDS}"

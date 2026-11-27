@@ -1,0 +1,23 @@
+{
+  "_provenance": {
+    "source": "omnibase_infra pull-request facts as the PR watcher state recorded them (head_sha, state, merged_at, base) and the merge commit of the merged one as git records it on origin/dev; the two fields the runtime rebuild trigger workflows read from the pull_request event, merged and head.sha, are those facts",
+    "captured_utc": "2026-11-24T14:50:20Z",
+    "source_commit": "6143a4c4b09c21213b88548b9210e3e24ec3abf1"
+  },
+  "open_pull_request": {
+    "number": 6244,
+    "state": "OPEN",
+    "merged": "false",
+    "base": "dev",
+    "head_sha": "e34070bdd0991ad6497222503ea54016ae80d4b9"
+  },
+  "merged_pull_request": {
+    "number": 6242,
+    "state": "MERGED",
+    "merged": "true",
+    "base": "dev",
+    "merged_at": "2026-11-24T14:47:40Z",
+    "head_sha": "a06f21c2bf0e2cf46b401cd0cdc0068ee1655054",
+    "merge_commit_sha": "6143a4c4b09c21213b88548b9210e3e24ec3abf1"
+  }
+}

@@ -7,7 +7,7 @@ the siblings get a resolvable ref of their own.
 ``git_ref`` to a 7-64 character lowercase hex commit SHA -- of omnibase_infra,
 the repo whose merge fired the trigger. ``_compose_build`` passed that SHA
 straight into ``stage_workspace.sh`` as ``DEPLOY_REF``, where RT-1 tried to
-check omnibase_core / omnibase_compat / omnimarket out at it. No such commit
+check the staged sibling repositories out at it. No such commit
 exists in any of them, so every CI-triggered rebuild failed in the CORE phase
 seconds after acceptance (job ``a5b200d5``, 2026-09-09T21:02Z).
 
@@ -39,6 +39,8 @@ from deploy_agent.events import (
 from deploy_agent.executor import DeployExecutor
 from deploy_agent.job_state import JobState
 from deploy_agent.publisher import build_completion_payload
+
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 
 pytestmark = [pytest.mark.unit, pytest.mark.promotion_guard]
 
@@ -152,7 +154,6 @@ def test_compose_build_records_the_per_repo_resolved_shas(
 ) -> None:
     resolved = {
         "omnibase_core": "1111111111111111111111111111111111111111",
-        "omnibase_compat": "2222222222222222222222222222222222222222",
         "omnimarket": "3333333333333333333333333333333333333333",
     }
     repo = tmp_path / "repo"
@@ -218,29 +219,37 @@ def test_build_args_carry_the_rt1_resolved_shas_not_the_canonical_heads(
 ) -> None:
     """OMN-20263: RT-1 now checks the pins out in worktrees of its own, so the
     canonical clone's HEAD is not the staged commit. OMNIMARKET_REF must be the
-    SHA RT-1 resolved, not the clone HEAD. OMNIBASE_COMPAT_REF is no longer
-    passed (omnibase_compat is retired)."""
+    SHA RT-1 resolved. The retired package has no build argument.
+    """
     resolved = {
         "omnibase_core": "1111111111111111111111111111111111111111",
-        "omnibase_compat": "2222222222222222222222222222222222222222",
         "omnimarket": "3333333333333333333333333333333333333333",
     }
     repo = tmp_path / "repo"
     repo.mkdir()
     _install_recording_stage_script(repo, resolved=resolved)
-    omni_home = tmp_path / "omni_home"
-    canonical_heads = {}
-    for name in ("omnimarket", "omnibase_compat"):
-        clone = omni_home / name
-        clone.mkdir(parents=True)
-        git = ["git", "-C", str(clone), "-c", "user.name=t", "-c", "user.email=t@t"]
-        subprocess.run([*git, "init", "-q"], check=True)
-        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "c"], check=True)
-        canonical_heads[name] = subprocess.run(
-            [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-        ).stdout.strip()
+    source_root = tmp_path / "sources"
+    clone = source_root / "omnimarket"
+    clone.mkdir(parents=True)
+    git = [
+        "git",
+        "-C",
+        str(clone),
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+    ]
+    env = scrub_git_location_env()
+    subprocess.run([*git, "init", "-q"], check=True, env=env)
+    subprocess.run(
+        [*git, "commit", "-q", "--allow-empty", "-m", "c"], check=True, env=env
+    )
+    canonical_head = subprocess.run(
+        [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, env=env
+    ).stdout.strip()
     monkeypatch.setattr(executor_mod, "deploy_repo_dir", lambda: str(repo))
-    monkeypatch.setenv("OMNI_HOME", str(omni_home))
+    monkeypatch.setenv("OMNI_HOME", str(source_root))
     monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
     commands: list[list[str]] = []
 
@@ -263,7 +272,6 @@ def test_build_args_carry_the_rt1_resolved_shas_not_the_canonical_heads(
     assert f"OMNIMARKET_REF={resolved['omnimarket']}" in build
     compat_args = [t for t in build if t.startswith("OMNIBASE_COMPAT_REF=")]
     assert not compat_args, (
-        "OMNIBASE_COMPAT_REF must not be passed: omnibase_compat is retired; "
-        f"got {compat_args}"
+        f"OMNIBASE_COMPAT_REF must be absent from build arguments. got {compat_args}"
     )
-    assert f"OMNIMARKET_REF={canonical_heads['omnimarket']}" not in build
+    assert f"OMNIMARKET_REF={canonical_head}" not in build

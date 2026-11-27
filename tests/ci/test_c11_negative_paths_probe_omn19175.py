@@ -54,12 +54,12 @@ def test_the_four_cases_and_the_control_are_declared_up_front() -> None:
     assert coded == [
         "auth.credential.invalid",
         "auth.credential.absent",
-        "auth.tenant.forbidden",
+        "resource.not_found",
     ]
     assert len(set(coded)) == len(coded)
     malformed = next(case for case in probe.CASES if case.name == "malformed")
     assert malformed.expected_code is None
-    assert malformed.expected_missing_field == "name"
+    assert malformed.expected_missing_field == "runner_identity"
 
 
 @pytest.mark.unit
@@ -83,7 +83,7 @@ def test_a_healthy_lane_grades_pass() -> None:
     assert observed[:3] == [
         "auth.credential.invalid",
         "auth.credential.absent",
-        "auth.tenant.forbidden",
+        "resource.not_found",
     ]
     assert observed[3] is None
 
@@ -129,7 +129,7 @@ def test_a_malformed_body_that_does_not_name_the_field_is_refused() -> None:
     assert record.verdict == "fail"
     malformed = next(case for case in record.cases if case.name == "malformed")
     assert malformed.ok is False
-    assert "name" in malformed.reason
+    assert "runner_identity" in malformed.reason
 
 
 @pytest.mark.unit
@@ -182,3 +182,140 @@ def test_a_missing_credential_env_name_is_an_input_failure_not_a_verdict() -> No
         probe.resolve_credential("OMN19175_PRESENT", environ={"OMN19175_PRESENT": "v"})
         == "v"
     )
+
+
+@pytest.mark.unit
+def test_every_arm_targets_a_route_the_runtime_gateway_serves() -> None:
+    """OMN-26043: the separate HTTP API is gone, so the arms read the runtime's own routes.
+
+    RULING 2026-11-02T15:02:01Z and RULING 2026-11-10T13:26:22Z moved the tenant
+    routes inside the runtime. omnimarket's ``node_workflow_gateway_effect`` serves
+    ``POST /v1/workflows``, ``GET /v1/workflows/contracts``,
+    ``GET /v1/workflows/{id}/status`` and ``GET /v1/workflows/{id}/receipt`` on
+    the lane's ingress port; the retired routes (``/v1/whoami``,
+    ``/v1/tenants/<slug>/api-keys``, ``/v1/api-keys``) answered from onex-api.
+    """
+    served = (
+        r"^/v1/workflows/contracts$",
+        r"^/v1/workflows/[0-9a-f-]{36}/status$",
+        r"^/v1/workflows/[0-9a-f-]{36}/receipt$",
+    )
+    import re
+
+    for case in probe.CASES:
+        assert any(re.fullmatch(pattern, case.path) for pattern in served), case.path
+    paths = {case.name: case.path for case in probe.CASES}
+    assert paths["wrong_key"] == paths["absent_key"]
+    assert paths["malformed"].endswith("/receipt")
+    assert probe.MALFORMED_MISSING_FIELD == "runner_identity"
+
+
+@pytest.mark.unit
+def test_the_workflow_resolves_the_lane_by_its_runtime_ingress() -> None:
+    """OMN-26117: the probe reads the lane's ingress_url, never the retired gateway port.
+
+    The dev lane's separate HTTP API on port 8090 is gone (RULING 2026-11-02T15:02:01Z,
+    RULING 2026-11-10T13:26:22Z), so a lane resolved by ``gateway_url`` read a dead
+    address and graded RED before any arm ran.
+    """
+    workflow = (
+        Path(__file__).resolve().parents[2]
+        / ".github"
+        / "workflows"
+        / "chain-canary-c11-negative-paths.yml"
+    ).read_text(encoding="utf-8")
+    assert "require: ingress_url" in workflow
+    assert "require: gateway_url" not in workflow
+    assert "LANE_INGRESS_URL" in workflow
+    assert "LANE_GATEWAY_URL" not in workflow
+    assert "8090" not in workflow
+
+
+@pytest.mark.unit
+def test_the_probe_keeps_every_arm_status_and_code_the_criterion_names() -> None:
+    """OMN-26117: no clause is weakened; the four arms and the control keep their expectations."""
+    expected = {
+        name: (case.expected_status, case.expected_code)
+        for name, case in ((case.name, case) for case in probe.CASES)
+    }
+    assert expected == {
+        "wrong_key": (401, "auth.credential.invalid"),
+        "absent_key": (401, "auth.credential.absent"),
+        "wrong_tenant": (404, "resource.not_found"),
+        "malformed": (422, None),
+    }
+    assert probe.CONTROL.path == "/health"
+    assert probe.CONTROL.expected_status == 200
+    assert probe.HEADER_NAME == "x-api-key"
+
+
+@pytest.mark.unit
+def test_a_cross_tenant_read_that_answers_403_is_refused_as_an_existence_leak() -> None:
+    """OMN-26117: the runtime gateway answers 404 for another tenant's workflow, never 403.
+
+    ``node_workflow_gateway_effect``'s contract says "A workflow of another tenant
+    answers 404, the same as an unknown id", and the workflow receipt
+    endpoint reference and beta requirement N-2 say an existence signal across tenants is itself a leak,
+    so cross-tenant reads 404, never 403. The 403 ``auth.tenant.forbidden`` this
+    arm once expected came from the retired ``/v1/tenants/<slug>/api-keys`` route
+    of onex-api (RULING 2026-11-10T13:26:22Z). A 403 here would tell a caller the
+    foreign workflow exists, so it must grade FAIL, not PASS.
+    """
+    wrong_tenant = next(case for case in probe.CASES if case.name == "wrong_tenant")
+    assert (wrong_tenant.expected_status, wrong_tenant.expected_code) == (
+        404,
+        "resource.not_found",
+    )
+    leaked = probe.grade_case(
+        wrong_tenant,
+        probe.Observation(
+            status=403,
+            body={"code": "auth.tenant.forbidden", "detail": "Forbidden"},
+        ),
+    )
+    assert leaked.ok is False
+    refused = probe.grade_case(
+        wrong_tenant,
+        probe.Observation(
+            status=404,
+            body={"detail": "workflow not found", "code": "resource.not_found"},
+        ),
+    )
+    assert refused.ok is True, refused.reason
+    unavailable = probe.grade_case(
+        wrong_tenant,
+        probe.Observation(
+            status=503, body={"detail": "workflow status is unavailable"}
+        ),
+    )
+    assert unavailable.ok is False
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/ci_live_contact/c11_runtime_ingress_refusals_omn26117.json"
+)
+def test_recorded_runtime_ingress_answers_grade_as_the_declared_refusals(
+    recorded_response: dict[str, Any],
+) -> None:
+    """OMN-26117: what the dev runtime's own ingress really answered grades PASS per arm.
+
+    The recording is taken from the lane the probe now resolves; the two arms that
+    need no credential and the positive control are graded by the probe's own
+    ``grade_case`` against its declared expectations.
+    """
+    recorded = recorded_response["response"]["observations"]
+    specs = {case.name: case for case in probe.CASES}
+    for name in ("wrong_key", "absent_key"):
+        observation = probe.Observation(
+            status=recorded[name]["status"], body=recorded[name]["body"]
+        )
+        result = probe.grade_case(specs[name], observation)
+        assert result.ok is True, result.reason
+    control = probe.grade_case(
+        probe.CONTROL,
+        probe.Observation(
+            status=recorded["positive_control"]["status"],
+            body=recorded["positive_control"]["body"],
+        ),
+    )
+    assert control.ok is True, control.reason

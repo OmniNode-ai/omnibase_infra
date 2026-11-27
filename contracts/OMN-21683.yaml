@@ -6,6 +6,13 @@ summary: "The registration orchestrator wiring and the LLM completion registry b
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn21683-ac2-accepted-20261119t1745z:
+      - label: AC2
+        criterion_hash: 6f2903eb365eeebcbb158fdfdfa23d145e6a1d3a136c48b41e7c587153ce53c9
+        proposed_by: lane=dod-closeout-bind-2026-11-19T1745Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-19T1745Z-c2
 requirements:
   - id: req-omn21683-no-hand-construction-in-slice
     statement: "The slice paths no longer construct a handler or node class by hand outside a container registration call."
@@ -79,3 +86,12 @@ dod_evidence:
         check_value: "curl -sf --max-time 10 http://localhost:8085/health"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
+  - id: dod-omn21683-ac2-accepted-20261119t1745z
+    description: "AC2: the contracts_and_di checker re-run on every slice path reports no handler_hand_construction finding, and the injected registration wiring reaches the catalog through the real registry. Re-run at origin/dev 8f0ce596 PASSED (60 passed); with the product changes of 729d8a8b reverted the slice test fails (11 failed, 1 passed)."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest -q --no-cov -p no:cacheprovider tests/unit/validation/test_omn21683_handler_hand_construction_slice.py tests/integration/runtime/test_registration_wiring_identity_omn21683.py tests/unit/runtime/test_container_wiring_registration.py"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

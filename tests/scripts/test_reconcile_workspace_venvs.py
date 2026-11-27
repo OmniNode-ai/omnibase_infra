@@ -17,18 +17,16 @@ this script exists and the one thing no single existing tool gets right:
     one BREAKS the second.
 
 ``omnimarket`` is deliberately absent from ``omnibase_infra``'s
-``pyproject.toml`` and ``uv.lock`` (the layer graph is compat -> core -> spi ->
+``pyproject.toml`` and ``uv.lock`` (the layer graph is core -> spi ->
 infra and omnimarket sits above infra), so a bare ``uv sync --frozen``
 UNINSTALLS it and every ``onex skill`` / ``onex delegate`` dispatch then dies on
 the OMN-14060 drift guard. ``--inexact`` is what makes the two layers coexist:
 it applies every locked pin without removing what the lock does not mention.
 
 Given that, the ORDER is chosen for a second reason and is asserted directly
-here: PROVIDER FIRST, LOCK SECOND. The co-install carries a hardcoded
-``COMPAT_PIN`` that downgrades the locked ``omnibase-compat`` (OMN-16262) --
-reproduced live on 2026-08-30, where the downgrade broke the ``occ`` CLI
-extension badly enough that the ``onex`` binary would not start at all. Ending
-on the lock pass is what undoes it.
+here: PROVIDER FIRST, LOCK SECOND. In OMN-16262, a hardcoded co-install
+pin downgraded a dependency and broke the ``onex`` CLI at startup. The
+final lock pass restores governed pins.
 
 The provider co-install must pin to the LOCAL clone's ``HEAD``, never to
 ``origin/dev``: the guard compares against the local clone, so installing from
@@ -43,6 +41,7 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -50,6 +49,7 @@ import pytest
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
+from tests.scripts.onex_dispatch_fake import install_fake_core_cli
 
 pytestmark = pytest.mark.unit
 
@@ -711,6 +711,91 @@ def test_real_uv_hook_sync_keeps_the_installed_branch_revision(
     assert json.loads(direct.read_text())["vcs_info"]["commit_id"] == branch_commit
 
 
+def _real_uv_extra_hook_project(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch, *, lock_lists_extra: bool
+) -> None:
+    """Install an optional extra into the hook venv with real uv, offline (OMN-24524)."""
+    uv = shutil.which("uv")
+    assert uv is not None, "uv is required to run workspace reconciliation"
+    wheel = ws.root / "probe-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("probe/__init__.py", "")
+        archive.writestr(
+            "probe-1.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: probe\nVersion: 1.0\n",
+        )
+        archive.writestr(
+            "probe-1.0.dist-info/WHEEL",
+            "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        archive.writestr("probe-1.0.dist-info/RECORD", "")
+    shutil.rmtree(ws.omniclaude / ".venv")
+    (ws.omniclaude / "uv.lock").unlink()
+    (ws.omniclaude / "pyproject.toml").write_text(
+        '[project]\nname = "hookproj"\nversion = "0.1"\nrequires-python = ">=3.9"\n'
+        "dependencies = []\n\n[project.optional-dependencies]\n"
+        f'probeextra = ["probe @ {wheel.as_uri()}"]\n\n[tool.uv]\npackage = false\n'
+    )
+    env = scrub_git_location_env()
+    for name in ("UV_PROJECT_ENVIRONMENT", "PYTHONPATH"):
+        env.pop(name, None)
+    env["UV_OFFLINE"] = "true"
+    env["UV_LINK_MODE"] = "copy"
+    for args in (["lock"], ["sync", "--frozen", "--extra", "probeextra"]):
+        done = subprocess.run(
+            [uv, *args, "--project", str(ws.omniclaude)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert done.returncode == 0, done.stdout + done.stderr
+    if not lock_lists_extra:
+        lock = ws.omniclaude / "uv.lock"
+        lock.write_text(
+            "\n".join(
+                line
+                for line in lock.read_text().splitlines()
+                if "provides-extras" not in line
+            )
+            + "\n"
+        )
+    monkeypatch.setenv("HOOK_PROJECT", str(ws.omniclaude))
+    monkeypatch.setenv("REAL_UV", uv)
+    monkeypatch.setenv("UV_OFFLINE", "true")
+    monkeypatch.setenv("UV_LINK_MODE", "copy")
+    shim = ws.bin_dir / "uv"
+    shim.write_text(
+        '#!/usr/bin/env bash\nif [[ "$*" == *"--project $HOOK_PROJECT"* ]]; then\n'
+        '  exec "$REAL_UV" "$@"\nfi\n' + shim.read_text()
+    )
+
+
+def test_drift_check_keeps_a_lock_listed_extra_like_the_repair_does(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check and the repair ask uv the same question, so DRIFT can clear (OMN-24524).
+
+    Measured with real uv: a plain frozen check reads an installed extra as a
+    package to uninstall and exits 1, while the repair keeps it and says in sync.
+    """
+    _real_uv_extra_hook_project(ws, monkeypatch, lock_lists_extra=True)
+    result = ws.run("--check")
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    assert "outdated against" not in result.stdout
+
+
+def test_drift_check_still_reads_an_unlocked_extra_as_drift(
+    ws: _Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control: an extra the lock does not list is not kept, so the check reports it."""
+    _real_uv_extra_hook_project(ws, monkeypatch, lock_lists_extra=False)
+    result = ws.run("--check")
+    assert result.returncode != _EXIT_OK, result.stdout + result.stderr
+    assert "outdated against" in result.stdout
+    assert "extras not kept (not listed in uv.lock): probeextra" in result.stderr
+
+
 def test_proven_installs_the_floor_commit_without_moving_the_clone(
     ws: _Workspace,
 ) -> None:
@@ -770,11 +855,7 @@ def _evidence_command_after_install(
         ),
         encoding="utf-8",
     )
-    entrypoint = ws.dispatch_venv / "bin" / "onex"
-    entrypoint.write_text(
-        f"#!/usr/bin/env bash\nexit {_WRAPPER_RAN}\n", encoding="utf-8"
-    )
-    entrypoint.chmod(0o755)
+    install_fake_core_cli(ws.dispatch_venv, f"exit {_WRAPPER_RAN}\n")
     wrapper = ws.infra / "scripts" / "onex"
     wrapper.write_bytes(_WRAPPER_SOURCE.read_bytes())
     wrapper.chmod(0o755)
@@ -1143,13 +1224,9 @@ def test_reconcile_applies_the_lock_without_removing_the_provider_layer(
 def test_provider_coinstall_runs_before_the_lock_pass(ws: _Workspace) -> None:
     """OMN-16262: the co-install downgrades a locked pin, so the lock pass ends the run.
 
-    ``install-node-skill-package.sh`` carries a hardcoded
-    ``COMPAT_PIN="omnibase-compat==0.5.5"`` and installs it ``--no-deps``,
-    silently downgrading the locked 0.5.6. Reproduced live on this Mac
-    2026-08-30 by this very reconciler: the downgrade removed
-    ``omnibase_compat.contracts.pr_occ_stamp``, the ``occ`` CLI extension failed
-    to load, and the ``onex`` binary would not start at all. Ending on the lock
-    pass repairs it structurally instead of inheriting the bug.
+    A hardcoded co-install pin used to downgrade a dependency with
+    ``--no-deps``, causing ``onex`` to fail at startup. The final lock
+    pass restores governed pins.
     """
     ws.set_installed_commit("0" * _SHA_LEN)
     assert ws.run().returncode == _EXIT_OK

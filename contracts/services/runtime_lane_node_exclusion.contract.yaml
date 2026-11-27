@@ -1,0 +1,614 @@
+# The contracts a runtime lane does not attach, and the contracts it needs (OMN-26324).
+#
+# Read by ModelRuntimeNodeSelection.from_env (the one reader behind the
+# auto-wiring ownership filter and the health monitor's expectations): the lane a
+# runtime declares in ONEX_RUNTIME_LANE names a profile (the lane without its
+# "compose-" prefix, the profile names of runtime_policy.contract.yaml), that
+# profile's entry below is selected, and its excluded_contracts join
+# ONEX_RUNTIME_NODE_EXCLUSION. A lane with no entry, and a runtime with no
+# ONEX_CONTRACTS_DIR, attach exactly what they attached before.
+# The file reaches the runtime through the image's contracts/ directory (and the
+# ../contracts bind mount), so no compose file names a contract.
+#
+# Evidence for the dev profile (read 2026-11-21T13:57Z from the dev broker, SASL, read-only;
+# every name also read from the running dev image's contract files):
+# a contract is listed only when it subscribes to at least one topic, every topic it
+# subscribes to received no message in the broker's whole retention window of 7 days
+# (1098 distinct topics read, 213 active, 884 idle, 1 absent), it declares no schedule
+# or runtime tick, and it belongs to the lab factory's own tooling (sweeps, landing,
+# review, retrospectives, hosts, seams, swarm). A contract with no subscription on the
+# dev bus has no traffic to read, and a contract on the gateway, delegation, ledger,
+# deploy, health, tenant or onboarding paths is never listed: unproven idle stays wired.
+#
+# A contract of a package outside dev's ONEX_ACTIVE_RUNTIME_PACKAGES (docker/runtime-policy.env,
+# omnibase_infra and omnimarket) is never listed: discovery on dev never returns it, so an entry for
+# it reads as a declared exclusion that no discovered contract is, a discovery error that makes the
+# runtime DEGRADED and stops the dev roll (compliance_orchestrator, an omnibase_core node, did
+# exactly that in deploy job ae286985; OMN-26460). It is already unattached on dev.
+#
+# required_contracts is what dev needs (gateway, delegation, ledger, deploy, health).
+# tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py fails
+# when one of them is also excluded, so the trim breaks a test and not dev.
+name: runtime_lane_node_exclusion
+version: 1
+profiles:
+  dev:
+    excluded_contracts:
+      - baseline_capture
+      - canary_score_reducer
+      - capture_silence_watch_effect
+      - close_out
+      - compaction_loss_compute
+      - data_verification
+      - handoff_effect
+      - host_reconcile_compute
+      - install_refusal_trace_compute
+      - integration_test_runner
+      - local_review
+      - local_supervisor
+      - morning_handoff_generator
+      - nightly_loop_controller
+      - node_adr_canary_orchestrator
+      - node_adr_document_ingestion_effect
+      - node_adr_draft_generation_compute
+      - node_adversarial_pipeline_orchestrator
+      - node_architectural_invariant_loop
+      - node_architecture_discovery_orchestrator
+      - node_architecture_graph_populate_effect
+      - node_architecture_graph_query_effect
+      - node_architecture_validator
+      - node_board_truth_compute
+      - node_board_truth_reconcile_effect
+      - node_branch_protection_audit_effect
+      - node_build_loop_write_effect
+      - node_ci_live_contact_effect
+      - node_ci_red_kind_rule_compute
+      - node_ci_state_verdict_compute
+      - node_claude_code_binding_render_compute
+      - node_claude_code_history_read_effect
+      - node_claude_review_batch_effect
+      - node_closeout_verifier_compute
+      - node_codegen_handler_test_effect
+      - node_compaction_arm_assignment_compute
+      - node_compaction_arm_run_effect
+      - node_compaction_continuation_replay_effect
+      - node_conflict_hunk_effect
+      - node_controller_fix_plan_compute
+      - node_decompose_epic_orchestrator
+      - node_demo_fanout_orchestrator
+      - node_dirty_canonical_sweep
+      - node_dod_closeout_sweep_compute
+      - node_dod_criteria_check_effect
+      - node_dod_sweep_orchestrator
+      - node_entropy_experiment_orchestrator
+      - node_epic_team_orchestrator
+      - node_evidence_collector_effect
+      - node_evidence_extractor_compute
+      - node_evidence_pipeline_orchestrator
+      - node_feature_dashboard_compute
+      - node_floor_task_ticket_effect
+      - node_friction_rollup_compute
+      - node_friction_synthesis_effect
+      - node_friction_triage_orchestrator
+      - node_fsm_single_source_check_compute
+      - node_gap_analyzer_compute
+      - node_generate_node_effect
+      - node_generated_code_validator
+      - node_generated_node_publish_effect
+      - node_goal_scope_admission_compute
+      - node_green_controller_read_compute
+      - node_green_draft_clock_compute
+      - node_handler_correctness_gate
+      - node_handoff_check_effect
+      - node_harness_invocation_check_effect
+      - node_hostile_reviewer_orchestrator
+      - node_insights_to_plan_compute
+      - node_integration_sweep_orchestrator
+      - node_internal_release_path_guard_compute
+      - node_kb_adr_publisher
+      - node_kb_repowise_index_effect
+      - node_lab_disk_growth_effect
+      - node_lab_story_log_effect
+      - node_landing_private_reads_effect
+      - node_landing_stall_expectation_compute
+      - node_lane_closeout_effect
+      - node_lane_closeout_sweep_effect
+      - node_migration_sync_plan_compute
+      - node_model_comparison_runner
+      - node_mypy_check_effect
+      - node_on_vs_off_experiment_compute
+      - node_oneoff_register_compute
+      - node_onex_pillar_owner_compute
+      - node_overseer_observer
+      - node_pipeline_audit_orchestrator
+      - node_pipeline_cache_effect
+      - node_pipeline_fill
+      - node_plan_audit_compute
+      - node_plan_review_ladder_compute
+      - node_plugin_bump_stuck_compute
+      - node_polish_task_classifier
+      - node_process_spine_reading_compute
+      - node_public_consumer_check_compute
+      - node_question_guard_compute
+      - node_recall_compute
+      - node_refill_sprint_orchestrator
+      - node_release
+      - node_release_candidate_verify_effect
+      - node_release_pin_guard_compute
+      - node_release_sibling_premise_compute
+      - node_remote_lane_handoff_compute
+      - node_retired_model_reference_check_effect
+      - node_retrospective_audit_compute
+      - node_retrospective_calculate_compute
+      - node_retrospective_collect_effect
+      - node_retrospective_digest_render_compute
+      - node_retrospective_run_orchestrator
+      - node_retrospective_run_reducer
+      - node_review_convergence_compute
+      - node_review_finding_disposition_compute
+      - node_review_finding_veto_effect
+      - node_review_prompt_builder_compute
+      - node_review_record_compute
+      - node_review_replay_set_effect
+      - node_review_response_parser_compute
+      - node_rewind_compute
+      - node_rrh_compute
+      - node_rsd_fill_compute
+      - node_rsd_orchestrator
+      - node_ruling_mechanism_owed_compute
+      - node_ruling_register_compute
+      - node_runner_group_exposure_compute
+      - node_runner_group_reading_compute
+      - node_runner_image_roll
+      - node_runner_orchestrator
+      - node_runner_stop_idle_proof_compute
+      - node_runner_usage_effect
+      - node_schedule_verdict_compute
+      - node_script_node_src_compute
+      - node_seam_classify_compute
+      - node_seam_conservation_compute
+      - node_seam_graph_compute
+      - node_seam_graph_defects_compute
+      - node_seam_match_compute
+      - node_seam_read_orchestrator
+      - node_seam_reading_compute
+      - node_semantic_antipattern_classifier_compute
+      - node_semantic_antipattern_validator_orchestrator
+      - node_shared_blocker_escalation_compute
+      - node_shim_scanner
+      - node_standup_draft_check_compute
+      - node_standup_retrospective_compute
+      - node_stop_only_on_withdrawal_compute
+      - node_stop_only_on_withdrawal_effect
+      - node_stub_detector
+      - node_superseded_run_cancel_effect
+      - node_swarm_aggregator_compute
+      - node_swarm_decomposer_compute
+      - node_swarm_fanout_orchestrator
+      - node_swarm_fleet_discovery_effect
+      - node_task_execution_orchestrator
+      - node_tech_debt_sweep_orchestrator
+      - node_test_duration_record_check_effect
+      - node_test_generator
+      - node_test_generator_compute
+      - node_test_selection_selector_compute
+      - node_test_selector_reading_compute
+      - node_transcript_manifest_effect
+      - node_transcript_parse_compute
+      - node_transcript_read_effect
+      - node_two_strike_arbiter
+      - node_update_plan_reducer
+      - node_user_correction_observer_effect
+      - node_wave_scheduler_orchestrator
+      - node_wire_consumer_pin_compute
+      - node_worker_stall_recovery
+      - node_workflow_baseline_compare_compute
+      - node_workflow_comparison_compute
+      - overnight
+      - overseer_benchmarker
+      - overseer_verifier
+      - prrp_snapshot_publish_effect
+      - regression_test_orchestrator
+      - rescue_patch_review_compute
+      - rescue_patch_review_effect
+      - review_thread_reconciler
+      - seam_parallel_executor
+      - swarm_supervisor_orchestrator
+      - verify_effect
+      - volume_config_drift_sweep
+      - worktree_reconcile_compute
+    required_contracts:
+      - node_gateway_attach_effect
+      - node_gateway_link_health_projection_compute
+      - node_gateway_link_health_write_effect
+      - node_delegation_dispatch_terminal_effect
+      - node_c11_delegation_legs_effect
+      - node_ledger_write_effect
+      - node_ledger_open_claims_effect
+      - node_delegation_chain_ledger_effect
+      - node_dev_roll_events_effect
+      - node_dev_roll_request_compute
+      - node_deploy_job_reading_effect
+      - node_model_health_effect
+      # Declares a runtime-tick schedule (every 600 s) in its contract, so the dev lane runs it: a contract with a
+      # schedule is never listed above, and the overlays boot set carries it eager so its tick subscription attaches.
+      - node_stall_responder_compute
+      - node_registry_effect
+      - environment_health_scanner
+    # The paths the lab's delegation checks, the gateway, the scm write nodes, the work ledger,
+    # deploy, health and onboarding use (OMN-26357). Each path names the contracts and topics its
+    # probe or command drives (read from the probe code: workflows, scripts, the nodes and topics
+    # they publish to or wait on). The use set of a path is these seeds plus every contract that
+    # subscribes to a topic a used contract publishes, to a fixed point, plus every contract named
+    # by a literal in a used node's own code. A contract in a use set is never excluded:
+    # tests/unit/runtime/auto_wiring/test_runtime_lane_node_exclusion_omn26324.py
+    # (delegation_path_not_excluded) computes the set from the contract files it can see and fails
+    # when one is also excluded.
+    delegation_check_paths:
+      - id: C11
+        nodes:
+          - node_c11_delegation_legs_effect
+          - node_workflow_gateway_effect
+        topics: []
+      - id: C12
+        nodes:
+          - node_inference_credentials
+        topics: []
+      - id: C13
+        nodes:
+          - node_delegation_orchestrator
+        topics:
+          - onex.cmd.omnibase-infra.delegation-request.v1
+      - id: C14
+        nodes:
+          - node_delegation_quality_gate_reducer
+          - node_delegation_routing_reducer
+          - node_llm_delegation_call_effect
+        topics:
+          - onex.cmd.omnibase-infra.delegation-request.v1
+      - id: C15
+        nodes:
+          - node_chain_canary_effect
+          - node_delegation_chain_ledger_effect
+          - node_delegation_routing_reducer
+          - node_delegation_orchestrator
+        topics:
+          - onex.cmd.omnibase-infra.delegation-request.v1
+          - onex.cmd.omnimarket.delegate-skill.v1
+      - id: C16
+        nodes:
+          - node_c16_pinned_backend_effect
+          - node_chain_canary_effect
+        topics:
+          - onex.evt.omnimarket.delegate-skill-completed.v1
+      - id: C17
+        nodes:
+          - projection_delegation
+        topics:
+          - onex.snapshot.projection.delegation.correlation-trace.v1
+      - id: C28
+        nodes:
+          - node_board_probe_effect
+        topics:
+          - onex.evt.omnimarket.projection-consumer-flow-applied.v1
+      - id: C29
+        nodes:
+          - node_delegation_orchestrator
+        topics:
+          - onex.cmd.omnibase-infra.delegation-request.v1
+      - id: C30
+        nodes:
+          - node_delegate_skill_orchestrator
+        topics:
+          - onex.snapshot.projection.delegation.correlation-trace.v1
+          - onex.snapshot.projection.delegation.decisions.v1
+      - id: gateway
+        nodes:
+          - node_gateway_attach_effect
+          - node_gateway_link_health_projection_compute
+          - node_gateway_link_health_write_effect
+          - node_github_repo_gateway_effect
+          - node_workflow_gateway_effect
+        topics: []
+      - id: scm_write
+        nodes:
+          - node_merge_effect
+          - node_ci_rerun_effect
+          - node_rebase_effect
+          - node_thread_reply_effect
+          - node_ci_fix_effect
+          - node_merge_gate_effect
+          - node_github_repo_write_effect
+          - node_github_repo_gateway_effect
+          - node_job_log_filler_effect
+          - node_lane_github_budget_effect
+          - node_lab_work_unit_effect
+        topics: []
+      - id: work_ledger
+        nodes:
+          - node_work_ledger_reader_effect
+          - node_work_ledger_append_effect
+          - node_ledger_write_effect
+          - node_ledger_open_claims_effect
+          - node_work_ledger_bus_mirror
+          - node_work_ledger_emit_effect
+        topics: []
+      - id: deploy
+        nodes:
+          - node_deploy_job_reading_effect
+          - node_dev_roll_events_effect
+          - node_dev_roll_request_compute
+          - node_dev_roll_verify_compute
+          - node_dev_roll_window_gate_effect
+          - runtime_deploy_effect
+          - node_redeploy_orchestrator
+          - node_branch_deploy_orchestrator
+        topics: []
+      - id: health
+        nodes:
+          - node_model_health_effect
+          - node_registry_effect
+          - environment_health_scanner
+          - node_delegation_health_compute
+          - node_process_health_effect
+        topics: []
+      - id: onboarding
+        nodes:
+          - node_onex_setup_effect
+          - node_hook_delegate_effect
+          - node_local_dashboard_serve_effect
+          - local_secret_store_effect
+          - captured_secret_store_effect
+          - captured_secret_resolve_effect
+          - node_setup_orchestrator
+          - node_onboarding_orchestrator
+        topics: []
+    # The fixed point of delegation_check_paths over the topic edges of every shipped contract,
+    # read on 2026-11-21 from the contract files of omnibase_infra, omnimarket and omnibase_core.
+    # The test also reads the contract files it can see (omnimarket's are not installed in this
+    # repo's test environment) and fails when a contract those files reach is missing here.
+    reached_contracts:
+      - aislop_sweep
+      - alert_channel_liveness_effect
+      - autopilot_orchestrator
+      - beacon_trace_capture_effect
+      - branch_claim_check_effect
+      - captured_secret_resolve_effect
+      - captured_secret_store_effect
+      - consumer_flow_stall_alert_effect
+      - dod_verify
+      - environment_health_scanner
+      - fixer_dispatcher
+      - kafka_topic_emit_probe
+      - local_secret_store_effect
+      - log_persistence_effect
+      - log_projection
+      - merge_sweep_compute
+      - monitor_alert_responder
+      - node_agent_inbox_spool
+      - node_agent_review_cloud_rung_effect
+      - node_agent_review_dispatch_orchestrator
+      - node_audit_trail_compact_schedule_compute
+      - node_audit_trail_compactor
+      - node_board_probe_effect
+      - node_branch_deploy_command_effect
+      - node_branch_deploy_orchestrator
+      - node_branch_deploy_probe_effect
+      - node_branch_prune_effect
+      - node_bus_login_exposure_scheduled_effect
+      - node_c11_delegation_legs_effect
+      - node_c16_pinned_backend_effect
+      - node_c32_probe_scheduled_effect
+      - node_canonical_clone_refresh_effect
+      - node_chain_canary_effect
+      - node_ci_fix_effect
+      - node_ci_rerun_effect
+      - node_code_contract_score_effect
+      - node_code_eval_trial_orchestrator
+      - node_commitment_check_scheduled_effect
+      - node_consumer_flow_prune_effect
+      - node_contract_drift_compute
+      - node_contract_registry
+      - node_contract_registry_reducer
+      - node_convergence_orchestrator
+      - node_dead_letter_prune_effect
+      - node_delegate_fanout_effect
+      - node_delegate_skill_orchestrator
+      - node_delegation_acceptance_judge_compute
+      - node_delegation_acceptance_judge_request_compute
+      - node_delegation_chain_ledger_effect
+      - node_delegation_dod_verify_request_compute
+      - node_delegation_events_defect_scan_scheduled_effect
+      - node_delegation_health_compute
+      - node_delegation_orchestrator
+      - node_delegation_quality_gate_reducer
+      - node_delegation_receipt_verdict_compute
+      - node_delegation_routing_feedback_reducer
+      - node_delegation_routing_reducer
+      - node_delegation_second_arm_scheduled_effect
+      - node_deploy_job_reading_effect
+      - node_deployment_evidence_reducer
+      - node_dev_cause_lane_receiver_effect
+      - node_dev_merge_redeploy_trigger_effect
+      - node_dev_roll_decision_request_effect
+      - node_dev_roll_events_effect
+      - node_dev_roll_failure_capture_effect
+      - node_dev_roll_request_compute
+      - node_dev_roll_verify_compute
+      - node_dev_roll_window_gate_effect
+      - node_developer_principal_plan_compute
+      - node_dlq_replay_effect
+      - node_dropped_work_audit_scheduled_effect
+      - node_e2e_bridge_effect
+      - node_e2e_orchestrator
+      - node_eval_tracking_schedule_compute
+      - node_evidence_dashboard_effect
+      - node_evidence_dashboard_reducer
+      - node_evidence_publisher_effect
+      - node_floor_document_reducer
+      - node_floor_fill_orchestrator
+      - node_floor_fill_scheduled_effect
+      - node_floor_simple_effect
+      - node_floor_simple_scheduled_effect
+      - node_gateway_attach_effect
+      - node_gateway_link_health_projection_compute
+      - node_gateway_link_health_write_effect
+      - node_git_mirror_sync_schedule_compute
+      - node_git_query_mirror_effect
+      - node_github_pr_poller_effect
+      - node_github_repo_gateway_effect
+      - node_github_repo_write_effect
+      - node_gmail_archive_cleanup_effect
+      - node_goal_verification_orchestrator
+      - node_hook_chain_probe_effect
+      - node_hook_chain_probe_trigger_effect
+      - node_hook_chain_probe_verdict_effect
+      - node_hook_delegate_effect
+      - node_host_disk_orchestrator
+      - node_host_drift_orchestrator
+      - node_host_hygiene_orchestrator
+      - node_host_install_file_effect
+      - node_host_install_orchestrator
+      - node_host_install_readback_compute
+      - node_host_install_state_reducer
+      - node_host_installer_registry_units
+      - node_hourly_tick_decision_compute
+      - node_inference_credentials
+      - node_job_log_filler_effect
+      - node_lab_alarm_scheduled_effect
+      - node_lab_fill_orchestrator
+      - node_lab_fill_plan_compute
+      - node_lab_history_archive_effect
+      - node_lab_job_check_effect
+      - node_lab_job_check_schedule_compute
+      - node_lab_sli_alert_effect
+      - node_lab_sli_board_compute
+      - node_lab_sli_collect_effect
+      - node_lab_sli_compute
+      - node_lab_sli_schedule_compute
+      - node_lab_state_alarm_scheduled_effect
+      - node_lab_test_harness_effect
+      - node_lab_test_harness_reading_compute
+      - node_lab_test_harness_schedule_compute
+      - node_lab_work_unit_effect
+      - node_landing_canary_scheduled_effect
+      - node_lane_dispatch_effect
+      - node_lane_github_budget_effect
+      - node_lane_liveness_compute
+      - node_lane_result_sweep_scheduled_effect
+      - node_ledger_open_claims_effect
+      - node_ledger_projection_compute
+      - node_ledger_write_effect
+      - node_linear_comments_decision_compute
+      - node_linear_comments_sweep_orchestrator
+      - node_llm_delegation_call_effect
+      - node_llm_delegation_projection
+      - node_local_dashboard_serve_effect
+      - node_local_environment_observe_effect
+      - node_machine_grant_role_compute
+      - node_merge_effect
+      - node_merge_gate_effect
+      - node_merge_override_alarm_effect
+      - node_merge_sweep_effect
+      - node_merge_sweep_orchestrator
+      - node_merge_sweep_plan_compute
+      - node_merge_sweep_reading_compute
+      - node_merge_sweep_request_compute
+      - node_merge_sweep_state_reducer
+      - node_metering_summary_refresh_compute
+      - node_model_health_effect
+      - node_morning_friction_sweep_orchestrator
+      - node_morning_ground_state_orchestrator
+      - node_onboarding_orchestrator
+      - node_onex_setup_effect
+      - node_overlay_drift_compute_scheduled_effect
+      - node_overlay_drift_scheduled_effect
+      - node_pr_arm_gate_compute
+      - node_pr_landing_github_effect
+      - node_pr_landing_orchestrator
+      - node_pr_lifecycle_state_reducer
+      - node_process_health_effect
+      - node_prod_promotion_gate_compute
+      - node_prod_promotion_grant_resolver_effect
+      - node_projection_cost_by_repo
+      - node_projection_delegation_inference_response
+      - node_projection_event_chain
+      - node_projection_mcp_tools
+      - node_projection_query_api_effect
+      - node_projection_traces
+      - node_readiness_gate_orchestrator
+      - node_readiness_scorer_compute
+      - node_rebase_effect
+      - node_red_main_alarm_effect
+      - node_redeploy_deploy_effect
+      - node_redeploy_orchestrator
+      - node_registration_orchestrator
+      - node_registry_effect
+      - node_release_sibling_premise_effect
+      - node_remote_agent_invoke_effect
+      - node_remote_lane_start_effect
+      - node_remote_lane_start_orchestrator
+      - node_repo_health_classify_compute
+      - node_repo_health_repair_effect
+      - node_repo_state_query_effect
+      - node_runtime_closeout_orchestrator
+      - node_schedule_run_reducer
+      - node_schedule_verdict_effect
+      - node_setup_orchestrator
+      - node_slack_publish_effect
+      - node_swarm_subtask_state_reducer
+      - node_sweep_outcome_classify
+      - node_thread_reply_effect
+      - node_throughput_tick_decision_compute
+      - node_ticket_closer_scheduled_effect
+      - node_typed_decision_effect
+      - node_verification_sweep_orchestrator
+      - node_view_seam_reading_reducer
+      - node_work_ledger_append_effect
+      - node_work_ledger_bus_mirror
+      - node_work_ledger_delegation_mirror
+      - node_work_ledger_emit_effect
+      - node_work_ledger_reader_effect
+      - node_work_ledger_reducer_scheduled_effect
+      - node_work_progress_alert_effect
+      - node_work_state_projection_scheduled_effect
+      - node_workflow_contract_catalog_effect
+      - node_workflow_gateway_effect
+      - platform_diagnostics
+      - pr_lifecycle_fix_effect
+      - pr_lifecycle_orchestrator
+      - pr_merged_projection
+      - projection_alert_channel_liveness
+      - projection_board_probe_results
+      - projection_claude_hook_events
+      - projection_consumer_flow
+      - projection_context_roi
+      - projection_delegation
+      - projection_delegation_budget_readings
+      - projection_dod_verdict
+      - projection_eval_results
+      - projection_freshness_alert_effect
+      - projection_goal_trace
+      - projection_hook_ledger
+      - projection_infra_routing_decisions
+      - projection_lab_job
+      - projection_live_events
+      - projection_local_alerts
+      - projection_local_environment
+      - projection_metering_summary
+      - projection_pr_landing
+      - projection_prod_promotion_gate
+      - projection_provider_quota
+      - projection_registration
+      - projection_routing_feedback
+      - projection_run_trace
+      - projection_savings
+      - projection_session_replay
+      - projection_tenant_credentials
+      - projection_topic_activity
+      - projection_work_events
+      - projection_work_ledger
+      - retention_cleanup
+      - runtime_deploy_effect
+      - topic_activity_sampler_effect
+      - work_ledger_render_effect

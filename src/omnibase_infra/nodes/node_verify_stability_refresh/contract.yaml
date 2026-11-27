@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_verify_stability_refresh
+contract_name: node_verify_stability_refresh
+node_name: node_verify_stability_refresh
+node_type: EFFECT_GENERIC
+descriptor:
+  node_archetype: effect
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  The stability refresh health gate's Kafka API reads (cluster health, the partition cap, topic and group listings), taken inside the stability broker container as the declared superuser principal stability-refresh-gate once the broker requires SASL. The password is read by name from the refresh's operator env and reaches docker as RPK_PASS, never on a command line; with no password set the read stays anonymous, as on a PLAINTEXT broker. scripts/runtime_build/verify_stability_refresh.py builds every rpk argv through this handler.
+input_model:
+  name: ModelVerifyStabilityRefreshRpkRequest
+  module: omnibase_infra.models.model_verify_stability_refresh_rpk_request
+  description: The broker container and the rpk arguments of one read.
+output_model:
+  name: ModelVerifyStabilityRefreshRpkResult
+  module: omnibase_infra.models.model_verify_stability_refresh_rpk_result
+  description: rpk's exit code and output, and whether the read went as the gate's principal.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: read_kafka_api
+      handler: {name: HandlerVerifyStabilityRefresh, module: omnibase_infra.handlers.handler_verify_stability_refresh}
+capabilities:
+  - name: stability_lane.refresh_health_gate_auth
+    description: Let the stability refresh health gate read a SASL broker as its own declared principal.
+metadata:
+  ticket: OMN-25927
+  author: OmniNode Team
+  description: Host-local effect run by the stability refresh. No runtime bus dependency and no prod or customer runner admission.
+  tags: [effect, deployment, stability]

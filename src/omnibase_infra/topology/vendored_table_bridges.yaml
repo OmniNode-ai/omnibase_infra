@@ -26,3 +26,79 @@
   prefix: ""
   opts: {schema: public}
   tables: [experiment_arm_results]
+# OMN-25505: infra vendors the eval results tables ahead of the node contract.
+# The tenant projection writer receives the table grants; FORCE RLS is fenced.
+- ticket: OMN-25505
+  node: node_projection_eval_results
+  create: 0000_create_eval_results_tables.sql
+  prefix: ""
+  opts: {schema: public}
+  tables: [eval_item_scores, eval_item_traces, eval_run_closes, eval_run_rates]
+# OMN-25104: infra vendors done_items (node_projection_done_items 0000-0001)
+# ahead of the omnimarket node contract; 0001 grants omninode_runtime SELECT,
+# INSERT, UPDATE. Retired when the omnimarket pin carries the node.
+- ticket: OMN-25104 # omnimarket OMN-25104
+  node: node_projection_done_items
+  create: 0000_create_done_items.sql
+  prefix: ""
+  opts: {}
+  tables: [done_items]
+# OMN-25103: infra vendors floor_integration_rows (node_projection_floor_integration
+# 0000-0001) ahead of the omnimarket node contract; 0001 grants omninode_runtime
+# SELECT, INSERT, UPDATE, DELETE. Retired when the omnimarket pin carries the node.
+- ticket: OMN-25103 # omnimarket OMN-25103
+  node: node_projection_floor_integration
+  create: 0000_create_floor_integration_rows.sql
+  prefix: ""
+  opts: {}
+  tables: [floor_integration_rows]
+# OMN-25103 AC7: infra vendors floor_integration_pass, the held-pass marker
+# (node_projection_floor_integration 0002-0003) ahead of the omnimarket node
+# contract; 0003 grants omninode_runtime SELECT, INSERT, UPDATE (the marker is
+# only upserted, never deleted). Written by omnimarket#6420; retired when the
+# omnimarket pin carries the node.
+- ticket: OMN-25103 # omnimarket OMN-25103
+  node: node_projection_floor_integration
+  create: 0002_create_floor_integration_pass.sql
+  prefix: ""
+  opts: {}
+  tables: [floor_integration_pass]
+# OMN-26663: infra vendors lab_alerts (node_projection_lab_alerts 0000-0001) ahead
+# of the omnimarket node contract (omnimarket#6788); 0001 grants omninode_runtime
+# SELECT, INSERT, UPDATE and no DELETE: a cleared alert stays as a cleared row.
+# Retired when the omnimarket pin carries the node.
+- ticket: OMN-26663 # omnimarket#6788
+  node: node_projection_lab_alerts
+  create: 0000_create_lab_alerts.sql
+  prefix: ""
+  opts: {}
+  tables: [lab_alerts]
+# OMN-26708: infra vendors lane_work_workflow (node_projection_lane_work 0000-0001) ahead
+# of the omnimarket node contract (omnimarket#6964's projection node); 0001 grants
+# omninode_runtime SELECT, INSERT, UPDATE and no DELETE: a workflow's row is never removed.
+# Retired when the omnimarket pin carries the node.
+- ticket: OMN-26708
+  node: node_projection_lane_work
+  create: 0000_create_lane_work_workflow.sql
+  prefix: ""
+  opts: {}
+  tables: [lane_work_workflow]
+# OMN-26635: infra vendors the overlay store write tables (node_projection_overlay_store
+# 0003-0004) ahead of the omnimarket node contract; 0004 grants omninode_runtime
+# SELECT, INSERT, UPDATE. Retired when omnimarket#6761 reaches the pin.
+- ticket: OMN-26635 # omnimarket#6761
+  node: node_projection_overlay_store
+  create: 0003_overlay_store_revision_provenance_audit.sql
+  prefix: overlay_store_
+  opts: {}
+  tables: [revision, write, provenance, audit]
+# OMN-26444: infra vendors savings_priced_models (node_projection_savings 102)
+# ahead of the omnimarket node contract pin. The metering-summary refresh
+# refills the priced-models manifest. Retired when the omnimarket pin
+# carries node_projection_metering_summary's savings_priced_models decl.
+- ticket: OMN-26444 # omnimarket OMN-26444
+  node: node_projection_savings
+  create: 102_delegation_savings_unpriced_matches_refresh.sql
+  prefix: ""
+  opts: {schema: public, access: read_write, role: savings_priced_models}
+  tables: [savings_priced_models]

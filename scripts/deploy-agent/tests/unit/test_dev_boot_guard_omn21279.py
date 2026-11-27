@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock
 from uuid import uuid4
@@ -65,9 +66,27 @@ def _containers(*, healthy: bool = True) -> list[dict]:
     ]
 
 
+def without_env_unset(argv: list[str]) -> list[str]:
+    """``argv`` without the ``env -u NAME ...`` prefix the guard runs its commands under (OMN-26316)."""
+    if argv[:1] != ["env"]:
+        return argv
+    rest = argv[1:]
+    while rest[:1] == ["-u"] or (rest and "=" in rest[0] and rest[0][0].isupper()):
+        rest = rest[2:] if rest[0] == "-u" else rest[1:]
+    return rest
+
+
 @pytest.fixture
 def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
-    state = {"containers": _containers(), "logs": "", "commands": []}
+    state = {
+        "containers": _containers(),
+        "logs": "",
+        "commands": [],
+        "raw_commands": [],
+        "ledger": '{"status": "ok", "rows": []}',
+        "ledger_exit": 0,
+        "ledger_raises": None,
+    }
     project = executor_mod.lane_config_for(EnumRuntimeLane.DEV).compose_project
     state["compose"] = {
         "name": project,
@@ -88,6 +107,8 @@ def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
     }
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        state["raw_commands"].append(list(argv))
+        argv = without_env_unset(argv)
         state["commands"].append(argv)
         output = ""
         if argv[:2] == ["docker", "ps"]:
@@ -96,6 +117,13 @@ def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
             output = json.dumps(state["containers"])
         elif argv[:2] == ["docker", "logs"]:
             output = state["logs"]
+        elif argv[0].endswith("/scripts/onex"):
+            # OMN-25942: the post-roll work-ledger proof.
+            if state["ledger_raises"] is not None:
+                raise state["ledger_raises"]
+            return subprocess.CompletedProcess(
+                argv, state["ledger_exit"], state["ledger"], ""
+            )
         elif "config" in argv:
             output = (
                 "\n".join(f"{s} hash-{s}" for s in SERVICES)
@@ -108,6 +136,10 @@ def docker(monkeypatch: pytest.MonkeyPatch) -> dict:
         return subprocess.CompletedProcess(argv, 0, output, "")
 
     monkeypatch.setattr(executor_mod, "_run", run)
+    # OMN-25942: the post-roll proof reads its declaration from the deploy-source clone.
+    monkeypatch.setattr(
+        executor_mod, "deploy_repo_dir", lambda: str(Path(__file__).parents[4])
+    )
     state["deliver_reports"] = guard_mod.deliver_reports
     monkeypatch.setattr(guard_mod, "deliver_reports", Mock())
     return state
@@ -573,36 +605,77 @@ def test_reporting_outage_keeps_status_and_exception_pending_for_retry(
         "project": "omnibase-infra",
         "restored_revision": GOOD_COMMIT,
         "recovery_verified": True,
-        "at": "2026-10-25T15:46:43Z",
+        # Inside the abandon bound: an incident older than it is not retried (OMN-26316).
+        "at": (datetime.now(UTC) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "ledger_pending": True,
         "exception_pending": True,
     }
     executor_mod._atomic_write_private_json(path, incident)
+    # The bus append command is a real child process (the guard runs it through one shell);
+    # it records what it was given and answers with the receipt status in `status.txt`.
+    append = tmp_path / "append.py"
+    seen = tmp_path / "seen.jsonl"
+    status = tmp_path / "status.txt"
+    status.write_text("spooled", encoding="utf-8")
+    append.write_text(
+        "import json, sys\n"
+        f"open({str(seen)!r}, 'a').write(json.dumps({{'argv': sys.argv[1:], 'stdin': sys.stdin.read()}}) + '\\n')\n"
+        f"print(json.dumps({{'status': open({str(status)!r}).read(), 'exit_code': 0}}))\n",
+        encoding="utf-8",
+    )
     monkeypatch.setenv("ONEX_LEDGER_WRITE_VIA", "bus")
+    monkeypatch.setenv(
+        "ONEX_LEDGER_BUS_APPEND_COMMAND", f"{sys.executable} {append} --bus-lane dev"
+    )
+    monkeypatch.setenv("ONEX_LEDGER_HOST_NAME", "h-test")
     monkeypatch.setenv("DEPLOY_AGENT_REPORT_PLUGIN_DIR", str(tmp_path / "plugin"))
     run = Mock(return_value=subprocess.CompletedProcess([], 75, "", "bus unavailable"))
-    monkeypatch.setattr(executor_mod, "_run", run)
+
+    def routed(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        argv = without_env_unset(argv)
+        if argv[0] != "bash":
+            return run(argv, **kwargs)
+        return subprocess.run(
+            argv, capture_output=True, text=True, timeout=20, check=False
+        )
+
+    monkeypatch.setattr(executor_mod, "_run", routed)
+    # The row's stamp is read per delivery; a delivery pair that straddles a second
+    # boundary would otherwise differ in the stamp alone, so the retry-sends-the-same-row
+    # assertion below would fail by timing rather than by content.
+    monkeypatch.setattr(
+        executor_mod, "_dev_boot_timestamp", lambda: "2026-11-24T14:28:05Z"
+    )
     executor_mod.deliver_dev_boot_reports(root)
     assert json.loads(path.read_text())["ledger_pending"] is True
     assert json.loads(path.read_text())["exception_pending"] is True
     run.side_effect = [
-        subprocess.CompletedProcess([], 0, "OK line=42 via=bus status=accepted", ""),
         subprocess.CompletedProcess(
             [], 0, "EXCEPTION-QUEUE appended id=boot-failed", ""
         ),
     ]
+    status.write_text("accepted", encoding="utf-8")
     executor_mod.deliver_dev_boot_reports(root)
     stored = json.loads(path.read_text())
     assert stored["ledger_pending"] is False and stored["exception_pending"] is False
     assert BAD_COMMIT in str(run.call_args_list)
     assert "BIFROST_BASE_CONTRACT_PATH" in str(run.call_args_list)
-    status_rows = [
-        call.args[0][-1] for call in run.call_args_list if "--append" in call.args[0]
-    ]
-    assert len(status_rows) == 2 and status_rows[0] == status_rows[1]
+    # The STATUS row went to the bus append command on stdin (lane, host, request id, rows
+    # from stdin); the first delivery was spooled and kept it pending, the second took it.
+    sent = [json.loads(line) for line in seen.read_text().splitlines()]
+    assert len(sent) == 2 and sent[0] == sent[1]
+    assert BAD_COMMIT in sent[0]["stdin"] and "| STATUS |" in sent[0]["stdin"]
+    assert sent[0]["stdin"].count("\n") == 1
+    argv = sent[0]["argv"]
+    assert argv[:2] == ["--bus-lane", "dev"]
+    assert argv[argv.index("--lane") + 1] == "deploy-agent-omnibase-infra"
+    assert argv[argv.index("--host") + 1] == "h-test"
+    assert argv[argv.index("--rows-file") + 1] == "-"
+    assert not any("--append" in call.args[0] for call in run.call_args_list)
     calls = run.call_count
     executor_mod.deliver_dev_boot_reports(root)
     assert run.call_count == calls
+    assert len(seen.read_text().splitlines()) == 2
 
 
 def test_second_failed_job_leaves_a_family_the_first_recovery_restored_running(

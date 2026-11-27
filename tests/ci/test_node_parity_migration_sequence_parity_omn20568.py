@@ -35,7 +35,7 @@ from omnibase_infra.nodes.node_migration_sequence_check_compute import (
 from omnibase_infra.nodes.node_migration_sequence_check_compute.models import (
     ModelMigrationSequenceCheckInput,
 )
-from tests.ci.recorded_verdicts import RecordedVerdicts, normalise_git_error
+from tests.ci.recorded_verdicts import RecordedVerdicts
 
 RECORDED = RecordedVerdicts(
     Path(__file__).resolve().parents[1]
@@ -351,9 +351,18 @@ def test_node_parity_migration_sequence_parity_git_failure(
     old_output = capsys.readouterr()
     node_exit = node_runtime.main([str(tmp_path)])
     node_output = capsys.readouterr()
-    assert node_exit == old_exit == 2
+    # The removed script relayed git's usage block with exit 2; the node reports
+    # git's own discovery failure with git's status, 128 (OMN-22867). Stdout stays
+    # at parity; the divergence is pinned here and in
+    # test_migration_sequence_check_node.py::TestGitDiscoveryFailure.
+    assert old_exit == 2
+    assert node_exit == 128
     assert node_output.out == old_output.out
-    assert normalise_git_error(node_output.err) == normalise_git_error(old_output.err)
+    assert "usage:" not in node_output.err.lower()
+    assert any(
+        line.startswith("fatal: not a git repository")
+        for line in node_output.err.splitlines()
+    )
 
 
 @pytest.mark.unit

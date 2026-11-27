@@ -99,7 +99,7 @@ class TestInstanceCompositionIsData:
         )
         cfg = configs["dev-999"]
         assert cfg.lane is EnumRuntimeLane.DEV
-        assert cfg.compose_project == cfg.build_project == "omnibase-infra-dev-999"
+        assert cfg.compose_project == "omnibase-infra-dev-999"
         assert cfg.compose_files[-1] == "/r/docker/docker-compose.dev-999.yml"
         assert [Path(f).name for f in cfg.compose_files] == [
             "docker-compose.infra.yml",
@@ -136,7 +136,6 @@ class TestInstanceCompositionIsData:
                 ),
             ),
             compose_project="omnibase-infra-dev-202",
-            build_project="omnibase-infra-dev-202",
             postgres_container="omnibase-infra-dev-202-postgres",
             runtime_health_targets=(
                 ("omninode-runtime", 61085),

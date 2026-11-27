@@ -6,6 +6,11 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "kafka-python>=2.0.2",
+    # OMN-26106: kafka-python decodes a snappy-compressed record only through
+    # `import snappy` (python-snappy; `cramjam` does not satisfy it). Without it
+    # the agent's consumer raises UnsupportedCodecError on the first snappy
+    # record on the deploy topic, measured 2026-11-27T06:12:04Z on h201.
+    "python-snappy>=0.7.3",
     # OMN-18913: use the shared topic namespace, including in the standalone agent venv.
     "omnibase-infra>=0.38.36,<0.39",
     "pydantic>=2.0",
@@ -72,6 +77,7 @@ markers = [
     "cost_estimator_build: exercises the real estimator build settings and host effect",
     "llm_endpoint_env_render: exercises the real render of the dev lane embedding address from the llm_endpoints overlay",
     "unit: unit tests in isolation",
+    "product_clone_pin: test drives the real write of the dev runtime product clone pin file (OMN-25901)",
     "dev_boot_guard: test drives the real dev boot guard and recovery store (OMN-21279)",
     "runtime_boot_gate: test drives the candidate-image boot gate (OMN-21279)",
     "promotion_guard: test controls the prod promotion-lineage guard stub itself (OMN-12626)",

@@ -136,7 +136,6 @@ def warm_lane(
             compose_project=project,
             postgres_container=f"{project}-postgres",
             runtime_health_targets=(("omninode-runtime", 0),),
-            build_project=project,
         )
         monkeypatch.setattr(executor_mod, "lane_config_for", lambda lane: config)
         monkeypatch.setattr(

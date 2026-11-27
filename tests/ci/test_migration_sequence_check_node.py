@@ -10,7 +10,9 @@ subtree exclusions, report wording, and Git errors. Also pins CLI exit codes.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,6 +21,7 @@ import pytest
 from omnibase_core.models.validation.model_validation_report import (
     ModelValidationReport,
 )
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from omnibase_infra.nodes.node_migration_sequence_check_compute import (
     runtime_migration_sequence_check as runtime,
 )
@@ -320,6 +323,79 @@ class TestGitErrorHandling:
                 match=r"git diff --cached failed \(exit 128\): not a git repository",
             ):
                 runtime.collect_input(tmp_path)
+
+
+class TestGitDiscoveryFailure:
+    """A hook run where git cannot find the repository reports git's own words.
+
+    Outside a repository ``git diff --cached`` reads as ``git diff --no-index``
+    and prints ``error: unknown option `cached'`` and a usage block (exit 129).
+    The hook relayed that block with exit 2, which the lane hook preflight reads
+    as a hook with a wrong command line (``hook-usage-error``) and so ends the
+    lane; the failure is the environment's, git discovery, and git's own exit is
+    128 with ``fatal: not a git repository``, which the preflight retries
+    outside its sandbox (OMN-22867).
+    """
+
+    def _run_hook(self, directory: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-m", runtime.__name__, str(directory)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            env=scrub_git_location_env(os.environ),
+        )
+
+    def _assert_no_repository_above(self, directory: Path) -> None:
+        probe = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            env=scrub_git_location_env(os.environ),
+        )
+        assert probe.returncode == 128, (
+            f"{directory} sits inside a git repository: {probe.stdout}"
+        )
+
+    def test_hook_outside_a_repository_exits_with_gits_discovery_status(
+        self, tmp_path: Path
+    ) -> None:
+        self._assert_no_repository_above(tmp_path)
+        completed = self._run_hook(tmp_path)
+        assert completed.returncode == 128, completed.stderr
+
+    def test_hook_outside_a_repository_prints_no_git_usage_block(
+        self, tmp_path: Path
+    ) -> None:
+        self._assert_no_repository_above(tmp_path)
+        completed = self._run_hook(tmp_path)
+        assert "usage:" not in completed.stderr.lower(), completed.stderr
+        assert "unknown option" not in completed.stderr.lower(), completed.stderr
+
+    def test_hook_outside_a_repository_names_the_git_discovery_failure(
+        self, tmp_path: Path
+    ) -> None:
+        self._assert_no_repository_above(tmp_path)
+        completed = self._run_hook(tmp_path)
+        assert any(
+            line.startswith("fatal: not a git repository")
+            for line in completed.stderr.splitlines()
+        ), completed.stderr
+
+    def test_hook_inside_a_repository_still_passes(self, tmp_path: Path) -> None:
+        subprocess.run(
+            ["git", "init", "-q", str(tmp_path)],
+            check=True,
+            capture_output=True,
+            env=scrub_git_location_env(os.environ),
+        )
+        completed = self._run_hook(tmp_path)
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stderr == ""
 
 
 class TestMain:

@@ -2,15 +2,15 @@
   "corpus": {
     "contracts_by_package": {
       "omnibase_core": 21,
-      "omnibase_infra": 164
+      "omnibase_infra": 182
     },
-    "contracts_discovered": 185,
+    "contracts_discovered": 203,
     "discovery_errors": 0,
-    "distinct_subscribe_topics": 104,
-    "probe_count": 1141,
-    "registered_dispatchers": 140,
-    "registered_routes": 123,
-    "type_scoped_dispatchers": 87
+    "distinct_subscribe_topics": 108,
+    "probe_count": 1154,
+    "registered_dispatchers": 147,
+    "registered_routes": 128,
+    "type_scoped_dispatchers": 92
   },
   "exclusions": [
     {
@@ -46,10 +46,10 @@
     "omnimemory",
     "onex-change-control"
   ],
-  "generated_at_utc": "2026-11-19T02:07:31.637560+00:00",
+  "generated_at_utc": "2026-11-27T23:10:35.467193+00:00",
   "installed_package_versions": {
-    "omnibase-core": "0.47.73.dev9+ga09066ca",
-    "omnibase-infra": "0.38.77",
+    "omnibase-core": "0.47.81.dev3+gce48c176d",
+    "omnibase-infra": "0.38.87",
     "omniclaude": null,
     "omniintelligence": null,
     "omnimarket": null,

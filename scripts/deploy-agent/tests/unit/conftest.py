@@ -100,6 +100,63 @@ def _stub_deploy_source_clone_creation(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_recreate_window_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An agent built by an unrelated test carries no recreate window gate (OMN-25912).
+
+    The gate reads the checkout's rendered policy and the wall clock, so a test of the
+    converge rule would otherwise depend on the hour. A test that sets ``_recreate_gate``
+    on its agent gets the real window decision; every other agent is admitted.
+    """
+    real = agent_mod.load_dev_boot_guard
+
+    def loader(effect: str = "handler_dev_boot_guard") -> Any:
+        if effect != agent_mod.DEV_ROLL_EVENTS:
+            return real(effect)
+        module = real(effect)
+        return SimpleNamespace(
+            window_admits=lambda agent, who: (
+                module.window_admits(agent, who)
+                if hasattr(agent, "_recreate_gate")
+                else True
+            ),
+            lane_build_gate=lambda agent: (
+                module.lane_build_gate(agent)
+                if hasattr(agent, "_recreate_gate")
+                else getattr(agent, "_load_gate", None)
+            ),
+            registered_installs=module.registered_installs,
+        )
+
+    monkeypatch.setattr(agent_mod, "load_dev_boot_guard", loader)
+
+
+@pytest.fixture(autouse=True)
+def _candidate_self_check_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A self-update test drives the pull and the re-exec, not the candidate's self-check (OMN-26494).
+
+    The self-check runs the candidate clone's idle ticks in a subprocess, and its bounds come
+    from the clone's node contract; a test clone has neither a source tree nor a contract.
+    Every agent test therefore sees a passing self-check, and
+    ``test_agent_adoption_omn26494.py`` restores the real one for what it proves.
+    """
+    from deploy_agent.executor import load_dev_boot_guard
+
+    adoption = load_dev_boot_guard(
+        "nodes.node_dev_roll_events_effect.runtime_dev_agent_adoption"
+    )
+    monkeypatch.setattr(
+        adoption,
+        "candidate_self_check",
+        lambda agent_dir, run, settings: subprocess.CompletedProcess([], 0, "", ""),
+    )
+    monkeypatch.setattr(
+        adoption,
+        "settings_at",
+        lambda root: adoption.AdoptionSettings(5, 600, "agent-adoption.json", 300, 60),
+    )
+
+
+@pytest.fixture(autouse=True)
 def _no_ledger_append_route(monkeypatch: pytest.MonkeyPatch) -> None:
     """A unit test never appends a job reading row to the host's real ledger (OMN-24617).
 
@@ -125,6 +182,26 @@ def _stub_cost_estimator_build_settings(
         "nodes.node_setup_local_provision_effect.runtime_cost_estimator_build"
     )
     monkeypatch.setattr(effect, "dev_lane_build_settings", lambda *args: None)
+
+
+@pytest.fixture(autouse=True)
+def _stub_product_clone_pin_write(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A unit test never writes the dev runtime's pin file under the host's registry root (OMN-25901).
+
+    ``runtime_overlay_revision.apply`` writes it from ``REPO_DIR``, a deploy host path.
+    The pin writer's own suite opts out with the ``product_clone_pin`` marker.
+    """
+    if request.node.get_closest_marker("product_clone_pin") is not None:
+        return
+    monkeypatch.setattr(
+        executor_mod.load_dev_boot_guard(
+            "nodes.node_setup_local_provision_effect.runtime_overlay_revision"
+        ),
+        "write_product_clone_pins",
+        lambda execution: None,
+    )
 
 
 @pytest.fixture(autouse=True)

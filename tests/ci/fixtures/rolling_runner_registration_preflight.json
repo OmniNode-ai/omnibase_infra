@@ -1,9 +1,9 @@
 {
   "_provenance": {
-    "source": "Unstubbed rolling CLI missing-token preflight, re-run with ssh, scp, rsync, docker, curl and gh shimmed to fail and record any call (none was made); no external API or credential-backed registration performed; re-captured 2026-11-06 after OMN-22478 changed the retire route idle read and added the hook mount drift cron to the freshness cron install: same refusal text, returncode 1 and no ssh, scp, rsync, docker, curl or gh call in either mode; re-captured 2026-11-13 after OMN-24299 added two fields to the prepare effect payload line: same refusal text, returncode 1 and no external call in either mode",
-    "captured_utc": "2026-11-13T19:05:08.000000+00:00",
+    "source": "Unstubbed rolling CLI missing-token preflight, re-run with ssh, scp, rsync, docker, curl and gh shimmed to fail and record any call (none was made); no external API or credential-backed registration performed; re-captured 2026-11-06 after OMN-22478 changed the retire route idle read and added the hook mount drift cron to the freshness cron install: same refusal text, returncode 1 and no ssh, scp, rsync, docker, curl or gh call in either mode; re-captured 2026-11-13 after OMN-24299 added two fields to the prepare effect payload line: same refusal text, returncode 1 and no external call in either mode; re-captured 2026-11-16 after OMN-24864 moved the retire route idle read to the container's own evidence: same refusal text, returncode 1 and no ssh, scp, rsync, docker, curl or gh call in either mode; re-captured for OMN-25796 with the same primary refusal text and no transport calls in either mode; re-captured 2026-11-19 after the secondary --rolling combination refusal text changed: same primary refusal text, returncode 1 and no transport call in either mode; re-captured 2026-11-19 after OMN-26098 added one lab_host_table_projection argument to the prepare effect and the image roll payload lines: same primary refusal text, returncode 1 and no ssh, scp, rsync, docker, curl or gh call in either mode; re-captured 2026-11-20 after OMN-26105 added the --retire-pool dispatch and tightened the --help text: same primary refusal text, returncode 1 and no ssh, scp, rsync, docker, curl or gh call in either mode",
+    "captured_utc": "2026-11-20T00:46:00.000000+00:00",
     "source_file": "scripts/deploy-runners.sh",
-    "source_sha256": "922e2db047a7f058c8b414a09a42ef7294658a1308c9eec1bdd7adb1cfacfa9a"
+    "source_sha256": "e6525ddfbd321a0cea12cb2a236e010fc1a1739a5a3d94df60d36810e8d49895"
   },
   "responses": {
     "normal": {

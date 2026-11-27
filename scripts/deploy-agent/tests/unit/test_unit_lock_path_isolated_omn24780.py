@@ -13,7 +13,7 @@ follow-test lost that race (KeyError ``sibling_tags``) and failed CI Summary.
 from __future__ import annotations
 
 import fcntl
-import tempfile
+import os
 from pathlib import Path
 
 import pytest
@@ -28,7 +28,9 @@ _HOST_GLOBAL_LOCK = lock_mod._LOCK_PATH
 @pytest.mark.unit
 def test_the_default_lock_path_is_the_host_global_file() -> None:
     """Positive control: the path this module captured at import is the shared file."""
-    assert Path(tempfile.gettempdir(), "deploy-agent.lock") == _HOST_GLOBAL_LOCK
+    # lock.py fixes the file at the root's tmp directory so every process on the host
+    # shares it; the test process's own tempdir (TMPDIR) is not that directory.
+    assert Path(os.sep, "tmp", "deploy-agent.lock") == _HOST_GLOBAL_LOCK
 
 
 @pytest.mark.unit

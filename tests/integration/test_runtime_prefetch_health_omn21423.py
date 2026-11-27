@@ -62,8 +62,7 @@ async def test_prefetch_before_construction_preserves_native_runtime_health(
     try:
         await runtime.start()
         assert health._site is not None
-        assert health._site._server is not None
-        port = health._site._server.sockets[0].getsockname()[1]
+        port = health._site.port
         async with (
             aiohttp.ClientSession() as session,
             session.get(f"http://127.0.0.1:{port}/health") as response,

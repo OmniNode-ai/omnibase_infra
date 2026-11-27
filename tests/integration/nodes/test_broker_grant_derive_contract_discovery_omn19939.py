@@ -176,7 +176,8 @@ def test_discovered_derivation_feeds_the_developer_principal_issuer(
     # DESCRIBE on its failure topic, and READ and DESCRIBE on the two snapshot group prefixes.
     # OMN-23418: plus READ on the work-ledger query command topic.
     # OMN-23458: plus WRITE and DESCRIBE on the tick orchestrator's compared and compare-failed topics.
-    assert len(rows) == 212
+    # OMN-26302: plus WRITE and DESCRIBE on the host job claim run topic.
+    assert len(rows) == 214
     assert any(row.resource == "group" and row.pattern == "prefixed" for row in rows)
     assert {row.operation for row in rows if row.name == "*"} == {"describe"}
     scoped_expected = {

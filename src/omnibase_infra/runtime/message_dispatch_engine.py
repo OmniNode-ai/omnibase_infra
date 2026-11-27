@@ -133,6 +133,7 @@ __all__ = ["MessageDispatchEngine", "coerce_message_category"]
 
 import asyncio
 import functools
+import gc
 import inspect
 import logging
 import threading
@@ -156,7 +157,6 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import JsonType, PrimitiveValue
 from omnibase_infra.enums import (
     EnumDispatchStatus,
-    EnumDlqFailureClass,
     EnumInfraTransportType,
     EnumMessageCategory,
 )
@@ -178,9 +178,15 @@ from omnibase_infra.models.dispatch.model_dispatch_log_context import (
 from omnibase_infra.models.dispatch.model_dispatch_metrics import ModelDispatchMetrics
 from omnibase_infra.models.dispatch.model_dispatch_outcome import ModelDispatchOutcome
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
+from omnibase_infra.models.dispatch.model_dispatch_refusal import (
+    classify_no_dispatcher_refusal,
+)
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.dispatch.model_dispatcher_metrics import (
     ModelDispatcherMetrics,
+)
+from omnibase_infra.models.dispatch.model_failure_terminal_bindings import (
+    ModelFailureTerminalBindings,
 )
 from omnibase_infra.models.dispatch.model_materialized_dispatch import (
     ModelMaterializedDispatch,
@@ -190,16 +196,6 @@ from omnibase_infra.runtime.binding_resolver import OperationBindingResolver
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 from omnibase_infra.runtime.dispatch_envelope_context import bind_dispatch_envelope
 from omnibase_infra.utils import sanitize_error_message
-
-_VALIDATION_DETAIL_MAX_LENGTH = 500
-
-
-def _sanitize_validation_detail(detail: str) -> str:
-    """Sanitize validation detail before it reaches logs, results, or DLQ metadata."""
-    return sanitize_error_message(
-        ValueError(detail), max_length=_VALIDATION_DETAIL_MAX_LENGTH
-    )
-
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -634,6 +630,10 @@ class MessageDispatchEngine:
         # Dispatcher storage: dispatcher_id -> DispatchEntryInternal
         self._dispatchers: dict[str, DispatchEntryInternal] = {}
 
+        # owner contract name -> its dispatcher IDs, kept at registration so the
+        # per-contract scope proofs never rescan every dispatcher (OMN-26336).
+        self._ids_by_owner: dict[str, set[str]] = {}
+
         # Index for fast dispatcher lookup by category
         # category -> list of dispatcher_ids
         # NOTE: Only routable message categories are indexed here.
@@ -648,6 +648,9 @@ class MessageDispatchEngine:
         # Freeze state
         self._frozen: bool = False
         self._registration_lock: threading.Lock = threading.Lock()
+        self.failure_terminals: ModelFailureTerminalBindings = (
+            ModelFailureTerminalBindings()
+        )
 
         # Metrics lock for TOCTOU-safe structured metrics updates
         # This lock protects the entire read-modify-write sequence on _structured_metrics:
@@ -967,6 +970,8 @@ class MessageDispatchEngine:
             owner_contract_name=owner_contract_name,
         )
         self._dispatchers[dispatcher_id] = entry
+        if owner_contract_name is not None:
+            self._ids_by_owner.setdefault(owner_contract_name, set()).add(dispatcher_id)
 
         if operation_bindings is not None:
             self._logger.debug(
@@ -984,7 +989,7 @@ class MessageDispatchEngine:
             node_kind.value if node_kind else "none",
         )
 
-    def freeze(self) -> None:
+    def freeze(self, *, freeze_gc_heap: bool = False) -> None:
         """
         Freeze the engine to prevent further registration.
 
@@ -994,6 +999,12 @@ class MessageDispatchEngine:
 
         The freeze operation validates route-to-dispatcher consistency:
         all routes must reference existing dispatchers.
+
+        Args:
+            freeze_gc_heap: Also move the GC heap to the permanent generation
+                (OMN-26336), so no later full collection walks the wired graph on
+                the event loop: 0.955 s for 1.56M objects on one core. Objects
+                alive now are never collected afterwards.
 
         Raises:
             ModelOnexError: If any route references a non-existent dispatcher
@@ -1029,11 +1040,14 @@ class MessageDispatchEngine:
                     )
 
             self._frozen = True
+            self.failure_terminals.freeze()
             self._logger.info(
                 "MessageDispatchEngine frozen with %d routes and %d dispatchers",
                 len(self._routes),
                 len(self._dispatchers),
             )
+            if freeze_gc_heap:
+                gc.freeze()
 
     @property
     def is_frozen(self) -> bool:
@@ -1176,6 +1190,13 @@ class MessageDispatchEngine:
         # accept None via object type annotation.
         ctx = ModelDispatchLogContext.model_validate(kwargs)
         return ctx.to_dict()
+
+    def _log_debug(
+        self, message: str, *args: object, **context: Unpack[ModelLogContextKwargs]
+    ) -> None:
+        """Write a DEBUG line, building its log context only when DEBUG is enabled (OMN-26152)."""
+        if self._logger.isEnabledFor(logging.DEBUG):
+            self._logger.debug(message, *args, extra=self._build_log_context(**context))
 
     @traced_dispatch
     async def dispatch(
@@ -1333,15 +1354,14 @@ class MessageDispatchEngine:
                 output_events=[],
             )
 
-        # Log dispatch start at INFO level
-        self._logger.info(
+        # Log dispatch start at DEBUG level (OMN-26152): at INFO this line and its
+        # completion pair were 79.1% of the dev runtime log at 52 dispatches/s.
+        self._log_debug(
             "Dispatch started",
-            extra=self._build_log_context(
-                topic=topic,
-                category=topic_category,
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-            ),
+            topic=topic,
+            category=topic_category,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
         )
 
         # Step 2: Validate envelope category matches topic category
@@ -1408,20 +1428,17 @@ class MessageDispatchEngine:
         )
 
         # Log routing decision at DEBUG level
-        routing_source = "event_type" if normalized_event_type else "payload_class"
-        self._logger.debug(
+        self._log_debug(
             "Routing decision: %d dispatchers matched for message_type '%s' (source=%s)",
             len(matching_dispatchers),
             message_type,
-            routing_source,
-            extra=self._build_log_context(
-                topic=topic,
-                category=topic_category,
-                message_type=message_type,
-                dispatcher_count=len(matching_dispatchers),
-                correlation_id=correlation_id,
-                trace_id=trace_id,
-            ),
+            "event_type" if normalized_event_type else "payload_class",
+            topic=topic,
+            category=topic_category,
+            message_type=message_type,
+            dispatcher_count=len(matching_dispatchers),
+            correlation_id=correlation_id,
+            trace_id=trace_id,
         )
 
         if not matching_dispatchers:
@@ -1447,34 +1464,19 @@ class MessageDispatchEngine:
                 original_topic=topic,
             )
 
-            # OMN-14492: classify WHY no dispatcher matched instead of
-            # collapsing every empty-result case into the same unclassifiable
-            # "No dispatcher found" signal. When the type-scoping pass (OMN-12416)
-            # rejected at least one real candidate, a dispatcher IS registered
-            # for this event_type — the payload just failed that dispatcher's
-            # event_model validation. That is a publisher/producer defect, not
-            # a wiring gap, and gets the real pydantic ValidationError detail
-            # attached instead of a generic message.
-            if scoping_outcome.type_scoped_candidate_rejected:
-                failure_class = EnumDlqFailureClass.PUBLISHER_MALFORMED
-                error_code = EnumCoreErrorCode.ENVELOPE_VALIDATION_FAILED
-                validation_detail = _sanitize_validation_detail(
-                    scoping_outcome.validation_detail or "validation detail unavailable"
-                )
-                error_message = (
-                    f"Publisher-malformed payload for message type '{message_type}' "
-                    f"on topic '{topic}': a dispatcher IS registered for this "
-                    f"event_model, but the payload failed model_validate: "
-                    f"{validation_detail}"
-                )
-            else:
-                failure_class = EnumDlqFailureClass.NO_DISPATCHER
-                error_code = EnumCoreErrorCode.ITEM_NOT_REGISTERED
-                validation_detail = None
-                error_message = (
-                    f"No dispatcher registered for category '{topic_category}' "
-                    f"and message type '{message_type}' matching topic '{topic}'."
-                )
+            # OMN-14492: classify WHY no dispatcher matched (payload refused by a
+            # registered dispatcher's event_model, or a true wiring gap).
+            refusal = classify_no_dispatcher_refusal(
+                type_scoped_candidate_rejected=scoping_outcome.type_scoped_candidate_rejected,
+                raw_validation_detail=scoping_outcome.validation_detail,
+                message_type=message_type,
+                topic=topic,
+                topic_category=topic_category,
+            )
+            failure_class = refusal.failure_class
+            error_code = refusal.error_code
+            error_message = refusal.error_message
+            validation_detail = refusal.validation_detail
 
             # Log warning with DLQ routing info + real classification/detail
             self._logger.warning(
@@ -1515,7 +1517,14 @@ class MessageDispatchEngine:
                 error_code=error_code,
                 error_details=error_details,
                 correlation_id=correlation_id,
-                output_events=[],
+                # OMN-26026: a malformed command whose contract declares a failure
+                # topic is answered there; the DLQ address stays on the result.
+                output_events=self.failure_terminals.answer(
+                    topic=topic,
+                    refusal=refusal,
+                    correlation_id=correlation_id,
+                    payload=envelope_payload,
+                ),
             )
 
         # Step 5: Execute dispatchers and collect outputs
@@ -1531,17 +1540,15 @@ class MessageDispatchEngine:
             dispatcher_start_time = time.perf_counter()
 
             # Log dispatcher execution at DEBUG level
-            self._logger.debug(
+            self._log_debug(
                 "Executing dispatcher '%s'",
                 dispatcher_entry.dispatcher_id,
-                extra=self._build_log_context(
-                    topic=topic,
-                    category=topic_category,
-                    message_type=message_type,
-                    dispatcher_id=dispatcher_entry.dispatcher_id,
-                    correlation_id=correlation_id,
-                    trace_id=trace_id,
-                ),
+                topic=topic,
+                category=topic_category,
+                message_type=message_type,
+                dispatcher_id=dispatcher_entry.dispatcher_id,
+                correlation_id=correlation_id,
+                trace_id=trace_id,
             )
 
             try:
@@ -1594,19 +1601,17 @@ class MessageDispatchEngine:
                     )
 
                 # Log dispatcher completion at DEBUG level
-                self._logger.debug(
+                self._log_debug(
                     "Dispatcher '%s' completed successfully in %.2f ms",
                     dispatcher_entry.dispatcher_id,
                     dispatcher_duration_ms,
-                    extra=self._build_log_context(
-                        topic=topic,
-                        category=topic_category,
-                        message_type=message_type,
-                        dispatcher_id=dispatcher_entry.dispatcher_id,
-                        duration_ms=dispatcher_duration_ms,
-                        correlation_id=correlation_id,
-                        trace_id=trace_id,
-                    ),
+                    topic=topic,
+                    category=topic_category,
+                    message_type=message_type,
+                    dispatcher_id=dispatcher_entry.dispatcher_id,
+                    duration_ms=dispatcher_duration_ms,
+                    correlation_id=correlation_id,
+                    trace_id=trace_id,
                 )
 
                 # Normalize dispatcher output using ModelDispatchOutcome to avoid
@@ -1761,24 +1766,23 @@ class MessageDispatchEngine:
                 matched_route_id = route.route_id
                 break
 
-        # Log dispatch completion at INFO level
+        # Log dispatch completion: success at DEBUG (OMN-26152, the start/completion
+        # pair was 79.1% of the dev runtime log), failure at ERROR
         # Use empty string sentinel to avoid str | None union in local scope
         dispatcher_ids_str: str = (
             ", ".join(executed_dispatcher_ids) if executed_dispatcher_ids else ""
         )
         if status == EnumDispatchStatus.SUCCESS:
-            self._logger.info(
+            self._log_debug(
                 "Dispatch completed successfully",
-                extra=self._build_log_context(
-                    topic=topic,
-                    category=topic_category,
-                    message_type=message_type,
-                    dispatcher_id=dispatcher_ids_str,
-                    dispatcher_count=len(executed_dispatcher_ids),
-                    duration_ms=duration_ms,
-                    correlation_id=correlation_id,
-                    trace_id=trace_id,
-                ),
+                topic=topic,
+                category=topic_category,
+                message_type=message_type,
+                dispatcher_id=dispatcher_ids_str,
+                dispatcher_count=len(executed_dispatcher_ids),
+                duration_ms=duration_ms,
+                correlation_id=correlation_id,
+                trace_id=trace_id,
             )
         else:
             self._logger.error(
@@ -3192,21 +3196,10 @@ class MessageDispatchEngine:
                     ),
                     error_code=EnumCoreErrorCode.DUPLICATE_REGISTRATION,
                 )
-            prepared_owner_names = frozenset(dispatcher_owners.values())
-            existing_owner_scopes = {
-                owner_name: tuple(
-                    sorted(
-                        dispatcher_id
-                        for dispatcher_id, entry in self._dispatchers.items()
-                        if entry.owner_contract_name == owner_name
-                    )
-                )
-                for owner_name in prepared_owner_names
-            }
             conflicting_owner_scopes = {
-                owner_name: dispatcher_scope
-                for owner_name, dispatcher_scope in existing_owner_scopes.items()
-                if dispatcher_scope
+                owner_name: tuple(sorted(self._ids_by_owner[owner_name]))
+                for owner_name in frozenset(dispatcher_owners.values())
+                if self._ids_by_owner.get(owner_name)
             }
             if conflicting_owner_scopes:
                 raise ModelOnexError(
@@ -3243,7 +3236,9 @@ class MessageDispatchEngine:
             )
         dispatcher_scope = frozenset(raw_dispatcher_ids)
         with self._registration_lock:
-            unknown_dispatcher_ids = dispatcher_scope.difference(self._dispatchers)
+            unknown_dispatcher_ids = {
+                d for d in dispatcher_scope if d not in self._dispatchers
+            }
             if unknown_dispatcher_ids:
                 raise ModelOnexError(
                     message=(
@@ -3253,10 +3248,10 @@ class MessageDispatchEngine:
                     ),
                     error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
                 )
+            complete_owner_scope = frozenset(self._ids_by_owner.get(contract_name, ()))
             invalid_owners = {
                 dispatcher_id: self._dispatchers[dispatcher_id].owner_contract_name
-                for dispatcher_id in dispatcher_scope
-                if self._dispatchers[dispatcher_id].owner_contract_name != contract_name
+                for dispatcher_id in dispatcher_scope - complete_owner_scope
             }
             if invalid_owners:
                 raise ModelOnexError(
@@ -3266,11 +3261,6 @@ class MessageDispatchEngine:
                     ),
                     error_code=EnumCoreErrorCode.INVALID_CONFIGURATION,
                 )
-            complete_owner_scope = frozenset(
-                dispatcher_id
-                for dispatcher_id, entry in self._dispatchers.items()
-                if entry.owner_contract_name == contract_name
-            )
             if dispatcher_scope != complete_owner_scope:
                 raise ModelOnexError(
                     message=(

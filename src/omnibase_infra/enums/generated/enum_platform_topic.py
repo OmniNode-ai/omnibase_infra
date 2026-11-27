@@ -29,7 +29,10 @@ class EnumPlatformTopic(str, Enum):
     CMD_LEDGER_APPEND_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'CMD_LEDGER_APPEND_V1')  # onex.cmd.platform.ledger-append.v1
     CMD_LEDGER_QUERY_V1 = contract_topic_value('nodes/node_ledger_write_effect/contract.yaml', 'platform', 'CMD_LEDGER_QUERY_V1')  # onex.cmd.platform.ledger-query.v1
     CMD_NODE_REGISTRATION_ACKED_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'CMD_NODE_REGISTRATION_ACKED_V1')  # onex.cmd.platform.node-registration-acked.v1
+    CMD_NODE_START_REQUESTED_V1 = contract_topic_value('nodes/node_lazy_start_ingress/contract.yaml', 'platform', 'CMD_NODE_START_REQUESTED_V1')  # onex.cmd.platform.node-start-requested.v1
     CMD_REQUEST_INTROSPECTION_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'platform', 'CMD_REQUEST_INTROSPECTION_V1')  # onex.cmd.platform.request-introspection.v1
+    CMD_RUNNER_IMAGE_ROLL_V1 = contract_topic_value('nodes/node_runner_image_roll/contract.yaml', 'platform', 'CMD_RUNNER_IMAGE_ROLL_V1')  # onex.cmd.platform.runner-image-roll.v1
+    CMD_RUNNER_POOL_RETIRE_V1 = contract_topic_value('nodes/node_runner_pool_retire/contract.yaml', 'platform', 'CMD_RUNNER_POOL_RETIRE_V1')  # onex.cmd.platform.runner-pool-retire.v1
     CMD_RUNNER_TMP_PREPARE_V1 = contract_topic_value('nodes/node_deploy_runners/contract.yaml', 'platform', 'CMD_RUNNER_TMP_PREPARE_V1')  # onex.cmd.platform.runner-tmp-prepare.v1
     CMD_TICKET_CONTRACT_COMPOSE_V1 = contract_topic_value('nodes/node_ticket_contract_compose_effect/contract.yaml', 'platform', 'CMD_TICKET_CONTRACT_COMPOSE_V1')  # onex.cmd.platform.ticket-contract-compose.v1
     CMD_TOPIC_CATALOG_QUERY_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'CMD_TOPIC_CATALOG_QUERY_V1')  # onex.cmd.platform.topic-catalog-query.v1
@@ -58,9 +61,12 @@ class EnumPlatformTopic(str, Enum):
     EVT_NODE_REGISTRATION_INITIATED_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_NODE_REGISTRATION_INITIATED_V1')  # onex.evt.platform.node-registration-initiated.v1
     EVT_NODE_REGISTRATION_REJECTED_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_NODE_REGISTRATION_REJECTED_V1')  # onex.evt.platform.node-registration-rejected.v1
     EVT_NODE_REGISTRATION_RESULT_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_NODE_REGISTRATION_RESULT_V1')  # onex.evt.platform.node-registration-result.v1
+    EVT_NODE_START_ANSWERED_V1 = contract_topic_value('nodes/node_lazy_start_ingress/contract.yaml', 'platform', 'EVT_NODE_START_ANSWERED_V1')  # onex.evt.platform.node-start-answered.v1
     EVT_REGISTRATION_SNAPSHOTS_V1 = contract_topic_value('nodes/node_ledger_projection_compute/contract.yaml', 'platform', 'EVT_REGISTRATION_SNAPSHOTS_V1')  # onex.evt.platform.registration-snapshots.v1
     EVT_REGISTRY_REQUEST_INTROSPECTION_V1 = contract_topic_value('nodes/node_registration_orchestrator/contract.yaml', 'platform', 'EVT_REGISTRY_REQUEST_INTROSPECTION_V1')  # onex.evt.platform.registry-request-introspection.v1
     EVT_RESOLUTION_DECIDED_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_RESOLUTION_DECIDED_V1')  # onex.evt.platform.resolution-decided.v1
+    EVT_RUNNER_IMAGE_ROLL_COMPLETED_V1 = contract_topic_value('nodes/node_runner_image_roll/contract.yaml', 'platform', 'EVT_RUNNER_IMAGE_ROLL_COMPLETED_V1')  # onex.evt.platform.runner-image-roll-completed.v1
+    EVT_RUNNER_POOL_RETIRE_COMPLETED_V1 = contract_topic_value('nodes/node_runner_pool_retire/contract.yaml', 'platform', 'EVT_RUNNER_POOL_RETIRE_COMPLETED_V1')  # onex.evt.platform.runner-pool-retire-completed.v1
     EVT_RUNNER_TMP_PREPARED_V1 = contract_topic_value('nodes/node_deploy_runners/contract.yaml', 'platform', 'EVT_RUNNER_TMP_PREPARED_V1')  # onex.evt.platform.runner-tmp-prepared.v1
     EVT_SERVICE_HEARTBEAT_V1 = contract_topic_value('services/topics.yaml', 'platform', 'EVT_SERVICE_HEARTBEAT_V1')  # onex.evt.platform.service-heartbeat.v1
     EVT_TICKET_CONTRACT_COMPOSED_V1 = contract_topic_value('nodes/node_ticket_contract_compose_effect/contract.yaml', 'platform', 'EVT_TICKET_CONTRACT_COMPOSED_V1')  # onex.evt.platform.ticket-contract-composed.v1

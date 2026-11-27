@@ -147,7 +147,7 @@ ARGS=()
 [[ -n "${MAX_CYCLES}" ]] && ARGS+=("--max-cycles" "${MAX_CYCLES}")
 [[ -n "${MAX_TICKETS}" ]] && ARGS+=("--max-tickets" "${MAX_TICKETS}")
 
-CMD=(uv run onex run build_loop_workflow.yaml "${ARGS[@]}")
+CMD=(env ONEX_CLI_SHOW_ALL_COMMANDS=1 uv run python -m omnibase_core.cli.cli_commands run build_loop_workflow.yaml "${ARGS[@]}")
 
 if [[ "${DRY_RUN}" == true ]]; then
     printf '[build-loop] DRY RUN — would execute from %s:\n' "${OMNIMARKET_DIR}"

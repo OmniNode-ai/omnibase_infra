@@ -24,6 +24,9 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
 from tests.helpers.lane_census_fixtures import (
     NEUTRAL_CONFIG_ROOT,
     NEUTRAL_MANIFEST,
@@ -107,7 +110,17 @@ def _installer_env(
     bin_dir.mkdir()
     calls = tmp_path / "systemctl.log"
     stub = bin_dir / "systemctl"
-    stub.write_text(f'#!/usr/bin/env bash\necho "$*" >> "{calls}"\nexit 0\n')
+    # `--user cat <unit>` prints the unit and its drop-in the way systemd does,
+    # so `--verify` reads what an install wrote.
+    units = home / ".config/systemd/user"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$*" >> "{calls}"\n'
+        'if [[ "$2" == cat ]]; then\n'
+        f'  cat "{units}/$3" "{units}/$3.d/"*.conf 2>/dev/null\n'
+        "fi\n"
+        "exit 0\n"
+    )
     stub.chmod(0o755)
     # OMN-22152: the unit carries the host registry, so the install needs one.
     env = {
@@ -134,6 +147,40 @@ def _install(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str
     )
 
 
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=census-test",
+            "-c",
+            "user.email=census-test@example.invalid",
+            "-C",
+            str(cwd),
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    ).stdout.strip()
+
+
+def _clone(tmp_path: Path) -> Path:
+    """A durable clone (its own git dir) holding the census collector, one commit."""
+    clone = tmp_path / "clone" / "omnibase_infra"
+    if not clone.exists():
+        (clone / "scripts").mkdir(parents=True)
+        shutil.copyfile(
+            _REPO / "scripts" / "lane-census-check.sh",
+            clone / "scripts" / "lane-census-check.sh",
+        )
+        _git(clone, "init", "-q")
+        _git(clone, "add", "scripts")
+        _git(clone, "commit", "-q", "-m", "collector")
+    return clone
+
+
 def test_installer_requires_a_broker_container(tmp_path: Path) -> None:
     env, home = _installer_env(tmp_path)
     (home / ".config/systemd/user/onex-disk-gc.service").write_text("[Service]\n")
@@ -147,7 +194,11 @@ def test_installer_renders_the_dropin_with_broker_and_clone(tmp_path: Path) -> N
     units = home / ".config/systemd/user"
     (units / "onex-disk-gc.service").write_text("[Service]\n")
     result = _install(
-        env, "--broker-container", "omnibase-infra-redpanda", "--repo-root", str(_REPO)
+        env,
+        "--broker-container",
+        "omnibase-infra-redpanda",
+        "--repo-root",
+        str(_clone(tmp_path)),
     )
     assert result.returncode == 0, result.stderr
     body = (units / "onex-disk-gc.service.d/20-lane-census.conf").read_text()
@@ -157,7 +208,9 @@ def test_installer_renders_the_dropin_with_broker_and_clone(tmp_path: Path) -> N
         f"Environment=ONEX_WORKSPACE_CONFIG_ROOT={env['ONEX_WORKSPACE_CONFIG_ROOT']}"
         in body
     )
-    assert f"ExecStart=-/bin/bash {_REPO}/scripts/lane-census-check.sh" in body
+    assert (
+        f"ExecStart=-/bin/bash {_clone(tmp_path)}/scripts/lane-census-check.sh" in body
+    )
     assert "--snapshot" in body and "--memory" in body
     assert (
         "%h/Code/omni_home/omnibase_infra"
@@ -169,7 +222,14 @@ def test_installer_renders_the_dropin_with_broker_and_clone(tmp_path: Path) -> N
 def test_installer_refuses_standalone_beside_disk_gc(tmp_path: Path) -> None:
     env, home = _installer_env(tmp_path)
     (home / ".config/systemd/user/onex-disk-gc.service").write_text("[Service]\n")
-    result = _install(env, "--standalone", "--broker-container", "b")
+    result = _install(
+        env,
+        "--standalone",
+        "--broker-container",
+        "b",
+        "--repo-root",
+        str(_clone(tmp_path)),
+    )
     assert result.returncode == 1
     assert "Install without --standalone" in result.stderr
     assert not (home / ".config/systemd/user/onex-lane-census.service").exists()
@@ -184,7 +244,7 @@ def test_installer_standalone_on_a_host_without_disk_gc(tmp_path: Path) -> None:
         "--broker-container",
         "omnibase-infra-dev-202-redpanda",
         "--repo-root",
-        str(_REPO),
+        str(_clone(tmp_path)),
     )
     assert result.returncode == 0, result.stderr
     service = (units / "onex-lane-census.service").read_text()
@@ -194,7 +254,10 @@ def test_installer_standalone_on_a_host_without_disk_gc(tmp_path: Path) -> None:
         "Environment=LANE_MEMORY_BROKER_CONTAINER=omnibase-infra-dev-202-redpanda"
         in service
     )
-    assert f"ExecStart=/bin/bash {_REPO}/scripts/lane-census-check.sh" in service
+    assert (
+        f"ExecStart=/bin/bash {_clone(tmp_path)}/scripts/lane-census-check.sh"
+        in service
+    )
     assert (
         f"Environment=ONEX_WORKSPACE_CONFIG_ROOT={env['ONEX_WORKSPACE_CONFIG_ROOT']}"
         in service
@@ -214,7 +277,9 @@ def test_installer_refuses_without_a_config_root(tmp_path: Path) -> None:
     env, home = _installer_env(tmp_path, config_root=False)
     units = home / ".config/systemd/user"
     (units / "onex-disk-gc.service").write_text("[Service]\n")
-    result = _install(env, "--broker-container", "b", "--repo-root", str(_REPO))
+    result = _install(
+        env, "--broker-container", "b", "--repo-root", str(_clone(tmp_path))
+    )
     assert result.returncode == 2, result.stderr
     assert "not configured" in result.stderr
     assert "ONEX_WORKSPACE_CONFIG_ROOT" in result.stderr
@@ -227,7 +292,12 @@ def test_installer_refuses_when_the_root_holds_no_units(tmp_path: Path) -> None:
     empty.mkdir()
     env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(empty)
     result = _install(
-        env, "--standalone", "--broker-container", "b", "--repo-root", str(_REPO)
+        env,
+        "--standalone",
+        "--broker-container",
+        "b",
+        "--repo-root",
+        str(_clone(tmp_path)),
     )
     assert result.returncode == 2, result.stderr
     assert f"{empty}/systemd/lane-census/" in result.stderr
@@ -241,7 +311,9 @@ def test_the_workspace_root_alone_is_not_a_config_root(tmp_path: Path) -> None:
     env["OMNI_HOME"] = str(tmp_path / "workspace")
     units = home / ".config/systemd/user"
     (units / "onex-disk-gc.service").write_text("[Service]\n")
-    result = _install(env, "--broker-container", "b", "--repo-root", str(_REPO))
+    result = _install(
+        env, "--broker-container", "b", "--repo-root", str(_clone(tmp_path))
+    )
     assert result.returncode == 2, result.stderr
     assert "ONEX_WORKSPACE_CONFIG_ROOT" in result.stderr
     assert not (units / "onex-disk-gc.service.d/20-lane-census.conf").exists()
@@ -271,9 +343,205 @@ def test_installer_requires_the_manifest_under_the_config_root(
     units = home / ".config/systemd/user"
     (units / "onex-disk-gc.service").write_text("[Service]\n")
     result = _install(
-        env, "--broker-container", "omnibase-infra-redpanda", "--repo-root", str(_REPO)
+        env,
+        "--broker-container",
+        "omnibase-infra-redpanda",
+        "--repo-root",
+        str(_clone(tmp_path)),
     )
     assert result.returncode == 2, result.stderr
     assert "lane-manifest.yaml" in result.stderr
     assert "ONEX_WORKSPACE_CONFIG_ROOT" in result.stderr
     assert not (units / "onex-disk-gc.service.d/20-lane-census.conf").exists()
+
+
+# ---------------------------------------------------------------------------
+# OMN-26379 -- an install records the revision it runs, or installs nothing
+# ---------------------------------------------------------------------------
+
+
+def _head(clone: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    ).stdout.strip()
+
+
+def test_standalone_unit_records_the_revision_it_runs(tmp_path: Path) -> None:
+    """`systemctl cat` of the unit names the clone's revision, not only its path."""
+    env, home = _installer_env(tmp_path)
+    result = _install(
+        env,
+        "--standalone",
+        "--broker-container",
+        "census-test-broker",
+        "--repo-root",
+        str(_clone(tmp_path)),
+    )
+    assert result.returncode == 0, result.stderr
+    service = (home / ".config/systemd/user/onex-lane-census.service").read_text()
+    match = re.search(r"^Environment=LANE_CENSUS_REVISION=(\S+)$", service, re.M)
+    assert match, "the unit carries no revision record"
+    assert match.group(1).removesuffix("-dirty") == _head(_clone(tmp_path))
+
+
+def test_dropin_records_the_revision_it_runs(tmp_path: Path) -> None:
+    env, home = _installer_env(tmp_path)
+    units = home / ".config/systemd/user"
+    (units / "onex-disk-gc.service").write_text("[Service]\n")
+    result = _install(
+        env,
+        "--broker-container",
+        "omnibase-infra-redpanda",
+        "--repo-root",
+        str(_clone(tmp_path)),
+    )
+    assert result.returncode == 0, result.stderr
+    body = (units / "onex-disk-gc.service.d/20-lane-census.conf").read_text()
+    match = re.search(r"^Environment=LANE_CENSUS_REVISION=(\S+)$", body, re.M)
+    assert match, "the drop-in carries no revision record"
+    assert match.group(1).removesuffix("-dirty") == _head(_clone(tmp_path))
+
+
+def test_installer_refuses_a_copy_with_no_revision_record(tmp_path: Path) -> None:
+    """A plain copy of the scripts (a proof copy) has no revision: nothing installs."""
+    env, home = _installer_env(tmp_path)
+    copy = tmp_path / "lab-proof" / "omnibase_infra"
+    (copy / "scripts").mkdir(parents=True)
+    shutil.copyfile(
+        _REPO / "scripts" / "lane-census-check.sh",
+        copy / "scripts" / "lane-census-check.sh",
+    )
+    result = _install(
+        env,
+        "--standalone",
+        "--broker-container",
+        "census-test-broker",
+        "--repo-root",
+        str(copy),
+    )
+    assert result.returncode == 2, result.stderr
+    assert "revision" in result.stderr
+    assert not (home / ".config/systemd/user/onex-lane-census.service").exists()
+    assert not (tmp_path / "systemctl.log").exists()
+
+
+def test_standalone_unit_keeps_the_collector_beside_its_revision(
+    tmp_path: Path,
+) -> None:
+    """The unit a scheduled run starts is the collector, and it names its revision."""
+    env, home = _installer_env(tmp_path)
+    result = _install(
+        env,
+        "--standalone",
+        "--broker-container",
+        "census-test-broker",
+        "--repo-root",
+        str(_clone(tmp_path)),
+    )
+    assert result.returncode == 0, result.stderr
+    service = (home / ".config/systemd/user/onex-lane-census.service").read_text()
+    assert (
+        f"ExecStart=/bin/bash {_clone(tmp_path)}/scripts/lane-census-check.sh"
+        in service
+    )
+    assert re.search(r"^Environment=LANE_CENSUS_REVISION=\S+$", service, re.M), (
+        "the unit carries no revision record"
+    )
+
+
+def test_standalone_unit_runs_one_source_whose_revision_is_recorded(
+    tmp_path: Path,
+) -> None:
+    """One script root in the unit, and exactly one revision record for it."""
+    env, home = _installer_env(tmp_path)
+    result = _install(
+        env,
+        "--standalone",
+        "--broker-container",
+        "census-test-broker",
+        "--repo-root",
+        str(_clone(tmp_path)),
+    )
+    assert result.returncode == 0, result.stderr
+    service = (home / ".config/systemd/user/onex-lane-census.service").read_text()
+    roots = set(re.findall(r"(/\S*?)/scripts/lane-census-check\.sh", service))
+    assert roots == {str(_clone(tmp_path))}, (
+        f"the unit names more than one source: {roots}"
+    )
+    assert len(re.findall(r"^Environment=LANE_CENSUS_REVISION=", service, re.M)) == 1
+
+
+# ---------------------------------------------------------------------------
+# OMN-26379 -- the source an install names is durable, and --verify reads it
+# ---------------------------------------------------------------------------
+
+
+def _install_dropin(tmp_path: Path, clone: Path) -> tuple[dict[str, str], Path]:
+    env, home = _installer_env(tmp_path)
+    (home / ".config/systemd/user/onex-disk-gc.service").write_text("[Service]\n")
+    result = _install(
+        env, "--broker-container", "omnibase-infra-redpanda", "--repo-root", str(clone)
+    )
+    assert result.returncode == 0, result.stderr
+    return env, home
+
+
+def test_installer_refuses_a_linked_worktree(tmp_path: Path) -> None:
+    """A lane worktree is reaped when its lane ends; a unit must never name one.
+
+    h202's census ran from a lane worktree's scripts, the worktree was removed,
+    and every hourly pass then exited 127 behind a fail-soft ExecStart.
+    """
+    env, home = _installer_env(tmp_path)
+    (home / ".config/systemd/user/onex-disk-gc.service").write_text("[Service]\n")
+    worktree = tmp_path / "omni_worktrees" / "lane" / "omnibase_infra"
+    _git(_clone(tmp_path), "worktree", "add", "-q", "-b", "lane", str(worktree))
+    result = _install(
+        env,
+        "--broker-container",
+        "omnibase-infra-redpanda",
+        "--repo-root",
+        str(worktree),
+    )
+    assert result.returncode == 2, result.stderr
+    assert "worktree" in result.stderr
+    assert not (home / ".config/systemd/user/onex-disk-gc.service.d").exists()
+    assert not (tmp_path / "systemctl.log").exists()
+
+
+def test_verify_passes_on_a_fresh_install(tmp_path: Path) -> None:
+    """Positive control: the checks below fail only for the fault they inject."""
+    env, _ = _install_dropin(tmp_path, _clone(tmp_path))
+    result = _install(env, "--verify")
+    assert result.returncode == 0, result.stderr
+
+
+def test_verify_fails_when_the_collector_path_is_gone(tmp_path: Path) -> None:
+    """The unit still names a script path, the path is gone: that is not installed."""
+    clone = _clone(tmp_path)
+    env, _ = _install_dropin(tmp_path, clone)
+    shutil.rmtree(clone / "scripts")
+    result = _install(env, "--verify")
+    assert result.returncode == 1, result.stdout
+    assert "lane-census-check.sh" in result.stderr
+    assert "does not exist" in result.stderr
+
+
+def test_verify_fails_on_an_install_with_no_revision_record(tmp_path: Path) -> None:
+    """An install from before the revision record reads as stale, not as OK."""
+    env, home = _install_dropin(tmp_path, _clone(tmp_path))
+    dropin = home / ".config/systemd/user/onex-disk-gc.service.d/20-lane-census.conf"
+    dropin.write_text(
+        "".join(
+            line
+            for line in dropin.read_text().splitlines(keepends=True)
+            if "LANE_CENSUS_REVISION" not in line
+        )
+    )
+    result = _install(env, "--verify")
+    assert result.returncode == 1, result.stdout
+    assert "LANE_CENSUS_REVISION" in result.stderr

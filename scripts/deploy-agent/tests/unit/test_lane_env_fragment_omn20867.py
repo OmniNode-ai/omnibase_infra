@@ -14,6 +14,7 @@ overlay and the routing table, never in a test.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -56,6 +57,32 @@ LANE_CLASS = {
     "ONEX_RUNTIME_LANE_CLASS": "compose-lane",
     "ONEX_RUNTIME_LANE_CLASS_CONTRACTS": "node_a,node_b",
 }
+
+# The deployment's provenance overlay (OMN-23981, OMN-25116): the five variables
+# the envelope publish seam stamps events from. It stamps when LANE, HOST,
+# INSTALL_SOURCE and REVISION are all set; LANE_KIND is unset for lane dev or
+# stability and one of mac_unit, lane_worktree, hand_run for lane other; any
+# other LANE_KIND is refused and stamps nothing. A fragment may set all five.
+PROVENANCE = {
+    "ONEX_PROVENANCE_LANE": "other",
+    "ONEX_PROVENANCE_LANE_KIND": "lane_worktree",
+    "ONEX_PROVENANCE_HOST": "lab-host",
+    "ONEX_PROVENANCE_INSTALL_SOURCE": "worktree",
+    "ONEX_PROVENANCE_REVISION": "0123456789ab",
+}
+# A dev lane's fragment: the four required values, LANE_KIND left unset.
+PROVENANCE_DEV = {
+    "ONEX_PROVENANCE_LANE": "dev",
+    "ONEX_PROVENANCE_HOST": "lab-host",
+    "ONEX_PROVENANCE_INSTALL_SOURCE": "tag",
+    "ONEX_PROVENANCE_REVISION": "0123456789ab",
+}
+# The values the stamp accepts, as literals because the agent's venv pins a
+# published omnibase_core that need not carry the provenance enums; the stamp's
+# own rule is pinned in tests/ci/test_runtime_env_anchor.py.
+STAMP_LANES_WITHOUT_KIND = frozenset({"dev", "stability"})
+STAMP_LANE_KINDS = frozenset({"mac_unit", "lane_worktree", "hand_run"})
+STAMP_INSTALL_SOURCES = frozenset({"tag", "branch", "worktree", "hand"})
 
 ROUTING_TEXT = """\
 default_instance: inst-a
@@ -126,10 +153,12 @@ def test_schema_declares_exactly_the_act_switches_and_the_lane_class() -> None:
     assert {
         SCHEMA: frozenset(NON_ACTING)
         | frozenset(LANE_CLASS)
+        | frozenset(PROVENANCE)
         | frozenset(
             {"COST_ESTIMATOR_WEB_SOURCE_REPOSITORY", "COST_ESTIMATOR_WEB_SOURCE_URL"}
         )
         | frozenset({"ESTIMATOR_GATE_OPEN_SOURCES"})
+        | frozenset({"ONEX_RUNTIME_NODE_EXCLUSION"})
     } == LANE_ENV_FRAGMENT_SCHEMA_KEYS
 
 
@@ -137,6 +166,94 @@ def test_schema_declares_exactly_the_act_switches_and_the_lane_class() -> None:
 def test_a_fragment_may_select_a_lane_class() -> None:
     env = {**NON_ACTING, **LANE_CLASS}
     assert parse_lane_env_fragment(_fragment(env), lane_id=LANE, source="t") == env
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("env", [PROVENANCE, PROVENANCE_DEV], ids=["other", "dev"])
+def test_a_fragment_may_set_the_provenance_overlay(env: Mapping[str, str]) -> None:
+    assert parse_lane_env_fragment(_fragment(env), lane_id=LANE, source="t") == dict(
+        env
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("env", [PROVENANCE, PROVENANCE_DEV], ids=["other", "dev"])
+def test_the_provenance_fixtures_are_overlays_the_stamp_accepts(
+    env: Mapping[str, str],
+) -> None:
+    lane = env["ONEX_PROVENANCE_LANE"]
+    kind = env.get("ONEX_PROVENANCE_LANE_KIND", "")
+    for name in (
+        "ONEX_PROVENANCE_LANE",
+        "ONEX_PROVENANCE_HOST",
+        "ONEX_PROVENANCE_INSTALL_SOURCE",
+        "ONEX_PROVENANCE_REVISION",
+    ):
+        assert env[name].strip(), name
+    assert env["ONEX_PROVENANCE_INSTALL_SOURCE"] in STAMP_INSTALL_SOURCES
+    if lane in STAMP_LANES_WITHOUT_KIND:
+        assert kind == ""
+    else:
+        assert lane == "other"
+        assert kind in STAMP_LANE_KINDS
+
+
+@pytest.mark.unit
+def test_provenance_allowlist_literals_are_the_names_the_stamp_reads() -> None:
+    # The allowlist names them as literals because the agent's own venv pins a
+    # published omnibase_infra that need not carry the model, so the names are
+    # read from the model's source file in the checkout, never imported.
+    # Only the VARIABLES assignment is read, so a name in a comment or a
+    # docstring of the model file does not count.
+    source = (
+        Path(__file__).resolve().parents[4]
+        / "src/omnibase_infra/models/event_bus/model_event_provenance_overlay.py"
+    ).read_text(encoding="utf-8")
+    read = frozenset(name for _, name in _overlay_variables(source))
+    allowed = LANE_ENV_FRAGMENT_SCHEMA_KEYS[SCHEMA]
+    assert read == frozenset(PROVENANCE)
+    assert {k for k in allowed if k.startswith("ONEX_PROVENANCE_")} == read
+
+
+def _overlay_variables(source: str) -> tuple[tuple[str, str], ...]:
+    """The literal ``VARIABLES`` of ``ModelEventProvenanceOverlay`` in ``source``."""
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.ClassDef)
+            and node.name == "ModelEventProvenanceOverlay"
+        ):
+            for stmt in node.body:
+                if (
+                    isinstance(stmt, ast.AnnAssign)
+                    and isinstance(stmt.target, ast.Name)
+                    and stmt.target.id == "VARIABLES"
+                    and stmt.value is not None
+                ):
+                    value: tuple[tuple[str, str], ...] = ast.literal_eval(stmt.value)
+                    return value
+    raise AssertionError("ModelEventProvenanceOverlay.VARIABLES not found")
+
+
+@pytest.mark.unit
+def test_the_drift_read_ignores_names_outside_variables() -> None:
+    source = (
+        "class ModelEventProvenanceOverlay:\n"
+        '    """Mentions "ONEX_PROVENANCE_DOC" in prose."""\n'
+        '    # "ONEX_PROVENANCE_COMMENT"\n'
+        '    VARIABLES: ClassVar = (("lane", "ONEX_PROVENANCE_LANE"),)\n'
+        '    OTHER = "ONEX_PROVENANCE_OTHER"\n'
+    )
+    assert _overlay_variables(source) == (("lane", "ONEX_PROVENANCE_LANE"),)
+
+
+@pytest.mark.unit
+def test_a_fragment_may_not_set_a_provenance_key_the_stamp_does_not_read() -> None:
+    with pytest.raises(LaneEnvFragmentError, match="ONEX_PROVENANCE_EXTRA"):
+        parse_lane_env_fragment(
+            _fragment({**PROVENANCE, "ONEX_PROVENANCE_EXTRA": "x"}),
+            lane_id=LANE,
+            source="t",
+        )
 
 
 @pytest.mark.unit
@@ -379,6 +496,32 @@ def test_refresh_exports_the_default_instance_fragment(tmp_path: Path) -> None:
         lane_env_shell_exports(NON_ACTING)
     )
     assert default_instance_lane_env_exports(repo_root, tmp_path / "absent") == ""
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("table", "match"),
+    [
+        (None, "routing table unreadable"),
+        ("instances: [unclosed\n", "routing table is not YAML"),
+        ("- a list, not a mapping\n", "routing table declares no instances"),
+    ],
+    ids=["unreadable", "not-yaml", "not-a-mapping"],
+)
+def test_refresh_refuses_a_bad_routing_table_as_routing_table_error(
+    tmp_path: Path, table: str | None, match: str
+) -> None:
+    # Before OMN-25116 these raised OSError, yaml.YAMLError and AttributeError;
+    # the one caller, refresh_dev_lane.sh, stops on any nonzero exit of its
+    # python -c and catches no exception type.
+    repo_root = tmp_path / "infra"
+    (repo_root / "config").mkdir(parents=True)
+    if table is not None:
+        (repo_root / "config" / "deploy_lane_routing.yaml").write_text(
+            table, encoding="utf-8"
+        )
+    with pytest.raises(RoutingTableError, match=match):
+        default_instance_lane_env_exports(repo_root, tmp_path / "home")
 
 
 @pytest.mark.unit

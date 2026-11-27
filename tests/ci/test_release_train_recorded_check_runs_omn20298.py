@@ -62,9 +62,13 @@ def _read_through_the_train(
         "import json, sys\nfrom pathlib import Path\n"
         "args = sys.argv[1:]\n"
         "assert args[:2] == ['api', '--paginate'], args\n"
-        f"assert args[2] == 'repos/OmniNode-ai/{_REPO}/commits/{sha}/check-runs', args\n"
+        f"runs_path = 'repos/OmniNode-ai/{_REPO}/actions/runs?head_sha={sha}'\n"
+        f"assert args[2] in ('repos/OmniNode-ai/{_REPO}/commits/{sha}/check-runs', "
+        "runs_path), args\n"
         f"with Path({str(calls)!r}).open('a') as stream:\n"
         "    stream.write(json.dumps(args) + '\\n')\n"
+        "if args[2] == runs_path:\n"
+        "    sys.exit(0)\n"
         f"for row in json.loads(Path({str(rows)!r}).read_text()):\n"
         "    print(json.dumps({k: row.get(k) for k in "
         "('name', 'status', 'conclusion', 'started_at', 'completed_at')}))\n",
@@ -90,7 +94,8 @@ def _read_through_the_train(
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert len(calls.read_text(encoding="utf-8").splitlines()) == 1
+    # the check-run read and the workflow-run read that keys each copy
+    assert len(calls.read_text(encoding="utf-8").splitlines()) == 2
     verdict: dict[str, Any] = json.loads(result.stdout.splitlines()[-1])
     return verdict
 

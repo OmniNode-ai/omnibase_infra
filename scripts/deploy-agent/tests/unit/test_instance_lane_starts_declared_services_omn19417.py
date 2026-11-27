@@ -65,10 +65,20 @@ def _lab_manifest() -> Path:
     return Path(root) / "config" / "lab" / "lane-census" / "lane-manifest.yaml"
 
 
+#: OMN-26463: the runtime-only canary instance is a deploy-agent instance lane that
+#: boots a dev candidate alone for a PASS or FAIL receipt. It is not a lane of the
+#: lab census: it has no manifest entry, so there is no entry to parity-check.
+#: ``test_canary_instance_is_in_no_manifest_lane`` holds the exemption honest: the
+#: moment the census declares the canary's compose project, that test fails and the
+#: instance has to move back into the parity check below.
+_CENSUS_FREE_INSTANCES = frozenset({"canary-h051"})
+
 #: The instances whose manifest entry is parity-checked against its overlay and
 #: therefore declares every service the composition runs.
 _OVERLAY_INSTANCES = tuple(
-    name for name in dev_instance_lane_configs() if name != DEFAULT_DEV_INSTANCE
+    name
+    for name in dev_instance_lane_configs()
+    if name != DEFAULT_DEV_INSTANCE and name not in _CENSUS_FREE_INSTANCES
 )
 
 
@@ -149,3 +159,26 @@ def test_instance_lane_phoenix_stays_out_of_the_201_deps_leg() -> None:
     services = _merged_services(config)
     assert "phoenix" in services
     assert "phoenix" not in _deps_leg(services, config.disabled_services)
+
+
+@pytest.mark.lab_overlay
+@pytest.mark.parametrize("instance", sorted(_CENSUS_FREE_INSTANCES))
+def test_canary_instance_is_in_no_manifest_lane(instance: str) -> None:
+    """Control for the exemption above: the lab manifest declares no such lane.
+
+    Positive control: the instance exists in the agent's lane table and the
+    manifest read finds lanes, so zero matches is a finding and not an empty read.
+    """
+    config = dev_instance_lane_configs()[instance]
+    manifest = yaml.safe_load(_lab_manifest().read_text())
+    assert manifest["lanes"], "the manifest read found no lanes"
+    declaring = sorted(
+        name
+        for name, spec in manifest["lanes"].items()
+        if spec.get("compose_project") == config.compose_project
+    )
+    assert declaring == [], (
+        f"{instance}: the lab manifest now declares {config.compose_project} as "
+        f"lane(s) {declaring}; drop it from _CENSUS_FREE_INSTANCES so the parity "
+        "check covers it"
+    )

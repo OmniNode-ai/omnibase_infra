@@ -1,0 +1,23 @@
+{
+  "node": "node_github_repo_gateway_effect",
+  "consumer_group": "local.omnimarket.node_github_repo_gateway_effect.consume.1.8.0.__i.runtime-main.__t.onex.cmd.omnimarket.github-repo-gateway-read-requested.v1",
+  "host": "the dev runtime host",
+  "source": "lane gwroot-0335 report gwroot-0335-2026-11-19T0415Z.md (ticket OMN-25857), values as the ticket OMN-26356 quotes them; the dev runtime log of each container",
+  "recorded_on": "2026-11-19",
+  "attach_budget_seconds": 60,
+  "rolls": [
+    {
+      "container_start": "2026-11-19T03:17:09Z",
+      "group_joined": "2026-11-19T03:21:03Z",
+      "attach_seconds": 234,
+      "note": "the report reads the join as 03:21:03Z to 03:21:06Z; the earlier time is kept"
+    },
+    {
+      "container_start": "2026-11-19T03:30:48Z",
+      "group_joined": "2026-11-19T03:34:55Z",
+      "attach_seconds": 247,
+      "request_sent": "2026-11-19T03:30:53Z",
+      "note": "a job-log request sent 5 s after the container start had no reply"
+    }
+  ]
+}

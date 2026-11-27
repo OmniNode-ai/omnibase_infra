@@ -9,6 +9,9 @@ only through a ``contract.yaml`` parsed by the production discovery code.
 
 from __future__ import annotations
 
+import asyncio
+import gzip
+from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -70,8 +73,85 @@ async def _mounted(server: ServiceHealth, manifest: ModelAutoWiringManifest) -> 
 
 
 def _bound_port(server: ServiceHealth) -> int:
-    assert server._runner is not None
-    return int(server._runner.addresses[0][1])
+    assert server._site is not None
+    return int(server._site.port)
+
+
+async def _serve_body_cap_probe(port_file: Path) -> None:
+    """Start the runtime listener for the hosted loopback deploy probe."""
+    server = await _server()
+    try:
+        block = _mount_block("/api/v1", "create_app") + "\n  max_body_bytes: 2"
+        await _mounted(server, _manifest(port_file.parent, block))
+        port_file.write_text(str(_bound_port(server)), encoding="utf-8")
+        await asyncio.Event().wait()
+    finally:
+        await server.stop()
+
+
+@pytest.mark.parametrize(
+    ("limit", "body", "framing", "expected_status"),
+    [
+        pytest.param(8, b"012345678", "length", 413, id="over-cap-content-length"),
+        pytest.param(8, b"012345678", "chunked", 413, id="over-cap-chunked"),
+        pytest.param(64, b"x" * 128, "gzip", 413, id="over-cap-after-decoding"),
+        pytest.param(8, b"01234567", "chunked", 200, id="exact-cap"),
+        pytest.param(None, b"\x00\xff" * (1024 * 1024), "length", 200, id="uncapped"),
+    ],
+)
+async def test_mount_body_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    limit: int | None,
+    body: bytes,
+    framing: str,
+    expected_status: int,
+) -> None:
+    chunks: list[bytes] = []
+    first_chunk = asyncio.Event()
+    monkeypatch.setattr(
+        asgi_fixtures,
+        "create_app",
+        lambda: asgi_fixtures.create_body_echo(chunks, first_chunk),
+    )
+    block = _mount_block("/body", "create_app")
+    if limit is not None:
+        block += f"\n  max_body_bytes: {limit}"
+
+    async def stream() -> AsyncIterator[bytes]:
+        yield body[:4]
+        # Make the limit check span multiple receives instead of one buffered read.
+        await first_chunk.wait()
+        yield body[4:]
+
+    data: AsyncIterator[bytes] | bytes = body
+    headers = {}
+    if framing == "chunked":
+        data = stream()
+    elif framing == "gzip":
+        data = gzip.compress(body)
+        assert limit is not None and len(data) < limit < len(body)
+        headers["Content-Encoding"] = "gzip"
+
+    server = await _server()
+    try:
+        await _mounted(server, _manifest(tmp_path, block))
+        url = f"http://127.0.0.1:{_bound_port(server)}/body"
+        async with (
+            aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session,
+            session.post(url, data=data, headers=headers) as response,
+        ):
+            assert response.status == expected_status
+            if expected_status == 200:
+                assert await response.read() == body
+            elif framing == "length":
+                assert not chunks
+            else:
+                delivered = b"".join(chunks)
+                assert limit is not None and len(delivered) <= limit
+                assert body.startswith(delivered)
+    finally:
+        await server.stop()
 
 
 async def test_declared_factory_is_served_on_the_runtime_port(tmp_path: Path) -> None:

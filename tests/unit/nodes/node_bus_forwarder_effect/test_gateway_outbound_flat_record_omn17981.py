@@ -64,6 +64,7 @@ from uuid import UUID
 
 import pytest
 
+from omnibase_core.models.contracts.model_ingest_contract import compute_event_id
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.runtime.model_transport_message import ModelTransportMessage
@@ -81,8 +82,10 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_del
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
     ServiceGatewayForwarder,
-    content_addressed_event_id,
     synthesize_outbound_envelope,
+)
+from tests.unit.nodes.node_bus_forwarder_effect.test_https_ingest_omn16459 import (
+    recording_https_ingest,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -358,7 +361,7 @@ async def test_captured_flat_hook_record_is_delivered_and_acknowledged() -> None
     assert source.committed == [message]
     assert len(cloud_bus.sent) == 1
 
-    wire_topic, wire_value, _ = cloud_bus.sent[0]
+    wire_topic, wire_value, wire_headers = cloud_bus.sent[0]
     assert wire_topic == f"tenant-{TENANT_SLUG}.{SESSION_STARTED_TOPIC}"
 
     published = ModelEventEnvelope[dict[str, object]].model_validate_json(wire_value)
@@ -379,36 +382,37 @@ async def test_captured_flat_hook_record_is_delivered_and_acknowledged() -> None
     assert tags["gateway_synthesized_source_topic"] == SESSION_STARTED_TOPIC
     assert tags["gateway_synthesized_source_partition"] == "0"
     assert tags["gateway_synthesized_source_offset"] == "63816330"
-    # Older flat records carry no content header. The relay derives the same
-    # content identity at the standard-envelope boundary.
-    assert tags["event_id"] == content_addressed_event_id(
-        published, SESSION_STARTED_TOPIC
+    # A flat record with no content claim receives the shared HTTPS identity.
+    transport, records = recording_https_ingest()
+    await transport.publish(wire_topic, message.key, wire_value, wire_headers)
+    assert records[0]["event_id"] == compute_event_id(
+        wire_topic, message.key, wire_value, message.headers
     )
 
 
 async def test_synthesis_carries_content_event_id_from_idempotency_header() -> None:
     """The flat-wire adapter preserves the producer content identity."""
+    source = _admitted_session_started_record()
+    event_id = compute_event_id(source.topic, source.key, source.value, source.headers)
     headers = {
-        **_SESSION_STARTED_HEADERS,
-        "idempotency_key": b"a" * 64,
+        **source.headers,
+        "idempotency_key": event_id.encode("ascii"),
     }
     envelope = synthesize_outbound_envelope(
-        _session_started_record(headers=headers),
+        _admitted_session_started_record(headers=headers),
         _capture_config(SESSION_STARTED_TOPIC).tenant_identity,
     )
 
     assert envelope is not None
-    assert envelope.metadata.tags["event_id"] == "a" * 64
+    assert envelope.metadata.tags["event_id"] == event_id
 
 
 async def test_matching_content_event_id_is_forwarded_unchanged() -> None:
-    """The claimed post-redaction content ID survives flat-record synthesis."""
-    baseline = synthesize_outbound_envelope(
-        _admitted_session_started_record(),
-        _capture_config(SESSION_STARTED_TOPIC).tenant_identity,
+    """The verified producer ID survives flat-record synthesis."""
+    baseline = _admitted_session_started_record()
+    event_id = compute_event_id(
+        baseline.topic, baseline.key, baseline.value, baseline.headers
     )
-    assert baseline is not None
-    event_id = content_addressed_event_id(baseline, SESSION_STARTED_TOPIC)
     source = _Source()
     delivery, cloud_bus = _delivery(_capture_config(SESSION_STARTED_TOPIC), source)
     message = _admitted_session_started_record(
@@ -425,6 +429,24 @@ async def test_matching_content_event_id_is_forwarded_unchanged() -> None:
         cloud_bus.sent[0][1]
     )
     assert published.metadata.tags["event_id"] == event_id
+
+
+async def test_flat_record_has_stable_wire_bytes_without_producer_timestamp() -> None:
+    headers = dict(_SESSION_STARTED_HEADERS)
+    del headers["timestamp"]
+    message = _admitted_session_started_record(headers=headers)
+    transport, records = recording_https_ingest()
+    service = ServiceGatewayForwarder(
+        config=_capture_config(SESSION_STARTED_TOPIC),
+        local_bus=_RecordingBus(),
+        cloud_bus=transport,
+    )
+
+    await service.forward_outbound_message(message)
+    await service.forward_outbound_message(message)
+
+    assert records[0]["value"] == records[1]["value"]
+    assert records[0]["event_id"] == records[1]["event_id"]
 
 
 async def test_mismatched_content_event_id_is_quarantined() -> None:

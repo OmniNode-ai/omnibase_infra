@@ -40,5 +40,15 @@ lanes:
     # terminal topics (2 more specs).
     # OMN-23177 adds the c11-delegation-legs-check command and -checked
     # terminal topics (2 more specs).
-    repo_specs: 225
-    repo_specs_measured_at: "bf76c6681c90088fb9ca6dbca626d226c327c529"
+    # OMN-25796 adds the runner-image-roll command and -completed terminal
+    # topics (2 more specs).
+    # OMN-26105 adds the runner-pool-retire command and -completed terminal
+    # topics (2 more specs).
+    # OMN-26249 adds the runtime-loop-reading-recorded event topic (1 more spec).
+    # OMN-21592 adds the node-start-requested command and node-start-answered
+    # event topics (2 more specs).
+    # OMN-26316 adds the dev-merge-build-overdue event topic (1 more spec).
+    # OMN-26724 adds the build-repository-ref-check command and -checked
+    # terminal topics (2 more specs).
+    repo_specs: 235
+    repo_specs_measured_at: "ab8f59fcffdb362788112a4c7ea4cbc5e376e20e"

@@ -11,11 +11,11 @@ from unittest.mock import Mock
 import pytest
 import yaml
 
+from omnibase_infra.contracts.contract_completion_bound import read_completion_bound
 from omnibase_infra.handlers.handler_contract_subscribe_preflight import (
     load_consumer_group_handover,
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
-    _read_completion_bound,
     _read_declared_key_grains,
     _read_dlq_topics,
     _read_state_io,
@@ -32,7 +32,7 @@ from omnibase_infra.tools.contract_topic_extractor import read_projection_api_to
 pytestmark = pytest.mark.unit
 
 READERS = (
-    _read_completion_bound,
+    read_completion_bound,
     _read_declared_key_grains,
     _read_dlq_topics,
     _read_state_io,
@@ -83,7 +83,7 @@ def test_valid_contract_preserves_wiring_extensions(
         "database": "omnibase_infra",
         "table": "workflow_state",
     }
-    bound = _read_completion_bound(path)
+    bound = read_completion_bound(path)
     assert bound is not None
     assert bound.max_wall_seconds == 900
     assert bound.failure_class == "runtime_restart_during_delegation"
@@ -145,7 +145,7 @@ def test_unreadable_yaml_never_provides_an_exemption_or_wiring_configuration(
     for reader in (
         _read_dlq_topics,
         _read_state_io,
-        _read_completion_bound,
+        read_completion_bound,
         load_consumer_group_handover,
         load_consume_concurrency,
     ):
@@ -159,7 +159,7 @@ def test_missing_contract_keeps_each_readers_absent_value(tmp_path: Path) -> Non
     assert _read_declared_key_grains(path) == ()
     assert _read_dlq_topics(path) == []
     assert _read_state_io(path) == {}
-    assert _read_completion_bound(path) is None
+    assert read_completion_bound(path) is None
     assert load_published_events_map(path) == {}
     assert load_consumer_group_handover(path) is None
     assert load_consume_concurrency(path).is_serial

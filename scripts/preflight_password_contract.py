@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Check the five compose passwords against one stated format contract, up front.
+"""Check the six compose passwords against one stated format contract, up front.
 
-OMN-19087. A lane deploy consumes five passwords. Before this check, exactly three
+OMN-19087. A lane deploy consumes six passwords. Before this check, exactly three
 of them had a format contract, and it was enforced in one place: the forward
 migration (``scripts/run-forward-migrations.sh``), which runs after Postgres,
 Redpanda and Valkey are already up. On 2026-09-21 a dogfood cold bring-up used a
@@ -26,7 +26,7 @@ compose interpolation, in a sourced env file or in a quoted shell argument (``~`
 left out because an unquoted assignment tilde-expands it). "hex" is ``[0-9a-fA-F]+``.
 ``openssl rand -hex 32`` satisfies both, so it is the one generator the examples
 name. The bootstrap's placeholder form, ``__REPLACE_WITH_...__``, is refused for all
-five, as the bootstrap refuses it for the login roles.
+six, as the bootstrap refuses it for the login roles.
 
 WHY NOT HEX FOR ALL FIVE. The two infrastructure passwords are not hex on any lab
 host today (read 2026-09-23 on .201, .101 and .105, by character class only), and
@@ -88,17 +88,18 @@ URL_SAFE = PasswordFormat(
 )
 
 # The bootstrap's placeholder test (validate_password in
-# docker/migrations/forward/000_create_multiple_databases.sh), applied to all five.
+# docker/migrations/forward/000_create_multiple_databases.sh), applied to all six.
 PLACEHOLDER = re.compile(r"__REPLACE_WITH_.*__")
 
 GENERATOR = "openssl rand -hex 32"
 
-# The three login-role variables, in the order run-forward-migrations.sh and the
-# bootstrap's LOGIN_ONLY_ROLE_MAP list them.
+# The four login-role variables, in the order run-forward-migrations.sh and the
+# bootstrap's LOGIN_ONLY_ROLE_MAP list them (OMN-26151 added GATEWAY_RUNTIME_PASSWORD).
 LOGIN_ROLE_VARS: tuple[str, ...] = (
     "OMNINODE_RUNTIME_PASSWORD",
     "TENANT_PROJECTION_WRITER_PASSWORD",
     "CHAIN_CANARY_READER_PASSWORD",
+    "GATEWAY_RUNTIME_PASSWORD",
 )
 
 INFRA_VARS: tuple[str, ...] = (
@@ -139,21 +140,19 @@ def render_env_example_block() -> str:
         "# PASSWORD FORMAT CONTRACT (OMN-19087). Checked before any container starts",
         "# by scripts/preflight_password_contract.py, which names every variable that",
         "# breaks it. A set value outside its format is refused; the placeholder",
-        "# form __REPLACE_WITH_...__ is refused for all five.",
+        "# form __REPLACE_WITH_...__ is refused for all six.",
     ]
     for var, fmt in CONTRACT.items():
         lines.append(f"#   {var} is {fmt.name} ({fmt.rule})")
-    lines.append(f"# `{GENERATOR}` satisfies every format above.")
-    lines.append(
-        f"# {VOLUME_FIXED_VAR} is fixed once the Postgres data volume initialises: a"
+    lines.extend(
+        [
+            f"# `{GENERATOR}` satisfies every format above.",
+            f"# {VOLUME_FIXED_VAR} is fixed once the Postgres data volume initialises: a",
+            "# changed value fails authentication against the existing volume. Set it",
+            "# once, before the first bring-up, and change only a variable a refusal",
+            "# names.",
+        ]
     )
-    lines.append(
-        "# changed value fails authentication against the existing volume. Set it"
-    )
-    lines.append(
-        "# once, before the first bring-up, and change only a variable a refusal"
-    )
-    lines.append("# names.")
     return "\n".join(lines)
 
 

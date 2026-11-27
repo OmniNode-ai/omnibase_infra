@@ -179,11 +179,13 @@ from omnibase_infra.gate_binding import (
     resolve_gate_binding,
 )
 from omnibase_infra.handlers.done_write_receipt_guard import (
-    reap_timed_out_process as _reap_timed_out_process,
-)
-from omnibase_infra.handlers.done_write_receipt_guard import (
+    process_registry_root,
+    product_clone_verifier_env,
     resolve_done_write_receipt_gate,
     run_dod_verify_command,
+)
+from omnibase_infra.handlers.done_write_receipt_guard import (
+    reap_timed_out_process as _reap_timed_out_process,
 )
 from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect import (
@@ -281,6 +283,9 @@ _GH_PR_FILE_PATH_KEY = "filename"
 # dod_verify's own terminal status for "every verdict-bearing check passed".
 # `EnumDodVerifyStatus.VERIFIED` in omnimarket.
 _DOD_VERIFY_STATUS_VERIFIED = "verified"
+_DOD_VERIFY_STATUS_UNRESOLVED = "unresolved"
+_DOD_VERIFY_UNRESOLVED_CAUSE_KEY = "unresolved_cause"
+_DOD_VERIFY_BUDGET_NOT_DECLARED = "dispatch_budget_not_declared"
 # How many passing checks executed the claimed behavior, as opposed to reading
 # PR/merge state or standing in as a surrogate. `ModelDodVerifyState
 # .behavior_proving_count` in omnimarket, added by OMN-15911. Absent on any
@@ -2941,7 +2946,15 @@ class HandlerEvidenceAutocloseSweep:
         run_gateway_command: offer_companion_sources.TypeRunGateway | None = None,
         *,
         gate: ProtocolDoneWriteReceiptGate | None = None,
+        registry_root: str | None = None,
     ) -> None:
+        # OMN-26650. ``registry_root`` is the directory holding the materialised
+        # product clones (the caller's ``OMNI_HOME``); injected, with the
+        # process's own reader as the default so zero-arg contract-driven
+        # construction still anchors a relative check cwd in the product clone.
+        self._registry_root = (
+            registry_root if registry_root is not None else process_registry_root()
+        )
         # ``autoclose_disabled`` mirrors GitHubTransport's env-fallback-in-
         # __init__ precedent: read at construction time, override injectable
         # for tests. Re-checked defensively at the top of handle() too so a
@@ -3062,8 +3075,16 @@ class HandlerEvidenceAutocloseSweep:
             contract = Path(cwd).resolve() / "contracts" / f"{ticket_id}.yaml"
             if not contract.is_file():
                 return None, -1, f"Product contract is unreadable: {contract}"
+            # OMN-26650: the contract was read from a sparse contracts-only
+            # clone; a relative check cwd must mean the materialised product
+            # clone, not that tree (see `materialised_product_clone`). The
+            # verifier takes it as its explicit `CONTRACT_REPO_DIR` anchor.
             return await run_dod_verify_command(
-                ticket_id, cwd, timeout, contract_path=str(contract)
+                ticket_id,
+                cwd,
+                timeout,
+                contract_path=str(contract),
+                env=product_clone_verifier_env(cwd, self._registry_root),
             )
         return await run_dod_verify_command(ticket_id, cwd, timeout)
 
@@ -5112,6 +5133,32 @@ class HandlerEvidenceAutocloseSweep:
         behavior_proving_count = self._gate.as_int(
             verdict.get(_DOD_VERIFY_BEHAVIOR_KEY)
         )
+
+        # OMN-26106: a verifier that refused to start ran no check, so the
+        # `0/0` counters describe the refusal and not the ticket. Reported and
+        # left unwritten, never posted as an evidence gap.
+        refusal_cause = str(verdict.get(_DOD_VERIFY_UNRESOLVED_CAUSE_KEY) or "")
+        if (
+            verify_status == _DOD_VERIFY_STATUS_UNRESOLVED
+            and refusal_cause == _DOD_VERIFY_BUDGET_NOT_DECLARED
+        ):
+            return ModelEvidenceAutocloseOutcome(
+                ticket_id=ticket_id,
+                companion_pr_number=companion_pr_number,
+                companion_pr_url=companion_pr_url,
+                decision=EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY,
+                reason=(
+                    f"dod_verify refused to start ({refusal_cause}): "
+                    f"{_skipped_verdict_reason(verdict, gate=self._gate)}. No "
+                    "check ran, so this run learned nothing about the ticket's "
+                    "criteria; nothing was written."
+                ),
+                dod_verify_total_checks=total_checks,
+                dod_verify_verified_count=verified_count,
+                dod_verify_failed_count=failed_count,
+                dod_verify_non_probative_count=non_probative_count,
+                dod_verify_behavior_proving_count=behavior_proving_count,
+            )
 
         # OMN-20520: partial proofs do not turn a skipped verifier run into an
         # evidence verdict. Report its reason and leave the ticket untouched.

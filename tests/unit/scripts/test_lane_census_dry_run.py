@@ -221,3 +221,41 @@ def test_clean_lane_with_the_desired_state_removed_is_drift(tmp_path: Path) -> N
     assert proc.returncode == 30, proc.stderr
     assert "desired_state_unreadable" in proc.stdout
     assert "removed.json" in proc.stdout
+
+
+def test_start_line_names_the_collector_revision(tmp_path: Path) -> None:
+    """OMN-26593: a census run line says which collector revision ran.
+
+    The installer records the revision in the unit's environment
+    (LANE_CENSUS_REVISION, OMN-26379); the journal line is what a reader sees
+    after the unit has run, so the line carries it.
+    """
+    ps, networks = _clean_lane_inventory()
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    proc, _ = _run(
+        ["--lane", _LANE, "--dry-run"],
+        tmp_path,
+        ps_rows=ps,
+        networks=networks,
+        broker="redpanda",
+        extra_env={"LANE_CENSUS_REVISION": revision},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert f"revision={revision}" in proc.stderr
+
+
+def test_start_line_says_unrecorded_when_no_revision_is_installed(
+    tmp_path: Path,
+) -> None:
+    """OMN-26593: a run with no installed revision record says so, never a blank."""
+    ps, networks = _clean_lane_inventory()
+    proc, _ = _run(
+        ["--lane", _LANE, "--dry-run"],
+        tmp_path,
+        ps_rows=ps,
+        networks=networks,
+        broker="redpanda",
+        extra_env={"LANE_CENSUS_REVISION": ""},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "revision=unrecorded" in proc.stderr

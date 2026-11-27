@@ -283,6 +283,10 @@ jobs:
           PR_BASE_BRANCH: ${{ inputs.base_branch }}
           SOURCE_REPO: ${{ inputs.source_repo }}
           SOURCE_SHA: ${{ inputs.source_sha }}
+          # OMN-26637: the caller's own pull-request event. The publisher
+          # refuses a PR head, which is not a merged ref.
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PRIMARY_REF: ${{ steps.primary.outputs.ref }}
           CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: |
@@ -292,6 +296,8 @@ jobs:
             --base-branch "$PR_BASE_BRANCH" \
             --source-repo "$SOURCE_REPO" \
             --source-sha "$SOURCE_SHA" \
+            --pr-merged "$PR_MERGED" \
+            --pr-head-sha "$PR_HEAD_SHA" \
             --primary-ref "$PRIMARY_REF" \
             --bus-lane "dev" \
             --bus-overlay ".lane-table/config/ci_bus_lanes.yaml" \
@@ -765,7 +771,7 @@ jobs:
   # omnibase_infra commit merged.
   #
   # WHY IT LIVES HERE AND NOT IN A CALLER. Every repository the runtime image
-  # vendors -- omnimarket, omnibase_core, omnibase_compat, omnibase_spi --
+  # vendors -- omnimarket, omnibase_core, omnibase_spi --
   # calls this one file, so each acquires the delivery path with no per-repo
   # code and no per-repo configuration. A copy in each caller is how the org
   # ended up with two divergent trigger_rebuild_on_merge.py, which this file's

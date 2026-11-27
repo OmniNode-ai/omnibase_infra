@@ -43,8 +43,8 @@
 #
 # THE CREDENTIALS: LANE-LOCAL, THE STABILITY LANE'S OWN (OMN-21485)
 #   `CHAIN_CANARY_GATEWAY_API_KEY` and `KAFKA_SASL_*` are
-#   the stability environment's secrets, injected under the names the
-#   probe reads, exactly as chain-canary.yml injects them; the broker and its
+#   read from the stability Infisical (OMN-26121) and exported under the names the
+#   probe reads, exactly as chain-canary.yml exports them; the broker and its
 #   transport come from the bus_lane the resolved lane declares. Configure all
 #   three names in that environment before enabling the proof; GitHub otherwise
 #   falls back to a same-named repository secret. The API key is
@@ -86,7 +86,7 @@ on:
   workflow_dispatch:
     inputs:
       gateway_url:
-        description: 'Tenant-bearing API base URL. Empty grades the first stability lane of vars.LAB_PROOF_LANES_JSON whose gateway answers.'
+        description: 'Tenant-bearing base URL (the runtime ingress). Empty grades the first stability lane of vars.LAB_PROOF_LANES_JSON whose ingress_url answers.'
         required: false
         default: ''
       budget_seconds:
@@ -179,7 +179,12 @@ jobs:
         with:
           lanes-json: ${{ vars.LAB_PROOF_LANES_JSON }}
           lanes-var: LAB_PROOF_LANES_JSON
-          require: gateway_url bus_lane
+          # OMN-26122: the lane's front door is the runtime's own ingress_url,
+          # which serves POST /v1/workflows. The separate HTTP API a
+          # gateway_url named was retired (RULING 2026-11-02T15:02:01Z moved
+          # onex-api inside the runtime; RULING 2026-11-10T13:26:22Z removed
+          # the separate service), so no lane declares gateway_url.
+          require: ingress_url bus_lane
           match: lane_role=stability
           # OMN-19811: a lane that does not answer while its deploy agent reports
           # a deploy in progress is waited for, not graded. Idle, unreadable or
@@ -213,18 +218,32 @@ jobs:
                   handle.write(f'{key}={value}\n')
           "
 
+      # OMN-26121 (operator ruling 2026-11-23T23:06:19Z): C16 drives the stability lane's front door.
+      # Stability reads its credentials from the stability Infisical through the
+      # runner's own machine identity, never from repository or environment
+      # secrets. Each value is masked and exported to the job environment; a
+      # missing one fails here naming the variable, the Infisical name and the
+      # store path. OMN-26566: the gateway key is C16's own (the name the
+      # omnimarket secret store declares for node_stability_gateway_key_provision_effect
+      # --check c16), so provisioning it never touches the name C11 reads. See .github/actions/fetch-stability-secrets.
+      - name: Fetch the stability probe credentials from the stability Infisical
+        uses: ./.github/actions/fetch-stability-secrets
+        with:
+          secrets: |
+            KAFKA_SASL_USERNAME=STABILITY_TEST_KAFKA_SASL_USERNAME_STABILITY_CHAIN_CANARY
+            KAFKA_SASL_PASSWORD=STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_CHAIN_CANARY
+            CHAIN_CANARY_GATEWAY_API_KEY=STABILITY_TEST_C16_GATEWAY_API_KEY
+
       - name: Drive the healthy and the dying delegation and grade C16
         env:
-          # The lane's address as the overlay declares it (LANE_GATEWAY_URL,
-          # from the resolve step), or an explicit dispatch override.
+          # The lane's address as the overlay declares it (LANE_INGRESS_URL,
+          # the runtime's own front door, from the resolve step), or an
+          # explicit dispatch override.
           GATEWAY_URL_OVERRIDE: ${{ github.event.inputs.gateway_url }}
           BUDGET_SECONDS: ${{ github.event.inputs.budget_seconds || '240' }}
           RUNNER_IDENTITY: gha-${{ github.run_id }}-${{ github.run_attempt }}
           # The NAMES are what the probe is told; the VALUES reach it only
           # here, as environment. See the header note.
-          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.CHAIN_CANARY_GATEWAY_API_KEY }}
-          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
-          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
           # The healthy run's terminal, read off the bus for R-DELEG-12. Named
           # here, as chain-canary.yml names its hops, never in the script.
           TERMINAL_TOPIC: onex.evt.omnimarket.delegate-skill-completed.v1
@@ -232,7 +251,7 @@ jobs:
           set -uo pipefail
           # NOT `set -e`: a non-zero probe is the verdict and must still write
           # its record before the job ends.
-          GATEWAY_URL="${GATEWAY_URL_OVERRIDE:-${LANE_GATEWAY_URL:-}}"
+          GATEWAY_URL="${GATEWAY_URL_OVERRIDE:-${LANE_INGRESS_URL:-}}"
           echo "lane: ${LANE_NAME:-dispatch override}, gateway ${GATEWAY_URL}"
           uv run --frozen python scripts/ci/c16_receipt_identity_probe.py \
             --base-url "${GATEWAY_URL}" \
@@ -260,9 +279,6 @@ jobs:
           # A JSON array: the read-only SQL client prefix for delegation_events.
           # Unset grades SKIP, which is red.
           PSQL_ARGV_JSON: ${{ vars.C16_PINNED_PSQL_ARGV_JSON }}
-          CHAIN_CANARY_GATEWAY_API_KEY: ${{ secrets.CHAIN_CANARY_GATEWAY_API_KEY }}
-          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
-          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
         run: |
           set -uo pipefail
           uv run --frozen python -c "
@@ -276,12 +292,12 @@ jobs:
               'config_path': 'c16-pinned-backends.yaml',
               'record_path': 'c16-pinned-backends.json',
               'timeout_seconds': 300,
-              'delegate_argv': ['uv', 'run', '--frozen', 'onex', 'delegate', 'Reply with the single word: alive.', '--task-type', 'test', '--ticket', 'OMN-23176', '--bus', 'kafka', '--lane', os.environ.get('LANE_NAME', ''), '--locus', 'deployed-lane', '--state-root', '.onex_state'],
+              'delegate_argv': ['uv', 'run', '--frozen', 'python', '-m', 'omnibase_core.cli.cli_commands', 'delegate', 'Reply with the single word: alive.', '--task-type', 'test', '--ticket', 'OMN-23176', '--bus', 'kafka', '--lane', os.environ.get('LANE_NAME', ''), '--locus', 'deployed-lane', '--state-root', '.onex_state'],
               'psql_argv': json.loads(os.environ.get('PSQL_ARGV_JSON') or '[]'),
           }
           json.dump(request, open('c16-pinned-backends-input.json', 'w', encoding='utf-8'))
           "
-          uv run --frozen onex node node_c16_pinned_backend_effect \
+          uv run --frozen python -m omnibase_core.cli.cli_commands node node_c16_pinned_backend_effect \
             --input c16-pinned-backends-input.json --backend event_bus=inmemory \
             --state-root .onex_state/c16-pinned-backends
           status=$?

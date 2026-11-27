@@ -206,10 +206,10 @@ def _agent(
 # --------------------------------------------------------------------------- #
 # the job path                                                                #
 # --------------------------------------------------------------------------- #
-def test_a_dev_job_applies_the_record_after_the_recreate_and_the_verify(
+def test_a_dev_job_applies_the_record_after_the_recreate_and_before_the_verify(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The refresh replayed through the real ``_run_deploy``: recreate, verify, apply."""
+    """The refresh replayed through the real ``_run_deploy``: recreate, apply, verify (OMN-26300)."""
     agent, cmd, jobs, runner, timeline = _agent(tmp_path, monkeypatch)
     _declare(tmp_path / "state", tmp_path)
 
@@ -217,7 +217,7 @@ def test_a_dev_job_applies_the_record_after_the_recreate_and_the_verify(
 
     job = jobs.load(cmd.correlation_id)
     assert job is not None and job.status == "success"
-    assert timeline == ["recreate", "verify", "handler apply"]
+    assert timeline == ["recreate", "handler apply", "verify"]
     argv, timeout, env = runner.calls[0]
     assert argv[:3] == [sys.executable, branch_install_entry(), "apply"]
     assert argv[argv.index("--state-dir") + 1] == str(tmp_path / "state")
@@ -323,7 +323,7 @@ def test_the_reapply_is_a_dev_lane_step_only(
     _declare(tmp_path / "state", tmp_path)
 
     for lane in (EnumRuntimeLane.PROD, EnumRuntimeLane.STABILITY_TEST):
-        assert agent._reapply_branch_installs(lane) is True
+        assert agent._apply_branch_installs_in_job(lane) is True
 
     assert runner.calls == [], "no handler ran for a governed lane"
 

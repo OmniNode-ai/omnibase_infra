@@ -92,7 +92,7 @@ trusted_runner_variable:
   # The org variable is not flipped either: it is inherited by omninode_infra --
   # private, carrying a live staging deploy path, and with only five
   # seam-driven job definitions, so almost no yield for a large blast radius --
-  # and by omnimemory, omnidash, omnibase_spi and omnibase_compat, none of
+  # and by omnimemory, omnidash and omnibase_spi, none of
   # which were enumerated for container exposure.
   #
   # Two shadows were flipped at 21:12:33Z. ONE WAS REVERTED 35 MINUTES LATER on
@@ -413,22 +413,20 @@ trusted_runner_variable:
   # instead of an invisible one. No variable is written for omniweb by this
   # change.
   repository_overrides:
-    omninode_infra:
-      expected_json: '["self-hosted","omnibase-ci"]'
-      revert_when: >-
-        Revert to '["ubuntu-latest"]' the moment GitHub-hosted compute is a working placement again AND any of the following is observed: the fleet busy fraction sustains above the saturation threshold in `route` below with omninode_infra jobs among the waiting set; a maintenance roll cannot converge because too few runners are idle to recreate; or any of the thirteen seam-driven jobs fails on a named fleet runner for a fleet-caused reason -- a missing tool on the runner image, a container it cannot reach from the test process, or a job that is QUEUED rather than running. A hosted pin is NOT a valid revert target while the billing annotation persists, because that placement does not execute.
-      activation_gate:
-        sustained_samples: >-
-          Four job-level samples of fleet busy/idle and org-wide queue depth, taken at least fifteen minutes apart across the first ninety minutes after the write. A single quiet-moment snapshot is explicitly NOT acceptance: that is the +11min mistake recorded in the entry above.
-        sustained_min_span_seconds: 5400
-        capacity_budget: >-
-          Thirteen job definitions, against the 88-runner omnibase-ci group. Baseline read immediately before the write on 2026-09-14: 88 online, 11 busy, 77 idle. This repository already places 47 job definitions on the fleet (42 via OMNI_INFRA_FLEET_RUNS_ON_JSON plus 5 fleet literals), so this is a roughly 28 percent increase in its own fleet footprint, not a new tenant. Budget: the group must keep at least the `min_idle_runners` of `route` below free at every sample; breaching it on two consecutive samples is a revert, not a discussion.
-        maintenance_roll_convergence: >-
-          The runner auto-bounce roller refuses to recreate a BUSY runner, so a fleet at 87/88 busy cannot converge -- the harm measured at 2026-09-12T01:54Z. Convergence is proven by one completed maintenance roll, or by the busy fraction returning below the budget above, within the sampling window.
-        evidence_companion_fate_isolation: >-
-          The 2026-09-12 flip starved the evidence companion of the pull request that recorded it. The OCC autobind and companion-effect publishers in this repository read the dedicated OMNI_OCC_AUTOBIND_RUNS_ON_JSON knob, which stays UNSET and is therefore untouched by this override; both publisher jobs were observed SUCCESS on omninode_infra run 34838472657 and 34838472516 while every hosted job in the same push failed, so the companion path is already isolated from this seam by construction.
-        positive_control_acceptance: >-
-          Acceptance is a named fleet runner on a previously-hosted job, not an absence of red. Accept when at least one of the eleven clean seam-driven jobs reports conclusion success with a populated `runner_name` matching `omninode-runner-*` and labels self-hosted,omnibase-ci. The positive control that the fleet itself is healthy is a fleet-literal job in the SAME run staying green -- the discriminator the phase-2 diagnosis used.
+    # OMN-26287, 2026-11-20. The override that stood here for the private infra
+    # repository declared '["self-hosted","omnibase-ci"]' and is removed, not
+    # edited: that repository's CI moved to GitHub-hosted runners under the
+    # operator go-ahead of 2026-11-19 (RULING 2026-11-20T17:06:14Z, OMN-25674:
+    # "send it. we are on enterprise"; deploy and apply jobs stay self-hosted).
+    # Its repository variable now reads '["ubuntu-latest"]', which is the
+    # organisation value, so no divergence is declared and it inherits
+    # `expected_json` above. The hourly audit read the stale declaration as
+    # drift and failed runner-routing-audit / Runner Routing Audit on this
+    # repository's dev head and on every open pull request here, with one
+    # finding: the variable "drifted to '["ubuntu-latest"]'" against an expected
+    # fleet pair. The repository stays in `repositories` below, so a fleet-pair
+    # shadow set there again is reported as drift
+    # (tests/ci/test_runner_routing_audit.py, the two OMN-26287 tests).
     omni_home:
       expected_json: '["self-hosted","omnibase-ci"]'
       revert_when: >-
@@ -1108,8 +1106,8 @@ route:
     #
     # Measured 2026-09-20: omnibase_infra 32, omninode_infra 14, omniclaude 7,
     # omnimarket 5, omnibase_core 4, omniweb 4, omni_home 3,
-    # onex_change_control 3, omnibase_compat 2, omniintelligence 2,
-    # omnimemory 2, omnibase_spi 1, omnidash 1. `knowledge_base` declares none
+    # onex_change_control 3, omniintelligence 2, omnimemory 2, omnibase_spi 1,
+    # omnidash 1. The shared knowledge repository declares none
     # and is therefore absent -- absent because it has nothing to watch, not
     # because anybody decided not to watch it.
     #

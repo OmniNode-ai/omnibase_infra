@@ -6,6 +6,23 @@ summary: "On 2026-10-31 the dev lane broker read unhealthy from about 14:52Z on 
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn21789-ac1-accepted-20261120t1145z:
+      - label: AC1
+        criterion_hash: 3da8abf7285830c055dfdbd64d9d488dc1d40ca0f0d94444cb5ab01858dd362c
+        proposed_by: lane=dod-closeout-bind-2026-11-20T1145Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-20T1145Z-c2
+    dod-omn21789-ac2-accepted-20261120t1145z:
+      - label: AC2
+        criterion_hash: d3efa6ebeafa137718caa3d40b1ad43efacae3d3b725f1473ab9e60dc40d31f6
+        proposed_by: lane=dod-closeout-bind-2026-11-20T1145Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-20T1145Z-c2
+    dod-omn21789-ac3-accepted-20261120t1145z:
+      - label: AC3
+        criterion_hash: a32df3d03894eb945494bdac59d291c734c0df41e15fcd725d9aa0a6b081f3bc
+        proposed_by: lane=dod-closeout-bind-2026-11-20T1145Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-11-20T1145Z-c2
 requirements:
   - id: req-omn21789-probe-skips-relay-groups
     statement: "The broker readiness probe reads READY while a gateway-forwarder-outbound group is frozen, and still reads NOT READY for a frozen runtime group."
@@ -52,3 +69,30 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/docker/test_omn18789_broker_readiness_probe.py -q -p no:cacheprovider -k 'each_declared_suffix or suffix_elements or suffix_metacharacters'"
+  - id: dod-omn21789-ac1-accepted-20261120t1145z
+    description: 'AC1: the recorded forwarder outbound group describe (Stable, one member, lag 150078, offsets frozen past the window) leaves the probe READY. Fails at the parent of omnibase_infra#5521, where the probe reports NOT_READY group_not_synced for that group.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "tests/unit/docker/test_omn18789_broker_readiness_probe.py::test_frozen_forwarder_group_does_not_make_the_broker_not_ready" -v -p no:cacheprovider --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21789-ac2-accepted-20261120t1145z
+    description: 'AC2: a frozen runtime consumer group beside a forwarder outbound group reads NOT READY and the verdict names only the runtime group.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "tests/unit/docker/test_omn18789_broker_readiness_probe.py::test_frozen_runtime_group_is_still_not_ready_beside_a_forwarder_group" -v -p no:cacheprovider --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21789-ac3-accepted-20261120t1145z
+    description: 'AC3: broker_readiness_declaration.conf declares sync_exempt_group_suffixes and the probe fails closed with declaration_missing_key when it is absent. Both tests fail at the parent of omnibase_infra#5521.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "tests/unit/docker/test_omn18789_broker_readiness_probe.py::test_declaration_declares_the_exempt_group_suffixes" "tests/unit/docker/test_omn18789_broker_readiness_probe.py::test_probe_fails_closed_when_the_exempt_suffixes_are_not_declared" -v -p no:cacheprovider --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

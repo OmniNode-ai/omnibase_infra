@@ -94,6 +94,8 @@ def clones(tmp_path: Path) -> Path:
 def _write_pin(config_root: Path, pin: dict[str, str]) -> Path:
     path = config_root / "config" / "lab" / "lane-overlays" / f"{LANE}.release-pin.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
+    # OMN-26121: the stability refresh exports the lane declaration folder (config/lab), which must hold the declaration.
+    (path.parent.parent / "ci_bus_lanes.yaml").write_text("lanes: {}\n")
     lines = [
         "schema_version: 1",
         "date: 2026-10-30",
@@ -166,7 +168,7 @@ def _run_refresh(
     overlay_root = tmp_path / "overlay-root"
     (overlay_root / "llm_endpoints").mkdir(parents=True, exist_ok=True)
     (overlay_root / "llm_endpoints" / "overlay.yaml").write_text(
-        "schema_version: 1\nendpoint_urls:\n  embeddings-201: http://192.0.2.50:8100\n"
+        "schema_version: 1\nendpoint_urls:\n  embeddings-201: http://192.0.2.50:8100\n  coder-5090: http://192.0.2.51:8200\n"
     )
     env["ONEX_SKILL_OVERLAY_ROOTS"] = str(overlay_root)
     for key in ("ONEX_DEPLOY_REASON", "ONEX_DEPLOY_GRANT_ACK"):
@@ -348,7 +350,6 @@ def test_stability_release_only_stage_workspace_pins_each_sibling() -> None:
 # ---------------------------------------------------------------------------
 _STAGE_DISTS = {
     "omnibase_core": "omnibase-core",
-    "omnibase_compat": "omnibase-compat",
     "omnimarket": "omnimarket",
     "omnibase_infra": "omnibase-infra",
     "omnibase_spi": "omnibase-spi",

@@ -1,0 +1,89 @@
+schema_version: 1.0.0
+ticket_id: OMN-26493
+title: The deploy agent's idle restore and idle converge skip a dev head whose last roll failed with a recorded verdict class, and write one ledger row per head until the head changes
+summary: >-
+  Between 2026-11-16 and 2026-11-23 seven failed dev jobs rebuilt an omnibase_infra head that an earlier job had already failed to boot (7b25f0ff three times: 5623655f, 8648de6f, a9ecbe18), each leaving the dev runtime unhealthy until the guard restored the rollback image. The agent now refuses agent/idle-restore and agent/idle-converge builds of a head whose newest terminal dev job failed with a recorded verdict class (runtime_degraded, http_error, probe_unreachable, BOOT FAILED, compose up timed out), derived from the agent's own job records, until the head changes. The first refusal of a head writes one build-decision ledger row naming the head, the failed job and the verdict class; the once-per-head mark lives in the agent's state directory and survives a restart. A request a lane or the operator signed never reaches the rule. Code lives in src/omnibase_infra/nodes/node_deploy_job_reading_effect/runtime_failed_head_gate.py, loaded by path like the node's other runtime modules; agent.py changes by zero net lines.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26493-failed-head-gate
+    statement: The deploy agent's idle builds do not rebuild a dev head whose last dev job failed with a recorded verdict class, until the head changes.
+    acceptance:
+      - id: AC1
+        statement: "AC1: idle restore and idle converge do not accept a job for a head whose last dev job failed with a recorded verdict class, and accept one when the head differs -- falsifier: uv run pytest -k idle_skips_failed_head exits non-zero"
+      - id: AC2
+        statement: "AC2: each refusal appends exactly one ledger row per head, naming the head, the failed job id and the verdict class -- falsifier: uv run pytest -k idle_failed_head_ledger_row exits non-zero"
+      - id: AC3
+        statement: "AC3: a request signed by a lane or the operator for a failed head is still accepted -- falsifier: uv run pytest -k signed_request_bypasses_failed_head exits non-zero"
+      - id: AC4
+        statement: "AC4: a regression test built from the recorded job records 5623655f, 8648de6f and a9ecbe18 (same head 7b25f0ff, fixture path in the PR) fails on the broken code and passes on the fix -- falsifier: uv run pytest -k failed_head_incident_replay exits non-zero"
+evidence_requirements:
+  - kind: tests
+    description: The failed-head gate for the agent's idle builds, its ledger row and its replay of the 7b25f0ff incident.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_failed_head_gate_omn26493.py -q --no-header -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26493-ac1-idle-skips-failed-head
+    description: >-
+      With the newest terminal dev job failed on the dev head with each recorded verdict class (runtime_degraded, http_error, probe_unreachable, BOOT FAILED, compose up timed out), an idle restore of a down lane and an idle converge start no job; a newer head, a failure with no recorded class, a failed job of another lane, a later passed job and an unread head each start one.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_failed_head_gate_omn26493.py -q --no-header -p no:cacheprovider -k idle_skips_failed_head
+        cwd: .
+  - id: dod-omn26493-ac2-one-ledger-row-per-head
+    description: >-
+      The refusal writes one build-decision row (result=refused, reason=failed_head) carrying trigger_sha, job and verdict_class; thirty ticks, a restart of the agent and the converge and restore paths together still write one; a second head writes a second.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_failed_head_gate_omn26493.py -q --no-header -p no:cacheprovider -k idle_failed_head_ledger_row
+        cwd: .
+  - id: dod-omn26493-ac3-signed-request-bypasses
+    description: >-
+      After the idle restore of the failed head is refused, a request signed by the operator, a lane or CI for the same head is accepted and runs; the gate judges only agent/idle-restore and agent/idle-converge, and its two spellings are the agent's own.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_failed_head_gate_omn26493.py -q --no-header -p no:cacheprovider -k signed_request_bypasses_failed_head
+        cwd: .
+  - id: dod-omn26493-ac4-incident-replay
+    description: >-
+      The replay of head 7b25f0ff (fixture scripts/deploy-agent/tests/unit/fixtures/recorded_jobs_7b25f0ff_omn26493.json, built from the checked-in rows of devwindow_recorded_rows_omn26300.json and the shape of recorded_job_ca1533c4_omn26429.json) ticks every minute from the second idle restore (21:00:33Z) to the signed pinned fix (23:05:23Z) and three hours after it: no idle job starts, one ledger row names the head, job 5623655f and its verdict class, and a newer head lets the next restore through. Without the gate the same replay starts the second idle restore.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_failed_head_gate_omn26493.py -q --no-header -p no:cacheprovider -k failed_head_incident_replay
+        cwd: .
+  - id: dod-omn26493-deploy-source-readback
+    description: >-
+      Hosted-runner source-artifact readback: fetch the rule's module and the agent's calls of it at the evaluated published commit and confirm the module writes the failed_head reason and the agent asks it before both idle builds. A missing line fails the command, so it fails at the merge base, where neither exists. No lab service or credentials are required. This checks the published source and does not assert a live runtime roll.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/nodes/node_deploy_job_reading_effect/runtime_deploy_job_reading.py" | grep -c 'reason="failed_head"' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/scripts/deploy-agent/deploy_agent/agent.py" | grep -c '_failed_head.refuses' >/dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn26493-integration-proof
+    description: >-
+      The failed-head gate runs against the recorded job files of the 7b25f0ff incident written into a real state directory: the failed head is refused with its verdict class, a newer head and an empty directory are not. It binds no criterion; the hosted proof is dod-omn26493-ac1-idle-skips-failed-head and dod-omn26493-ac4-incident-replay.
+    source: manual
+    execution_scope: local_done_gate
+    binds_ac: []
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_failed_head_gate_omn26493.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra

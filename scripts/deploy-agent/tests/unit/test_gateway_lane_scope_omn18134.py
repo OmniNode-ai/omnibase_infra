@@ -47,6 +47,7 @@ from __future__ import annotations
 import inspect
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -74,6 +75,7 @@ from deploy_agent.executor import (
     DeployExecutor,
     GatewayDeployScriptUnavailableError,
     GatewayLaneConfigError,
+    _rcb,
     _requested_services_for_up,
     materialize_gateway_https_resolver_artifacts,
 )
@@ -102,6 +104,16 @@ def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:
 
 def _ok() -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+
+def _up_running_the_roll(
+    self: DeployExecutor,
+    *args: object,
+    after_migrations: Callable[..., object] = lambda *_: None,
+    **kwargs: object,
+) -> None:
+    """A faked ``_compose_up`` that runs the ``after_migrations`` step it is handed."""
+    after_migrations(kwargs.get("extra_env"))
 
 
 def _compose_services(path: Path) -> set[str]:
@@ -142,7 +154,12 @@ def _captured(
 
     with (
         patch("deploy_agent.executor._run", side_effect=_fake_run),
-        patch.object(DeployExecutor, "_compose_up", return_value=None),
+        # OMN-25440: the faked up runs the roll it is handed, as the real one does,
+        # so roll_writers is reached; a handed roll left unrun refuses the deploy.
+        patch.object(DeployExecutor, "_compose_up", new=_up_running_the_roll),
+        # The writers' recreate and image check read docker; their own file owns them.
+        patch.object(_rcb(), "roll_writers", return_value=()),
+        patch.object(_rcb(), "_assert_images_at_deploy_sha", return_value=None),
     ):
         executor.rebuild_scope(
             scope,

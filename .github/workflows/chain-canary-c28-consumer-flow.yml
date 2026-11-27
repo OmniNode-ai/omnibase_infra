@@ -46,9 +46,17 @@
 #   grant for this repository, so registering this producer needs no new board
 #   credential.
 #
-#   No repository secret is used. The broker credential is read by `rpk`
-#   inside the broker container from that container's own environment and
-#   never reaches this job.
+#   No repository secret is used. The stability broker requires SASL
+#   (OMN-26121) and the broker container carries no login of its own, so the
+#   probe has a SCRAM login of its own, stability-c28-probe (OMN-19812; its ACLs
+#   are the probe's own rpk calls and nothing else, declared with the lab's
+#   other broker ACLs). Its password is
+#   read BY NAME from the dev secret store on this runner host,
+#   STABILITY_TEST_KAFKA_SASL_PASSWORD_STABILITY_C28_PROBE, into a mode-600 file
+#   that `docker exec --env-file` hands to rpk: in no argv, no log and no
+#   artifact. A read that fails leaves no file and its cause beside it, the node
+#   grades INDETERMINATE before any rpk call, and nothing ever runs
+#   unauthenticated.
 #
 # THE ONE WRITE
 #   One malformed payload on onex.evt.omnimarket.projection-consumer-flow-applied.v1
@@ -180,16 +188,112 @@ jobs:
         # Clause 2 runs this checkout's tests; onex loads the packaged node.
         run: uv sync --frozen
 
+      - name: Read the probe's broker login from the dev secret store
+        # OMN-19812. The one secret read of this job, by name, with the runner
+        # host's own dev-store machine identity. Every failure leaves no file and
+        # a reason beside it (exit 0): the node then grades INDETERMINATE, and a
+        # missing login never becomes an unauthenticated rpk call.
+        env:
+          C28_BROKER_PRINCIPAL: stability-c28-probe
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 - <<'PYCODE'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          principal = os.environ["C28_BROKER_PRINCIPAL"]
+          target = Path(os.environ["RUNNER_TEMP"]) / "c28-broker-login.env"
+          reason_file = target.with_name(target.name + ".reason")
+          secret_name = "STABILITY_TEST_KAFKA_SASL_PASSWORD_" + principal.upper().replace("-", "_")
+          store_environment, store_path = "dev", "/shared/env/"
+
+
+          def fail(reason: str) -> None:
+              reason_file.write_text(reason + "\n", encoding="utf-8")
+              print(f"::warning::C28 broker login {principal} was not read from the dev secret store: {reason}")
+              sys.exit(0)
+
+
+          needed = ("INFISICAL_ADDR", "INFISICAL_PROJECT_ID", "INFISICAL_CLIENT_ID", "INFISICAL_CLIENT_SECRET")
+          missing = [name for name in needed if not os.environ.get(name)]
+          if missing:
+              fail(f"{', '.join(missing)} not set in the runner environment, so the runner has no dev secret store identity to read {secret_name} with")
+          base = os.environ["INFISICAL_ADDR"].rstrip("/")
+          if "://" not in base:
+              base = "http://" + base
+
+
+          def call(request: urllib.request.Request) -> dict:
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      body = json.load(response)
+              except urllib.error.HTTPError as exc:
+                  fail(f"{request.get_method()} {request.selector.split('?')[0]} answered HTTP {exc.code}")
+              except (urllib.error.URLError, OSError, ValueError) as exc:
+                  fail(f"{request.get_method()} {request.selector.split('?')[0]} failed: {type(exc).__name__}")
+              if not isinstance(body, dict):
+                  fail("the dev secret store answered with a body that is not an object")
+              return body
+
+
+          login = call(
+              urllib.request.Request(
+                  base + "/api/v1/auth/universal-auth/login",
+                  data=json.dumps(
+                      {
+                          "clientId": os.environ["INFISICAL_CLIENT_ID"],
+                          "clientSecret": os.environ["INFISICAL_CLIENT_SECRET"],
+                      }
+                  ).encode(),
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+          )
+          token = login.get("accessToken")
+          if not isinstance(token, str) or not token:
+              fail("the dev secret store login returned no access token")
+          query = urllib.parse.urlencode(
+              {
+                  "workspaceId": os.environ["INFISICAL_PROJECT_ID"],
+                  "environment": store_environment,
+                  "secretPath": store_path,
+              }
+          )
+          found = call(
+              urllib.request.Request(
+                  f"{base}/api/v3/secrets/raw/{urllib.parse.quote(secret_name)}?{query}",
+                  headers={"Authorization": f"Bearer {token}"},
+                  method="GET",
+              )
+          )
+          value = (found.get("secret") or {}).get("secretValue")
+          if not isinstance(value, str) or not value or any(ch.isspace() for ch in value):
+              fail(f"{secret_name} is absent from {store_environment}{store_path} or is not a single-line value")
+          descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+          with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+              handle.write(f"RPK_PASS={value}\n")
+          print(f"C28 broker login {principal}: {secret_name} read by name from {store_environment}{store_path}")
+          PYCODE
+
       - name: Prepare the consumer-flow node request
         env:
           C28_BASE_URL: ${{ github.event.inputs.base_url || fromJSON(needs.resolve-lane.outputs.lane_json).projection_url }}
           LANE_NAME: ${{ needs.resolve-lane.outputs.lane }}
           LANE_COMPOSE_PROJECT: ${{ fromJSON(needs.resolve-lane.outputs.lane_json).compose_project }}
+          C28_BROKER_PRINCIPAL: stability-c28-probe
         run: |
           jq -n --arg subject_lane "$LANE_NAME" --arg base_url "$C28_BASE_URL" \
             --arg compose_project "$LANE_COMPOSE_PROJECT" \
             --arg scratch "$RUNNER_TEMP" \
-            '{subject_lane: $subject_lane, compose_project: $compose_project, base_url: $base_url, scratch: $scratch, pytest_cmd: "uv run --frozen pytest", record: "c28-consumer-flow.json"}' \
+            --arg broker_principal "$C28_BROKER_PRINCIPAL" \
+            --arg broker_password_env_file "$RUNNER_TEMP/c28-broker-login.env" \
+            '{subject_lane: $subject_lane, compose_project: $compose_project, base_url: $base_url, scratch: $scratch, pytest_cmd: "uv run --frozen pytest", record: "c28-consumer-flow.json", broker_principal: $broker_principal, broker_password_env_file: $broker_password_env_file}' \
             > c28-request.json
           # RuntimeLocal single-shot dispatch uses the top-level handler.
           # Select it from the node's declared C28 route, retaining its contract.
@@ -211,7 +315,7 @@ jobs:
 
       - name: Re-measure C28 on the stability lane and grade it
         run: >-
-          uv run --frozen onex node node_board_probe_effect
+          uv run --frozen python -m omnibase_core.cli.cli_commands node node_board_probe_effect
           --contract c28-contract.yaml --input c28-request.json
           --timeout 1700 --output receipt
 
@@ -242,6 +346,15 @@ jobs:
           python3 scripts/ci/assert_evidence_artifact.py \
             --artifact c28-consumer-flow \
             --require c28-consumer-flow.json
+
+      - name: Remove the probe's broker login
+        if: always()
+        run: |
+          for file in "$RUNNER_TEMP/c28-broker-login.env" "$RUNNER_TEMP/c28-broker-login.env.reason"; do
+            if [ -e "$file" ]; then
+              shred -u -- "$file" || rm -f -- "$file"
+            fi
+          done
 
       - name: Upload the C28 consumer-flow record
         if: always()

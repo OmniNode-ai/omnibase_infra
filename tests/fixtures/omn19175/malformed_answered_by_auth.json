@@ -33,13 +33,13 @@
     },
     "wrong_tenant": {
       "body": {
-        "code": "auth.tenant.forbidden",
-        "detail": "Forbidden"
+        "code": "resource.not_found",
+        "detail": "workflow not found"
       },
-      "status": 403
+      "status": 404
     }
   },
-  "provenance": "Recorded on the lab dev lane 2026-09-22 (onex-api, compose project omnibase-infra, host port 8090) unless a row says otherwise. The 401 and 200 rows are verbatim response bytes. The wrong_tenant 403 row is DERIVED from the route source read in the running image -- routers/api_keys.py raises TypedRefusalHTTPException(403, 'Forbidden', RefusalCode.TENANT_FORBIDDEN) and refusal_codes.py fixes TENANT_FORBIDDEN = 'auth.tenant.forbidden' -- because driving it needs a valid credential, which exists only as a repository secret. The malformed row's envelope shape is verbatim from an observed 422 on the same app; only the omitted field name differs, because the observation was taken on a route reachable without a credential.",
+  "provenance": "Recorded on the lab dev lane 2026-09-22 (onex-api, compose project omnibase-infra, host port 8090) unless a row says otherwise. The 401 and 200 rows are verbatim response bytes. The wrong_tenant 404 row (OMN-26117) is DERIVED from the runtime gateway's handler source, not driven live -- node_workflow_gateway_effect handler_workflow_status_read returns 404 {code: resource.not_found, detail: 'workflow not found'} for another tenant's workflow, the same as an unknown id -- because driving it needs a valid credential, which exists only as a repository secret. The earlier 403 auth.tenant.forbidden came from the retired onex-api route /v1/tenants/<slug>/api-keys. The malformed row's envelope shape is verbatim from an observed 422 on the same app; only the omitted field name differs, because the observation was taken on a route reachable without a credential.",
   "ticket": "OMN-19175",
   "version": 1,
   "what_this_is": "The credential never worked, so validation was never reached. Grading this green would report a configuration failure as a product success."
