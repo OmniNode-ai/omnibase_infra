@@ -22,3 +22,7 @@ FROM alpine:3.19
 # Copy all migrations from the canonical location (recursive — includes nodes/).
 COPY docker/migrations/forward/ /migrations/forward/
 COPY docker/migrations/rollback/ /migrations/rollback/
+# OMN-26712: the declared cloud database migration path. Run as the database owner:
+#   psql -X -q -v ON_ERROR_STOP=1 -f /migrations/seams/cloud/apply_cloud_database.sql
+# with ONEX_CLOUD_DATABASE, ONEX_CLOUD_GATEWAY_ROLE and ONEX_CLOUD_TENANT_IDENTITY_WRITER_ROLE set.
+COPY docker/migrations/seams/ /migrations/seams/

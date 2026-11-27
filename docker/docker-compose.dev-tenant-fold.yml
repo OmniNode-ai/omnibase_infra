@@ -29,6 +29,13 @@ services:
       INFISICAL_PROJECT_ID: ${RUNTIME_EFFECTS_INFISICAL_PROJECT_ID:-}
       INFISICAL_CLIENT_ID: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_ID:-}
       INFISICAL_CLIENT_SECRET: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_SECRET:-}
+      # OMN-25856: the BYOK intake writes a customer's provider key with its own
+      # machine identity, because the identity above is read-only on
+      # /tenant-inference-credentials and a create with it answers 403. Both
+      # blank keeps the process identity; one blank is a configuration error the
+      # intake names. Values come from the operator env file, never from here.
+      INFISICAL_TENANT_CREDENTIAL_WRITER_CLIENT_ID: ${RUNTIME_EFFECTS_INFISICAL_TENANT_CREDENTIAL_WRITER_CLIENT_ID:-}
+      INFISICAL_TENANT_CREDENTIAL_WRITER_CLIENT_SECRET: ${RUNTIME_EFFECTS_INFISICAL_TENANT_CREDENTIAL_WRITER_CLIENT_SECRET:-}
       INFISICAL_ENVIRONMENT_SLUG: "dev"
       # Coding-agent nodes, savings consumer and the projection read binding.
       CODING_AGENT_CRED_HOME: /home/${RUNTIME_USER_NAME:-omniinfra}

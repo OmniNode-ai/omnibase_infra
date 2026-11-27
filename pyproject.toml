@@ -201,6 +201,18 @@ node = "omnibase_infra.cli.cli_node:run_node_by_name"
 profile = "omnibase_infra.cli.cli_profile:profile_group"
 skill = "omnibase_infra.cli.cli_skill:run_skill_by_name"
 
+# onex --help reads each command's one-line help from this table instead of importing the
+# command (OMN-26615). Keep it equal to the command's own help; the drift test enforces it.
+[project.entry-points."onex.cli.help"]
+auth = "Manage the gateway credential and the tokens minted from it."
+delegate = "Delegate PROMPT to a local LLM and print the result."
+identity = "Runtime-identity stamp: what code ran, where, against what config."
+kafka = "Kafka utilities — publish to command topics without SSH."
+ledger = "Read the cloud hook ledger and the dev work ledger."
+node = "Run a packaged ONEX node on the local runtime, resolved by NAME."
+profile = "Per-developer defaults in ~/.onex/config.yaml (OMN-19973)."
+skill = "Dispatch a skill to its backing node and print one typed result."
+
 [project.entry-points."onex.backends"]
 event_bus_kafka = "omnibase_infra.event_bus.event_bus_kafka:EventBusKafka"
 state_postgres = "omnibase_infra.backends.backend_probe:probe_postgres"
@@ -643,6 +655,7 @@ node_checkpoint_effect = "omnibase_infra.nodes.node_checkpoint_effect"
 node_checkpoint_validate_compute = "omnibase_infra.nodes.node_checkpoint_validate_compute"
 node_ci_live_contact_effect = "omnibase_infra.nodes.node_ci_live_contact_effect"
 node_ci_runner_route_compute = "omnibase_infra.nodes.node_ci_runner_route_compute"
+node_cloud_lab_guard_effect = "omnibase_infra.nodes.node_cloud_lab_guard_effect"
 node_coding_agent_fsm_reducer = "omnibase_infra.nodes.node_coding_agent_fsm_reducer"
 node_coding_agent_invoke_effect = "omnibase_infra.nodes.node_coding_agent_invoke_effect"
 node_coding_agent_orchestrator = "omnibase_infra.nodes.node_coding_agent_orchestrator"
@@ -720,6 +733,7 @@ node_onex_api_image_build_effect = "omnibase_infra.nodes.node_onex_api_image_bui
 node_onex_api_image_import_check_effect = "omnibase_infra.nodes.node_onex_api_image_import_check_effect"
 node_pattern_lifecycle_effect = "omnibase_infra.nodes.node_pattern_lifecycle_effect"
 node_placement_runtime_effect = "omnibase_infra.nodes.node_placement_runtime_effect"
+node_queued_request_priority_compute = "omnibase_infra.nodes.node_queued_request_priority_compute"
 node_reconcile_workspace_venvs = "omnibase_infra.nodes.node_reconcile_workspace_venvs"
 node_registration_orchestrator = "omnibase_infra.nodes.node_registration_orchestrator"
 node_registration_reducer = "omnibase_infra.nodes.node_registration_reducer"

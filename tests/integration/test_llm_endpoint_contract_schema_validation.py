@@ -57,7 +57,13 @@ def _overlay_home(root: Path) -> Path:
     _git(repo, "init", "-q")
     overlay.write_text(
         yaml.safe_dump(
-            {"schema_version": 1, "endpoint_urls": {_SLOT: _OVERLAY_ADDRESS}}
+            {
+                "schema_version": 1,
+                "endpoint_urls": {
+                    "coder-5090": "http://192.0.2.50:8000",
+                    _SLOT: _OVERLAY_ADDRESS,
+                },
+            }
         ),
         encoding="utf-8",
     )
@@ -74,7 +80,13 @@ def test_real_contract_slot_resolves_from_the_overlay_clone_at_the_ref(
     working_tree_file = home / "overlays" / "llm_endpoints" / "overlay.yaml"
     working_tree_file.write_text(
         yaml.safe_dump(
-            {"schema_version": 1, "endpoint_urls": {_SLOT: _REMOVED_ADDRESS}}
+            {
+                "schema_version": 1,
+                "endpoint_urls": {
+                    "coder-5090": "http://192.0.2.50:8000",
+                    _SLOT: _REMOVED_ADDRESS,
+                },
+            }
         ),
         encoding="utf-8",
     )

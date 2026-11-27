@@ -85,7 +85,7 @@ def _clone(
 
 @pytest.fixture
 def lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    infra, _ = _clone(
+    infra, infra_sha = _clone(
         tmp_path / "omnibase_infra", "docs/old.md", "old (#1)", timedelta(days=3)
     )
     market, market_sha = _clone(
@@ -110,7 +110,11 @@ def lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         caller, "_composed_repositories", lambda _e: ("omnimarket", "omnibase_infra")
     )
     return SimpleNamespace(
-        execution=execution, sender=sender, market_sha=market_sha, market=market
+        execution=execution,
+        sender=sender,
+        market_sha=market_sha,
+        market=market,
+        infra_sha=infra_sha,
     )
 
 
@@ -130,9 +134,12 @@ def test_the_omnimarket_merge_gets_its_event_and_one_build_request(
     caller.check_overdue_dev_merges(force=True)
     assert [e.repository for e in lane.sender.events] == ["omnimarket"]
     assert lane.sender.events[0].pr_number == 6872
+    # git_ref is a commit of the agent's own omnibase_infra clone, never the sibling's sha:
+    # the agent resets that clone to it (2026-11-26: "Git reset --hard 3026421861f6 failed").
     assert [(c.repo, c.pr_number, c.git_ref) for c in lane.sender.commands] == [
-        ("omnimarket", 6872, lane.market_sha)
+        ("omnimarket", 6872, lane.infra_sha)
     ]
+    assert lane.sender.commands[0].git_ref != lane.market_sha
 
 
 def test_a_dev_job_accepted_after_the_merge_satisfies_it(

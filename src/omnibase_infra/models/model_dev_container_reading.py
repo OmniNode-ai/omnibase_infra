@@ -13,6 +13,8 @@ class ModelDevContainerReading(BaseModel):
     ``container_digest`` changes when compose recreates the container; ``started_at`` and
     ``restart_count`` change when the same container starts again. ``image_digest`` is the
     image the container came up on and ``image_ref`` the reference its config names.
+    ``first_healthy_at`` is read from docker's health log, which keeps only the last five
+    checks, so it is a reading of a container seen while still young.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -24,10 +26,15 @@ class ModelDevContainerReading(BaseModel):
     exit_code: int | None = None
     image_digest: str = ""
     image_ref: str = ""
+    #: The image's ``org.opencontainers.image.revision`` label: the omnibase_infra commit it was built from (OMN-26703).
+    image_revision: str = ""
+    #: Docker's health status (``starting``, ``healthy``, ``unhealthy``) and the end of the first passing check in its log.
+    health_status: str = ""
+    first_healthy_at: datetime | None = None
 
-    @field_validator("started_at")
+    @field_validator("started_at", "first_healthy_at")
     @classmethod
-    def _aware(cls, value: datetime) -> datetime:
-        if value.utcoffset() is None:
-            raise ValueError("started_at must carry a UTC offset")
+    def _aware(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.utcoffset() is None:
+            raise ValueError("started_at and first_healthy_at must carry a UTC offset")
         return value

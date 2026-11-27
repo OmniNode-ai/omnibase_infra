@@ -31,6 +31,11 @@ topics:
   # OMN-25912: published by the deploy agent's tick for each start of the dev runtime
   # container, with its cause (a deploy job, the restart policy or unknown) and its image.
   dev_container_recreated: onex.evt.omnimarket.dev-container-recreated.v1
+  # OMN-26703: published once per start of the dev runtime container after its health settles:
+  # the seconds from start to first passing health check, whether that is within the declared
+  # limit, the image revision against the previous build's (went back or not) and where the
+  # 24 hour no-rollback clock starts.
+  dev_build_health: onex.evt.omnimarket.dev-build-health.v1
 # One incident event carries each failing container's log tail, and a broker message must stay
 # under its size limit.
 settings:
@@ -60,6 +65,11 @@ settings:
     - dev_recreate_announced
     - dev_container_recreated
   event_journal_dir: dev-roll-events
+  # OMN-26703: a dev build must answer /health within this many seconds of its container start
+  # (the operator's goal: five minutes). The previous build's image revision and the start of the
+  # no-rollback clock are kept in the container reading state file beside the reading.
+  build_health_limit_seconds: 300
+  build_health_git_timeout_seconds: 30
   container_reading_state_file: dev-container-reading.json
   # OMN-26494: the deploy agent adopts a code ref only after its one-shot self-check exits 0, and
   # returns to the previous ref after this many restarts inside this many seconds. The agent
@@ -108,7 +118,16 @@ handler_routing:
       event_model:
         name: ModelDevRecreateAuditRequest
         module: omnibase_infra.models.model_dev_recreate_audit_request
+    - operation: dev_roll.read_build_health
+      handler:
+        name: HandlerDevBuildHealth
+        module: omnibase_infra.handlers.dev_build_health.handler_dev_build_health
+      event_model:
+        name: ModelDevBuildHealthRequest
+        module: omnibase_infra.models.model_dev_build_health_request
 capabilities:
+  - name: dev_roll.build_health
+    description: Publish, once per start of the dev runtime container after its health settles, the seconds from start to first passing health check against the declared limit, whether the running image revision went back to an older build than the previous one (read from git), and where the 24 hour no-rollback clock starts.
   - name: dev_roll.audit
     description: Read the dev start, manifest and recreate announcement events with the container's own start readings and publish one violation event per start that broke the one-recreate-a-window rule.
   - name: dev_roll.observe
