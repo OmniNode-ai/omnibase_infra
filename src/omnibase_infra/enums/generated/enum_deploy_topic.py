@@ -20,6 +20,8 @@ class EnumDeployTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    CMD_BUILD_REPOSITORY_REF_CHECK_V1 = contract_topic_value('nodes/node_build_repository_ref_compute/contract.yaml', 'deploy', 'CMD_BUILD_REPOSITORY_REF_CHECK_V1')  # onex.cmd.deploy.build-repository-ref-check.v1
+    EVT_BUILD_REPOSITORY_REF_CHECKED_V1 = contract_topic_value('nodes/node_build_repository_ref_compute/contract.yaml', 'deploy', 'EVT_BUILD_REPOSITORY_REF_CHECKED_V1')  # onex.evt.deploy.build-repository-ref-checked.v1
     EVT_DEV_LANE_DRIFT_V1 = contract_topic_value('services/topics.yaml', 'deploy', 'EVT_DEV_LANE_DRIFT_V1')  # onex.evt.deploy.dev-lane-drift.v1
     EVT_DEV_MERGE_BUILD_OVERDUE_V1 = contract_topic_value('services/topics.yaml', 'deploy', 'EVT_DEV_MERGE_BUILD_OVERDUE_V1')  # onex.evt.deploy.dev-merge-build-overdue.v1
     EVT_DEV_TAG_HEARTBEAT_V1 = contract_topic_value('services/topics.yaml', 'deploy', 'EVT_DEV_TAG_HEARTBEAT_V1')  # onex.evt.deploy.dev-tag-heartbeat.v1

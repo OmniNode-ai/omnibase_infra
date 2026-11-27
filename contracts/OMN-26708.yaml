@@ -1,0 +1,40 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26708"
+title: "The runtime account is granted the lane_work_workflow table in the platform database settings"
+summary: "omnibase_infra vendors omnimarket's node_projection_lane_work migrations into docker/migrations/forward/nodes/node_projection_lane_work/ and grants omninode_runtime SELECT, INSERT and UPDATE, and no DELETE, on omninode_internal.lane_work_workflow in every shipped topology profile, so the Event Chain Gate stops refusing the lane work projection. This change holds the infra grant half of the ticket only."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-lane-work-runtime-grants"
+    statement: "Every shipped topology profile grants the runtime role, and only it, the lane_work_workflow table with SELECT, INSERT and UPDATE and no DELETE, and both node migrations are vendored and declared."
+    acceptance:
+      - id: "AC2670801"
+        statement: "AC2670801: the regenerated platform topology lists lane_work_workflow with select, insert and update for the runtime account alone in every profile -- falsifier: uv run pytest tests/unit/topology/test_omn26708_lane_work_workflow_grant.py -q fails on dev, where declared_acl lists no grant for lane_work_workflow"
+      - id: "AC2670802"
+        statement: "AC2670802: the two migrations are vendored with their ledger rows and the manifest validator prints PASS -- falsifier: the vendored-migrations case in the same test file fails on dev, where the directory is absent"
+evidence_requirements:
+  - kind: "tests"
+    description: "The grant tests pass at the head; on the merge base the test file is absent."
+    command: "uv run pytest tests/unit/topology/test_omn26708_lane_work_workflow_grant.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn26708-infra-ac1"
+    description: "Hosted probe. Every profile grants the runtime role alone the lane_work_workflow table; the file is absent at the merge base, so the command fails there."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/topology/test_omn26708_lane_work_workflow_grant.py -k 'may_read or other_principal or cannot_delete or control' -q"
+        cwd: "."
+    binds_ac: ["AC2670801"]
+  - id: "dod-omn26708-infra-ac2"
+    description: "Hosted probe. Both vendored migrations are present with ledger rows; the case fails at the merge base."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/topology/test_omn26708_lane_work_workflow_grant.py -k vendored -q"
+        cwd: "."
+    binds_ac: ["AC2670802"]
