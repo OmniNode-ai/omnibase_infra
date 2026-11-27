@@ -122,6 +122,7 @@ databases:
               - lab_lane_health
               - lab_proof_receipts
               - lane_drift_and_stalls
+              - lane_work_workflow
               - ledger_line_citation
               - live_events
               - log_entries
@@ -546,5 +547,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: c82aa2b0fa60248446c188cfff27d8bb21218c1f26511c8483987521ba2a77dc
+  sha256: f0ad5ae192157068c991ee2c29348c91a3ca28b0c75161fb80baf190d09477a4
 topology_instance: onex-prod
