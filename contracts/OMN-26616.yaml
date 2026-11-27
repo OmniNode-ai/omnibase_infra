@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+---
+schema_version: "1.0.0"
+ticket_id: "OMN-26616"
+title: "onex doctor and onex health judge only what a customer needs and never show a raw error"
+summary: "The delegation identity doctor check now asks the same local tenant identity that onex local identity reads, so the two agree on whether an identity is configured; an unreadable recorded identity is a refusal, not no_identity; delegation doctor failure messages no longer carry the internal fault tag in square brackets; and a healthy identity check no longer prints the tenant slug or gateway address."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+- id: "req-omn26616-doctor-identity-agreement"
+  statement: "onex doctor and onex local identity agree on whether an identity is configured, an unreadable recorded identity is a refusal not no_identity, failure messages omit the internal fault tag, and a healthy identity check omits the tenant slug and gateway address"
+  acceptance:
+  - id: "AC2"
+    statement: "AC2: onex doctor and onex local identity agree on whether an identity is configured; Falsifier: tests/unit/doctor/test_omn26616_ac2_identity_agreement.py::test_local_identity_present_is_not_no_identity"
+  - id: "AC4"
+    statement: "AC4: on a working customer install both commands exit 0; Falsifier: the dod-omn26616-integration-proof item below"
+evidence_requirements:
+- kind: "tests"
+  description: "Run the unit tests for the doctor identity agreement and message wording changes"
+  command: "uv run pytest tests/unit/doctor -q -n 0 --no-cov -p no:cacheprovider"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+- id: "dod-omn26616-ac2"
+  description: "AC2: onex doctor and onex local identity agree on whether an identity is configured"
+  source: "manual"
+  binds_ac:
+  - "AC2"
+  checks:
+  - check_type: "test_passes"
+    check_value: "uv run pytest tests/unit/doctor/test_omn26616_ac2_identity_agreement.py tests/unit/doctor -q -n 0 --no-cov -p no:cacheprovider"
+    cwd: "."
+- id: "dod-omn26616-integration-proof"
+  description: "The headless run of the OMN-26616 doctor tests on a lab host at the pushed head; hosted CI cannot reach the lab runner so only the local Done gate runs it"
+  source: "manual"
+  execution_scope: "local_done_gate"
+  checks:
+  - check_type: "command"
+    check_value: "env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --repo OmniNode-ai/omnibase_infra --sha \"$(git rev-parse HEAD)\" --lane dod-integration-proof-26616 --kind test -- env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/doctor -q -n 0 --no-cov -p no:cacheprovider"
+    cwd: "."
