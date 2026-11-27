@@ -22,12 +22,12 @@ emergency_bypass:
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-omn26444-ac2-infra-declare-and-vendor-102"
-    description: "Infra half only. Pins the tenant projection writer's declared grant on savings_priced_models in every instance that declares it, and 102's source bytes (omnimarket#6629 at 5b056878ad221aecc47dc99a2c89ac7de8e813f1), its exact tenant ledger checksum and forward-only class; at the merge base the grant and the file are absent, so it fails there. It does not prove the view's counts, which omnimarket#6629's real-Postgres tests prove."
+    description: "Infra half only. Pins the tenant projection writer's declared grant on savings_priced_models in every instance that declares it and in the rendered catalogs, and 102's source bytes (omnimarket#6629 at 5b056878ad221aecc47dc99a2c89ac7de8e813f1), its exact tenant ledger checksum and forward-only class; at the merge base the grant and the file are absent, so it fails there. It does not prove the view's counts, which omnimarket#6629's real-Postgres tests prove."
     source: "manual"
     binds_ac: ["AC2"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/unit/topology/test_topology_savings_priced_models_omn26444.py tests/unit/migrations/test_omn26444_savings_unpriced_matches_refresh_vendored.py -q"
+        check_value: "uv run pytest tests/unit/topology/test_topology_savings_priced_models_omn26444.py tests/unit/migrations/test_omn26444_savings_unpriced_matches_refresh_vendored.py tests/unit/topology/test_application_database_topology.py -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn26444-deploy-writer-delete-grant"
     description: "Deploy probe for the local Done gate, after the omnibase_infra release that carries this change is deployed. It asks the running infra Postgres whether tenant_projection_writer holds DELETE on public.savings_priced_models, the privilege the shared metering writer's priced-models fill needs to remove rows the pricing manifest no longer names. Its exit status depends on the deployed database, not on files this PR authors. It is unbound, and runs only in the local Done gate because hosted CI cannot reach a deployed lane."
