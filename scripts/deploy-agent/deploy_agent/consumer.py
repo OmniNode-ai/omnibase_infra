@@ -699,29 +699,6 @@ class DeployConsumer:
                 self._commit_through(msg, replay_from=replay_from)
                 return None, self._reject(EnumRejectionReason.BUSY, cmd=cmd)
 
-        # Step 5b: Load gate (OMN-19507). After routing, so a command for
-        # another instance is still skipped whatever this host's load, and
-        # after busy and the host slot, whose refusals stand as they were. A
-        # deferral is not a refusal: the record goes back onto the fetch path
-        # uncommitted and the partition is paused, so the next polls return
-        # nothing (the group keeps its membership) until a re-check opens the
-        # gate. Nothing is published, because nothing about the command is
-        # wrong; it is taken, or coalesced past, once the host has room.
-        if self.load_gate is not None:
-            gate = self.load_gate.check(cmd)
-            if gate.verdict is EnumLoadGateVerdict.DEFER:
-                topic_partition = TopicPartition(msg.topic, msg.partition)
-                self.consumer.seek(
-                    topic_partition,
-                    replay_from.offset if replay_from is not None else msg.offset,
-                )
-                self.consumer.pause(topic_partition)
-                self.load_gate_paused = topic_partition
-                logger.info(
-                    "Deferring %s: load gate %s", cmd.correlation_id, gate.describe()
-                )
-                return None, None
-
         # Step 6: Check dedup
         if self.job_store.is_duplicate(cmd.correlation_id):
             logger.info("Rejecting command %s: duplicate", cmd.correlation_id)
@@ -768,6 +745,35 @@ class DeployConsumer:
             return None, self._reject(
                 EnumRejectionReason.SUPERSEDED_BY_RUNNING_BUILD, cmd=cmd
             )
+        # Step 6a1: Load gate (OMN-19507), asked only of a command that would run.
+        # OMN-26703: the gate sat before dedup and the lineage fence, and the
+        # recreate window it folds in is SPENT by the first command it admits. On
+        # 2026-11-27 a duplicate and a contained (superseded) request took the
+        # 14:00Z and 15:00Z windows and were then rejected, so every real build
+        # behind them read window_spent and waited for the next hour. A command
+        # a fence refuses or supersedes never asks. After routing, so a command
+        # for another instance is still skipped whatever this host's load, and
+        # after busy and the host slot, whose refusals stand as they were. A
+        # deferral is not a refusal: the record goes back onto the fetch path
+        # uncommitted and the partition is paused, so the next polls return
+        # nothing (the group keeps its membership) until a re-check opens the
+        # gate. Nothing is published, because nothing about the command is
+        # wrong; it is taken, or coalesced past, once the host has room.
+        if self.load_gate is not None:
+            gate = self.load_gate.check(cmd)
+            if gate.verdict is EnumLoadGateVerdict.DEFER:
+                topic_partition = TopicPartition(msg.topic, msg.partition)
+                self.consumer.seek(
+                    topic_partition,
+                    replay_from.offset if replay_from is not None else msg.offset,
+                )
+                self.consumer.pause(topic_partition)
+                self.load_gate_paused = topic_partition
+                logger.info(
+                    "Deferring %s: load gate %s", cmd.correlation_id, gate.describe()
+                )
+                return None, None
+
         if lineage is not None and not lineage.verdict.permits_coalescing:
             lookahead = []
 
