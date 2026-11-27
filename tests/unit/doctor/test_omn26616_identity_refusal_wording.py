@@ -18,7 +18,7 @@ from omnibase_infra.doctor.checks.check_delegation_identity import (
 )
 
 _MODULE = "omnimarket.local_deployment.tenant_identity"
-_UPSTREAM_TEXT = "cannot parse /Users/someone/.onex/identity.yaml: line 3 column 9"
+_UPSTREAM_TEXT = "cannot parse /srv/tenant/identity.yaml: line 3 column 9"
 
 
 class _IdentityError(Exception):
@@ -45,7 +45,7 @@ def test_refusal_text_is_not_echoed_and_a_fix_is_named(
     result = check.run()
 
     for text in (diagnosis.detail, result.message):
-        assert "/Users/someone" not in text
+        assert "/srv/tenant" not in text
         assert "line 3" not in text
         assert "identity.yaml" not in text
     assert "Fix: onex local init" in diagnosis.detail
