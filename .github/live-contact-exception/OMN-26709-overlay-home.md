@@ -1,0 +1,1 @@
+Live-contact exception: the change points the Overlay Main Endpoints job at the repository that holds the llm_endpoints overlay; the job reads that checkout at main itself, and the first run at this head is the live contact, read from that job's log (OMN-26709).
