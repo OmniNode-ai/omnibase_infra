@@ -22,7 +22,7 @@ class ModelStabilityIntegrationRefreshResult(BaseModel):
     outcome: Literal["refreshed", "rolled_back", "build_failed", "refused"]
     heads: tuple[tuple[str, str], ...] = ()
     deploy_tags: tuple[tuple[str, str], ...] = ()
-    built_image_id: str = ""
+    built_image_digest: str = ""
     rollback_target: tuple[tuple[str, str], ...] = ()
     seconds_to_healthy: float = -1.0
     detail: str = ""

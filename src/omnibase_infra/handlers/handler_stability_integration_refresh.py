@@ -24,6 +24,7 @@ test runtime, so the release-tag-only rule of ``refresh_stability_lane.sh``
 
 from __future__ import annotations
 
+import http.client
 import json
 import shutil
 import subprocess
@@ -33,8 +34,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-import httpx
+from urllib.parse import urlsplit
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.model_stability_integration_refresh_request import (
@@ -329,10 +329,17 @@ class DockerStabilityIntegrationHost:
         )
 
     def health_status(self, url: str) -> int:
+        parts = urlsplit(url)
+        connection = http.client.HTTPConnection(
+            parts.hostname or "", parts.port, timeout=self._health_timeout
+        )
         try:
-            return httpx.get(url, timeout=self._health_timeout).status_code
-        except httpx.HTTPError:
+            connection.request("GET", parts.path or "/")
+            return connection.getresponse().status
+        except (OSError, http.client.HTTPException):
             return 0
+        finally:
+            connection.close()
 
 
 class HandlerStabilityIntegrationRefresh:
@@ -406,7 +413,7 @@ class HandlerStabilityIntegrationRefresh:
                 outcome="refused",
                 heads=heads,
                 deploy_tags=tags,
-                built_image_id=image_id,
+                built_image_digest=image_id,
                 rollback_target=target,
                 detail=f"recreate refused, lane untouched: {exc}",
             )
@@ -417,7 +424,7 @@ class HandlerStabilityIntegrationRefresh:
                     outcome="refreshed",
                     heads=heads,
                     deploy_tags=tags,
-                    built_image_id=image_id,
+                    built_image_digest=image_id,
                     rollback_target=target,
                     seconds_to_healthy=self.clock() - started,
                 )
@@ -430,7 +437,7 @@ class HandlerStabilityIntegrationRefresh:
             outcome="rolled_back",
             heads=heads,
             deploy_tags=tags,
-            built_image_id=image_id,
+            built_image_digest=image_id,
             rollback_target=target,
             detail=f"/health not 200 within {request.health_window_seconds}s",
         )
