@@ -172,7 +172,12 @@ def apply(
     until the revision is verified and rendered.
     """
     try:
-        write_product_clone_pins(execution)
+        if hasattr(execution, "deploy_repo_dir"):
+            write_product_clone_pins(execution)
+        else:
+            logger.warning(
+                "OMN-25901: the execution module names no deploy-source clone; no product clone pin written"
+            )
     except OSError:
         # The clones stay refused PRODUCT_CLONE_NOT_FRESH; the deploy is not stopped.
         logger.exception("OMN-25901: the product clone pin file was not written")

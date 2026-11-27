@@ -23,6 +23,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 from deploy_agent import executor as executor_mod
 
 pytestmark = pytest.mark.unit
@@ -295,15 +296,56 @@ def dev_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return registry
 
 
-def _instances_without_store_mount() -> list[str]:
-    """Routing-table dev instances whose overlay replaces volumes and names no store.
+class _ComposeLoader(yaml.SafeLoader):
+    """Safe YAML that reads compose's ``!override`` and ``!reset`` tags as data."""
 
-    Read from the overlay files themselves, not through the code under test.
+
+def _compose_volumes(path: Path) -> dict[str, tuple[bool, list[str]]]:
+    """Per service: whether its ``volumes`` replace the earlier files', and the entries."""
+    overridden: set[int] = set()
+
+    def tagged(loader: yaml.SafeLoader, node: yaml.SequenceNode) -> object:
+        value = loader.construct_sequence(node, deep=True)
+        overridden.add(id(value))
+        return value
+
+    _ComposeLoader.add_constructor("!override", tagged)
+    _ComposeLoader.add_constructor("!reset", tagged)
+    loader = _ComposeLoader(path.read_text("utf-8"))
+    try:
+        document = loader.get_single_data()
+    finally:
+        loader.dispose()
+    return {
+        name: (id(spec["volumes"]) in overridden, [str(v) for v in spec["volumes"]])
+        for name, spec in (document.get("services") or {}).items()
+        if isinstance(spec, dict) and isinstance(spec.get("volumes"), list)
+    }
+
+
+def _instances_without_store_mount() -> list[str]:
+    """Routing-table dev instances whose overlay leaves no service mounting the store.
+
+    A service of the dev lane file that mounts the store is dropped from the mount only
+    when the instance's overlay replaces its ``volumes`` with a list naming none.
+    Read from the compose files themselves, not through the code under test.
     """
+    mounters = {
+        name
+        for name, (_, volumes) in _compose_volumes(
+            REPO_ROOT / "docker" / "docker-compose.dev-lane.yml"
+        ).items()
+        if any(STORE_TARGET in volume for volume in volumes)
+    }
     names = []
     for name, spec in executor_mod.load_instance_lanes(REPO_ROOT).items():
-        text = (REPO_ROOT / spec.compose_overlay).read_text("utf-8")
-        if "volumes: !override" in text and STORE_TARGET not in text:
+        overlay = _compose_volumes(REPO_ROOT / spec.compose_overlay)
+        if all(
+            service in overlay
+            and overlay[service][0]
+            and not any(STORE_TARGET in volume for volume in overlay[service][1])
+            for service in mounters
+        ):
             names.append(name)
     return names
 

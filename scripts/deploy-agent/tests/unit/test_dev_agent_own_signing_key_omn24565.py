@@ -1175,7 +1175,7 @@ def test_the_executor_env_file_argv_is_the_repoint_script_and_no_compose_command
     # The script it runs is the repoint script, named in the list by its constant.
     assert any(
         isinstance(element, ast.Call)
-        and ast.unparse(element) == "str(REPOINT_ONEX_API_SCRIPT)"
+        and ast.unparse(element) == "str(repoint_onex_api_script())"
         for element in argv.elts
     )
 
