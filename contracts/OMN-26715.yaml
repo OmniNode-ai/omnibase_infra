@@ -64,3 +64,23 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_handler_stability_integration_refresh_omn26715.py -q --no-cov -n 0 -p no:cacheprovider -k exports
         cwd: .
+  - id: dod-omn26715-ac3-host-registered
+    description: >-
+      The refresh's composition root registers DockerStabilityIntegrationHost in the container under the class the handler resolves, so the handler builds; a container with nothing registered refuses with a resolution error naming the host.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_stability_integration_refresh_wiring_omn26715.py -q --no-cov -n 0 -p no:cacheprovider -k "unwired or registers"
+        cwd: .
+  - id: dod-omn26715-ac3-lane-declaration-dirs
+    description: >-
+      The recreate script exports ONEX_LANE_OVERLAY_DIR and ONEX_LANE_DECLARATION_DIR from the two folders the host was constructed with (over any value the sourced env files carry), and the host hands exactly those folders to the recreate subprocess.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_stability_integration_refresh_wiring_omn26715.py -q --no-cov -n 0 -p no:cacheprovider -k "lane_dirs or lane_declaration"
+        cwd: .
