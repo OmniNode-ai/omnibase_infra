@@ -104,6 +104,11 @@ requirements:
     acceptance:
       - id: AC30
         statement: 'AC30: an in-run job with status in_progress and conclusion success is done and green, in_progress with failure is red, in_progress with no conclusion waits, and a job with no conclusion 45 minutes after the last other job completed is named by the poll step stall filter, and the jobs read pages at 30 then 10 -- falsifier: uv run --frozen pytest tests/ci/test_ci_summary_running_conclusion_omn24562.py -q -n 0 --no-cov fails on the merge-base ci_summary_gate.py'
+  - id: req-omn24562-stability-runtime-lane-test
+    statement: The stability runtime lane test reads the runtime services as the composed build the overlay declares.
+    acceptance:
+      - id: AC31
+        statement: 'AC31: the stability runtime lane unit test asserts the runtime services build with the infra-runtime additional context bound to service:composed-runtime-base-image -- falsifier: tests/unit/infra/test_stability_test_runtime_lane.py fails when the overlay runtime build drops that additional context'
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -384,4 +389,13 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_ci_summary_running_conclusion_omn24562.py tests/ci/test_ci_summary_gate.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac31-stability-runtime-lane-test
+    description: The stability runtime lane unit test passes with the composed build context asserted on the runtime services.
+    source: manual
+    binds_ac:
+      - AC31
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_stability_test_runtime_lane.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
