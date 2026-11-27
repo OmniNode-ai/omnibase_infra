@@ -119,6 +119,11 @@ requirements:
     acceptance:
       - id: AC33
         statement: 'AC33: admit_open_pr refuses a different pull request, another head of the pinned pull request and a declaration with no live pin on the stability lane, admits the pin''s own, and does not read the dev lane -- falsifier: scripts/deploy-agent/tests/unit/test_stability_follow_builds_pinned_head_omn24562.py fails at the merge base'
+  - id: req-omn24562-stability-runtime-lane-test
+    statement: The stability runtime lane test reads the runtime services as the composed build the overlay declares.
+    acceptance:
+      - id: AC34
+        statement: 'AC34: the stability runtime lane unit test asserts the runtime services build with the infra-runtime additional context bound to service:composed-runtime-base-image -- falsifier: tests/unit/infra/test_stability_test_runtime_lane.py fails when the overlay runtime build drops that additional context'
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -432,4 +437,13 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/test_stability_follow_open_pr_pin_omn24562.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac34-stability-runtime-lane-test
+    description: The stability runtime lane unit test passes with the composed build context asserted on the runtime services.
+    source: manual
+    binds_ac:
+      - AC34
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_stability_test_runtime_lane.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
