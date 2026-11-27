@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: MIT
 """OMN-26616 AC3: a refused local identity is reported in fixed plain words.
 
-The upstream identity reader's own message can carry a file path or parser
-text. The doctor must not echo it, and must say how to fix the identity.
+The upstream identity reader's own message can carry a file path or parser text. The doctor must not echo it, and must say how to fix the identity.
 """
+
+from __future__ import annotations
 
 import sys
 import types
@@ -37,13 +38,12 @@ def refused_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_refusal_text_is_not_echoed_and_a_fix_is_named(
-    tmp_path: Path, refused_identity: None
+    tmp_path: Path,
+    refused_identity: None,
 ) -> None:
     check = CheckDelegationIdentity(onex_home=tmp_path)
-
     diagnosis = check.diagnose()
     result = check.run()
-
     for text in (diagnosis.detail, result.message):
         assert "/srv/tenant" not in text
         assert "line 3" not in text
