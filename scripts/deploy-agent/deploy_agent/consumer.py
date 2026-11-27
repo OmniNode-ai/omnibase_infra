@@ -1351,7 +1351,12 @@ class DeployConsumer:
         ):
             position = self.consumer.position(tp)
             highwater = self.consumer.highwater(tp)
-            if position is None or highwater is None or position >= highwater:
+            # OMN-26106: an unknown high-water mark is not "caught up". The
+            # fetch that failed to decode is the first fetch after assignment,
+            # so no response had set a high-water mark yet; the failure itself
+            # proves a record sits at the position. Only a KNOWN mark at or
+            # behind the position means nothing is pending.
+            if position is None or (highwater is not None and position >= highwater):
                 continue
             self.consumer.seek(tp, position + 1)
             try:
