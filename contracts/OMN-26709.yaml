@@ -63,7 +63,7 @@ dod_evidence:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/models/contracts/test_llm_endpoint_overlay_main_check_omn26709.py -q --no-cov -n 0 -p no:randomly
+        check_value: uv run --frozen pytest tests/integration/models/test_llm_endpoint_overlay_main_check_omn26709.py -q --no-cov -n 0 -p no:randomly
         cwd: .
       - check_type: command
         check_value: grep -q 'overlay-main-endpoints:' .github/workflows/ci.yml
