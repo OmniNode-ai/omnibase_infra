@@ -76,11 +76,11 @@ class HandlerContractsRevisionGuard:
                 f"the image carries no contracts stamp (path {request.stamp_path!r})",
                 stamp_path=str(stamp_path),
             )
-        stamped: dict[str, str] = {}
+        stamped: dict[str, set[str]] = {}
         for line in stamp_path.read_text(encoding="utf-8").splitlines():
             digest, _, name = line.partition("  ")
             if digest and name:
-                stamped[name.removeprefix("./")] = digest
+                stamped.setdefault(name.removeprefix("./"), set()).add(digest)
         runtime_dir = Path(request.runtime_contracts_dir)
         mounted = sorted(p for p in runtime_dir.rglob("*") if p.is_file())
         mismatched = [
@@ -88,7 +88,8 @@ class HandlerContractsRevisionGuard:
             for name, path in (
                 (p.relative_to(runtime_dir).as_posix(), p) for p in mounted
             )
-            if stamped.get(name) != hashlib.sha256(path.read_bytes()).hexdigest()
+            if hashlib.sha256(path.read_bytes()).hexdigest()
+            not in stamped.get(name, ())
         ]
         if mismatched:
             raise ContractsRevisionMismatchError(

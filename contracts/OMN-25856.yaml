@@ -147,3 +147,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_contracts_revision_guard_omn25856.py -k before_core_overlays -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn25856-contracts-stamp-final-tree
+    description: An image run with no contracts mount boots on the files core's overlay left, because the stamp lists the final tree beside the clone's; a name stamped twice passes with either digest and a third digest is refused.
+    source: manual
+    binds_ac: [AC25856007]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_contracts_revision_guard_omn25856.py -k "stamped_twice or final_tree" -q --no-cov -n 0 -p no:randomly
+        cwd: .

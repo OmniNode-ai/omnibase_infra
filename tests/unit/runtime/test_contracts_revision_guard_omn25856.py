@@ -161,3 +161,36 @@ def test_the_dockerfile_stamps_the_repo_runtime_contracts_before_core_overlays_t
     core_overlay_at = dockerfile.index("/app/contracts/runtime/\n")
 
     assert repo_copy_at < stamp_at < core_overlay_at
+
+
+def test_a_name_stamped_twice_passes_with_either_digest(tmp_path: Path) -> None:
+    """The image's own final tree (core's overlay) is as valid as the clone's.
+
+    The Dockerfile stamps the clone's ``contracts/runtime`` and, after core's
+    overlay, the image's final tree: a container with no mount runs the second,
+    one with the clone mounted the first.
+    """
+    clone = _runtime(tmp_path / "clone", {"runtime_config.yaml": _OLD})
+    core = _runtime(tmp_path / "core", {"runtime_config.yaml": _NEW})
+    stamp = tmp_path / "stamp.sha256"
+    _stamp(clone, stamp)
+    with stamp.open("a") as fh:
+        fh.write(
+            f"{hashlib.sha256((core / 'runtime_config.yaml').read_bytes()).hexdigest()}"
+            "  ./runtime_config.yaml\n"
+        )
+
+    assert guard.refuse_mismatched_contracts(_env(clone, stamp)) == 0
+    assert guard.refuse_mismatched_contracts(_env(core, stamp)) == 0
+    other = _runtime(tmp_path / "other", {"runtime_config.yaml": "z: 1\n"})
+    assert guard.refuse_mismatched_contracts(_env(other, stamp)) == 1
+
+
+def test_the_dockerfile_also_stamps_the_final_tree_after_core_overlays_it() -> None:
+    """An image run with no mount holds core's files, not the clone's."""
+    dockerfile = (_DOCKER_DIR / "Dockerfile.runtime").read_text()
+
+    final_stamp_at = dockerfile.index(">> /app/config/contracts_runtime.sha256")
+    core_overlay_at = dockerfile.index("/app/contracts/runtime/\n")
+
+    assert core_overlay_at < final_stamp_at

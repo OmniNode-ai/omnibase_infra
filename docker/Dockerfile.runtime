@@ -996,6 +996,11 @@ COPY --from=builder --chown=omniinfra:omniinfra \
     /app/.venv/lib/python*/site-packages/omnibase_core/contracts/runtime_data/ \
     /app/contracts/runtime/
 
+# OMN-25856: a container with no contracts mount runs the files the overlay just
+# left, not the clone's: stamp that final tree too, so either is this revision's.
+RUN cd /app/contracts/runtime \
+    && find . -type f | LC_ALL=C sort | xargs -r sha256sum >> /app/config/contracts_runtime.sha256
+
 # OMN-15645 / OMN-21279: bake the delegation routing-tiers ladder into a stable,
 # non-version-embedded in-image path so DELEGATION_ROUTING_TIERS_PATH can be
 # pinned in compose (docker-compose.infra.yml x-runtime-env) to a fixed literal
