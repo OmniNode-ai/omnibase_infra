@@ -721,6 +721,7 @@ node_onex_api_image_build_effect = "omnibase_infra.nodes.node_onex_api_image_bui
 node_onex_api_image_import_check_effect = "omnibase_infra.nodes.node_onex_api_image_import_check_effect"
 node_pattern_lifecycle_effect = "omnibase_infra.nodes.node_pattern_lifecycle_effect"
 node_placement_runtime_effect = "omnibase_infra.nodes.node_placement_runtime_effect"
+node_queued_request_priority_compute = "omnibase_infra.nodes.node_queued_request_priority_compute"
 node_reconcile_workspace_venvs = "omnibase_infra.nodes.node_reconcile_workspace_venvs"
 node_registration_orchestrator = "omnibase_infra.nodes.node_registration_orchestrator"
 node_registration_reducer = "omnibase_infra.nodes.node_registration_reducer"
