@@ -234,6 +234,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # routed around (OMN-18833 lane).
     "ProtocolDriftGuardVerdict": "cli/protocol_drift_guard_verdict.py",
     "ProtocolExecutionBudget": "cli/protocol_execution_budget.py",  # [DI] OMN-19407 reads a task class's execution ceiling and delivery margin.
+    "ProtocolStabilityIntegrationHost": "protocols/protocol_stability_integration_host.py",  # [DI] OMN-26715 git/docker/http host operations the stability integration refresh handler injects. Infra-local: bound to this repo's stability host refresh node, not a cross-repo contract
     "ProtocolSelectionFallback": "cli/protocol_selection_fallback.py",  # [DI] OMN-19407 reads the fallback class for an unclaimed prompt.
     "ProtocolTaskClassAuthority": "cli/protocol_task_class_authority.py",  # [DI] OMN-19407 reads the task-class authority contract.
     "ProtocolTaskTypeResolution": "cli/protocol_task_type_resolution.py",  # [DI] OMN-19407 reads a resolved task type and decision rationale.
