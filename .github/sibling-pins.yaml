@@ -25,9 +25,9 @@
 # design and are not pinned; they carry the label in their header.
 pins:
   omnibase_core: f43f97629182f463d233b564b19a2b27d4fc4888
-  omnimarket: 0238884e3849e2917bf79cc164a8e1cb9a2eaf82
+  omnimarket: 0c535f960f48534079ee499410ea358671fa852b
   omniintelligence: 3fcbf795087a79081c0ceeb676216bf64c5d49ae
   omnimemory: c7175878b331628de9be9358cb178547d8247c34
   omniclaude: 3b8addff365b1a53e04106284b9275b6d5fad3c6
   omninode_infra: 9819782319a96cae1bfee6a0a5955029e882c601
-  omnidash: 42e51834d00067d325686a404f6391dd1fe0b9fd
+  omnidash: bb23d514c41d32bcc889a2da4e2c1b5dcc0fb41e
