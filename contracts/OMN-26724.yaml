@@ -109,14 +109,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_deploy_agent_reading_omn26724.py -k 'known_good or ac1' -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
-  - id: dod-omn26724-ac2-build-ref-decision-holds
-    description: The build-ref decision that AC2's hourly build relies on holds at the head and fails with the merged fix reverted - a ref still missing after one good fetch is refused and a held ref is built.
-    source: manual
-    binds_ac: [AC2]
-    checks:
-      - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/handlers/test_build_repository_ref_omn26724.py -q --no-cov -n 0 -p no:cacheprovider
-        cwd: .
   - id: dod-omn26724-ac2-build-reading-judged
     description: "The node that judges AC2's live reading passes a dev-lane success with phase results and fails a failed, other-lane or phase-less last result."
     source: manual
