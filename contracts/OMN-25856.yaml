@@ -155,3 +155,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/test_contracts_revision_guard_omn25856.py -k "stamped_twice or final_tree" -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn25856-plan-assign-writer-grants
+    description: 'The tenant identity writer seam grants SELECT on plan_entitlements and UPDATE (is_active, ended_at) on tenant_plans, the exact set the plan-assign node needs; the readback literals equal the declared list and a dropped or widened grant is seen.'
+    source: manual
+    binds_ac: [AC25856003]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/test_tenant_identity_writer_grants.py -q --no-cov -n 0 -p no:randomly
+        cwd: .

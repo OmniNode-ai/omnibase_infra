@@ -21,7 +21,8 @@
 --   tenants:             SELECT, INSERT; UPDATE (provisioning_state, kc_patch_attempt_count,
 --                        kc_patch_last_error, principal_id, name)
 --   plan_tiers:          SELECT
---   tenant_plans:        SELECT, INSERT
+--   plan_entitlements:   SELECT
+--   tenant_plans:        SELECT, INSERT; UPDATE (is_active, ended_at)
 --   tenant_api_keys:     SELECT, INSERT; UPDATE (is_active, revoked_at)
 --   tenant_event_outbox: SELECT, INSERT; UPDATE (published_at, attempts, last_error)
 --   USAGE on the sequence behind tenant_event_outbox.id
@@ -73,16 +74,17 @@ SELECT
       \connect omninode_cloud
 
       SELECT
-        (SELECT count(*) = 6
-           FROM unnest(ARRAY['tenants', 'plan_tiers', 'tenant_plans', 'tenant_api_keys', 'tenant_event_outbox', 'tenant_event_outbox_id_seq']) AS t(name)
+        (SELECT count(*) = 7
+           FROM unnest(ARRAY['tenants', 'plan_tiers', 'plan_entitlements', 'tenant_plans', 'tenant_api_keys', 'tenant_event_outbox', 'tenant_event_outbox_id_seq']) AS t(name)
           WHERE to_regclass('public.' || t.name) IS NOT NULL)
-        AND (SELECT count(*) = 10
+        AND (SELECT count(*) = 12
                FROM pg_catalog.pg_attribute a
                JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
               WHERE c.relnamespace = 'public'::regnamespace AND NOT a.attisdropped AND a.attnum > 0
                 AND (c.relname, a.attname) IN (
                       ('tenants', 'provisioning_state'), ('tenants', 'kc_patch_attempt_count'),
                       ('tenants', 'kc_patch_last_error'), ('tenants', 'principal_id'), ('tenants', 'name'),
+                      ('tenant_plans', 'is_active'), ('tenant_plans', 'ended_at'),
                       ('tenant_api_keys', 'is_active'), ('tenant_api_keys', 'revoked_at'),
                       ('tenant_event_outbox', 'published_at'), ('tenant_event_outbox', 'attempts'),
                       ('tenant_event_outbox', 'last_error')))
@@ -97,7 +99,9 @@ SELECT
         GRANT SELECT, INSERT ON public.tenants TO "tenant_identity_writer";
         GRANT UPDATE (provisioning_state, kc_patch_attempt_count, kc_patch_last_error, principal_id, name) ON public.tenants TO "tenant_identity_writer";
         GRANT SELECT ON public.plan_tiers TO "tenant_identity_writer";
+        GRANT SELECT ON public.plan_entitlements TO "tenant_identity_writer";
         GRANT SELECT, INSERT ON public.tenant_plans TO "tenant_identity_writer";
+        GRANT UPDATE (is_active, ended_at) ON public.tenant_plans TO "tenant_identity_writer";
         GRANT SELECT, INSERT ON public.tenant_api_keys TO "tenant_identity_writer";
         GRANT UPDATE (is_active, revoked_at) ON public.tenant_api_keys TO "tenant_identity_writer";
         GRANT SELECT, INSERT ON public.tenant_event_outbox TO "tenant_identity_writer";
@@ -179,9 +183,9 @@ SELECT
              OR has_database_privilege('tenant_identity_writer', 'omninode_cloud', 'CREATE')
              OR NOT has_schema_privilege('tenant_identity_writer', 'public', 'USAGE')
              OR has_schema_privilege('tenant_identity_writer', 'public', 'CREATE')
-             OR table_set IS DISTINCT FROM 'plan_tiers:SELECT,tenant_api_keys:INSERT,tenant_api_keys:SELECT,tenant_event_outbox:INSERT,tenant_event_outbox:SELECT,tenant_plans:INSERT,tenant_plans:SELECT,tenants:INSERT,tenants:SELECT'
-             OR any_column_set IS DISTINCT FROM 'plan_tiers:SELECT,tenant_api_keys:INSERT,tenant_api_keys:SELECT,tenant_api_keys:UPDATE,tenant_event_outbox:INSERT,tenant_event_outbox:SELECT,tenant_event_outbox:UPDATE,tenant_plans:INSERT,tenant_plans:SELECT,tenants:INSERT,tenants:SELECT,tenants:UPDATE'
-             OR update_columns IS DISTINCT FROM 'tenant_api_keys.is_active,tenant_api_keys.revoked_at,tenant_event_outbox.attempts,tenant_event_outbox.last_error,tenant_event_outbox.published_at,tenants.kc_patch_attempt_count,tenants.kc_patch_last_error,tenants.name,tenants.principal_id,tenants.provisioning_state'
+             OR table_set IS DISTINCT FROM 'plan_entitlements:SELECT,plan_tiers:SELECT,tenant_api_keys:INSERT,tenant_api_keys:SELECT,tenant_event_outbox:INSERT,tenant_event_outbox:SELECT,tenant_plans:INSERT,tenant_plans:SELECT,tenants:INSERT,tenants:SELECT'
+             OR any_column_set IS DISTINCT FROM 'plan_entitlements:SELECT,plan_tiers:SELECT,tenant_api_keys:INSERT,tenant_api_keys:SELECT,tenant_api_keys:UPDATE,tenant_event_outbox:INSERT,tenant_event_outbox:SELECT,tenant_event_outbox:UPDATE,tenant_plans:INSERT,tenant_plans:SELECT,tenant_plans:UPDATE,tenants:INSERT,tenants:SELECT,tenants:UPDATE'
+             OR update_columns IS DISTINCT FROM 'tenant_api_keys.is_active,tenant_api_keys.revoked_at,tenant_event_outbox.attempts,tenant_event_outbox.last_error,tenant_event_outbox.published_at,tenant_plans.ended_at,tenant_plans.is_active,tenants.kc_patch_attempt_count,tenants.kc_patch_last_error,tenants.name,tenants.principal_id,tenants.provisioning_state'
              OR sequence_set IS DISTINCT FROM 'tenant_event_outbox_id_seq:USAGE'
              OR delegated <> '' THEN
             RAISE EXCEPTION 'tenant_identity_writer on omninode_cloud does not hold exactly the declared grants after they ran (tables=%, any_column=%, update_columns=%, sequences=%, delegable=%). A GRANT by a role that does not own the relations warns and returns success; re-run as a role that owns them.', table_set, any_column_set, update_columns, sequence_set, delegated;
