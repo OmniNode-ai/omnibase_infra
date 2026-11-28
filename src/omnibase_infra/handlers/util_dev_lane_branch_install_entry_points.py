@@ -77,17 +77,13 @@ def entry_point_rows(
     container: str,
     install: ModelDevLaneBranchInstall,
     timeout: float,
-    no_container: str = "",
 ) -> list[ModelDevLaneBranchInstallFileReadback]:
-    """One readback row per declared entry point; ``container`` "" means none ran."""
+    """One readback row per declared entry point, read from ``container``."""
     rows: list[ModelDevLaneBranchInstallFileReadback] = []
     for ep in install.entry_points:
-        if container:
-            observed, state, detail = _read(run, container, ep, timeout)
-            if state is State.PRESENT and observed != ep.sha256:
-                state, detail = State.DRIFTED, "entry point line differs"
-        else:
-            observed, state, detail = "", State.NO_CONTAINER, no_container
+        observed, state, detail = _read(run, container, ep, timeout)
+        if state is State.PRESENT and observed != ep.sha256:
+            state, detail = State.DRIFTED, "entry point line differs"
         rows.append(
             ModelDevLaneBranchInstallFileReadback(
                 service=service,
@@ -102,4 +98,29 @@ def entry_point_rows(
     return rows
 
 
-__all__ = ["entry_point_rows", "parse_entry_points", "put_entry_point"]
+def entry_point_rows_no_container(
+    service: str,
+    install: ModelDevLaneBranchInstall,
+    why: str,
+) -> list[ModelDevLaneBranchInstallFileReadback]:
+    """One ``NO_CONTAINER`` row per declared entry point: no container ran."""
+    return [
+        ModelDevLaneBranchInstallFileReadback(
+            service=service,
+            container="",
+            path=ep.path,
+            expected_sha256=ep.sha256,
+            observed_sha256="",
+            state=State.NO_CONTAINER,
+            detail=why,
+        )
+        for ep in install.entry_points
+    ]
+
+
+__all__ = [
+    "entry_point_rows",
+    "entry_point_rows_no_container",
+    "parse_entry_points",
+    "put_entry_point",
+]

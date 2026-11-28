@@ -104,6 +104,7 @@ from omnibase_infra.enums.enum_dev_lane_branch_install_state import (
 from omnibase_infra.handlers.util_dev_lane_branch_install_cli import build_parser
 from omnibase_infra.handlers.util_dev_lane_branch_install_entry_points import (
     entry_point_rows,
+    entry_point_rows_no_container,
     parse_entry_points,
     put_entry_point,
 )
@@ -558,11 +559,7 @@ class DevLaneContainerReader:
                     )
                     for f in install.files
                 )
-                rows.extend(
-                    entry_point_rows(
-                        self._run, service, "", install, DOCKER_TIMEOUT_SECONDS, why
-                    )
-                )
+                rows.extend(entry_point_rows_no_container(service, install, why))
                 continue
             container = ids[0]
             for f in install.files:

@@ -7,7 +7,13 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+)
 
 from omnibase_infra.models.model_dev_lane_branch_install_entry_point import (
     ModelDevLaneBranchInstallEntryPoint,
@@ -103,22 +109,19 @@ class ModelDevLaneBranchInstall(BaseModel):
             raise ValueError("services must be distinct compose service names")
         return value
 
-    @field_validator("files")
+    @field_validator("files", "entry_points")
     @classmethod
-    def _files_distinct(
-        cls, value: tuple[ModelDevLaneBranchInstallFile, ...]
-    ) -> tuple[ModelDevLaneBranchInstallFile, ...]:
-        if len({f.path for f in value}) != len(value):
-            raise ValueError("files must name distinct container paths")
-        return value
-
-    @field_validator("entry_points")
-    @classmethod
-    def _entry_points_distinct(
-        cls, value: tuple[ModelDevLaneBranchInstallEntryPoint, ...]
-    ) -> tuple[ModelDevLaneBranchInstallEntryPoint, ...]:
-        if len({e.path for e in value}) != len(value):
-            raise ValueError("entry_points must name distinct dist, group and name")
+    def _paths_distinct(
+        cls,
+        value: tuple[
+            ModelDevLaneBranchInstallFile | ModelDevLaneBranchInstallEntryPoint, ...
+        ],
+        info: ValidationInfo,
+    ) -> tuple[
+        ModelDevLaneBranchInstallFile | ModelDevLaneBranchInstallEntryPoint, ...
+    ]:
+        if len({v.path for v in value}) != len(value):
+            raise ValueError(f"{info.field_name} must name distinct paths")
         return value
 
     @field_validator("registered_at", "expires_at")
