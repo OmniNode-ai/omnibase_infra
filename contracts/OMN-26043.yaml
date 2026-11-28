@@ -1,0 +1,38 @@
+schema_version: '1.0.0'
+ticket_id: OMN-26043
+title: 'The C13 customer-local probe reads the routing attempts where a current delegate receipt records them'
+summary: 'grade_local_model read the routing attempts at receipt.result.attempts; a current delegate receipt carries them under receipt.result.terminal_payload.payload.attempts, so a real receipt graded as having no attempt. This change covers that one reader of the C13 probe; the ticket acceptance criteria for the other probes are not finished here.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26043-c13-attempts-path
+    statement: The C13 customer-local grader reads the routing attempts from the terminal payload of a current delegate receipt, and still refuses a receipt that records none.
+    acceptance:
+      - id: AC26043001
+        statement: 'AC26043001: a recorded current-shape delegate receipt reads its one local attempt (known good), the old receipt.result.attempts path reads none on that recording (known bad), and a climbed attempt or a receipt with no attempt at either path still fails local_model'
+evidence_requirements:
+  - kind: tests
+    description: The C13 customer-local probe grading tests, including the recorded terminal-payload receipt and the known good and known bad receipts of the current shape
+    command: uv run --frozen pytest tests/ci/test_c13_customer_local_probe_omn19179.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26043-c13-attempts-path
+    description: A receipt in the current shape reads its attempts and grades the local_model clause (known good), a climbed attempt and a receipt with no attempt at either path each fail it (known bad). The known-good test fails on the base commit, where the reader looks only at receipt.result.attempts, and passes after the change.
+    source: manual
+    binds_ac: [AC26043001]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c13_customer_local_probe_omn19179.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26043-c13-recorded-terminal-payload
+    description: The recorded onex delegate receipt (run 33da8f0d-774a-4c48-ae8d-0d1440639acb) carries its one local attempt only under terminal_payload.payload.attempts; the grader reads that attempt, and the test fails on the base commit where the reader looks only at receipt.result.attempts.
+    source: manual
+    binds_ac: [AC26043001]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c13_customer_local_probe_omn19179.py -k "recorded_terminal_payload_attempt" -q --no-cov -n 0 -p no:randomly
+        cwd: .

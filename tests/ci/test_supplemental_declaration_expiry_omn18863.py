@@ -138,6 +138,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "overlay_store_write": "omnimarket#6761 (node_projection_overlay_store)",
     "overlay_store_provenance": "omnimarket#6761 (node_projection_overlay_store)",
     "overlay_store_audit": "omnimarket#6761 (node_projection_overlay_store)",
+    "savings_priced_models": "omnimarket OMN-26444 (node_projection_metering_summary)",
 }
 
 _SKIP_REASON = (

@@ -427,9 +427,13 @@ def test_recorded_check_listing_exercises_real_fetch_projection_and_ordering(
     from scripts.ci import ci_summary_gate, release_train
 
     rows = recorded_response["pull_requests"]["2567"]["check_runs"]
-    replay_gh({"check_runs": rows})
+    # default_check_runs reads two listings through the same gh: the check runs
+    # and the workflow runs that own their suites. The recording predates suite
+    # ids, so the workflow listing is empty and every copy keys to its own suite.
+    replay_gh({"check_runs": rows, "workflow_runs": []})
     fetched = release_train.default_check_runs("omnibase_infra", "recorded-head")
     assert len(fetched) == len(rows)
+    assert all(str(row["workflow"]).startswith("suite:") for row in fetched)
     assert [row["started_at"] for row in fetched] == [row["started_at"] for row in rows]
     winner = ci_summary_gate.latest_check_run_rows(fetched)["Canonical Inference Gate"]
     assert winner["started_at"] == "2026-07-30T14:23:29Z"

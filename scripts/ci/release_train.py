@@ -1164,6 +1164,7 @@ def default_rebuild_pending(repo: str, sha: str) -> bool:
 # purpose: GitHub treats a skipped REQUIRED context as satisfying protection,
 # which is precisely why a release train must not.
 _CI_PENDING_STATES = frozenset({"queued", "in_progress", "pending", "waiting"})
+_CI_GREEN = ("success", "skipped", "neutral")
 
 
 def default_required_contexts(repo: str, branch: str) -> list[str]:
@@ -1219,29 +1220,39 @@ def default_gating_sha(repo: str, sha: str) -> str:
 
 
 def default_check_runs(repo: str, sha: str) -> list[dict[str, Any]]:
-    """Every check run reported against ``sha``, newest attempt per name."""
-    raw = subprocess.run(
-        [
-            "gh",
-            "api",
-            "--paginate",
-            f"repos/OmniNode-ai/{repo}/commits/{sha}/check-runs",
-            # started_at and completed_at are REQUIRED here, not decorative:
-            # a name can carry several runs on one sha and the resolver orders
-            # them by recency. Projecting them away made every run look equally
-            # recent, so an arbitrary one won -- which is the same defect as
-            # first-wins, just better hidden.
-            "--jq",
-            ".check_runs[] | {name, status, conclusion, started_at, completed_at}",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    runs: list[dict[str, Any]] = []
-    for line in raw.splitlines():
-        if line.strip():
-            runs.append(json.loads(line))
+    """Every check-run copy reported against ``sha``, keyed to its workflow.
+
+    Each row carries ``workflow``: the workflow path of the run that owns the
+    copy's check suite, or ``suite:<id>`` when the suite is not a workflow run.
+    One check name is emitted by many workflows, so the resolver judges a copy
+    per (workflow, name), the way ``ci_premise.py`` does.
+    """
+
+    def _rows(path: str, jq: str) -> list[dict[str, Any]]:
+        url = f"repos/OmniNode-ai/{repo}/{path}"
+        out = subprocess.check_output(
+            ["gh", "api", "--paginate", url, "--jq", jq], text=True
+        )
+        return [json.loads(line) for line in out.splitlines() if line.strip()]
+
+    # started_at and completed_at are REQUIRED here, not decorative: a name can
+    # carry several runs on one sha and the resolver orders them by recency.
+    # Projecting them away made every run look equally recent, so an arbitrary
+    # one won -- the same defect as first-wins, just better hidden.
+    runs = _rows(
+        f"commits/{sha}/check-runs",
+        ".check_runs[] | {name, status, conclusion, started_at, completed_at, "
+        "check_suite_id: .check_suite.id}",
+    )
+    paths = {
+        str(w["check_suite_id"]): str(w["path"])
+        for w in _rows(
+            f"actions/runs?head_sha={sha}", ".workflow_runs[] | {check_suite_id, path}"
+        )
+    }
+    for r in runs:
+        suite = r.get("check_suite_id")
+        r["workflow"] = paths.get(str(suite), f"suite:{suite}")
     return runs
 
 
@@ -1259,6 +1270,7 @@ def classify_ci_green(
     None means every required context reported ``success`` ON THIS SHA. Every
     other outcome is a distinct, actionable reason.
     """
+
     try:
         required = required_contexts(repo, branch)
     except Exception as exc:  # noqa: BLE001 - any failure to read is fail-closed
@@ -1270,10 +1282,7 @@ def classify_ci_green(
     if not required:
         return (
             EnumTrainReason.CI_PROTECTION_UNREADABLE,
-            f"{repo}@{branch} declares NO required status checks, so there is no "
-            "green to prove. An empty required set is an ungated branch, not a "
-            "passing one, and reading it as green would make this premise "
-            "vacuous exactly where it matters most",
+            f"{repo}@{branch} declares NO required status checks, so there is no green to prove. An empty required set is an ungated branch, not a passing one, and reading it as green would make this premise vacuous exactly where it matters most",
         )
 
     try:
@@ -1286,10 +1295,7 @@ def classify_ci_green(
     if not gate_sha:
         return (
             EnumTrainReason.CI_NO_MERGED_PR,
-            f"{repo}@{sha[:12]} is not the merge of any MERGED pull request, so "
-            "there is no gated event whose required contexts could be read. A "
-            "commit that reached the branch by some other path is what this "
-            "premise exists to refuse",
+            f"{repo}@{sha[:12]} is not the merge of any MERGED pull request, so there is no gated event whose required contexts could be read. A commit that reached the branch by some other path is what this premise exists to refuse",
         )
 
     try:
@@ -1312,54 +1318,62 @@ def classify_ci_green(
     # same rather than inventing a preference. Ordering is by completed_at and
     # then started_at, with an unfinished run sorting last so a still-running
     # leg cannot be masked by an older finished one.
+    #
+    # OMN-26706: a copy is keyed by (workflow, name), as ci_premise.py and
+    # cut_facts.sh key it, and only the NEWEST copy of a key is judged. An older
+    # red copy (a cancelled run, a replayed run, a job that failed before the
+    # rerun that superseded it) counts only when it overlaps the newest copy in
+    # time, ties it or lacks the timestamps to order it by: that is a concurrent
+    # sibling, not a superseded run. A green copy from another workflow never
+    # hides a red newest copy of this one.
     def _recency(run: dict[str, Any]) -> tuple[str, str]:
-        return (
-            str(run.get("completed_at") or "9999"),
-            str(run.get("started_at") or ""),
-        )
+        # Only an UNFINISHED copy sorts last. A copy that completed without a
+        # completed_at (a run cancelled before it started carries none) orders
+        # by when it started, so it cannot outrank a later green copy.
+        started = str(run.get("started_at") or "")
+        if str(run.get("status") or "").lower() != "completed":
+            return ("9999", started)
+        return (str(run.get("completed_at") or started), started)
 
-    by_name: dict[str, dict[str, Any]] = {}
-    for run in sorted(runs, key=_recency):
-        name = str(run.get("name", ""))
-        if name:
-            by_name[name] = run
+    def _superseded(copy: dict[str, Any], newest: dict[str, Any]) -> bool:
+        ended = copy.get("completed_at") or copy.get("started_at")
+        return bool(ended and newest.get("started_at") and ended < newest["started_at"])
 
     for context in sorted(required):
-        reported = by_name.get(context)
-        if reported is None:
+        named = [r for r in runs if r.get("name") == context]
+        if not named:
             return (
                 EnumTrainReason.CI_REQUIRED_CONTEXT_MISSING,
-                f"required context {context!r} reported no check run on "
-                f"{gate_sha[:12]}, the gating commit for {sha[:12]}; the "
-                "gate did not run on the change being cut",
+                f"required context {context!r} reported no check run on {gate_sha[:12]}, the gating commit for {sha[:12]}; the gate did not run on the change being cut",
             )
-        status = str(reported.get("status") or "").lower()
-        conclusion = str(reported.get("conclusion") or "").lower()
-        if status in _CI_PENDING_STATES or not conclusion:
-            return (
-                EnumTrainReason.CI_REQUIRED_CONTEXT_PENDING,
-                f"required context {context!r} is still {status or 'unfinished'} "
-                f"on {gate_sha[:12]}; a train that cut now would cut ahead of its "
-                "gate",
-            )
-        if conclusion == "skipped":
+        skipped = []
+        for workflow in sorted({str(r.get("workflow") or "") for r in named}):
+            copies = [r for r in named if str(r.get("workflow") or "") == workflow]
+            newest = max(copies, key=_recency)
+            status = str(newest.get("status") or "").lower()
+            conclusion = str(newest.get("conclusion") or "").lower()
+            skipped.append(conclusion == "skipped")
+            if status in _CI_PENDING_STATES or not conclusion:
+                return (
+                    EnumTrainReason.CI_REQUIRED_CONTEXT_PENDING,
+                    f"required context {context!r} ({workflow or 'no workflow'}) is still unfinished; a train that cut now would cut ahead of its gate",
+                )
+            live = [c for c in copies if c is newest or not _superseded(c, newest)]
+            for c in live:
+                if str(c.get("conclusion") or "x").lower() not in _CI_GREEN:
+                    return (
+                        EnumTrainReason.CI_NOT_GREEN,
+                        f"required context {context!r} ({workflow or 'no workflow'}) concluded {c.get('conclusion')!r} in a copy no newer copy supersedes",
+                    )
+        if all(skipped):
             return (
                 EnumTrainReason.CI_REQUIRED_CONTEXT_SKIPPED,
-                f"required context {context!r} is SKIPPED on {gate_sha[:12]}. GitHub "
-                "treats a skipped required context as satisfying protection, so "
-                "this commit is mergeable while that gate never ran; the train "
-                "refuses rather than inheriting that",
-            )
-        if conclusion != "success":
-            return (
-                EnumTrainReason.CI_NOT_GREEN,
-                f"required context {context!r} concluded {conclusion!r} on {sha[:12]}",
+                f"required context {context!r} is SKIPPED on {gate_sha[:12]}. GitHub treats a skipped required context as satisfying protection, so this commit is mergeable while that gate never ran; the train refuses rather than inheriting that",
             )
 
     return (
         None,
-        f"all {len(required)} required context(s) on {repo}@{branch} reported "
-        f"success for {gate_sha[:12]}, the gating commit for {sha[:12]}",
+        f"all {len(required)} required context(s) on {repo}@{branch} reported success for {gate_sha[:12]}, the gating commit for {sha[:12]}",
     )
 
 

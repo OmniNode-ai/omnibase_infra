@@ -60,7 +60,7 @@ dod_evidence:
       - AC4
     checks:
       - check_type: command
-        check_value: grep -q 'dev-20261126053711-ce48c176d269' pyproject.toml
+        check_value: grep -q 'dev-20261127051535-94ed7507315d' pyproject.toml
         cwd: .
   - id: dod-omn26227-ac1-core-0-47-80
     description: 'The omnibase-core pin names core 0.47.80 (dev tag dev-20261125154033-214c1fa29b7b, commit 214c1fa29b7b), the lock agrees, and the core dependency-pin check exits zero on this tree.'

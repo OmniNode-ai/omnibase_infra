@@ -536,15 +536,15 @@ def grade_local_model(obs: Mapping[str, Any], receipt: Any) -> Clause:
         clause.reasons.append(
             f"receipt endpoint port {parsed.port} is not the model server's {model_port}"
         )
-    attempts = receipt.get("receipt", {}).get("result", {}).get("attempts") or []
+    res = receipt.get("receipt", {}).get("result", {})
+    attempts = res.get("terminal_payload", {}).get("payload", res).get("attempts") or []
     clause.evidence["attempts"] = [
         {k: a.get(k) for k in ("tier", "backend_id", "model_id", "acceptance_decision")}
         for a in attempts
     ]
     if not attempts:
         clause.reasons.append("receipt records no routing attempt")
-    non_local = [a for a in attempts if a.get("tier") != "local"]
-    if non_local:
+    if non_local := [a for a in attempts if a.get("tier") != "local"]:
         clause.reasons.append(f"{len(non_local)} attempt(s) left the local tier")
     accepted = [a for a in attempts if a.get("acceptance_decision") == "accept"]
     if len(accepted) != 1:

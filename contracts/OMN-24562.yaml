@@ -104,6 +104,21 @@ requirements:
     acceptance:
       - id: AC30
         statement: 'AC30: an in-run job with status in_progress and conclusion success is done and green, in_progress with failure is red, in_progress with no conclusion waits, and a job with no conclusion 45 minutes after the last other job completed is named by the poll step stall filter, and the jobs read pages at 30 then 10 -- falsifier: uv run --frozen pytest tests/ci/test_ci_summary_running_conclusion_omn24562.py -q -n 0 --no-cov fails on the merge-base ci_summary_gate.py'
+  - id: req-omn24562-stability-follow-pinned-head
+    statement: A stability follow builds the live code-ref pin's head, so the build reads the compose files of the code the agent loads and not the tracking branch's.
+    acceptance:
+      - id: AC31
+        statement: 'AC31: while a code-ref pin is live the stability follow command carries the pin head as its git_ref, and without a live pin it carries the tracking ref -- falsifier: scripts/deploy-agent/tests/unit/test_stability_follow_builds_pinned_head_omn24562.py fails at the merge base'
+  - id: req-omn24562-stability-follow-open-pr
+    statement: The stability follow of a live code-ref pin builds the pinned branch as a declared open pull request, and only the stability and dev lanes may; prod keeps refusing a branch build.
+    acceptance:
+      - id: AC32
+        statement: 'AC32: a stability command carries an open pull request declaration with its rollback declaration, prod refuses one, and the first-party policy admits the stability lane -- falsifier: scripts/deploy-agent/tests/unit/test_open_pr_declaration_omn21928.py or tests/unit/validation/test_first_party_open_pr_context_omn21928.py fails at the merge base'
+  - id: req-omn24562-stability-own-open-pr
+    statement: On the stability lane a declared open pull request must equal the live pin's own declaration, so a foreign pull request, another head of the pinned one, or a declaration with no live pin is refused before the preflight.
+    acceptance:
+      - id: AC33
+        statement: 'AC33: admit_open_pr refuses a different pull request, another head of the pinned pull request and a declaration with no live pin on the stability lane, admits the pin''s own, and does not read the dev lane -- falsifier: scripts/deploy-agent/tests/unit/test_stability_follow_builds_pinned_head_omn24562.py fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: The alarm row tests and the job reading tests.
@@ -384,4 +399,37 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_ci_summary_running_conclusion_omn24562.py tests/ci/test_ci_summary_gate.py -q -n 0 --no-cov -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac31-stability-follow-pinned-head
+    description: The stability follow carries the live pin's head as the build ref and the tracking ref when no pin is live.
+    source: manual
+    binds_ac:
+      - AC31
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_open_pr_declaration_omn21928.py tests/unit/test_stability_follow_builds_pinned_head_omn24562.py tests/unit/test_stability_composed_build_omn24562.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac32-stability-follow-open-pr
+    description: A stability command carries the open pull request declaration, prod refuses it, and the policy data admits the stability lane.
+    source: manual
+    binds_ac:
+      - AC32
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_open_pr_declaration_omn21928.py tests/unit/test_stability_follow_builds_pinned_head_omn24562.py tests/unit/test_stability_composed_build_omn24562.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/validation/test_first_party_open_pr_context_omn21928.py -q -p no:cacheprovider --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn24562-ac33-stability-own-open-pr
+    description: The stability lane admits only the live pin's own open pull request declaration.
+    source: manual
+    binds_ac:
+      - AC33
+    checks:
+      - check_type: test_passes
+        check_value: cd scripts/deploy-agent && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --extra dev python -m pytest tests/unit/test_open_pr_declaration_omn21928.py tests/unit/test_stability_follow_builds_pinned_head_omn24562.py tests/unit/test_stability_composed_build_omn24562.py -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_stability_follow_open_pr_pin_omn24562.py -q -n 0 --no-cov -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
