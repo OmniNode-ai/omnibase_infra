@@ -1,0 +1,50 @@
+schema_version: 1.0.0
+ticket_id: OMN-26768
+title: The dev realm pushes the dashboard client secret, so dev sign-in is not left on a minted one
+summary: >-
+  OMN-23491 (#6376) put the confidential omnidash client in every realm but gave it a pushed secret only on staging
+  and prod. The base entry declares no secretEnv, so a dev run leaves Keycloak to mint its own secret for a
+  confidential client, and that minted value is never written back to the omnidash-credentials Secret the dashboard
+  reads: dev sign-in moves from Client not found to invalid_client, and the empty-secret guard (OMN-16504) cannot see
+  it because the value it reads is not empty. This is the OMN-18391 shape. OMN-26768 AC23 asks for the client
+  declared with a dev override and its secret where omnidash-credentials reads it, so dev was the one environment
+  short of its own criterion. The dev block carries secretEnv and nothing else, the same shape as prod, because the
+  base entry already allows https://dev.dash.omninode.ai/* as a return address, in webOrigins and in
+  post.logout.redirect.uris. The dev slot omninode/dev/keycloak already holds OMNIDASH_CLIENT_SECRET (read live
+  2026-11-28). Three tests asserted the opposite and are updated rather than deleted: what they pinned was a premise,
+  stated in #6376's own docstring as "On dev there is no secretEnv, so the dev seed job needs no new variable", and
+  the deployment repository's #2199 (merged 2026-11-28T15:59Z) adds that variable to the dev seed job and to the dev reconcile
+  credentials template, so the premise is gone and the exclusion is what breaks sign-in. Each updated test records
+  that in its own docstring. The two deployment copies of the roster and the sibling pin follow in the deployment repository.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26768-dev-pushes-the-dashboard-secret
+    statement: The dev realm gets the dashboard client secret pushed from the slot the dashboard reads, like staging and prod.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: omnidash resolved for dev declares secretEnv OMNIDASH_CLIENT_SECRET and no consumerSecretEnv, the
+          seeder reads the secret from that variable and fails closed when it is unset, and dev is a declared
+          environment override beside staging and prod
+evidence_requirements:
+  - kind: tests
+    description: The OMN-23491 client tests, whose three dev assertions this change inverts, and the roster override test that lists every declared exception.
+    command: uv run --frozen pytest scripts/tests/test_seed_keycloak_omnidash_client_omn23491.py scripts/tests/test_seed_keycloak_environment_overrides.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26768-ac1-dev-pushes-the-secret
+    description: >-
+      Dev resolves to a secretEnv of OMNIDASH_CLIENT_SECRET, the seeder reads the value from it and exits on an unset
+      one, and the roster's declared overrides list dev for omnidash. All three fail at the merge base with these
+      test bodies, measured 2026-11-28: the first two assert the previous behaviour's inverse and the third omits dev.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/tests/test_seed_keycloak_omnidash_client_omn23491.py scripts/tests/test_seed_keycloak_environment_overrides.py -q --no-cov -n 0 -p no:randomly -k "dev_pushes_the_secret_like_the_other_realms or dev_reads_the_secret_and_fails_closed_without_it or declared_overrides_are_exactly_these"
+        cwd: .

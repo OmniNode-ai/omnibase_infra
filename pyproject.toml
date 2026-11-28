@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.38.87"
+version = "0.38.88"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -682,6 +682,7 @@ node_delegation_chain_ledger_effect = "omnibase_infra.nodes.node_delegation_chai
 node_delegation_dispatch_terminal_effect = "omnibase_infra.nodes.node_delegation_dispatch_terminal_effect"
 node_delta_bundle_effect = "omnibase_infra.nodes.node_delta_bundle_effect"
 node_delta_metrics_effect = "omnibase_infra.nodes.node_delta_metrics_effect"
+node_deploy_agent_reading_compute = "omnibase_infra.nodes.node_deploy_agent_reading_compute"
 node_deploy_job_reading_effect = "omnibase_infra.nodes.node_deploy_job_reading_effect"
 node_deploy_runners = "omnibase_infra.nodes.node_deploy_runners"
 node_dev_boot_guard_effect = "omnibase_infra.nodes.node_dev_boot_guard_effect"

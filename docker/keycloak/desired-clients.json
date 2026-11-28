@@ -151,6 +151,99 @@
       ]
     },
     {
+      "clientId": "omnidash",
+      "publicClient": false,
+      "fullScopeAllowed": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "post.logout.redirect.uris": "https://dash.omninode.ai/*##https://dev.dash.omninode.ai/*##http://localhost:3000/*##http://localhost:8080/*"
+      },
+      "redirectUris": [
+        "https://dash.omninode.ai/*",
+        "https://dev.dash.omninode.ai/*",
+        "http://localhost:3000/*",
+        "http://localhost:8080/*"
+      ],
+      "webOrigins": [
+        "https://dash.omninode.ai",
+        "https://dev.dash.omninode.ai",
+        "http://localhost:3000",
+        "http://localhost:8080"
+      ],
+      "environmentOverrides": {
+        "staging": {
+          "secretEnv": "OMNIDASH_CLIENT_SECRET",
+          "attributes": {
+            "post.logout.redirect.uris": "https://staging.dash.omninode.ai/*"
+          },
+          "redirectUris": ["https://staging.dash.omninode.ai/*"],
+          "webOrigins": ["https://staging.dash.omninode.ai"],
+          "ticket": "OMN-23491",
+          "reason": "The dashboard server signs in as a confidential client and reads its secret from the same keycloak slot the seed job mounts, so staging pushes that secret here and the realm and the app hold one value. The staging realm serves only the staging hosts. No PKCE attribute, here or in the base: keycloak-connect sends no code_challenge, so a required S256 would refuse every sign-in."
+        },
+        "dev": {
+          "secretEnv": "OMNIDASH_CLIENT_SECRET",
+          "ticket": "OMN-26768",
+          "reason": "Dev pushes the dashboard secret for the same reason staging and prod do, and without this block it is the one environment that does not. The base entry declares no secretEnv, so a dev run leaves Keycloak to mint its own secret for a confidential client, and that minted value is never written back to the omnidash-credentials Secret the dashboard reads: sign-in then moves from Client not found to invalid_client, which the empty-secret guard (OMN-16504) cannot see because the value it reads is not empty. The dev slot omninode/dev/keycloak already carries OMNIDASH_CLIENT_SECRET (read 2026-11-28). No host keys here: the base already allows the dev return address, so dev needs the secret and nothing else."
+        },
+        "prod": {
+          "secretEnv": "OMNIDASH_CLIENT_SECRET",
+          "ticket": "OMN-23491",
+          "reason": "Production pushes the dashboard secret from its keycloak slot for the same reason as staging: the realm and the app read one value, and the confidential secret guard (OMN-16504) never sees an empty secret."
+        }
+      },
+      "defaultClientScopes": ["basic", "web-origins", "roles", "profile", "email"],
+      "protocolMappers": [
+        {
+          "name": "tenant_id",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tenant_slug",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_slug",
+            "claim.name": "tenant_slug",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "principal_id",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "principal_id",
+            "claim.name": "principal_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "onex-api-audience",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "onex-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
       "clientId": "onex-customer",
       "publicClient": true,
       "fullScopeAllowed": false,
