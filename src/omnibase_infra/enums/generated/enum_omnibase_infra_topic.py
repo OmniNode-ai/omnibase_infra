@@ -104,6 +104,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_RUNNER_HEALTH_SNAPSHOT_V1 = contract_topic_value('nodes/node_runner_fleet_maintain_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_RUNNER_HEALTH_SNAPSHOT_V1')  # onex.evt.omnibase-infra.runner-health-snapshot.v1
     EVT_RUNTIME_BOOT_FAILED_V1 = contract_topic_value('nodes/node_runtime_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_RUNTIME_BOOT_FAILED_V1')  # onex.evt.omnibase-infra.runtime-boot-failed.v1
     EVT_RUNTIME_BOOTED_V1 = contract_topic_value('nodes/node_runtime_orchestrator/contract.yaml', 'omnibase-infra', 'EVT_RUNTIME_BOOTED_V1')  # onex.evt.omnibase-infra.runtime-booted.v1
+    EVT_RUNTIME_CANARY_RECEIPT_V1 = contract_topic_value('nodes/node_runtime_canary_receipt_effect/contract.yaml', 'omnibase-infra', 'EVT_RUNTIME_CANARY_RECEIPT_V1')  # onex.evt.omnibase-infra.runtime-canary-receipt.v1
     EVT_RUNTIME_ERROR_V1 = contract_topic_value('nodes/node_runtime_error_triage_effect/contract.yaml', 'omnibase-infra', 'EVT_RUNTIME_ERROR_V1')  # onex.evt.omnibase-infra.runtime-error.v1
     EVT_RUNTIME_ERROR_ESCALATED_V1 = contract_topic_value('nodes/node_runtime_error_triage_effect/contract.yaml', 'omnibase-infra', 'EVT_RUNTIME_ERROR_ESCALATED_V1')  # onex.evt.omnibase-infra.runtime-error-escalated.v1
     EVT_RUNTIME_HEALTH_CHECK_V1 = contract_topic_value('services/topics.yaml', 'omnibase-infra', 'EVT_RUNTIME_HEALTH_CHECK_V1')  # onex.evt.omnibase-infra.runtime-health-check.v1

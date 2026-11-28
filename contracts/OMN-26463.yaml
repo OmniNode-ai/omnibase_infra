@@ -99,3 +99,27 @@ dod_evidence:
       - check_type: command
         check_value: onex validate src/omnibase_infra/nodes/node_runtime_canary_effect
         cwd: .
+  - id: dod-omn26463-receipt-delivery
+    description: A canary receipt is published as a bus event by the canary lane's node and recorded by the dev agent's node into canary-receipts, after which the dev roll's gate admits a PASS and refuses a FAIL.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_handler_runtime_canary_receipt_delivery_omn26463.py -q
+        cwd: .
+      - check_type: command
+        check_value: onex validate src/omnibase_infra/nodes/node_runtime_canary_receipt_effect
+        cwd: .
+  - id: dod-omn26463-canary-principal
+    description: The lab-only principal runtime-canary-h051 has bindings and grants derived by the grant derivation node, reading the dev candidate topics and writing the receipt topic only.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_runtime_canary_h051_grants_omn26463.py -q
+        cwd: .
+  - id: dod-omn26463-receipt-host-entry
+    description: The host entry binds the receipt directory protocol to the dev agent's state dir and records a delivered receipt there, after which the dev roll's gate admits a PASS and refuses a FAIL with the TypeError line; the publish entry prints the event of a run's receipt and refuses a candidate with none.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_runtime_canary_receipt_host_entry_omn26463.py -q
+        cwd: .
