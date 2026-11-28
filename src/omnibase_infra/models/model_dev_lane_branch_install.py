@@ -9,6 +9,9 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_infra.models.model_dev_lane_branch_install_entry_point import (
+    ModelDevLaneBranchInstallEntryPoint,
+)
 from omnibase_infra.models.model_dev_lane_branch_install_file import (
     ModelDevLaneBranchInstallFile,
 )
@@ -42,6 +45,7 @@ class ModelDevLaneBranchInstall(BaseModel):
     registered_by: str
     services: tuple[str, ...] = Field(min_length=1)
     files: tuple[ModelDevLaneBranchInstallFile, ...] = Field(min_length=1)
+    entry_points: tuple[ModelDevLaneBranchInstallEntryPoint, ...] = ()
     restart: bool = True
     registered_at: datetime
     expires_at: datetime
@@ -106,6 +110,15 @@ class ModelDevLaneBranchInstall(BaseModel):
     ) -> tuple[ModelDevLaneBranchInstallFile, ...]:
         if len({f.path for f in value}) != len(value):
             raise ValueError("files must name distinct container paths")
+        return value
+
+    @field_validator("entry_points")
+    @classmethod
+    def _entry_points_distinct(
+        cls, value: tuple[ModelDevLaneBranchInstallEntryPoint, ...]
+    ) -> tuple[ModelDevLaneBranchInstallEntryPoint, ...]:
+        if len({e.path for e in value}) != len(value):
+            raise ValueError("entry_points must name distinct dist, group and name")
         return value
 
     @field_validator("registered_at", "expires_at")
