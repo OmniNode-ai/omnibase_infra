@@ -137,6 +137,28 @@ x-stability-test-internal-projection-env: &stability_test_internal_projection_en
 # base, and a fail-closed reference there would refuse prod's compose render.
 x-gateway-database-env: &stability_test_gateway_env
   GATEWAY_DATABASE_DSN: "postgresql://gateway_runtime:${GATEWAY_RUNTIME_PASSWORD:?GATEWAY_RUNTIME_PASSWORD must be set — the lab workflow gateway connects to omninode_cloud as the least-grant gateway_runtime principal (OMN-26151), never as role_omninode or the postgres superuser}@postgres:5432/omninode_cloud"
+# =============================================================================
+# RUNTIME SECRET-STORE IDENTITY (OMN-26121; ruling 2026-11-23T23:06:19Z)
+# =============================================================================
+# The stability runtime reads its secrets from the stability Infisical, through
+# its own read-only machine identity (environment `stability`, folder
+# /tenant-inference-credentials). The four values come from the operator env on
+# the lab host as STABILITY_TEST_RUNTIME_INFISICAL_*; the runtime sees them as
+# the INFISICAL_* names its resolver reads (handler_wiring
+# build_lane_infisical_handler). Names only here, no value.
+#
+# Fail closed and by name: each reference is `:?`, so a render with any of the
+# four absent is refused naming it, instead of booting a runtime whose store
+# reads answer nothing. The dev lane's RUNTIME_EFFECTS_INFISICAL_* and the base
+# anchor's ONEX_RUNTIME_INFISICAL_* are never a fallback: a stability runtime
+# holding a dev identity would read the dev store. The slug is a literal for the
+# same reason as ONEX_RUNTIME_LANE: an exported shell value must not re-point it.
+x-runtime-infisical-identity-env: &runtime_infisical_identity_env
+  INFISICAL_ADDR: ${STABILITY_TEST_RUNTIME_INFISICAL_ADDR:?STABILITY_TEST_RUNTIME_INFISICAL_ADDR must be set - the stability runtime reads its secret store with its own identity (OMN-26121), never the dev lane's}
+  INFISICAL_PROJECT_ID: ${STABILITY_TEST_RUNTIME_INFISICAL_PROJECT_ID:?STABILITY_TEST_RUNTIME_INFISICAL_PROJECT_ID must be set - the stability runtime reads its secret store with its own identity (OMN-26121), never the dev lane's}
+  INFISICAL_CLIENT_ID: ${STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_ID:?STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_ID must be set - the stability runtime reads its secret store with its own identity (OMN-26121), never the dev lane's}
+  INFISICAL_CLIENT_SECRET: ${STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_SECRET:?STABILITY_TEST_RUNTIME_INFISICAL_CLIENT_SECRET must be set - the stability runtime reads its secret store with its own identity (OMN-26121), never the dev lane's}
+  INFISICAL_ENVIRONMENT_SLUG: "stability"
 # OMN-20932: a lane's Bifrost overlay is private deployment config; this
 # repository ships none (only lane-overlays/local.bifrost.example.yaml, the
 # neutral template). Every runtime service mounts the overlay named for its
@@ -418,7 +440,7 @@ services:
       redpanda-partition-cap:
         condition: service_completed_successfully
     environment:
-      !!merge <<: [*stability_test_strict_wiring_env, *stability_test_gateway_env, *stability_test_lane_identity_env, *stability_test_broker_sasl_env]
+      !!merge <<: [*stability_test_strict_wiring_env, *stability_test_gateway_env, *stability_test_lane_identity_env, *stability_test_broker_sasl_env, *runtime_infisical_identity_env]
       KAFKA_SASL_USERNAME: "omninode-runtime"
       KAFKA_SASL_PASSWORD: ${STABILITY_TEST_KAFKA_SASL_PASSWORD_OMNINODE_RUNTIME:?STABILITY_TEST_KAFKA_SASL_PASSWORD_OMNINODE_RUNTIME must be set - the stability lane authenticates omninode-runtime to its own broker as principal omninode-runtime (OMN-25927); resolved from Infisical through the operator env, never inlined here}
       # OMN-21288: carried over unchanged from runtime-effects.
@@ -451,7 +473,7 @@ services:
       KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
       BIFROST_VERIFY_ENDPOINTS: ${STABILITY_TEST_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_BIFROST_VERIFY_ENDPOINTS}
       ONEX_SECRET_RESOLVER_CONFIG_PATH: ${STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_PATH}
-      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON}
       OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${STABILITY_TEST_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-main
       # OMN-20593: this lane's main runtime publishes the runtime tick
@@ -471,7 +493,7 @@ services:
       # dev runtime main (docker-compose.dev-tenant-fold.yml), from the same
       # host directories. Unset, every delegation the nightly measures on this
       # lane was refused "no call budget declared".
-      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-branch:/etc/onex/skill-overlays-store:/etc/onex/skill-overlays
+      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays-branch:/etc/onex/skill-overlays-settings:/etc/onex/skill-overlays-store:/etc/onex/skill-overlays
     ports: !override
       - "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085"
       - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
@@ -493,6 +515,7 @@ services:
       # The branch root is a directory in the container's writable layer, not a mount.
       - ${DEV_LANE_SKILL_OVERLAY_ROOTS_DIR:-./skill-overlay-roots}:/etc/onex/skill-overlays:ro
       - ${DEV_LANE_OVERLAY_STORE_ROOTS_DIR:-../../overlays/overlays}:/etc/onex/skill-overlays-store:ro
+      - ${HOME}/.local/state/onex/overlay-store:/etc/onex/skill-overlays-settings:ro
       # OMN-26121: the lane declaration folder, as the dev runtime mounts it (OMN-24854). The lab
       # overlay of node_gateway_batch_ingest_effect names /etc/onex/workspace-config as its config
       # root, and the door's lifespan reads config/lab/ci_bus_lanes.yaml under it to resolve its
@@ -553,7 +576,7 @@ services:
     environment:
       # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
       ONEX_RUNTIME_LANE: "stability-test"
-      !!merge <<: *stability_test_strict_wiring_env
+      !!merge <<: [*stability_test_strict_wiring_env, *runtime_infisical_identity_env]
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test
@@ -575,7 +598,7 @@ services:
       KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
       BIFROST_VERIFY_ENDPOINTS: ${STABILITY_TEST_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS}
       ONEX_SECRET_RESOLVER_CONFIG_PATH: ${STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH}
-      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
       # OMN-20593: the two prune effects on this role resolve their local
       # archive directory from these names on every runtime tick, and this lane

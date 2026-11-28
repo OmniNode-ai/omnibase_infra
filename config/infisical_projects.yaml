@@ -2,10 +2,10 @@
 #
 # Authoritative list of Infisical project names and their purposes.
 # Project UUIDs are populated after the projects are created in the live
-# Infisical instance on 192.168.86.201:8880.
+# Infisical instance at $INFISICAL_ADDR.
 #
 # To create the projects and fill in the IDs:
-#   1. Ensure Infisical is reachable: curl -fsS http://192.168.86.201:8880/api/status
+#   1. Ensure Infisical is reachable: curl -fsS "$INFISICAL_ADDR/api/status"
 #   2. Run: uv run python scripts/seed-infisical.py --machine-class mac-dev --dry-run
 #      (lists what would be seeded; use --execute to actually seed)
 #   3. After creation, populate the project_id fields below with the UUIDs

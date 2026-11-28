@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """The reader side of the one-recreate-an-hour rule (OMN-25912).
 
-The deploy agent's window gate covers the idle converge and the idle restore, and a lane's
+The deploy agent's window gate covers the idle converge, the idle restore and a lane's build request, and a real
 rollback command or the container's own restart policy never asks it. This handler reads
 what those starts left on the bus (``dev_runtime_started``, ``dev_roll_manifest`` and
 ``dev_recreate_announced``, plus the container's own StartedAt and RestartCount) and names
@@ -284,7 +284,7 @@ def audit_and_publish(
     """Read the window, publish one violation event per case, and return what was found."""
     result = handler.handle(request)
     for violation in result.violations:
-        if not events.recreate_violation(violation):
+        if not events.publish_observed("dev_recreate_violation", violation):
             logger.error(
                 "dev recreate violation %s was not accepted by the bus "
                 "friction_type=dev_event_publish_failed",

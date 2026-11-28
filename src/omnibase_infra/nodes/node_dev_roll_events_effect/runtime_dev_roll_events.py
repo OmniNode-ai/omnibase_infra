@@ -15,15 +15,18 @@ import importlib
 import importlib.util
 import json
 import logging
+import operator
 import os
+import re
 import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
-from types import ModuleType
-from typing import TYPE_CHECKING, Protocol
+from types import ModuleType, SimpleNamespace
+from typing import TYPE_CHECKING, Any, Protocol
 
 import yaml
 from pydantic import BaseModel, JsonValue
@@ -289,7 +292,11 @@ def recreate_gate_at(
         ]
         return handler.DevRecreateWindowGate(
             window.ModelDevRecreatePolicy.from_env(policy_env_at(repo_root)),
-            announce or build_events_at(repo_root, state_dir).recreate_announced,
+            announce
+            or partial(
+                build_events_at(repo_root, state_dir).publish_observed,
+                "dev_recreate_announced",
+            ),
             clock=clock or (lambda: datetime.now(UTC)),
             last_recreate_at=last_recreate_at,
             announced_for=announced_for,
@@ -342,7 +349,7 @@ RUNTIME_IMAGE_PATHS: tuple[str, ...] = (
     "uv.lock",
     "src/**",
     "contracts/**",
-    "config/runner_fleet.yaml",
+    "config/image/runner_fleet.yaml",
     "docker/Dockerfile.runtime",
     "docker/entrypoint-runtime.sh",
     "docker/catalog/**",
@@ -448,6 +455,20 @@ def _runtime_merge_waiting(state_dir: Path) -> datetime | None:
     )
 
 
+def window_deferral(agent: object, requested_by: str) -> tuple[datetime, str] | None:
+    """When and why the recreate window holds ``requested_by``, ``None`` when it admits (OMN-25912)."""
+    if window_admits(agent, requested_by):
+        return None
+    decision = getattr(agent.__dict__.get("_recreate_gate"), "last_decision", None)
+    if decision is None:
+        return datetime.now(UTC) + timedelta(
+            seconds=60
+        ), "the window gate holds no decision"
+    return decision.next_recreate_at, (
+        f"{decision.reason.value}, next recreate at {decision.next_recreate_at.isoformat()}"
+    )
+
+
 def window_admits(agent: object, requested_by: str) -> bool:
     """Whether the dev recreate window admits ``requested_by`` now (OMN-25912).
 
@@ -487,6 +508,77 @@ def window_admits(agent: object, requested_by: str) -> bool:
             merged.isoformat(),
         )
     return admitted
+
+
+_DEV_TAG_REF = re.compile(r"(?:refs/tags/)?dev-[0-9]{14}-[0-9a-f]{7,40}")
+
+
+def is_lane_build(cmd: object) -> bool:
+    """A dev build a lane asked for under a rollback declaration (OMN-25912).
+
+    The declaration is how a lane gets past the lineage fence, so a lane's build of its
+    branch carries one. A real rollback goes to a pinned good build, a dev tag or an
+    image, and only the first kind recreates the runtime on a lane's own say-so.
+    """
+    return bool(
+        str(getattr(getattr(cmd, "runtime_lane", None), "value", "")) == "dev"
+        and getattr(cmd, "rollback", None) is not None
+        and not getattr(cmd, "image_ref", None)
+        and not getattr(cmd, "image_digest", None)
+        and not _DEV_TAG_REF.fullmatch(str(getattr(cmd, "git_ref", "")))
+    )
+
+
+def lane_build_gate(agent: object) -> LaneBuildWindowGate:
+    """The consumer's gate for ``agent``: its load gate, if any, with the window folded in."""
+    return LaneBuildWindowGate(agent, getattr(agent, "_load_gate", None))
+
+
+class LaneBuildWindowGate:
+    """The consumer's load gate with the dev recreate window folded in (OMN-25912).
+
+    The consumer defers a command while ``check`` reads DEFER and resumes its partition
+    once a ``check`` with no command reads OPEN. This gate answers the host's own load
+    gate first, then asks the window for a lane's build request, which recreates the
+    runtime as the idle paths do. A real rollback never asks. A held request is named,
+    with the time of the next window, until that time passes.
+    """
+
+    def __init__(self, agent: object, inner: object | None) -> None:
+        self._agent = agent
+        self._inner = inner
+        self._until: datetime | None = None
+        self.is_lane_build = is_lane_build
+
+    def recheck_due(self) -> bool:
+        return (
+            True
+            if self._inner is None
+            else bool(operator.attrgetter("recheck_due")(self._inner)())
+        )
+
+    def check(self, cmd: object | None = None) -> object:
+        verdicts = importlib.import_module("deploy_agent.load_gate").EnumLoadGateVerdict
+        decision = (
+            operator.attrgetter("check")(self._inner)()
+            if self._inner is not None
+            else None
+        )
+        if getattr(decision, "verdict", None) is verdicts.DEFER:
+            return decision
+        held: tuple[datetime, str] | None = None
+        if cmd is None:
+            if self._until is not None and datetime.now(UTC) < self._until:
+                held = (self._until, "the recreate window has not opened")
+        elif is_lane_build(cmd):
+            held = window_deferral(self._agent, str(getattr(cmd, "requested_by", "")))
+        self._until = held[0] if held else None
+        if held is None:
+            return decision or SimpleNamespace(
+                verdict=verdicts.OPEN, describe=lambda: "open"
+            )
+        text = f"deferred to the recreate window at {held[0].isoformat()}: {held[1]}"
+        return SimpleNamespace(verdict=verdicts.DEFER, describe=lambda: text)
 
 
 def announce_preflight_failure(
@@ -531,6 +623,9 @@ _OBSERVER_MODULES = (
     "models/model_dev_recreate_audit_request.py",
     "protocols/protocol_dev_roll_events.py",
     "handlers/dev_container_recreate/handler_dev_container_recreate.py",
+    "models/model_dev_build_health.py",
+    "models/model_dev_build_health_request.py",
+    "handlers/dev_build_health/handler_dev_build_health.py",
 )
 _WINDOW_MODULES = (
     "enums/enum_dev_recreate_verdict.py",
@@ -576,6 +671,100 @@ def _setting_str(settings: Mapping[str, JsonValue], name: str) -> str:
     if not isinstance(value, str) or not value:
         raise RuntimeError(f"the dev roll events contract declares no {name}")
     return value
+
+
+#: The image label that names the omnibase_infra commit an image was built from.
+_REVISION_LABEL = "org.opencontainers.image.revision"
+
+
+def _image_revision(
+    image: str, run: Callable[..., subprocess.CompletedProcess[str]]
+) -> str:
+    """The image's revision label, or empty when docker cannot say (OMN-26703)."""
+    try:
+        answer = run(
+            [
+                "docker",
+                "image",
+                "inspect",
+                "--format",
+                '{{index .Config.Labels "' + _REVISION_LABEL + '"}}',
+                image,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return ""
+    text = str(answer.stdout).strip()
+    return (
+        text if answer.returncode == 0 and re.fullmatch(r"[0-9a-f]{7,40}", text) else ""
+    )
+
+
+def _health_reading(state: Mapping[str, object]) -> dict[str, object]:
+    """Docker's health status and the end of the first passing check in its log (OMN-26703)."""
+    health = state.get("Health")
+    if not isinstance(health, dict):
+        return {}
+    sentinel = datetime(1, 1, 1, tzinfo=UTC)
+    first: datetime | None = None
+    for entry in health.get("Log") or []:
+        if isinstance(entry, dict) and entry.get("ExitCode") == 0:
+            stamp = docker_started_at(entry.get("End"), fallback=sentinel)
+            if stamp.year >= _DOCKER_NEVER_STARTED_YEAR:
+                first = stamp
+                break
+    return {"health_status": str(health.get("Status", "")), "first_healthy_at": first}
+
+
+def revision_order(
+    repo_root: Path,
+    previous: str,
+    current: str,
+    timeout: float,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> str:
+    """How ``current`` stands against ``previous`` in the checkout's history (OMN-26703).
+
+    ``first`` with no previous revision, ``same``, ``forward`` (previous is an ancestor),
+    ``back`` (current is an ancestor of previous), ``unrelated`` (neither) and ``unread``
+    when a revision is unknown to the checkout or git fails: never a guess.
+    """
+    if not previous:
+        return "first"
+    if not current:
+        return "unread"
+    if previous == current:
+        return "same"
+
+    def ancestor(older: str, newer: str) -> bool | None:
+        try:
+            answer = run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_root),
+                    "merge-base",
+                    "--is-ancestor",
+                    older,
+                    newer,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return {0: True, 1: False}.get(answer.returncode)
+
+    forward = ancestor(previous, current)
+    back = ancestor(current, previous)
+    if forward is None or back is None:
+        return "unread"
+    return "forward" if forward else "back" if back else "unrelated"
 
 
 def read_container(
@@ -632,6 +821,8 @@ def read_container(
             exit_code=exit_code if isinstance(exit_code, int) else None,
             image_digest=str(raw.get("Image", "")),
             image_ref=str(raw.get("Config", {}).get("Image", "")),
+            image_revision=_image_revision(str(raw.get("Image", "")), run),
+            **_health_reading(state),
         )
     except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError):
         logger.exception(
@@ -695,17 +886,67 @@ class NewViolationsOnly:
         self.settled: set[str] = set()
         self.refused = 0
 
-    def recreate_violation(self, violation: BaseModel) -> bool:
+    def publish_observed(self, kind: str, violation: BaseModel) -> bool:
         event_id = str(violation.model_dump(mode="json")["event_id"])
         if event_id in self._seen:
             self.settled.add(event_id)
             return True
-        accepted = bool(self._publisher.recreate_violation(violation))
+        accepted = bool(self._publisher.publish_observed(kind, violation))
         if accepted:
             self.settled.add(event_id)
         else:
             self.refused += 1
         return accepted
+
+
+_BUILD_HEALTH = "handlers/dev_build_health/handler_dev_build_health.py"
+
+
+def _publish_build_health(
+    reading: ModelDevContainerReading,
+    state: dict[str, object],
+    publisher: ProtocolDevRollEvents,
+    settings: Mapping[str, JsonValue],
+    order_of: Callable[[str, str], str],
+) -> None:
+    """Publish the container start's health clock and revision order once its health settles (OMN-26703).
+
+    The judged start, the revision it ran and the start of the no-rollback clock are kept in
+    ``state["build_health"]``; a start the bus did not accept is not marked, so it is retried.
+    ``order_of(previous, current)`` reads how the two revisions stand in the checkout's history.
+    """
+    recorded = state.get("build_health")
+    judged = recorded if isinstance(recorded, dict) else {}
+    key = f"{reading.container_digest}:{reading.started_at.isoformat()}"
+    if judged.get("judged") == key:
+        return
+    previous_revision = str(judged.get("image_revision", ""))
+    since = judged.get("no_rollback_since")
+    request_module = _module("models/model_dev_build_health_request.py")
+    health_handler = _module(_BUILD_HEALTH).HandlerDevBuildHealth()
+    event = health_handler.handle(
+        request_module.ModelDevBuildHealthRequest(
+            reading=reading,
+            previous_image_revision=previous_revision,
+            revision_order=order_of(previous_revision, reading.image_revision),
+            previous_no_rollback_since=datetime.fromisoformat(since) if since else None,
+            limit_seconds=_setting_int(settings, "build_health_limit_seconds"),
+        )
+    )
+    if event is None:
+        return
+    if not publisher.publish_observed("dev_build_health", event):
+        logger.error(
+            "dev build health %s was not accepted by the bus %s",
+            event.event_id,
+            events.FRICTION,
+        )
+        return
+    state["build_health"] = {
+        "judged": key,
+        "image_revision": reading.image_revision or previous_revision,
+        "no_rollback_since": event.no_rollback_since.isoformat(),
+    }
 
 
 def observe_dev_container(
@@ -782,7 +1023,9 @@ def observe_dev_container(
         )
         # A start the bus did not accept is retried: the reading that would hide it is
         # not saved until the event is out.
-        if result.event is None or publisher.container_recreated(result.event):
+        if result.event is None or publisher.publish_observed(
+            "dev_container_recreated", result.event
+        ):
             state["reading"] = reading.model_dump(mode="json")
         else:
             logger.error(
@@ -790,6 +1033,18 @@ def observe_dev_container(
                 result.event.event_id,
                 events.FRICTION,
             )
+
+    if reading is not None:
+        git_timeout = float(_setting_int(settings, "build_health_git_timeout_seconds"))
+        _publish_build_health(
+            reading,
+            state,
+            publisher,
+            settings,
+            lambda previous, current: revision_order(
+                repo_root, previous, current, git_timeout, run
+            ),
+        )
 
     journal_size = _journal_size(journal_dir)
     audited: object | None = None

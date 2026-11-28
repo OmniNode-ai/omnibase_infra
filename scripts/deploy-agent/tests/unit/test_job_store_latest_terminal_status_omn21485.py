@@ -85,6 +85,7 @@ class TestLatestTerminalStatus:
             _command(DEV),
             superseded_by_sha="a" * 40,
             superseded_by_correlation_id=uuid4(),
+            reason="superseded in a test",
         )
         active = uuid4()
         store.accept(active, _command(DEV))

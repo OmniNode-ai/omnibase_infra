@@ -260,10 +260,18 @@ def run_preflight(
     naming the issuer and the failed phase (OMN-24048). Evidence only: announcing never
     raises and never replaces the preflight's own error.
     """
+    execution = sys.modules["deploy_agent.executor"]
+    # OMN-24562: a stability build declares only its live pin's own open PR; the
+    # pin is read from the agent's STATE_DIR, where the stability follow reads it.
+    lane = getattr(command, "runtime_lane", None)
+    execution.load_dev_boot_guard("handler_dev_lane_code_ref_pin").admit_open_pr(
+        lane is execution.EnumRuntimeLane.STABILITY_TEST,
+        str(getattr(command, "open_pr", "") or ""),
+        Path(sys.modules["deploy_agent.agent"].STATE_DIR),
+    )
     try:
         executor.preflight(on_phase_update=on_phase_update)
     except Exception as error:
-        execution = sys.modules["deploy_agent.executor"]
         _roll_events_module(execution).announce_preflight_failure(
             execution,
             command.model_dump(mode="json"),
@@ -305,16 +313,24 @@ _LEDGER_CLIENT_UNINHERITED_ENV: Final = frozenset(
 )
 
 
-def _without_agent_broker_declaration(command: list[str]) -> list[str]:
-    """``command`` run under ``env -u`` for the agent's own broker declarations.
+# omnibase_core 0.47.77 and later list the internal command groups, ``ledger`` among
+# them, only when this variable is truthy; the post-roll proof calls ``onex ledger`` and
+# exited 2 ("No such command 'ledger'") on a healthy new runtime (dev job d7149818,
+# 2026-11-25T23:27Z, OMN-26316). It is set by ``env`` for that one call, never the process.
+_OPERATOR_COMMANDS_SWITCH: Final = "ONEX_CLI_SHOW_ALL_COMMANDS=1"
 
-    The unset is done by ``env`` in the child, so this handler never reads the process
+
+def _without_agent_broker_declaration(command: list[str]) -> list[str]:
+    """``command`` run under ``env`` for the ledger call: the agent's own broker
+    declarations unset and the operator command switch set.
+
+    Both are done by ``env`` in the child, so this handler never reads the process
     environment (handlers take no direct environment access).
     """
     unset = [
         arg for name in sorted(_LEDGER_CLIENT_UNINHERITED_ENV) for arg in ("-u", name)
     ]
-    return ["env", *unset, *command]
+    return ["env", *unset, _OPERATOR_COMMANDS_SWITCH, *command]
 
 
 def _prove_work_ledger_answers(execution: ModuleType) -> None:

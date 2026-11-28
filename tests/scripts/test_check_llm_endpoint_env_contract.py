@@ -54,6 +54,9 @@ _CONTRACT = _REPO_ROOT / "contracts" / "llm_endpoints.yaml"
 # Synthetic documentation address (TEST-NET-1 range): never a real lab host.
 _SYNTHETIC_EMBEDDING_URL = "http://192.0.2.10:8100"
 _REMOVED_EMBEDDING_URL = "http://192.0.2.10:8002"
+# the coder slot is also overlay-addressed (OMN-26709), so every overlay names it
+_CODER_SLOT_ID = "coder-5090"
+_SYNTHETIC_CODER_URL = "http://192.0.2.10:8000"
 
 
 def _load_module() -> Any:
@@ -69,7 +72,15 @@ def _write_overlay(root: Path, endpoint_urls: dict[str, str]) -> Path:
     path = root / "llm_endpoints" / "overlay.yaml"
     path.parent.mkdir(parents=True)
     path.write_text(
-        yaml.safe_dump({"schema_version": 1, "endpoint_urls": endpoint_urls}),
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "endpoint_urls": {
+                    _CODER_SLOT_ID: _SYNTHETIC_CODER_URL,
+                    **endpoint_urls,
+                },
+            }
+        ),
         encoding="utf-8",
     )
     return root
@@ -105,7 +116,7 @@ def test_rejects_disabled_embedding_endpoint(tmp_path: Path) -> None:
     env_file.write_text(
         "\n".join(
             [
-                "LLM_CODER_URL=http://192.168.86.201:8000",
+                "LLM_CODER_URL=http://192.0.2.10:8000",
                 "LLM_EMBEDDING_URL=http://192.168.86.200:8100",
             ]
         )
@@ -118,7 +129,9 @@ def test_rejects_disabled_embedding_endpoint(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "LLM_EMBEDDING_URL=http://192.168.86.200:8100" in result.stderr
-    assert "status='disabled'" in result.stderr
+    # the disabled slot no longer carries an address (OMN-26709), so the retired
+    # value is refused as not matching the canonical running slot
+    assert "does not match canonical running slot 'embeddings-201'" in result.stderr
 
 
 @pytest.mark.unit
@@ -127,7 +140,7 @@ def test_accepts_running_embedding_endpoint(tmp_path: Path) -> None:
     env_file.write_text(
         "\n".join(
             [
-                "LLM_CODER_URL=http://192.168.86.201:8000",
+                "LLM_CODER_URL=http://192.0.2.10:8000",
                 f"LLM_EMBEDDING_URL={_SYNTHETIC_EMBEDDING_URL}",
             ]
         )
@@ -161,7 +174,7 @@ def test_accepts_host_shaped_env_with_released_variable_set(tmp_path: Path) -> N
     env_file.write_text(
         "\n".join(
             [
-                "LLM_CODER_URL=http://192.168.86.201:8000",
+                "LLM_CODER_URL=http://192.0.2.10:8000",
                 f"LLM_EMBEDDING_URL={_SYNTHETIC_EMBEDDING_URL}",
                 "LLM_DEEPSEEK_R1_URL=http://llm.test:8000",
                 # Released by OMN-16442 (slot coder-fast-4090, hardware removed);

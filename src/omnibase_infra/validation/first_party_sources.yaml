@@ -31,8 +31,10 @@
 #
 # open_pr_context (OMN-21928): the context of a deploy-agent build of a DECLARED
 # OPEN PULL REQUEST's branch. Only a lane named in open_pr_lanes may build in it;
-# every other lane (stability, judge, collaborator, prod) builds in
-# default_context and so keeps refusing a branch build. The context sets
+# every other lane (judge, collaborator, prod) builds in
+# default_context and so keeps refusing a branch build. The stability lane builds a
+# declared open pull request only for a stability follow of a live code-ref pin
+# (OMN-24562), whose branch image carries non-main lineage. The context sets
 # requires_declared_pr, so the target is accepted only when the signed command's
 # declaration (repository, pull request number, head sha) names the target
 # repository and the exact commit that was staged; the declaration is recorded in
@@ -47,6 +49,10 @@ policy: dev-merge-tag
 # (.github/workflows/dev-merge-tag.yml in each repository) write and
 # scripts/runtime_build/deploy_source_ref.py reads.
 tag_pattern: '^dev-(?P<stamp>\d{14})-(?P<sha12>[0-9a-f]{12})$'
+# OMN-26715 (RULING 2026-11-18T15:28:49Z, separation plan S10): the name a
+# node-made lab deploy tag carries. It is admitted only in a build context that
+# sets accepts_deploy_tag, and its twelve hex digits must be the staged commit.
+deploy_tag_pattern: '^deploy-(?P<stamp>\d{14})-(?P<sha12>[0-9a-f]{12})$'
 packages:
   - distribution: omnibase-core
     repo: omnibase_core
@@ -66,7 +72,7 @@ packages:
 default_context: dev-lane
 pre_pr_slot_context: pre-pr-slot
 open_pr_context: dev-lane-open-pr
-open_pr_lanes: [dev]
+open_pr_lanes: [dev, stability_test]
 build_contexts:
   - name: dev-lane
     target_accepts: []
@@ -75,3 +81,10 @@ build_contexts:
   - name: dev-lane-open-pr
     target_accepts: [branch, sha]
     requires_declared_pr: true
+  # OMN-26715: the stability lane is the integration test runtime (RULING
+  # 2026-11-26T21:08:59Z). The refresh node cuts deploy-* tags on the heads of
+  # integration/launch-<date> and builds from them; every package, the target
+  # included, is admitted at such a tag here and nowhere else.
+  - name: stability-integration
+    target_accepts: []
+    accepts_deploy_tag: true

@@ -32,4 +32,6 @@ repo_slice:
   # OMN-26105 adds the runner-pool-retire command and completed terminal topics (2 more specs).
   # OMN-26249 adds the runtime-loop-reading-recorded event topic (1 more spec).
   # OMN-21592 adds the node-start-requested command and node-start-answered event topics (2 more specs).
-  max_specs: 228
+  # OMN-26316 adds the dev-merge-build-overdue event topic (1 more spec).
+  # OMN-26724 adds the build-repository-ref-check command and checked terminal topics (2 more specs).
+  max_specs: 231

@@ -548,6 +548,21 @@ models:
       min_samples: 20
       query: llm_call_metrics usage_source=API created_at>=now-7d
       authoritative: false
+  Inkling-2-Mini:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: '2026-11-25'
+    note: 'OMN-25856: Inkling-2-Mini served from an owned lab GPU - zero marginal API cost'
+    confidence: LOW_CONFIDENCE
+    source: LOCAL_ZERO_API_COST_POLICY
+    sample_count: 0
+    evidence:
+      generated_at: '2026-11-25T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
   gpt-6-astra:
     input_cost_per_1k: 0.01
     output_cost_per_1k: 0.05

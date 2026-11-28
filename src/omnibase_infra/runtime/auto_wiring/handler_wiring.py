@@ -120,6 +120,7 @@ from omnibase_infra.event_bus.model_topic_set_readiness import (
 from omnibase_infra.event_bus.topic_constants import (
     derive_event_type_alias_for_topic,
 )
+from omnibase_infra.handlers.boot_demand_split import split_boot_set_by_demand
 from omnibase_infra.handlers.boot_topic_provisioning import (
     ensure_topics_exist,
     provision_unattached_publish_topics,
@@ -146,6 +147,12 @@ from omnibase_infra.handlers.topic_migration_dependencies import (
     TOPIC_MIGRATION_EXECUTOR_DEPS,
     required_handler_init_params,
     warm_topic_migration_scan,
+)
+from omnibase_infra.models.dispatch.model_dispatch_refusal import (
+    bind_contract_failure_terminal,
+)
+from omnibase_infra.models.dispatch.model_dispatch_refusal import (
+    select_dispatch_result_output_topic as _select_dispatch_result_output_topic,
 )
 from omnibase_infra.models.dispatch.model_injected_request import ModelInjectedRequest
 from omnibase_infra.models.model_contract_hotload_lane_overlay import (
@@ -386,10 +393,13 @@ class HandlerDispatchFailureError(Exception):
         *,
         failure_code: str | None = None,
         retryable: bool | None = None,
+        terminal_emitted: bool = False,
     ) -> None:
         super().__init__(message)
         self.failure_code = failure_code
         self.retryable = retryable
+        # OMN-26026: the engine's result already carried the failure terminal.
+        self.terminal_emitted = terminal_emitted
 
 
 class UndeliverableDispatchOutputError(Exception):
@@ -6866,6 +6876,7 @@ def _raise_if_no_dispatcher_drop(result: object, topic: str) -> None:
         detail,
         failure_code=error_code.value if error_code is not None else None,
         retryable=False,
+        terminal_emitted=bool(result.output_events),
     )
 
 
@@ -7695,6 +7706,9 @@ def _make_event_bus_callback(
         from omnibase_infra.runtime.boundary_failure_terminal import (
             classify_boundary_failure,
         )
+
+        if getattr(exc, "terminal_emitted", False):
+            return
 
         if _is_boundary_failure_terminal_record(message):
             # A terminal is an answer, not a request: nobody is holding a
@@ -10255,8 +10269,16 @@ async def subscribe_wired_contract_topics(
     core_runtime_owners: Mapping[str, str] | None = None,
     demand_source: HandlerKafkaTopicDemandSource | None = None,
     demand_watch_stops_out: list[Callable[[], Awaitable[None]]] | None = None,
+    defer_retained: bool = False,
 ) -> dict[str, tuple[str, ...]]:
     """Subscribe Kafka topics for contracts that already wired successfully.
+
+    OMN-25856 — with *defer_retained* (policy ``gate_required``) a
+    contract that subscribes no command topic stays off the boot path even when
+    its topics hold a retained record; the demand watch reads those topics from
+    their high watermark and starts the contract, from ``earliest``, when the next
+    record arrives. Priority contracts, command contracts in use and contracts
+    with a topic that cannot be read still attach at boot.
 
     OMN-18087 — when *demand_source* is supplied, only contracts with a
     subscribe topic in use (holding a retained record at boot, as the broker
@@ -10462,13 +10484,15 @@ async def subscribe_wired_contract_topics(
     # topics to its first request; any other lane creates them at boot (OMN-23951).
     scheduled = {c.name for _, c in eligible if lane_defers_topics_to_first_request()}
     if demand_source is not None:
-        eligible = await _split_boot_set_by_demand(
+        eligible = await split_boot_set_by_demand(
             eligible,
             priority_contracts=knobs.priority_contracts,
-            demand_source=demand_source,
+            watch_idle_topics=demand_source.watch_idle_topics,
             start=partial(_provision_ready_attach, auto_offset_reset="earliest"),
             exclude=_exclude,
             watch_stops_out=demand_watch_stops_out,
+            defer_retained=defer_retained,
+            retry_backoff_seconds=DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS,
         )
 
     attach_results = await asyncio.gather(
@@ -10493,113 +10517,6 @@ async def subscribe_wired_contract_topics(
         if ar.status is EnumContractAttachStatus.ATTACHED:
             subscribed[ar.contract_name] = ar.topics_subscribed
     return subscribed
-
-
-async def _split_boot_set_by_demand(
-    eligible: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]],
-    *,
-    demand_source: HandlerKafkaTopicDemandSource,
-    start: Callable[
-        [ModelContractWiringResult, ModelDiscoveredContract],
-        Awaitable[ModelContractAttachResult],
-    ],
-    exclude: Callable[[str, EnumContractAttachExclusionReason, str], None],
-    watch_stops_out: list[Callable[[], Awaitable[None]]] | None,
-    priority_contracts: Sequence[str] = (),
-) -> list[tuple[ModelContractWiringResult, ModelDiscoveredContract]]:
-    """Boot priority contracts and contracts whose topics hold retained records.
-
-    The rest are watched by one group-less reader, which costs
-    no group join, and each is attached by *start* when a record first reaches
-    one of its topics. Each start runs as its own task, so a slow join never
-    holds up the watch, and a start that does not attach is retried with the
-    unattached-contract reconciliation's bounded backoff.
-    """
-    # Clients can require a live first hop before publishing. Priority consumers
-    # therefore take the normal provision->ready->attach path without waiting
-    # for demand, and only nonpriority contracts need a first-record watch.
-    topics_of = {
-        contract.name: tuple(contract.event_bus.subscribe_topics)
-        if contract.event_bus is not None
-        else ()
-        for _, contract in eligible
-        if contract.name not in priority_contracts
-    }
-    all_topics = {topic for topics in topics_of.values() for topic in topics}
-    deferred_by_topic: dict[
-        str, list[tuple[ModelContractWiringResult, ModelDiscoveredContract]]
-    ] = {}
-    started: set[str] = set()
-    start_tasks: set[asyncio.Task[None]] = set()
-
-    async def start_until_attached(
-        topic: str,
-        result: ModelContractWiringResult,
-        contract: ModelDiscoveredContract,
-    ) -> None:
-        for attempt in range(1, TIMEOUTS.not_ready_retry_max_attempts + 1):
-            outcome = await start(result, contract)
-            if outcome.status is EnumContractAttachStatus.ATTACHED:
-                logger.info(
-                    "Demand start: contract '%s' attached on its first request "
-                    "(topic=%s, topics=%s, attempt=%d) (OMN-18087)",
-                    contract.name,
-                    topic,
-                    list(outcome.topics_subscribed),
-                    attempt,
-                )
-                return
-            logger.warning(
-                "Demand start: contract '%s' did not attach on its first request "
-                "(topic=%s, status=%s, detail=%s, attempt=%d of %d) (OMN-18087)",
-                contract.name,
-                topic,
-                outcome.status.value,
-                outcome.detail,
-                attempt,
-                TIMEOUTS.not_ready_retry_max_attempts,
-            )
-            await asyncio.sleep(DEFAULT_NOT_READY_RETRY_BACKOFF_SECONDS)
-
-    async def on_first_record(topic: str) -> None:
-        for result, contract in deferred_by_topic.get(topic, ()):
-            if contract.name in started:
-                continue
-            started.add(contract.name)
-            task = asyncio.create_task(
-                start_until_attached(topic, result, contract),
-                name=f"demand-start-{contract.name}",
-            )
-            start_tasks.add(task)
-            task.add_done_callback(start_tasks.discard)
-
-    in_use, stop = await demand_source.watch_idle_topics(all_topics, on_first_record)
-    if watch_stops_out is not None:
-        watch_stops_out.append(stop)
-    boot: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]] = []
-    for result, contract in eligible:
-        topics = topics_of.get(contract.name, ())
-        if contract.name in priority_contracts or in_use.intersection(topics):
-            boot.append((result, contract))
-            continue
-        for topic in topics:
-            deferred_by_topic.setdefault(topic, []).append((result, contract))
-        exclude(
-            contract.name,
-            EnumContractAttachExclusionReason.DEMAND_DEFERRED,
-            f"idle_topics={list(topics)}",
-        )
-    logger.info(
-        "Boot subscription split: %d priority or in-use contract(s) attach at boot, %d "
-        "start on their first request; %d of %d topic(s) are in use (hold a "
-        "record, or cannot be read here); watched_topics=%s (OMN-18087)",
-        len(boot),
-        len(eligible) - len(boot),
-        len(in_use),
-        len(all_topics),
-        sorted(deferred_by_topic),
-    )
-    return boot
 
 
 async def _interleave_contract(
@@ -11256,6 +11173,14 @@ async def _commit_contract_wiring(
             )
         )
 
+    bind_contract_failure_terminal(
+        dispatch_engine,
+        contract,
+        _declared_failure_terminal_topics(
+            contract, success_topic=_select_dispatch_result_output_topic(contract) or ""
+        ),
+    )
+
     # Fail-closed phantom-wiring guard (OMN-14141). A contract that declares
     # subscribe topics but registered ZERO dispatchers — and quarantined /
     # resolver-skipped NOTHING — is a silent phantom-wire: the topic would be
@@ -11764,17 +11689,9 @@ def _declared_failure_terminal_topics(
 ) -> tuple[str, ...]:
     """Return the contract's declared FAILURE terminal topics (OMN-15468 AC2).
 
-    A failure terminal is any contract-declared terminal topic that is (a) not
-    the success terminal the applier falls back to and (b) actually publishable
-    by this contract. Both conditions matter: publishing to an undeclared topic
-    would violate the contract's own publish allowlist, and re-routing to the
-    success terminal would be a no-op.
-
-    Read through :func:`load_terminal_event_topics` — the SAME reader the
-    Pattern B broker's subscription set is built from — so the applier's idea of
-    which topics are terminal cannot drift from the broker's. A second
-    hand-rolled reader here is exactly the seam mismatch that produced this
-    ticket.
+    Read through :func:`load_terminal_event_topics`, the SAME reader the Pattern B
+    broker's subscription set is built from, so the applier's idea of which
+    topics are terminal cannot drift from the broker's.
     """
     if contract.event_bus is None or not contract.event_bus.publish_topics:
         return ()
@@ -11783,24 +11700,6 @@ def _declared_failure_terminal_topics(
         success_topic=success_topic,
         publishable_topics=contract.event_bus.publish_topics,
     )
-
-
-def _select_dispatch_result_output_topic(
-    contract: ModelDiscoveredContract,
-) -> str | None:
-    """Choose the fallback output topic for generic dispatch results.
-
-    Prefer the contract's declared terminal_event when it is also publishable.
-    Otherwise fall back to the first publish topic to preserve older contracts.
-    """
-    if contract.event_bus is None or not contract.event_bus.publish_topics:
-        return None
-    if (
-        contract.terminal_event
-        and contract.terminal_event in contract.event_bus.publish_topics
-    ):
-        return contract.terminal_event
-    return contract.event_bus.publish_topics[0]
 
 
 async def _wire_single_contract(

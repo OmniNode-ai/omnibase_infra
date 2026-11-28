@@ -130,7 +130,7 @@ def test_recreate_announce_topic_is_declared_in_the_node_contract() -> None:
         reason=EnumDevRecreateReason.WINDOW_OPEN,
         immediate=True,
     )
-    assert publisher.recreate_announced(announcement) is True
+    assert publisher.publish_observed("dev_recreate_announced", announcement) is True
     assert sent[0][0] == topic
     assert sent[0][2]["next_recreate_at"] and sent[0][2]["reason"] == "window_open"
     operations = [h["operation"] for h in contract["handler_routing"]["handlers"]]

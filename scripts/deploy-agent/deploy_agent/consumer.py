@@ -55,10 +55,12 @@ import json
 import logging
 import os
 import re
+import runpy
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -94,6 +96,7 @@ from deploy_agent.lane_policy import (
     assert_lane_allowed,
 )
 from deploy_agent.lineage_fence import (
+    GitRefResolver,
     ModelRunningBuild,
     RefResolver,
     RunningBuildReader,
@@ -136,6 +139,15 @@ def _broker_timestamp(msg: Any) -> datetime | None:
 # expected not to return when it decides to update: it replaces the process
 # image, and the rewound offset is what makes the replacement process re-read
 # the command instead of skipping it.
+_ENTRY = "src/omnibase_infra/handlers/build_repository_ref/agent_entry.py"
+
+
+@cache
+def _build_ref_check(resolver: GitRefResolver) -> Any:
+    entry = runpy.run_path(str(Path(__file__).resolve().parents[3] / _ENTRY))
+    return entry["BuildRepositoryRefCheck"](resolver.repo_dir, resolver._run)
+
+
 SelfUpdateHook = Callable[[Callable[[], None]], None]
 
 # OMN-18143. Invoked once per command the coalescing scan folds into a newer
@@ -627,9 +639,7 @@ class DeployConsumer:
         try:
             assert_lane_allowed(cmd.runtime_lane, self.allowed_lanes)
         except LaneNotAllowedError as e:
-            logger.warning(
-                "Rejecting command %s: lane_not_allowed (%s)", cmd.correlation_id, e
-            )
+            logger.warning("Rejecting %s: lane_not_allowed (%s)", cmd.correlation_id, e)
             self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(EnumRejectionReason.LANE_NOT_ALLOWED, cmd=cmd)
 
@@ -643,12 +653,10 @@ class DeployConsumer:
             mine, decision = self.router.is_mine(cmd)
             if not mine:
                 logger.info(
-                    "Skipping command %s: routed to instance %s by the %s; this "
-                    "is instance %s. Nothing is published.",
+                    "Skipping %s: routed to %s by the %s",
                     cmd.correlation_id,
                     decision.instance,
                     decision.basis,
-                    self.router.instance.name,
                 )
                 self._commit_through(msg, replay_from=replay_from)
                 return None, None
@@ -664,10 +672,7 @@ class DeployConsumer:
         )
         if frozen is not None and not is_promotion(cmd.requested_by):
             logger.warning(
-                "Rejecting command %s from %s: %s",
-                cmd.correlation_id,
-                cmd.requested_by,
-                frozen,
+                "Rejecting %s from %s: %s", cmd.correlation_id, cmd.requested_by, frozen
             )
             self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(EnumRejectionReason.FROZEN, cmd=cmd)
@@ -689,37 +694,10 @@ class DeployConsumer:
             holder = self.host_slot.held_by_other(self.host_slot_owner)
             if holder is not None:
                 logger.info(
-                    "Rejecting command %s: busy, %s",
-                    cmd.correlation_id,
-                    holder.describe(),
+                    "Rejecting %s: busy, %s", cmd.correlation_id, holder.describe()
                 )
                 self._commit_through(msg, replay_from=replay_from)
                 return None, self._reject(EnumRejectionReason.BUSY, cmd=cmd)
-
-        # Step 5b: Load gate (OMN-19507). After routing, so a command for
-        # another instance is still skipped whatever this host's load, and
-        # after busy and the host slot, whose refusals stand as they were. A
-        # deferral is not a refusal: the record goes back onto the fetch path
-        # uncommitted and the partition is paused, so the next polls return
-        # nothing (the group keeps its membership) until a re-check opens the
-        # gate. Nothing is published, because nothing about the command is
-        # wrong; it is taken, or coalesced past, once the host has room.
-        if self.load_gate is not None:
-            gate = self.load_gate.check()
-            if gate.verdict is EnumLoadGateVerdict.DEFER:
-                topic_partition = TopicPartition(msg.topic, msg.partition)
-                self.consumer.seek(
-                    topic_partition,
-                    replay_from.offset if replay_from is not None else msg.offset,
-                )
-                self.consumer.pause(topic_partition)
-                self.load_gate_paused = topic_partition
-                logger.info(
-                    "Deferring command %s: load gate %s",
-                    cmd.correlation_id,
-                    gate.describe(),
-                )
-                return None, None
 
         # Step 6: Check dedup
         if self.job_store.is_duplicate(cmd.correlation_id):
@@ -743,27 +721,20 @@ class DeployConsumer:
         # builds only a ref its tracking branch already contains. A PR head is
         # refused with its own typed reason, offset committed, nothing run.
         if self._not_a_merged_ref(cmd):
-            logger.warning(
-                "Rejecting command %s: ref %s is not contained in %s, and lane %s "
-                "builds merged refs only",
-                cmd.correlation_id,
-                cmd.git_ref,
-                self.tracking_ref,
-                cmd.runtime_lane.value,
-            )
+            logger.warning("Rejecting %s: not a merged ref", cmd.correlation_id)
             self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(EnumRejectionReason.NOT_A_MERGED_REF, cmd=cmd)
 
         lineage = self._lineage_decision(cmd, msg)
         if lineage is not None and lineage.verdict.refuses:
             logger.warning(
-                "Rejecting command %s: %s", cmd.correlation_id, lineage.journal_line()
+                "Rejecting %s: %s", cmd.correlation_id, lineage.journal_line()
             )
             self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(EnumRejectionReason.DIVERGENT_REF, cmd=cmd)
         if lineage is not None and lineage.verdict.supersedes:
             logger.info(
-                "Superseding command %s: %s", cmd.correlation_id, lineage.journal_line()
+                "Superseding %s: %s", cmd.correlation_id, lineage.journal_line()
             )
             self.job_store.record_superseded_by_running_build(
                 cmd.correlation_id,
@@ -774,6 +745,35 @@ class DeployConsumer:
             return None, self._reject(
                 EnumRejectionReason.SUPERSEDED_BY_RUNNING_BUILD, cmd=cmd
             )
+        # Step 6a1: Load gate (OMN-19507), asked only of a command that would run.
+        # OMN-26703: the gate sat before dedup and the lineage fence, and the
+        # recreate window it folds in is SPENT by the first command it admits. On
+        # 2026-11-27 a duplicate and a contained (superseded) request took the
+        # 14:00Z and 15:00Z windows and were then rejected, so every real build
+        # behind them read window_spent and waited for the next hour. A command
+        # a fence refuses or supersedes never asks. After routing, so a command
+        # for another instance is still skipped whatever this host's load, and
+        # after busy and the host slot, whose refusals stand as they were. A
+        # deferral is not a refusal: the record goes back onto the fetch path
+        # uncommitted and the partition is paused, so the next polls return
+        # nothing (the group keeps its membership) until a re-check opens the
+        # gate. Nothing is published, because nothing about the command is
+        # wrong; it is taken, or coalesced past, once the host has room.
+        if self.load_gate is not None:
+            gate = self.load_gate.check(cmd)
+            if gate.verdict is EnumLoadGateVerdict.DEFER:
+                topic_partition = TopicPartition(msg.topic, msg.partition)
+                self.consumer.seek(
+                    topic_partition,
+                    replay_from.offset if replay_from is not None else msg.offset,
+                )
+                self.consumer.pause(topic_partition)
+                self.load_gate_paused = topic_partition
+                logger.info(
+                    "Deferring %s: load gate %s", cmd.correlation_id, gate.describe()
+                )
+                return None, None
+
         if lineage is not None and not lineage.verdict.permits_coalescing:
             lookahead = []
 
@@ -953,7 +953,14 @@ class DeployConsumer:
 
     # ── coalescing (OMN-18143) ───────────────────────────────────────────────
     def _not_a_merged_ref(self, cmd: ModelRebuildRequested) -> bool:
-        # Whether ``cmd`` is proven to name a ref its lane's branch lacks (OMN-26637).
+        # Proven to name a ref its lane's branch lacks (OMN-26637), or one the deploy
+        # clone lacks even after one fetch (OMN-26724, node_build_repository_ref_compute).
+        resolver = self.ref_resolver
+        if isinstance(resolver, GitRefResolver) and not (
+            cmd.image_ref or cmd.image_digest
+        ):
+            if _build_ref_check(resolver)(cmd.git_ref).refuses:
+                return True
         if self.ancestry_resolver is None:
             return False
         return decide_merged_ref(
@@ -1067,7 +1074,7 @@ class DeployConsumer:
                 command=self._command_payload(record_msg),
                 superseded_by_sha=supersession.superseded_by_sha,
                 superseded_by_correlation_id=supersession.superseded_by_correlation_id,
-                by_containment=supersession.by_containment,
+                reason=supersession.reason,
             )
             logger.info(
                 "coalesce: %s (ref=%s) superseded by %s (ref=%s)",
@@ -1351,7 +1358,12 @@ class DeployConsumer:
         ):
             position = self.consumer.position(tp)
             highwater = self.consumer.highwater(tp)
-            if position is None or highwater is None or position >= highwater:
+            # OMN-26106: an unknown high-water mark is not "caught up". The
+            # fetch that failed to decode is the first fetch after assignment,
+            # so no response had set a high-water mark yet; the failure itself
+            # proves a record sits at the position. Only a KNOWN mark at or
+            # behind the position means nothing is pending.
+            if position is None or (highwater is not None and position >= highwater):
                 continue
             self.consumer.seek(tp, position + 1)
             try:

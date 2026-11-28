@@ -134,9 +134,16 @@ def test_the_rule_is_declared_on_dev_effects_and_on_the_main_that_folds_it() -> 
     # Effects keeps its rule for the dev instances that still render a separate
     # effects role; main carries the same rule because the fold runs the effects
     # nodes there (OMN-22930). Nothing else declares one.
+    # OMN-26566: the one other profile that declares it (the stability lane's)
+    # carries the same rule on its main and effects.
+    other_profiles = {profile for profile, _ in declared} - {"dev"}
+    assert len(other_profiles) == 1
+    (other,) = other_profiles
     assert declared == {
         ("dev", "effects"): [_NAMESPACE],
         ("dev", "main"): [_NAMESPACE],
+        (other, "effects"): [_NAMESPACE],
+        (other, "main"): [_NAMESPACE],
     }
     # No profile-level rule anywhere: that would reach worker and
     # tenant-projection too, each of which would then demand an identity.
@@ -169,11 +176,18 @@ def test_the_rendered_store_config_is_the_house_config_plus_the_rule() -> None:
     assert not house.namespaces
     assert config_declares_infisical_source(store)
     assert not config_declares_infisical_source(house)
-    # Exactly two store variants exist: effects' own and the folded main's. No
-    # other lane or process gained one.
+    # Four store variants exist: dev effects, the folded dev main, and the
+    # stability lane's main and effects (OMN-26566). No other process gained one.
     assert sorted(
         key for key in env if "_STORE_SECRET_RESOLVER_CONFIG_JSON" in key
-    ) == sorted([_STORE_VAR, _MAIN_STORE_VAR])
+    ) == sorted(
+        [
+            _STORE_VAR,
+            _MAIN_STORE_VAR,
+            "STABILITY_TEST_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON",
+            "STABILITY_TEST_RUNTIME_MAIN_STORE_SECRET_RESOLVER_CONFIG_JSON",
+        ]
+    )
 
 
 def test_the_folded_main_store_config_is_its_house_config_plus_the_rule() -> None:

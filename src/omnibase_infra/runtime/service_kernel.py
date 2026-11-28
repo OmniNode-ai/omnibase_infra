@@ -4539,13 +4539,12 @@ async def bootstrap() -> int:
             )
 
             _demand_source: HandlerKafkaTopicDemandSource | None = None
-            if config.boot_subscriptions.policy == "in_use" and isinstance(
+            if config.boot_subscriptions.demand_start and isinstance(
                 event_bus, EventBusKafka
             ):
                 _demand_source = HandlerKafkaTopicDemandSource(container)
             logger.info(
-                "Boot subscription policy=%s demand_start=%s (OMN-18087, "
-                "correlation_id=%s)",
+                "Boot subscription policy=%s demand_start=%s (correlation_id=%s)",
                 config.boot_subscriptions.policy,
                 _demand_source is not None,
                 correlation_id,
@@ -4566,6 +4565,7 @@ async def bootstrap() -> int:
                 core_runtime_owners=core_runtime_owners,
                 demand_source=_demand_source,
                 demand_watch_stops_out=_demand_watch_stops,
+                defer_retained=config.boot_subscriptions.defer_retained,
             )
             plugin_unsubscribe_callbacks.extend(_demand_watch_stops)
             boot_readiness_checks.report_roster_partition(
