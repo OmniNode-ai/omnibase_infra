@@ -1,0 +1,1 @@
+Live-contact exception: the change replaces the variable-driven runs-on of 34 jobs that reach no lab service with the literal ubuntu-latest and touches no step, command, trigger or permission; their contact record is the first run of each on a hosted runner, and the pull_request jobs already run there for fork pull requests (OMN-22867).

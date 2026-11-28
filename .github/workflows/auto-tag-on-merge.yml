@@ -70,13 +70,7 @@ jobs:
     timeout-minutes: 15
     # A merged PR from a fork remains on GitHub-hosted compute. Releases from
     # this repository use the trusted CI selector.
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-      }}
+    runs-on: ubuntu-latest
     steps:
       # Condition 1. `persist-credentials: false` is load-bearing, not hygiene:
       # with the default `true`, checkout v7 leaves the workflow token in the

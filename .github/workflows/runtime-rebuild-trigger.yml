@@ -1491,13 +1491,7 @@ jobs:
       (needs.trigger-rebuild.outputs.published == 'true' ||
        (needs.verify-lane-converged.outputs.reemit_candidates != '' &&
         needs.verify-lane-converged.outputs.reemit_candidates != '[]'))
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
-      }}
+    runs-on: ubuntu-latest
     # A few API reads and at most one POST per subject.
     timeout-minutes: 10
     permissions:
