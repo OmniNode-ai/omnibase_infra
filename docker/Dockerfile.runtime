@@ -661,6 +661,8 @@ ENV PYTHONUNBUFFERED=1 \
     ONEX_CONTRACTS_DIR=/app/contracts \
     # Runtime contract directory for omnibase_core.get_runtime_contracts_dir()
     ONEX_RUNTIME_CONTRACTS_DIR=/app/contracts/runtime \
+    # OMN-25856: build-time sha256 manifest of the runtime contracts (outside the mounted /app/contracts)
+    ONEX_CONTRACTS_STAMP_PATH=/app/config/contracts_runtime.sha256 \
     # Logging configuration
     ONEX_LOG_LEVEL=INFO \
     # Event bus configuration
@@ -979,11 +981,25 @@ COPY --chown=omniinfra:omniinfra docker/catalog/ /app/docker/catalog/
 # and ProtocolEventBusPublisher wiring. Without them, no events are published.
 COPY --chown=omniinfra:omniinfra src/omnibase_infra/nodes/ /app/contracts/nodes/
 
+# OMN-25856: stamp a sha256 manifest of the checkout's runtime contracts this
+# image carries, taken BEFORE the packaged runtime_data replaces them: the dev
+# services bind-mount the host checkout's contracts/ over /app/contracts, so the
+# mount holds the checkout's files. The stamp sits outside /app/contracts;
+# entrypoint_preflight.check_contracts_match_image refuses a mounted contracts
+# tree that is not this revision's, before the kernel starts.
+RUN mkdir -p /app/config && cd /app/contracts/runtime \
+    && find . -type f | LC_ALL=C sort | xargs -r sha256sum > /app/config/contracts_runtime.sha256
+
 # OMN-6440: Copy omnibase_core runtime contract YAMLs from the installed package.
 # get_runtime_contracts_dir() resolves via ONEX_RUNTIME_CONTRACTS_DIR env var in Docker.
 COPY --from=builder --chown=omniinfra:omniinfra \
     /app/.venv/lib/python*/site-packages/omnibase_core/contracts/runtime_data/ \
     /app/contracts/runtime/
+
+# OMN-25856: a container with no contracts mount runs the files the overlay just
+# left, not the clone's: stamp that final tree too, so either is this revision's.
+RUN cd /app/contracts/runtime \
+    && find . -type f | LC_ALL=C sort | xargs -r sha256sum >> /app/config/contracts_runtime.sha256
 
 # OMN-15645 / OMN-21279: bake the delegation routing-tiers ladder into a stable,
 # non-version-embedded in-image path so DELEGATION_ROUTING_TIERS_PATH can be

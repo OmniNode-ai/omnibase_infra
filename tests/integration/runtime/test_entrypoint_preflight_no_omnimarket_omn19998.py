@@ -66,6 +66,14 @@ def test_preflight_boots_with_missing_tiers_pin_and_never_imports_omnimarket(
         }
     }
     env["DELEGATION_ROUTING_TIERS_PATH"] = str(missing_pin)
+    # The revision guard (OMN-25856) needs an image stamp; an empty runtime
+    # contracts dir with an empty manifest is a consistent revision.
+    runtime_contracts = tmp_path / "contracts" / "runtime"
+    runtime_contracts.mkdir(parents=True)
+    stamp = tmp_path / "contracts_runtime.sha256"
+    stamp.write_text("", encoding="utf-8")
+    env["ONEX_RUNTIME_CONTRACTS_DIR"] = str(runtime_contracts)
+    env["ONEX_CONTRACTS_STAMP_PATH"] = str(stamp)
 
     proc = subprocess.run(
         [

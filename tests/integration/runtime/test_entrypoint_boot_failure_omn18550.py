@@ -13,6 +13,7 @@ longer boots, and the durable ledger holding one event per failure.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -28,6 +29,20 @@ pytestmark = [pytest.mark.integration]
 _REPO_SRC = Path(__file__).resolve().parents[3] / "src"
 _BOUND = 3
 _RUN_TIMEOUT_SECONDS = 120.0
+_REPO_RUNTIME_CONTRACTS = Path(__file__).resolve().parents[3] / "contracts" / "runtime"
+
+
+def _stamp_repo_runtime_contracts(stamp: Path) -> None:
+    """Write the sha256sum manifest the image stamps at build (OMN-25856)."""
+    stamp.write_text(
+        "".join(
+            f"{hashlib.sha256(p.read_bytes()).hexdigest()}  "
+            f"{p.relative_to(_REPO_RUNTIME_CONTRACTS).as_posix()}\n"
+            for p in sorted(_REPO_RUNTIME_CONTRACTS.rglob("*"))
+            if p.is_file()
+        ),
+        encoding="utf-8",
+    )
 
 
 def _env(state_dir: Path, contracts_dir: Path) -> dict[str, str]:
@@ -41,6 +56,8 @@ def _env(state_dir: Path, contracts_dir: Path) -> dict[str, str]:
         "HOME": os.environ.get("HOME", str(state_dir)),
         "ONEX_STATE_DIR": str(state_dir),
         "ONEX_CONTRACTS_DIR": str(contracts_dir),
+        "ONEX_RUNTIME_CONTRACTS_DIR": str(_REPO_RUNTIME_CONTRACTS),
+        "ONEX_CONTRACTS_STAMP_PATH": str(state_dir / "contracts_runtime.sha256"),
         "ONEX_GROUP_ID": "omn18550-itest",
         "HOSTNAME": "omn18550-container",
         "RUNTIME_SOURCE_HASH": "omn18550-hash",
@@ -86,6 +103,10 @@ def test_a_malformed_contract_is_counted_then_the_entrypoint_stops_booting(
         'runtime: [unclosed\n  name: "deliberately malformed\n', encoding="utf-8"
     )
     state_dir = tmp_path / "state"
+    # The revision guard (OMN-25856) needs the image's stamp of the runtime
+    # contracts the kernel loads; the malformed contract stays the one under test.
+    state_dir.mkdir()
+    _stamp_repo_runtime_contracts(state_dir / "contracts_runtime.sha256")
     env = _env(state_dir, contracts_dir)
 
     for attempt in range(1, _BOUND):

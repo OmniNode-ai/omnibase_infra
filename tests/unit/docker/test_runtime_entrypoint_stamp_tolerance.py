@@ -51,6 +51,9 @@ def _stub_stamp(
         util_schema_fingerprint, "stamp_manifest_fingerprint", _fake, raising=True
     )
     # The retry loop must not sleep in a unit test.
+    monkeypatch.setattr(
+        entrypoint_preflight.guard, "refuse_mismatched_contracts", lambda _env: 0
+    )
     monkeypatch.setattr(entrypoint_preflight, "STAMP_RETRY_SLEEP_SECONDS", 0.0)
     monkeypatch.setattr(entrypoint_preflight.time, "sleep", lambda _s: None)
     return calls
