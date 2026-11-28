@@ -821,47 +821,6 @@ class OverdueContext(NamedTuple):
 
     jobs: tuple[object, ...]
     repositories: dict[str, str]
-    #: Each repository's recent first-parent merges, newest first, as (sha, ``RUNTIME`` or ``NON_RUNTIME``).
-    merges: dict[str, tuple[tuple[str, str], ...]] = {}
-
-
-def _newest_unbuilt_decision(
-    clone: Path | None,
-    contained: BaseModel,
-    merges: tuple[tuple[str, str], ...],
-    running: str,
-    timeout: float,
-) -> BaseModel | None:
-    """The request for the newest runtime merge the running build does not contain (OMN-25942).
-
-    The decision of a merge the running build already contains builds nothing: the agent
-    supersedes it as ``contained``. The one build the check owes is the newest runtime merge
-    that build lacks, so that merge is named in its place; ``None`` when there is none.
-    """
-    if clone is None:
-        return None
-    handler_mod = sys.modules["omnibase_infra.handlers.handler_dev_merge_build_overdue"]
-    decision_mod = sys.modules[
-        "omnibase_infra.models.model_overdue_dev_merge_build_decision"
-    ]
-    for sha, runtime_class in merges:
-        if runtime_class != "RUNTIME":
-            continue
-        if built_shas_carrying(str(clone), sha, {running}, timeout):
-            return None
-        decision: BaseModel = (
-            decision_mod.ModelOverdueDevMergeBuildDecision.model_validate(
-                {
-                    "outcome": "REQUEST",
-                    "reason": "overdue_no_build",
-                    "merge_sha": sha,
-                    "due_at": contained.model_dump(mode="json")["due_at"],
-                    "request_id": handler_mod.request_id_for(_OWN_REPOSITORY, sha),
-                }
-            )
-        )
-        return decision
-    return None
 
 
 def _request_overdue_builds(
@@ -952,40 +911,6 @@ def _request_overdue_builds(
     handler = handler_mod.HandlerDevMergeBuildPublish(container)
     store = Path(execution.STATE_DIR) / _REQUESTED_KEYS
     carried: dict[str, str] = {}
-    # OMN-25942: an own-repository merge the running build contains is never the one named; the
-    # newest runtime merge that build lacks is, so dev advances instead of ending each window
-    # superseded.
-    running = _running_built_sha(jobs)
-    own_merges = (context.merges if context else {}).get(_OWN_REPOSITORY, ())
-    if running and _OWN_REPOSITORY in heads:
-        own_clone = _repository_clone(execution, _OWN_REPOSITORY)
-        kept: list[BaseModel] = []
-        moved = False
-        for decision in overdue:
-            merge_sha = str(getattr(decision, "merge_sha", ""))
-            if repository_of.get(merge_sha, _OWN_REPOSITORY) == _OWN_REPOSITORY and (
-                built_shas_carrying(str(own_clone), merge_sha, {running}, timeout)
-            ):
-                logger.warning(
-                    "overdue dev merge build sha=%s is contained in the running build %s",
-                    merge_sha,
-                    running,
-                )
-                _mark(store, str(getattr(decision, "request_id", "")))
-                if not moved:
-                    moved = True
-                    newest = _newest_unbuilt_decision(
-                        own_clone, decision, own_merges, running, timeout
-                    )
-                    if newest is not None:
-                        repository_of = {
-                            **repository_of,
-                            str(getattr(newest, "merge_sha", "")): _OWN_REPOSITORY,
-                        }
-                        kept.append(newest)
-                continue
-            kept.append(decision)
-        overdue = kept
     for decision in overdue:
         request_id = str(getattr(decision, "request_id", ""))
         merge_sha = str(getattr(decision, "merge_sha", ""))
@@ -1063,7 +988,6 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
         lookback = _seconds(settings, "dev_merge_build_lookback_seconds")
         subjects: dict[str, str] = {}
         repositories: dict[str, str] = {}
-        merge_lists: dict[str, tuple[tuple[str, str], ...]] = {}
         composed = _composed_repositories(execution)
         unread = 0
         for repository in composed:
@@ -1076,7 +1000,6 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
                 unread += 1
                 continue
             clone = _repository_clone(execution, repository)
-            merge_lists[repository] = tuple((m[0], m[2]) for m in merges)
             for sha, merged_at, runtime_class, subject in merges:
                 subjects[sha] = subject
                 repositories[sha] = repository
@@ -1126,7 +1049,7 @@ def check_overdue_dev_merges(*, force: bool = False) -> tuple[BaseModel, ...] | 
                     settings,
                     overdue,
                     subjects,
-                    OverdueContext(jobs, repositories, merge_lists),
+                    OverdueContext(jobs, repositories),
                 )
             except Exception:  # the publish never costs the tick its decisions
                 logger.exception("overdue dev merge build request was not made")
