@@ -1,0 +1,53 @@
+schema_version: "1.0.0"
+ticket_id: OMN-26765
+title: "Dev-lane branch installer creates parent directories of new files under the package root"
+summary: "The dev-lane branch install made a destination directory only for an overlay root, so a file in a new directory under the installed package root failed docker cp. It now makes the parent directory of every file under a declared root, and nothing outside one."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26765-new-dirs
+    statement: A branch install creates the parent directory of a new file under a declared root and never one outside a declared root.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a regression test built from the omnimarket#6933 new node directory case fails on the old code and passes on the fix -- falsifier: pytest tests/unit/handlers/test_handler_dev_lane_branch_install_new_dir_omn26765.py -q"
+      - id: AC2
+        statement: "AC2: a file outside every declared root is still refused and no mkdir is issued outside a declared root -- falsifier: pytest tests/unit/handlers/test_handler_dev_lane_branch_install_new_dir_omn26765.py -q"
+      - id: AC3
+        statement: "AC3: integrated: on a throwaway dev-lane container a file in a new directory under the package root installs and reads back with its hash -- falsifier: docker exec into the running throwaway container and sha256sum the installed file, runtime readback matches the declared hash"
+evidence_requirements:
+  - kind: tests
+    description: The new-directory tests pass at the pushed head and the new-directory case fails at the base commit.
+    command: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_new_dir_omn26765.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26765-ac1
+    description: 'AC1: a file in a new node directory under the package root installs, with its parent directory made before the copy.'
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_new_dir_omn26765.py -q -k new_node_directory
+        cwd: .
+  - id: dod-omn26765-ac2
+    description: 'AC2: paths outside every declared root are refused at declaration, so no directory is made for them.'
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_new_dir_omn26765.py -q -k outside_every_declared_root
+        cwd: .
+  - id: dod-omn26765-ac3
+    description: 'hosted proxy for AC3: the existing install, apply and readback tests pass with the change; the throwaway-container reading is on the pull request Lab line.'
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py tests/unit/handlers/test_handler_dev_lane_branch_install_overlay_root_omn25536.py -q
+        cwd: .

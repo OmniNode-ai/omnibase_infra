@@ -144,6 +144,8 @@ class _Lane:
     def _exec(
         self, argv: list[str], command: list[str]
     ) -> subprocess.CompletedProcess[str]:
+        if command[:3] == ["mkdir", "-p", "--"]:
+            return _done(argv)
         if command[:2] == ["sha256sum", "--"]:
             path = command[2]
             if path not in self.files:
