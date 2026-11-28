@@ -34,16 +34,6 @@ requirements:
         statement: 'AC3: integrated: after the fix is installed on h201 through the declared dev installer, deploy-agent-dev.service is active, its NRestarts reading is the same at two reads ten minutes apart, and the health port 8098 answers on h201 -- falsifier: systemctl show -p NRestarts --value deploy-agent-dev.service on h201 differs between the two reads, or curl -sS http://127.0.0.1:8098/health on h201 is refused'
       - id: AC4
         statement: 'AC4: the prod deploy agent''s unit file and its key are untouched -- falsifier: sha256sum of the prod deploy agent unit file on h201 read before and after the install differs'
-  - id: req-omn26106-closer-budget
-    statement: The evidence close sweep declares the dod-verify start budget, and a verifier that refused to start is reported as a skip and never as an evidence gap.
-    acceptance:
-      - id: AC5
-        statement: 'AC5: the evidence close sweep workflow declares DOD_VERIFY_START_BUDGET_S, and a dod_verify refusal with cause dispatch_budget_not_declared is reported as skipped_dod_verify with nothing written to Linear -- falsifier: the sweep budget tests exit non-zero on the merge base and zero on the fix head'
-  - id: req-omn26106-snappy-codec
-    statement: The deploy agent's own locked environment declares the snappy codec its kafka client imports, so a snappy-compressed fetch decodes and a failed fetch is quarantined instead of stalling the poll loop.
-    acceptance:
-      - id: AC6
-        statement: 'AC6: the deploy agent environment declares python-snappy, a snappy record batch decodes in that environment, and a fetch that fails before a high-water mark exists is skipped -- falsifier: the snappy codec test exits non-zero on the merge base and zero at the fix head'
 evidence_requirements:
   - kind: tests
     description: The deploy agent gate-requester tests and the real recreate window requester tests.
@@ -170,3 +160,27 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_snappy_codec_omn26106.py -q
         cwd: .
+  - id: dod-omn26106-deleted-acs-retired
+    description: AC5 and AC6 were deleted from OMN-26106. This item carries the retirement of the claim each of the two items that bound them made, keeps the start-budget regression tests and the snappy codec test running, and a committed-contract test requires the contract to declare only AC1 to AC4 with each deleted binding retired; it is bound to two live criteria so the merge-base control can fail on it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_omn26106_deleted_acs_retired.py tests/ci/test_autoclose_sweep_dod_verify_budget_omn26106.py tests/ci/test_autoclose_sweep_budget_refusal_live_contact_omn26106.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_26106_budget_refusal.py tests/integration/nodes/test_autoclose_sweep_budget_refusal_integration_omn26106.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_agent_snappy_codec_omn26106.py -q
+        cwd: .
+    binds_ac: [AC1, AC2]
+    supersedes_ac_binding:
+      - item: dod-omn26106-autoclose-sweep-start-budget
+        label: AC5
+        reason_kind: no_longer_applicable
+        reason: AC5 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: q-auto6377-1642n
+        retired_at: '2026-11-28T17:00:00Z'
+      - item: dod-omn26106-snappy-codec-dasnappy2
+        label: AC6
+        reason_kind: no_longer_applicable
+        reason: AC6 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: q-auto6377-1642n
+        retired_at: '2026-11-28T17:00:00Z'
