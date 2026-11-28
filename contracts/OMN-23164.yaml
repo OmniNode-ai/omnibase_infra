@@ -5,6 +5,18 @@ summary: The readiness producers pass a committed ladder file to the command lin
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn23164-probe-ladder-reaches-request:
+      - label: AC1
+        criterion_hash: c45700f3d9c49ae82a0988b800d7f7f8527aacc300b1512c2e98859a7636a8f0
+        proposed_by: lane=dod-closeout-bind-2026-11-28T1745Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-28T1745Z-c1
+    dod-omn23164-probe-ladder-needs-synthetic:
+      - label: AC2
+        criterion_hash: f39f569af5cbe685cff7932247c159a724f22ad2ba979b45b1bb329043d7ab0d
+        proposed_by: lane=dod-closeout-bind-2026-11-28T1745Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-11-28T1745Z-c1
 requirements:
   - id: req-omn23164-probe-ladder-flag
     statement: onex delegate accepts --probe-ladder, sends the file's mapping in the request, and refuses it unless --traffic-class synthetic is given.
@@ -29,7 +41,7 @@ dod_evidence:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/cli -q --no-cov -k probe_ladder
+        check_value: uv run pytest tests/unit/cli -q --no-cov -k probe_ladder
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23164-probe-ladder-needs-synthetic
     description: A ladder file without --traffic-class synthetic exits with a usage error before the delegation payload is written or dispatched.
@@ -38,7 +50,7 @@ dod_evidence:
       - AC2
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/cli -q --no-cov -k probe_ladder_needs_synthetic
+        check_value: uv run pytest tests/unit/cli -q --no-cov -k probe_ladder_needs_synthetic
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn23164-deploy
     description: Hosted-runner probe that reads the committed ladder loader from GitHub at the checked-out commit and requires the loader that refuses a ladder without synthetic traffic.
