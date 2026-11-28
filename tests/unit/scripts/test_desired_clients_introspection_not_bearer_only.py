@@ -119,28 +119,36 @@ class TestIntrospectionCallersAreNotBearerOnly:
 #: reason: a second exception must be a deliberate, reviewed edit to THIS list
 #: rather than a field someone adds to a roster entry and nobody notices.
 #: OMN-23298 adds the three browser clients, whose staging realm serves only
-#: the staging hosts.
+#: the staging hosts. OMN-23491 adds the dashboard server's confidential client,
+#: which pushes its secret on staging and prod.
 #: The browser login client's Keycloak id is also a private repository name,
 #: so it is read from the roster: it is the one client whose staging override
-#: declares ``attributes``. A second such client fails this read, not silently
-#: widens the allowlist.
+#: repeats the PKCE attribute. A second such client fails this read, not
+#: silently widens the allowlist.
 def _staging_attributes_client_id() -> str:
     ids = [
         c["clientId"]
         for c in _clients()
-        if "attributes" in c.get("environmentOverrides", {}).get("staging", {})
+        if "pkce.code.challenge.method"
+        in c.get("environmentOverrides", {}).get("staging", {}).get("attributes", {})
     ]
-    assert len(ids) == 1, f"expected exactly one staging attributes override: {ids}"
+    assert len(ids) == 1, f"expected exactly one staging PKCE override: {ids}"
     return ids[0]
 
 
 CLIENTS_ALLOWED_AN_ENVIRONMENT_OVERRIDE = frozenset(
-    {"onex-api", "omnidash-spa", "onex-customer", _staging_attributes_client_id()}
+    {
+        "onex-api",
+        "omnidash-spa",
+        "omnidash",
+        "onex-customer",
+        _staging_attributes_client_id(),
+    }
 )
 
 #: Every field an override block may carry. Two document it and the rest
-#: change the client: the onex-api secret shape (OMN-18582) and the staging
-#: hosts (OMN-23298). Anything else is refused rather than silently ignored --
+#: change the client: the onex-api secret shape (OMN-18582), the staging
+#: hosts (OMN-23298) and the dashboard's pushed secret (OMN-23491). Anything else is refused rather than silently ignored --
 #: a typo'd key would otherwise read as "no override" and ship the base shape
 #: to production, which is the outcome the override exists to prevent.
 _ALLOWED_OVERRIDE_KEYS = frozenset(
@@ -148,6 +156,7 @@ _ALLOWED_OVERRIDE_KEYS = frozenset(
         "bearerOnly",
         "serviceAccountsEnabled",
         "consumerSecretEnv",
+        "secretEnv",
         "redirectUris",
         "webOrigins",
         "attributes",
