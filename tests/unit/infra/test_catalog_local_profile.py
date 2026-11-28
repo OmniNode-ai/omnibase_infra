@@ -1372,7 +1372,7 @@ _OTHER_BUNDLE_DIGESTS = {
     "omnidash": "c8ec69a7177b270479e795459ad901c7608bfe5dafee676d83706f0c4ad267ba",
     "omnimarket-projections": "f6552c3c6c749ebda95be31d260d10b37eab5fb0ef3e4b34862ba0f065dcfbe0",
     "omnimemory": "deff725fc3a399734a9052e09823d6f7e2b1c65e4935dd2b9e16d9b275294671",
-    "runtime": "ce33ae0162e23d383ab873d9c45fc000c2ca2abcb69aec65e60f90914707ccb0",
+    "runtime": "4dfafbe3123c7c7b5225a35fe4b2e15c809f05f72d9ea5b462369af522c61ff7",
     "runtime-core": "3949afbb0748a15b509bc769f566af40395a385dcec987fa9e2983358d19268a",
     "runtime-infrastructure": "2471f0f63f3ff5688d537fcb2bfff2c2914e750b489de0451d4c15aa91a26fcf",
     "runtime-integrations": "becf59c5917d835f5148c9449bcec688b593792c89b1d31d6a62666b31d6b623",
@@ -1405,6 +1405,8 @@ def test_every_bundle_but_local_renders_byte_identically_to_its_pre_sasl_digest_
     # their service lists for the runtime's own HTTP mount. OMN-26151: the
     # forward-migration service gained the seams directory mount, so the six
     # bundles that carry it moved.
+    # OMN-22097: runtime moved when the tracing bundle it selects gained the
+    # Phoenix project resource attribute.
     assert sorted(
         set(bundles) - {"local", "local-market", "local-lane-mirror"}
     ) == sorted(_OTHER_BUNDLE_DIGESTS)

@@ -519,6 +519,9 @@ x-runtime-env: &runtime-env
   # OTEL_SERVICE_NAME is set per-service (see individual service blocks below).
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://phoenix:6006"
   OTEL_TRACES_EXPORTER: "otlp"
+  # OMN-22097: Phoenix routes a span to the project named by this resource
+  # attribute; unset, every span lands in "default".
+  OTEL_RESOURCE_ATTRIBUTES: "openinference.project.name=onex-runtime"
 # Value-less pass-through names (OMN-20867). Each is listed with no value, so
 # compose hands the container the host's value when one is set and leaves the
 # variable unset in the container when it is not. They are not in x-runtime-env,
