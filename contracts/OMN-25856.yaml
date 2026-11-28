@@ -118,3 +118,11 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn25856_gate_required_boot_set.py -k earliest -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn25856-lab-work-bus-lane-dev
+    description: The OMN-25912 integration-proof item names --bus-lane dev on onex lab-work run, so it publishes on the dev lane; the test fails on the contract before the change.
+    source: manual
+    binds_ac: [AC25856001]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_omn25912_lab_work_bus_lane_omn25856.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
