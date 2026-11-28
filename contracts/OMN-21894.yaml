@@ -108,3 +108,10 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "grep -q 'mcp>=2.3.0,<3.0.0' pyproject.toml && curl -fsS https://pypi.org/pypi/mcp/2.3.0/json -o /dev/null"
+  - id: dod-sdk-route-initialize
+    description: "The SDK protocol route completes a real initialize on a real listener and through the runtime http_mount, the mount factory receives its declared dependencies, and the runtime image pins the same mcp range as pyproject."
+    source: generated
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/mcp/test_mcp_sdk_route_omn21894.py tests/unit/handlers/http_mount/test_asgi_mounts_dependencies_omn21894.py tests/integration/handlers/test_mcp_handler_integration.py -q --no-cov"
