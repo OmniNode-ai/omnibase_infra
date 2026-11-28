@@ -573,7 +573,7 @@ error_handling:
       retry_strategy: "none"
     - name: "DOD_VERIFY_SKIPPED"
       description: >
-        dod_verify's terminal verdict is skipped. Record SKIPPED_DOD_VERIFY with the terminal error_message and skipped checks' causes/messages (or explicitly state that no reason was supplied). Count it as skipped even with partial behavior proofs; never post an evidence-gap comment or write Done (OMN-20520 AC2). A terminal verdict of unresolved with unresolved_cause dispatch_budget_not_declared means the verifier refused to start and ran no check: record SKIPPED_DOD_VERIFY the same way and write nothing to Linear, because its 0/0 counters describe the refusal and not the ticket (OMN-26106).
+        dod_verify's terminal verdict is skipped. Record SKIPPED_DOD_VERIFY with the terminal error_message and skipped checks' causes/messages (or explicitly state that no reason was supplied). Count it as skipped even with partial behavior proofs; never post an evidence-gap comment or write Done (OMN-20520 AC2).
 
       recoverable: true
       retry_strategy: "none"

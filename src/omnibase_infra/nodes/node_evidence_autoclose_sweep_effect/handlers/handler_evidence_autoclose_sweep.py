@@ -283,9 +283,6 @@ _GH_PR_FILE_PATH_KEY = "filename"
 # dod_verify's own terminal status for "every verdict-bearing check passed".
 # `EnumDodVerifyStatus.VERIFIED` in omnimarket.
 _DOD_VERIFY_STATUS_VERIFIED = "verified"
-_DOD_VERIFY_STATUS_UNRESOLVED = "unresolved"
-_DOD_VERIFY_UNRESOLVED_CAUSE_KEY = "unresolved_cause"
-_DOD_VERIFY_BUDGET_NOT_DECLARED = "dispatch_budget_not_declared"
 # How many passing checks executed the claimed behavior, as opposed to reading
 # PR/merge state or standing in as a surrogate. `ModelDodVerifyState
 # .behavior_proving_count` in omnimarket, added by OMN-15911. Absent on any
@@ -5133,32 +5130,6 @@ class HandlerEvidenceAutocloseSweep:
         behavior_proving_count = self._gate.as_int(
             verdict.get(_DOD_VERIFY_BEHAVIOR_KEY)
         )
-
-        # OMN-26106: a verifier that refused to start ran no check, so the
-        # `0/0` counters describe the refusal and not the ticket. Reported and
-        # left unwritten, never posted as an evidence gap.
-        refusal_cause = str(verdict.get(_DOD_VERIFY_UNRESOLVED_CAUSE_KEY) or "")
-        if (
-            verify_status == _DOD_VERIFY_STATUS_UNRESOLVED
-            and refusal_cause == _DOD_VERIFY_BUDGET_NOT_DECLARED
-        ):
-            return ModelEvidenceAutocloseOutcome(
-                ticket_id=ticket_id,
-                companion_pr_number=companion_pr_number,
-                companion_pr_url=companion_pr_url,
-                decision=EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY,
-                reason=(
-                    f"dod_verify refused to start ({refusal_cause}): "
-                    f"{_skipped_verdict_reason(verdict, gate=self._gate)}. No "
-                    "check ran, so this run learned nothing about the ticket's "
-                    "criteria; nothing was written."
-                ),
-                dod_verify_total_checks=total_checks,
-                dod_verify_verified_count=verified_count,
-                dod_verify_failed_count=failed_count,
-                dod_verify_non_probative_count=non_probative_count,
-                dod_verify_behavior_proving_count=behavior_proving_count,
-            )
 
         # OMN-20520: partial proofs do not turn a skipped verifier run into an
         # evidence verdict. Report its reason and leave the ticket untouched.

@@ -75,15 +75,14 @@ def test_three_queued_overdue_requests_run_as_one_build() -> None:
     assert plan.stop_reason is None
 
 
-def test_an_operators_rollback_runs_ahead_of_the_overdue_request() -> None:
-    # OMN-26718: a request someone made on purpose is the admitted job, never the overdue one.
+def test_an_operators_rollback_still_ends_the_group() -> None:
     operator = _overdue(
         requested_by="operator/lane",
         rollback={"actor": "operator/lane", "reason": "back out 6191"},
     )
     plan = _plan([_overdue(), operator])
-    assert plan.runner.command.correlation_id == operator.correlation_id
-    assert plan.superseded_count == 1
+    assert plan.superseded_count == 0
+    assert plan.stop_reason is EnumCoalesceRefusal.ROLLBACK_DECLARED
 
 
 def test_an_overdue_request_never_folds_into_a_full_scope_build() -> None:

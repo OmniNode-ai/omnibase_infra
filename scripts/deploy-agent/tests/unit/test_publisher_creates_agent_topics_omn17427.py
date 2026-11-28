@@ -94,9 +94,7 @@ def test_a_topic_another_node_declares_is_not_created() -> None:
         patch("deploy_agent.publisher.KafkaAdminClient", return_value=admin) as ctor,
         patch("deploy_agent.publisher.KafkaProducer", return_value=producer),
     ):
-        assert publisher.publish_result(
-            {"correlation_id": "c", "git_sha": "a" * 40}, _CONFIG
-        )
+        assert publisher.publish_result({"correlation_id": "c"}, _CONFIG)
     ctor.assert_not_called()
 
 

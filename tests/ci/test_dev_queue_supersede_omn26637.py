@@ -526,7 +526,7 @@ def test_the_two_readbacks_agree_on_the_shape_of_a_superseded_record(
         {"git_ref": MERGE_1},
         superseded_by_sha=MERGE_2,
         superseded_by_correlation_id=newer,
-        reason=f"superseded by {newer} at {MERGE_2}",
+        by_containment=False,
     )
 
     document = json.loads((tmp_path / "jobs" / f"{older}.json").read_text())

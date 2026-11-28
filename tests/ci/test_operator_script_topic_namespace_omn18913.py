@@ -266,9 +266,7 @@ def test_deploy_agent_transport_topics_and_group(
     factory = MagicMock(return_value=producer)
     monkeypatch.setattr(kafka, "KafkaProducer", factory)
     monkeypatch.setattr(publisher, "KafkaProducer", factory)
-    assert publisher.publish_result(
-        {"correlation_id": "test", "git_sha": "a" * 40}, config
-    )
+    assert publisher.publish_result({"correlation_id": "test"}, config)
     assert (
         producer.send.call_args.args[0]
         == prefix + "onex.evt.deploy.rebuild-completed.v1"

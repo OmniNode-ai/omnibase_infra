@@ -17,7 +17,6 @@ from uuid import uuid4
 
 import pytest
 from deploy_agent import agent as agent_mod
-from deploy_agent import publisher as publisher_mod
 from deploy_agent.agent import DeployAgent
 from deploy_agent.events import EnumRuntimeLane, Phase, PhaseStatus
 
@@ -75,16 +74,16 @@ def test_retried_publish_carries_the_resolved_sha(
     assert [p["git_sha"] for p in sent] == [SHA]
 
 
-def test_retried_publish_of_an_unresolved_job_is_not_published(
+def test_retried_publish_of_an_unresolved_job_stays_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Control: a job that never resolved a sha publishes nothing (OMN-26704), beside one that did."""
+    """Control: a job that never resolved a sha reports none, beside one that did."""
     agent = _agent(tmp_path, monkeypatch)
     sent: list[dict[str, Any]] = []
     monkeypatch.setattr(
-        publisher_mod,
-        "_produce",
-        lambda topic, key, payload, config: sent.append(payload) or True,
+        agent_mod,
+        "publish_result",
+        lambda payload, config: sent.append(payload) or True,
     )
     resolved = _owed_job(agent, resolved_sha=SHA)
     unresolved = _owed_job(agent, resolved_sha=None)
@@ -93,5 +92,4 @@ def test_retried_publish_of_an_unresolved_job_is_not_published(
     agent._retry_pending_publishes()
 
     by_job = {str(p["correlation_id"]): p["git_sha"] for p in sent}
-    assert by_job == {str(resolved): SHA}
-    assert str(unresolved) not in by_job
+    assert by_job == {str(resolved): SHA, str(unresolved): ""}

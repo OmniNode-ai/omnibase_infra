@@ -440,7 +440,6 @@ class TestSupersessionModel:
                 superseded=_queued(_cmd(SHA_A), 10),
                 superseded_by_sha="52e430b2",
                 superseded_by_correlation_id=uuid4(),
-                reason="superseded in a test",
             )
 
     def test_a_command_cannot_supersede_itself(self) -> None:
@@ -450,7 +449,6 @@ class TestSupersessionModel:
                 superseded=_queued(cmd, 10),
                 superseded_by_sha=SHA_B,
                 superseded_by_correlation_id=cmd.correlation_id,
-                reason="superseded in a test",
             )
 
 
@@ -518,7 +516,6 @@ class TestTheSupersededJobRecord:
             command={"scope": "full"},
             superseded_by_sha=SHA_C,
             superseded_by_correlation_id=runner,
-            reason="superseded in a test",
         )
         assert job.status == "superseded"
         assert job.completed_at is not None
@@ -541,7 +538,6 @@ class TestTheSupersededJobRecord:
             command={"scope": "full"},
             superseded_by_sha=SHA_C,
             superseded_by_correlation_id=uuid4(),
-            reason="superseded in a test",
         )
         assert store.has_active_job() is False
         assert store.load_active() is None
@@ -1000,7 +996,6 @@ class TestTheConsumerFoldsTheBatch:
             command={"scope": "full"},
             superseded_by_sha=SHA_C,
             superseded_by_correlation_id=c.correlation_id,
-            reason="superseded in a test",
         )
         announced: list[ModelSupersession] = []
         consumer = _consumer(
@@ -1104,7 +1099,6 @@ class TestTheJobEndpointServesTheSupersession:
             command={"scope": "full"},
             superseded_by_sha=SHA_C,
             superseded_by_correlation_id=runner,
-            reason="superseded in a test",
         )
         request = SimpleNamespace(
             app={"job_store": store}, match_info={"correlation_id": str(cid)}

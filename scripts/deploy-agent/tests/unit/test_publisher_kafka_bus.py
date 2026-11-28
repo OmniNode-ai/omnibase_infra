@@ -24,7 +24,7 @@ def test_publish_result_uses_configured_kafka_bus() -> None:
     producer = MagicMock()
 
     with patch("deploy_agent.publisher.KafkaProducer", return_value=producer) as ctor:
-        ok = publish_result({"correlation_id": "abc-123", "git_sha": "a" * 40}, config)
+        ok = publish_result({"correlation_id": "abc-123"}, config)
 
     assert ok is True
     ctor.assert_called_once()
@@ -36,7 +36,7 @@ def test_publish_result_uses_configured_kafka_bus() -> None:
     producer.send.assert_called_once_with(
         TOPIC_REBUILD_COMPLETED,
         key="deploy-result/abc-123",
-        value={"correlation_id": "abc-123", "git_sha": "a" * 40},
+        value={"correlation_id": "abc-123"},
     )
     producer.flush.assert_called_once_with(timeout=30)
     producer.close.assert_called_once()

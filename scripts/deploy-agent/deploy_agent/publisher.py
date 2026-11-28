@@ -293,9 +293,7 @@ def publish_result(
 ) -> bool:
     """Publish completion event to the same control bus consumed by deploy-agent."""
     correlation_id = payload.get("correlation_id", "")
-    # OMN-26704: a job that ended before git_pull resolved no revision and the event
-    # requires one, so nothing is owed to the bus (True: nothing to retry either).
-    return not payload.get("git_sha") or _produce(
+    return _produce(
         TOPIC_REBUILD_COMPLETED,
         f"deploy-result/{correlation_id}",
         payload,

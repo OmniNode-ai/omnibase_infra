@@ -1067,7 +1067,7 @@ class DeployConsumer:
                 command=self._command_payload(record_msg),
                 superseded_by_sha=supersession.superseded_by_sha,
                 superseded_by_correlation_id=supersession.superseded_by_correlation_id,
-                reason=supersession.reason,
+                by_containment=supersession.by_containment,
             )
             logger.info(
                 "coalesce: %s (ref=%s) superseded by %s (ref=%s)",
