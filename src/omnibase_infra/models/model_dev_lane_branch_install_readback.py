@@ -23,9 +23,13 @@ class ModelDevLaneBranchInstallReadback(BaseModel):
 
     install_key: str
     repo: str
-    pr: int
+    pr: int | None
     head: str
     ticket: str
     expires_at: datetime
     state: EnumDevLaneBranchInstallState
     files: tuple[ModelDevLaneBranchInstallFileReadback, ...]
+
+    @property
+    def pr_text(self) -> str:
+        return f"#{self.pr}" if self.pr is not None else "none"

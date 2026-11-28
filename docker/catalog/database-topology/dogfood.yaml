@@ -122,6 +122,7 @@ databases:
               - lab_lane_health
               - lab_proof_receipts
               - lane_drift_and_stalls
+              - lane_work_workflow
               - ledger_line_citation
               - live_events
               - log_entries
@@ -296,6 +297,13 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - savings_priced_models
+            privileges:
+              - DELETE
+              - SELECT
+            schema: public
+          - object_type: TABLE
+            objects:
               - agent_actions
               - agent_detection_failures
               - agent_execution_logs
@@ -336,6 +344,7 @@ databases:
               - router_performance_metrics
               - run_trace
               - savings_estimates
+              - savings_priced_models
               - skill_execution_snapshots
               - skill_executions
               - tenant_inference_credentials
@@ -547,5 +556,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 609fc7192c3870f8e38eff4ca2f793ee53513087c5a81e6f2781ebebbf66f908
+  sha256: fb6ce49253cf7a14e0b70aee9bfc79dfd7d4da5638536339089e41ff68e1e4b6
 topology_instance: local

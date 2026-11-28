@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-26706
+title: The release train judges only the newest check-run copy per workflow and context
+summary: >-
+  scripts/ci/release_train.py classify_ci_green keys each check-run copy by (workflow path, check name), judges the newest copy of each key, and counts an older red copy only when it overlaps the newest copy in time, as cut_facts.sh and ci_premise.py do. A copy that completed with no completed_at no longer sorts as the newest of all. Which contexts are required is unchanged. default_check_runs reads the commit's workflow runs to name each copy's workflow. Measured on omnibase_core#2369 (2026-11-27), where the train skipped a core cut with ci_not_green on stale or replayed CI Summary copies.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26706-newest-copy-per-key
+    statement: The release train judges only the newest check-run copy per workflow and context.
+    acceptance:
+      - id: AC26706001
+        statement: "AC26706001: an older failed or cancelled copy beside a newer green copy of the same workflow and context is cut, and a newest red copy, or a red copy overlapping the newest, is skipped -- falsifier: uv run pytest tests/scripts/test_release_train_nightly.py -k OnlyTheNewestCopy"
+      - id: AC26706002
+        statement: "AC26706002: the check-run fetch names each copy's workflow through the commit's workflow runs -- falsifier: uv run pytest tests/ci/test_release_train_recorded_check_runs_omn20298.py"
+evidence_requirements:
+  - kind: tests
+    description: The release-train decision tests and the recorded check-run replay.
+    command: uv run pytest tests/scripts/test_release_train_nightly.py tests/ci/test_release_train_recorded_check_runs_omn20298.py -n 0 -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn26706-newest-copy-judged
+    description: >-
+      An older failed copy and a newer green one on the same head are cut, an older cancelled copy with no completed_at does not outrank the green one, a newest red copy and an overlapping red copy are skipped, and a green copy of another workflow does not hide a newest red one. Three of the six fail on the merge base.
+    source: manual
+    binds_ac:
+      - AC26706001
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_release_train_nightly.py -k OnlyTheNewestCopy -n 0 -q -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26706-fetch-names-workflow
+    description: >-
+      The recorded check-run replay reads the check runs and the workflow runs through the train's real fetch and still judges the recorded green head green and the recorded red context red.
+    source: manual
+    binds_ac:
+      - AC26706002
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_release_train_recorded_check_runs_omn20298.py -n 0 -q -p no:cacheprovider
+        cwd: .

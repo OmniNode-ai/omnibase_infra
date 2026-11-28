@@ -119,6 +119,7 @@ databases:
               - lab_lane_health
               - lab_proof_receipts
               - lane_drift_and_stalls
+              - lane_work_workflow
               - ledger_line_citation
               - live_events
               - log_entries
@@ -262,6 +263,11 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - savings_priced_models
+            privileges: [DELETE, SELECT]
+            schema: public
+          - object_type: TABLE
+            objects:
               - agent_actions
               - agent_detection_failures
               - agent_execution_logs
@@ -302,6 +308,7 @@ databases:
               - router_performance_metrics
               - run_trace
               - savings_estimates
+              - savings_priced_models
               - skill_execution_snapshots
               - skill_executions
               - tenant_inference_credentials

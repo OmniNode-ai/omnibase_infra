@@ -50,6 +50,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolCapabilityProjection": "protocols/protocol_capability_projection.py",
     "ProtocolCapabilityQuery": "protocols/protocol_capability_query.py",
     "ProtocolCostEstimatorBuildIO": "protocols/protocol_cost_estimator_build_io.py",  # [DI] OMN-21487 host I/O (command execution, workspace, image build) the provisioning effect injects into estimator build policy. Infra-local: bound to this repo's setup-local provisioning effect and cost-estimator build handler, not a cross-repo contract
+    "CompletedProcessLike": "handlers/build_repository_ref/agent_entry.py",  # [DI] OMN-26724 the one attribute (returncode) the deploy agent entry reads from the runner it is handed, so the check takes the agent's own subprocess runner without importing subprocess into a non-EFFECT package. Infra-local, not spi: it narrows this handler's agent seam
     "ProtocolClock": "protocols/protocol_clock.py",  # [DI] OMN-21698 the clock a non-EFFECT node package reads time through (wall now() and a monotonic() duration reading), injected by dispatcher constructor and on the typed handler request so the registration orchestrator never calls datetime.now or time.perf_counter itself. Infra-local, not spi: core's ProtocolTimeService (omnibase_core.protocols.replay) carries now()/utc_now() only and has no monotonic reading the handlers' processing_time_ms needs
     "ProtocolContainerAware": "protocols/protocol_container_aware.py",
     "ProtocolDevMergeBuildSender": "protocols/protocol_dev_merge_build_sender.py",  # [DI] OMN-26316 the two sends an overdue dev merge makes (the overdue event and the signed build request), injected into the publish handler so tests use a fake sender instead of opening a bus connection. Infra-local, not spi: it narrows this repo's deploy agent send path and is not a cross-repo contract.
@@ -233,6 +234,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # routed around (OMN-18833 lane).
     "ProtocolDriftGuardVerdict": "cli/protocol_drift_guard_verdict.py",
     "ProtocolExecutionBudget": "cli/protocol_execution_budget.py",  # [DI] OMN-19407 reads a task class's execution ceiling and delivery margin.
+    "ProtocolStabilityIntegrationHost": "protocols/protocol_stability_integration_host.py",  # [DI] OMN-26715 git/docker/http host operations the stability integration refresh handler injects. Infra-local: bound to this repo's stability host refresh node, not a cross-repo contract
     "ProtocolSelectionFallback": "cli/protocol_selection_fallback.py",  # [DI] OMN-19407 reads the fallback class for an unclaimed prompt.
     "ProtocolTaskClassAuthority": "cli/protocol_task_class_authority.py",  # [DI] OMN-19407 reads the task-class authority contract.
     "ProtocolTaskTypeResolution": "cli/protocol_task_type_resolution.py",  # [DI] OMN-19407 reads a resolved task type and decision rationale.

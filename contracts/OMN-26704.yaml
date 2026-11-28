@@ -9,9 +9,9 @@ requirements:
   - id: "req-no-empty-sha-completed-event"
     statement: "The deploy agent publishes a rebuild-completed event only with the revision its job resolved."
     acceptance:
-      - id: "AC2670401"
+      - id: "AC1"
         statement: "AC1: a job that ends before git_pull publishes no rebuild-completed event, or one carrying the revision it actually ran, never an empty sha -- falsifier: a unit test drives a job that fails before git_pull and asserts no published event has an empty git_sha"
-      - id: "AC2670402"
+      - id: "AC2"
         statement: "AC2: a normal job still publishes the pulled sha -- falsifier: a unit test asserts the published git_sha equals the pulled revision"
 evidence_requirements:
   - kind: "tests"
@@ -22,19 +22,19 @@ emergency_bypass:
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
-  - id: "dod-omn26704-no-empty-sha"
+  - id: "dod-omn26704-ac1-no-empty-sha"
     description: "A job failing before git_pull publishes no event with an empty git_sha; fails at the merge base."
     source: "manual"
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest scripts/deploy-agent/tests/unit/test_terminal_event_never_empty_sha_omn26704.py -k before_git_pull -q -n 0"
         cwd: "."
-    binds_ac: ["AC2670401"]
-  - id: "dod-omn26704-normal-sha"
+    binds_ac: ["AC1"]
+  - id: "dod-omn26704-ac2-pulled-sha"
     description: "A normal job publishes the pulled sha."
     source: "manual"
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest scripts/deploy-agent/tests/unit/test_terminal_event_never_empty_sha_omn26704.py -k pulled_sha -q -n 0"
         cwd: "."
-    binds_ac: ["AC2670402"]
+    binds_ac: ["AC2"]

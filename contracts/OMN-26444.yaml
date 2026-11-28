@@ -1,0 +1,39 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26444"
+title: "The shared Postgres savings view counts unpriced runs by the shared metering refresh's rule"
+summary: "omnimarket#6629 adds savings migration 102, which creates savings_priced_models, grants the tenant projection writer read and write on it, and counts unpriced runs by the shared metering refresh's rule. The runtime resolver proves projection bindings against the topology's declared grants, so this declares the writer on savings_priced_models in every topology instance that declares the writer, regenerates the rendered database topologies, and vendors 102 byte-identical with its tenant ledger row and forward-only class, the way #5763 vendored 101."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26444-infra-declare-and-vendor-102"
+    statement: |-
+      The topology declares tenant_projection_writer SELECT, INSERT, UPDATE and DELETE on public.savings_priced_models, and migration 102, which delivers that grant, is deployed byte-identical to its omnimarket source with one checksum-bound tenant ledger row and the forward-only class.
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: the writer grant on savings_priced_models is declared in every topology instance and rendered catalog, and migration 102 is vendored byte-identical -- falsifier: uv run pytest tests/unit/topology/test_topology_savings_priced_models_omn26444.py tests/unit/migrations/test_omn26444_savings_unpriced_matches_refresh_vendored.py -q fails on omnibase_infra dev and passes on the fix branch"
+evidence_requirements:
+  - kind: "tests"
+    description: "Infra deployment half only; the writer's declared grant on savings_priced_models in every instance, and the vendored 102 bytes, tenant ledger checksum and forward-only class."
+    command: "uv run pytest tests/unit/topology/test_topology_savings_priced_models_omn26444.py tests/unit/migrations/test_omn26444_savings_unpriced_matches_refresh_vendored.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn26444-ac2-infra-declare-and-vendor-102"
+    description: "Infra half only. Pins the tenant projection writer's declared grant on savings_priced_models in every instance that declares it and in the rendered catalogs, and 102's source bytes (omnimarket#6629 at 5b056878ad221aecc47dc99a2c89ac7de8e813f1), its exact tenant ledger checksum and forward-only class; at the merge base the grant and the file are absent, so it fails there. It does not prove the view's counts, which omnimarket#6629's real-Postgres tests prove."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/topology/test_topology_savings_priced_models_omn26444.py tests/unit/migrations/test_omn26444_savings_unpriced_matches_refresh_vendored.py tests/unit/topology/test_application_database_topology.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn26444-deploy-writer-delete-grant"
+    description: "Deploy probe for the local Done gate, after the omnibase_infra release that carries this change is deployed. It asks the running infra Postgres whether tenant_projection_writer holds DELETE on public.savings_priced_models, the privilege the shared metering writer's priced-models fill needs to remove rows the pricing manifest no longer names. Its exit status depends on the deployed database, not on files this PR authors. It is unbound, and runs only in the local Done gate because hosted CI cannot reach a deployed lane."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec omnibase-infra-postgres psql -U postgres -d omnibase_infra -tAc \"select has_table_privilege('tenant_projection_writer', 'public.savings_priced_models', 'DELETE')\" | grep -qx t"
+        cwd: "${OMNI_HOME}/omnibase_infra"
