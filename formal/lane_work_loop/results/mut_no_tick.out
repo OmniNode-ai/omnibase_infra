@@ -1,23 +1,30 @@
-TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
-Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
-(Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 15 and seed 670759481937318852 with 2 workers on 32 cores with 23552MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-42-generic amd64, Eclipse Adoptium 17.0.21.1 x86_64, MSBDiskFPSet, DiskStateQueue).
-Parsing file /m/LaneWorkLoop.tla
-Parsing file /tmp/Naturals.tla
-Parsing file /tmp/Integers.tla
-Parsing file /tmp/FiniteSets.tla
-Parsing file /tmp/Sequences.tla
+TLC2 Version 2026.10.01.024053 (rev: 0dab95e)
+Running breadth-first search Model-Checking with fp 59 and seed -3705340159743946435 with 2 workers on 4 cores with 2731MB heap and 64MB offheap memory [pid: 1388699] (Linux 7.0.0-31-generic amd64, Ubuntu 21.0.13.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /scratch/lab-run/runs/rlane-q-tri26700-071500-f7f5b5/formal/lane_work_loop/LaneWorkLoop.tla
+Parsing file /tmp/tlc-10666411036549512910/Naturals.tla (jar:file:/home/jonah/lab-run/lob-tla/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-10666411036549512910/Integers.tla (jar:file:/home/jonah/lab-run/lob-tla/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-10666411036549512910/FiniteSets.tla (jar:file:/home/jonah/lab-run/lob-tla/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-10666411036549512910/_TLCTrace.tla (jar:file:/home/jonah/lab-run/lob-tla/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-10666411036549512910/Sequences.tla (jar:file:/home/jonah/lab-run/lob-tla/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-10666411036549512910/TLC.tla (jar:file:/home/jonah/lab-run/lob-tla/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-10666411036549512910/TLCExt.tla (jar:file:/home/jonah/lab-run/lob-tla/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
 Semantic processing of module Naturals
 Semantic processing of module Integers
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
 Semantic processing of module LaneWorkLoop
-Starting... (2026-11-26 15:01:12)
-Implied-temporal checking--satisfiability problem has 3 branches.
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module LaneWorkLoop
+Starting... (2026-11-27 13:41:36)
+Implied-temporal checking--satisfiability problem has 2 branches.
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-26 15:01:12.
-Checking 3 branches of temporal properties for the current state space with 50339 total distinct states at (2026-11-26 15:01:15)
-Error: Temporal properties were violated.
+Finished computing initial states: 1 distinct state generated at 2026-11-27 13:41:36.
+Checking 2 branches of temporal properties for the current state space with 71652 total distinct states at (2026-11-27 13:41:39)
+Error: Temporal property DeadlineFires was violated.
 
 Error: The following behavior constitutes a counter-example:
 
@@ -50,86 +57,28 @@ State 1: <Initial predicate>
 /\ effCnt = 0
 /\ head = 0
 
-State 2: <Arrive line 169, col 23 to line 169, col 65 of module LaneWorkLoop>
-/\ org = <<"working", "working">>
-/\ inCnt = 0
-/\ cur = [k |-> "start", w |-> 1, h |-> 0, f |-> FALSE, a |-> "none"]
-/\ ob = <<-1, -1>>
-/\ rcG = <<0, 0>>
-/\ startsLeft = 2
-/\ ansIn = {}
-/\ rOuts = {}
-/\ cm = FALSE
-/\ pc = "fold"
-/\ ph = <<-1, -1>>
-/\ gone = <<FALSE, FALSE>>
-/\ rP = FALSE
-/\ hmoves = 0
-/\ eh = <<0, 0>>
-/\ rW = 1
-/\ rc = <<0, 0>>
-/\ pubd = {}
-/\ rq = <<-1, -1>>
-/\ termPub = <<0, 0>>
-/\ st = <<"none", "none">>
-/\ hb = <<0, 0>>
-/\ crashes = 0
-/\ lost = FALSE
-/\ tier = <<0, 0>>
-/\ effCnt = 0
-/\ head = 0
-
-State 3: <HeadMove line 192, col 3 to line 193, col 55 of module LaneWorkLoop>
-/\ org = <<"working", "working">>
-/\ inCnt = 0
-/\ cur = [k |-> "start", w |-> 1, h |-> 0, f |-> FALSE, a |-> "none"]
-/\ ob = <<-1, -1>>
-/\ rcG = <<0, 0>>
-/\ startsLeft = 2
-/\ ansIn = {}
-/\ rOuts = {}
-/\ cm = FALSE
-/\ pc = "fold"
-/\ ph = <<-1, -1>>
-/\ gone = <<FALSE, FALSE>>
-/\ rP = FALSE
-/\ hmoves = 1
-/\ eh = <<0, 0>>
-/\ rW = 1
-/\ rc = <<0, 0>>
-/\ pubd = {}
-/\ rq = <<-1, -1>>
-/\ termPub = <<0, 0>>
-/\ st = <<"none", "none">>
-/\ hb = <<0, 0>>
-/\ crashes = 0
-/\ lost = FALSE
-/\ tier = <<0, 0>>
-/\ effCnt = 0
-/\ head = 1
-
-State 4: <Receipt line 203, col 3 to line 216, col 61 of module LaneWorkLoop>
+State 2: <HeadMove line 192, col 3 to line 193, col 55 of module LaneWorkLoop>
 /\ org = <<"working", "working">>
 /\ inCnt = 0
 /\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
 /\ ob = <<-1, -1>>
 /\ rcG = <<0, 0>>
-/\ startsLeft = 1
+/\ startsLeft = 2
 /\ ansIn = {}
-/\ rOuts = {"reply"}
+/\ rOuts = {}
 /\ cm = FALSE
-/\ pc = "pub"
+/\ pc = "idle"
 /\ ph = <<-1, -1>>
 /\ gone = <<FALSE, FALSE>>
-/\ rP = TRUE
+/\ rP = FALSE
 /\ hmoves = 1
-/\ eh = <<1, 0>>
+/\ eh = <<0, 0>>
 /\ rW = 1
 /\ rc = <<0, 0>>
 /\ pubd = {}
 /\ rq = <<-1, -1>>
 /\ termPub = <<0, 0>>
-/\ st = <<"awaiting_worker", "none">>
+/\ st = <<"none", "none">>
 /\ hb = <<0, 0>>
 /\ crashes = 0
 /\ lost = FALSE
@@ -137,7 +86,65 @@ State 4: <Receipt line 203, col 3 to line 216, col 61 of module LaneWorkLoop>
 /\ effCnt = 0
 /\ head = 1
 
-State 5: <HeadMove line 192, col 3 to line 193, col 55 of module LaneWorkLoop>
+State 3: <Arrive line 169, col 23 to line 169, col 65 of module LaneWorkLoop>
+/\ org = <<"working", "working">>
+/\ inCnt = 0
+/\ cur = [k |-> "start", w |-> 1, h |-> 0, f |-> FALSE, a |-> "none"]
+/\ ob = <<-1, -1>>
+/\ rcG = <<0, 0>>
+/\ startsLeft = 2
+/\ ansIn = {}
+/\ rOuts = {}
+/\ cm = FALSE
+/\ pc = "fold"
+/\ ph = <<-1, -1>>
+/\ gone = <<FALSE, FALSE>>
+/\ rP = FALSE
+/\ hmoves = 1
+/\ eh = <<0, 0>>
+/\ rW = 1
+/\ rc = <<0, 0>>
+/\ pubd = {}
+/\ rq = <<-1, -1>>
+/\ termPub = <<0, 0>>
+/\ st = <<"none", "none">>
+/\ hb = <<0, 0>>
+/\ crashes = 0
+/\ lost = FALSE
+/\ tier = <<0, 0>>
+/\ effCnt = 0
+/\ head = 1
+
+State 4: <HeadMove line 192, col 3 to line 193, col 55 of module LaneWorkLoop>
+/\ org = <<"working", "working">>
+/\ inCnt = 0
+/\ cur = [k |-> "start", w |-> 1, h |-> 0, f |-> FALSE, a |-> "none"]
+/\ ob = <<-1, -1>>
+/\ rcG = <<0, 0>>
+/\ startsLeft = 2
+/\ ansIn = {}
+/\ rOuts = {}
+/\ cm = FALSE
+/\ pc = "fold"
+/\ ph = <<-1, -1>>
+/\ gone = <<FALSE, FALSE>>
+/\ rP = FALSE
+/\ hmoves = 2
+/\ eh = <<0, 0>>
+/\ rW = 1
+/\ rc = <<0, 0>>
+/\ pubd = {}
+/\ rq = <<-1, -1>>
+/\ termPub = <<0, 0>>
+/\ st = <<"none", "none">>
+/\ hb = <<0, 0>>
+/\ crashes = 0
+/\ lost = FALSE
+/\ tier = <<0, 0>>
+/\ effCnt = 0
+/\ head = 2
+
+State 5: <Receipt line 203, col 3 to line 216, col 61 of module LaneWorkLoop>
 /\ org = <<"working", "working">>
 /\ inCnt = 0
 /\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
@@ -152,7 +159,7 @@ State 5: <HeadMove line 192, col 3 to line 193, col 55 of module LaneWorkLoop>
 /\ gone = <<FALSE, FALSE>>
 /\ rP = TRUE
 /\ hmoves = 2
-/\ eh = <<1, 0>>
+/\ eh = <<2, 0>>
 /\ rW = 1
 /\ rc = <<0, 0>>
 /\ pubd = {}
@@ -181,7 +188,7 @@ State 6: <Vanish line 196, col 3 to line 198, col 65 of module LaneWorkLoop>
 /\ gone = <<TRUE, FALSE>>
 /\ rP = TRUE
 /\ hmoves = 2
-/\ eh = <<1, 0>>
+/\ eh = <<2, 0>>
 /\ rW = 1
 /\ rc = <<0, 0>>
 /\ pubd = {}
@@ -210,7 +217,7 @@ State 7: <PubOut line 219, col 3 to line 224, col 93 of module LaneWorkLoop>
 /\ gone = <<TRUE, FALSE>>
 /\ rP = TRUE
 /\ hmoves = 2
-/\ eh = <<1, 0>>
+/\ eh = <<2, 0>>
 /\ rW = 1
 /\ rc = <<0, 0>>
 /\ pubd = {"reply"}
@@ -239,7 +246,7 @@ State 8: <Commit line 227, col 3 to line 229, col 107 of module LaneWorkLoop>
 /\ gone = <<TRUE, FALSE>>
 /\ rP = TRUE
 /\ hmoves = 2
-/\ eh = <<1, 0>>
+/\ eh = <<2, 0>>
 /\ rW = 1
 /\ rc = <<0, 0>>
 /\ pubd = {"reply"}
@@ -253,36 +260,7 @@ State 8: <Commit line 227, col 3 to line 229, col 107 of module LaneWorkLoop>
 /\ effCnt = 0
 /\ head = 2
 
-State 9: <Crash line 237, col 3 to line 239, col 98 of module LaneWorkLoop>
-/\ org = <<"working", "working">>
-/\ inCnt = 0
-/\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
-/\ ob = <<-1, -1>>
-/\ rcG = <<0, 0>>
-/\ startsLeft = 1
-/\ ansIn = {}
-/\ rOuts = {"reply"}
-/\ cm = TRUE
-/\ pc = "down"
-/\ ph = <<-1, -1>>
-/\ gone = <<TRUE, FALSE>>
-/\ rP = TRUE
-/\ hmoves = 2
-/\ eh = <<1, 0>>
-/\ rW = 1
-/\ rc = <<0, 0>>
-/\ pubd = {"reply"}
-/\ rq = <<-1, -1>>
-/\ termPub = <<0, 0>>
-/\ st = <<"awaiting_worker", "none">>
-/\ hb = <<0, 0>>
-/\ crashes = 1
-/\ lost = FALSE
-/\ tier = <<0, 0>>
-/\ effCnt = 0
-/\ head = 2
-
-State 10: <Recover line 242, col 3 to line 251, col 75 of module LaneWorkLoop>
+State 9: <Finish line 232, col 3 to line 234, col 81 of module LaneWorkLoop>
 /\ org = <<"working", "working">>
 /\ inCnt = 0
 /\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
@@ -297,7 +275,7 @@ State 10: <Recover line 242, col 3 to line 251, col 75 of module LaneWorkLoop>
 /\ gone = <<TRUE, FALSE>>
 /\ rP = FALSE
 /\ hmoves = 2
-/\ eh = <<1, 0>>
+/\ eh = <<2, 0>>
 /\ rW = 1
 /\ rc = <<0, 0>>
 /\ pubd = {}
@@ -305,16 +283,16 @@ State 10: <Recover line 242, col 3 to line 251, col 75 of module LaneWorkLoop>
 /\ termPub = <<0, 0>>
 /\ st = <<"awaiting_worker", "none">>
 /\ hb = <<0, 0>>
-/\ crashes = 1
+/\ crashes = 0
 /\ lost = FALSE
 /\ tier = <<0, 0>>
 /\ effCnt = 0
 /\ head = 2
 
-State 11: <Arrive line 169, col 23 to line 169, col 65 of module LaneWorkLoop>
+State 10: <Arrive line 169, col 23 to line 169, col 65 of module LaneWorkLoop>
 /\ org = <<"working", "working">>
 /\ inCnt = 0
-/\ cur = [k |-> "start", w |-> 2, h |-> 0, f |-> FALSE, a |-> "none"]
+/\ cur = [k |-> "proof_passed", w |-> 1, h |-> 2, f |-> FALSE, a |-> "none"]
 /\ ob = <<-1, -1>>
 /\ rcG = <<0, 0>>
 /\ startsLeft = 1
@@ -326,7 +304,152 @@ State 11: <Arrive line 169, col 23 to line 169, col 65 of module LaneWorkLoop>
 /\ gone = <<TRUE, FALSE>>
 /\ rP = FALSE
 /\ hmoves = 2
-/\ eh = <<1, 0>>
+/\ eh = <<2, 0>>
+/\ rW = 1
+/\ rc = <<0, 0>>
+/\ pubd = {}
+/\ rq = <<-1, -1>>
+/\ termPub = <<0, 0>>
+/\ st = <<"awaiting_worker", "none">>
+/\ hb = <<0, 0>>
+/\ crashes = 0
+/\ lost = FALSE
+/\ tier = <<0, 0>>
+/\ effCnt = 0
+/\ head = 2
+
+State 11: <Receipt line 203, col 3 to line 216, col 61 of module LaneWorkLoop>
+/\ org = <<"working", "working">>
+/\ inCnt = 1
+/\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
+/\ ob = <<-1, -1>>
+/\ rcG = <<0, 0>>
+/\ startsLeft = 1
+/\ ansIn = {}
+/\ rOuts = {"reply"}
+/\ cm = FALSE
+/\ pc = "pub"
+/\ ph = <<-1, -1>>
+/\ gone = <<TRUE, FALSE>>
+/\ rP = TRUE
+/\ hmoves = 2
+/\ eh = <<2, 0>>
+/\ rW = 1
+/\ rc = <<0, 0>>
+/\ pubd = {}
+/\ rq = <<-1, -1>>
+/\ termPub = <<0, 0>>
+/\ st = <<"awaiting_worker", "none">>
+/\ hb = <<0, 0>>
+/\ crashes = 0
+/\ lost = FALSE
+/\ tier = <<0, 0>>
+/\ effCnt = 0
+/\ head = 2
+
+State 12: <PubOut line 219, col 3 to line 224, col 93 of module LaneWorkLoop>
+/\ org = <<"working", "working">>
+/\ inCnt = 1
+/\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
+/\ ob = <<-1, -1>>
+/\ rcG = <<0, 0>>
+/\ startsLeft = 1
+/\ ansIn = {}
+/\ rOuts = {"reply"}
+/\ cm = FALSE
+/\ pc = "pub"
+/\ ph = <<-1, -1>>
+/\ gone = <<TRUE, FALSE>>
+/\ rP = TRUE
+/\ hmoves = 2
+/\ eh = <<2, 0>>
+/\ rW = 1
+/\ rc = <<0, 0>>
+/\ pubd = {"reply"}
+/\ rq = <<-1, -1>>
+/\ termPub = <<0, 0>>
+/\ st = <<"awaiting_worker", "none">>
+/\ hb = <<0, 0>>
+/\ crashes = 0
+/\ lost = FALSE
+/\ tier = <<0, 0>>
+/\ effCnt = 0
+/\ head = 2
+
+State 13: <Commit line 227, col 3 to line 229, col 107 of module LaneWorkLoop>
+/\ org = <<"working", "working">>
+/\ inCnt = 1
+/\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
+/\ ob = <<-1, -1>>
+/\ rcG = <<0, 0>>
+/\ startsLeft = 1
+/\ ansIn = {}
+/\ rOuts = {"reply"}
+/\ cm = TRUE
+/\ pc = "pub"
+/\ ph = <<-1, -1>>
+/\ gone = <<TRUE, FALSE>>
+/\ rP = TRUE
+/\ hmoves = 2
+/\ eh = <<2, 0>>
+/\ rW = 1
+/\ rc = <<0, 0>>
+/\ pubd = {"reply"}
+/\ rq = <<-1, -1>>
+/\ termPub = <<0, 0>>
+/\ st = <<"awaiting_worker", "none">>
+/\ hb = <<0, 0>>
+/\ crashes = 0
+/\ lost = FALSE
+/\ tier = <<0, 0>>
+/\ effCnt = 0
+/\ head = 2
+
+State 14: <Crash line 237, col 3 to line 239, col 98 of module LaneWorkLoop>
+/\ org = <<"working", "working">>
+/\ inCnt = 1
+/\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
+/\ ob = <<-1, -1>>
+/\ rcG = <<0, 0>>
+/\ startsLeft = 1
+/\ ansIn = {}
+/\ rOuts = {"reply"}
+/\ cm = TRUE
+/\ pc = "down"
+/\ ph = <<-1, -1>>
+/\ gone = <<TRUE, FALSE>>
+/\ rP = TRUE
+/\ hmoves = 2
+/\ eh = <<2, 0>>
+/\ rW = 1
+/\ rc = <<0, 0>>
+/\ pubd = {"reply"}
+/\ rq = <<-1, -1>>
+/\ termPub = <<0, 0>>
+/\ st = <<"awaiting_worker", "none">>
+/\ hb = <<0, 0>>
+/\ crashes = 1
+/\ lost = FALSE
+/\ tier = <<0, 0>>
+/\ effCnt = 0
+/\ head = 2
+
+State 15: <Recover line 242, col 3 to line 251, col 75 of module LaneWorkLoop>
+/\ org = <<"working", "working">>
+/\ inCnt = 1
+/\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
+/\ ob = <<-1, -1>>
+/\ rcG = <<0, 0>>
+/\ startsLeft = 1
+/\ ansIn = {}
+/\ rOuts = {}
+/\ cm = FALSE
+/\ pc = "idle"
+/\ ph = <<-1, -1>>
+/\ gone = <<TRUE, FALSE>>
+/\ rP = FALSE
+/\ hmoves = 2
+/\ eh = <<2, 0>>
 /\ rW = 1
 /\ rc = <<0, 0>>
 /\ pubd = {}
@@ -340,23 +463,23 @@ State 11: <Arrive line 169, col 23 to line 169, col 65 of module LaneWorkLoop>
 /\ effCnt = 0
 /\ head = 2
 
-State 12: <Receipt line 203, col 3 to line 216, col 61 of module LaneWorkLoop>
+State 16: <Arrive line 169, col 23 to line 169, col 65 of module LaneWorkLoop>
 /\ org = <<"working", "working">>
 /\ inCnt = 1
-/\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
+/\ cur = [k |-> "start", w |-> 1, h |-> 0, f |-> FALSE, a |-> "none"]
 /\ ob = <<-1, -1>>
 /\ rcG = <<0, 0>>
-/\ startsLeft = 0
+/\ startsLeft = 1
 /\ ansIn = {}
-/\ rOuts = {"reply"}
+/\ rOuts = {}
 /\ cm = FALSE
-/\ pc = "pub"
+/\ pc = "fold"
 /\ ph = <<-1, -1>>
 /\ gone = <<TRUE, FALSE>>
-/\ rP = TRUE
+/\ rP = FALSE
 /\ hmoves = 2
-/\ eh = <<1, 0>>
-/\ rW = 2
+/\ eh = <<2, 0>>
+/\ rW = 1
 /\ rc = <<0, 0>>
 /\ pubd = {}
 /\ rq = <<-1, -1>>
@@ -369,9 +492,9 @@ State 12: <Receipt line 203, col 3 to line 216, col 61 of module LaneWorkLoop>
 /\ effCnt = 0
 /\ head = 2
 
-State 13: <PubOut line 219, col 3 to line 224, col 93 of module LaneWorkLoop>
+State 17: <Receipt line 203, col 3 to line 216, col 61 of module LaneWorkLoop>
 /\ org = <<"working", "working">>
-/\ inCnt = 1
+/\ inCnt = 2
 /\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
 /\ ob = <<-1, -1>>
 /\ rcG = <<0, 0>>
@@ -384,8 +507,37 @@ State 13: <PubOut line 219, col 3 to line 224, col 93 of module LaneWorkLoop>
 /\ gone = <<TRUE, FALSE>>
 /\ rP = TRUE
 /\ hmoves = 2
-/\ eh = <<1, 0>>
-/\ rW = 2
+/\ eh = <<2, 0>>
+/\ rW = 1
+/\ rc = <<0, 0>>
+/\ pubd = {}
+/\ rq = <<-1, -1>>
+/\ termPub = <<0, 0>>
+/\ st = <<"awaiting_worker", "none">>
+/\ hb = <<0, 0>>
+/\ crashes = 1
+/\ lost = FALSE
+/\ tier = <<0, 0>>
+/\ effCnt = 0
+/\ head = 2
+
+State 18: <PubOut line 219, col 3 to line 224, col 93 of module LaneWorkLoop>
+/\ org = <<"working", "working">>
+/\ inCnt = 2
+/\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
+/\ ob = <<-1, -1>>
+/\ rcG = <<0, 0>>
+/\ startsLeft = 0
+/\ ansIn = {}
+/\ rOuts = {"reply"}
+/\ cm = FALSE
+/\ pc = "pub"
+/\ ph = <<-1, -1>>
+/\ gone = <<TRUE, FALSE>>
+/\ rP = TRUE
+/\ hmoves = 2
+/\ eh = <<2, 0>>
+/\ rW = 1
 /\ rc = <<0, 0>>
 /\ pubd = {"reply"}
 /\ rq = <<-1, -1>>
@@ -398,9 +550,9 @@ State 13: <PubOut line 219, col 3 to line 224, col 93 of module LaneWorkLoop>
 /\ effCnt = 0
 /\ head = 2
 
-State 14: <Commit line 227, col 3 to line 229, col 107 of module LaneWorkLoop>
+State 19: <Commit line 227, col 3 to line 229, col 107 of module LaneWorkLoop>
 /\ org = <<"working", "working">>
-/\ inCnt = 1
+/\ inCnt = 2
 /\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
 /\ ob = <<-1, -1>>
 /\ rcG = <<0, 0>>
@@ -413,8 +565,8 @@ State 14: <Commit line 227, col 3 to line 229, col 107 of module LaneWorkLoop>
 /\ gone = <<TRUE, FALSE>>
 /\ rP = TRUE
 /\ hmoves = 2
-/\ eh = <<1, 0>>
-/\ rW = 2
+/\ eh = <<2, 0>>
+/\ rW = 1
 /\ rc = <<0, 0>>
 /\ pubd = {"reply"}
 /\ rq = <<-1, -1>>
@@ -427,9 +579,9 @@ State 14: <Commit line 227, col 3 to line 229, col 107 of module LaneWorkLoop>
 /\ effCnt = 0
 /\ head = 2
 
-State 15: <Crash line 237, col 3 to line 239, col 98 of module LaneWorkLoop>
+State 20: <Crash line 237, col 3 to line 239, col 98 of module LaneWorkLoop>
 /\ org = <<"working", "working">>
-/\ inCnt = 1
+/\ inCnt = 2
 /\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
 /\ ob = <<-1, -1>>
 /\ rcG = <<0, 0>>
@@ -442,8 +594,8 @@ State 15: <Crash line 237, col 3 to line 239, col 98 of module LaneWorkLoop>
 /\ gone = <<TRUE, FALSE>>
 /\ rP = TRUE
 /\ hmoves = 2
-/\ eh = <<1, 0>>
-/\ rW = 2
+/\ eh = <<2, 0>>
+/\ rW = 1
 /\ rc = <<0, 0>>
 /\ pubd = {"reply"}
 /\ rq = <<-1, -1>>
@@ -456,9 +608,9 @@ State 15: <Crash line 237, col 3 to line 239, col 98 of module LaneWorkLoop>
 /\ effCnt = 0
 /\ head = 2
 
-State 16: <Recover line 242, col 3 to line 251, col 75 of module LaneWorkLoop>
+State 21: <Recover line 242, col 3 to line 251, col 75 of module LaneWorkLoop>
 /\ org = <<"working", "working">>
-/\ inCnt = 1
+/\ inCnt = 2
 /\ cur = [k |-> "none", w |-> 0, h |-> 0, f |-> FALSE, a |-> "none"]
 /\ ob = <<-1, -1>>
 /\ rcG = <<0, 0>>
@@ -471,8 +623,8 @@ State 16: <Recover line 242, col 3 to line 251, col 75 of module LaneWorkLoop>
 /\ gone = <<TRUE, FALSE>>
 /\ rP = FALSE
 /\ hmoves = 2
-/\ eh = <<1, 0>>
-/\ rW = 2
+/\ eh = <<2, 0>>
+/\ rW = 1
 /\ rc = <<0, 0>>
 /\ pubd = {}
 /\ rq = <<-1, -1>>
@@ -485,7 +637,9 @@ State 16: <Recover line 242, col 3 to line 251, col 75 of module LaneWorkLoop>
 /\ effCnt = 0
 /\ head = 2
 
-State 17: Stuttering
-Finished checking temporal properties in 00s at 2026-11-26 15:01:16
-44530 states generated, 18101 distinct states found, 3964 states left on queue.
-Finished in 03s at (2026-11-26 15:01:16)
+State 22: Stuttering
+Finished checking temporal properties in 00s at 2026-11-27 13:41:40
+87791 states generated, 35826 distinct states found, 6176 states left on queue.
+The depth of the complete state graph search is 25.
+Finished in 03s at (2026-11-27 13:41:40)
+Trace exploration spec path: ./LaneWorkLoop_TTrace_1795804896.tla

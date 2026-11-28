@@ -1460,7 +1460,7 @@ class DeployAgent:
             return decision
         assert decision.followed_tag is not None  # FOLLOW names the tag
         assert decision.followed_tag_sha is not None
-        cmd = stability_follow_command(decision.followed_tag, repository)
+        cmd = stability_follow_command(decision.followed_tag, repository, STATE_DIR)
         if not self._idle_converge_gate_open(cmd.requested_by):
             return decision
         self._stability_follow_attempted.add(decision.followed_tag_sha)

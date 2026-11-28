@@ -33,7 +33,7 @@ MUTATIONS = {
     "mut_resend_without_readback": "Invariant NoDuplicateEffect is violated",
     "mut_count_refused_input": "Invariant RetryBound is violated",
     "mut_answer_any_state": "Invariant AnswerInContract is violated",
-    "mut_no_tick": "Temporal properties were violated",
+    "mut_no_tick": "Temporal property DeadlineFires was violated",
 }
 
 
@@ -46,6 +46,14 @@ def test_model_passes_all_properties() -> None:
 @pytest.mark.parametrize(("name", "message"), sorted(MUTATIONS.items()))
 def test_mutation_breaks_its_property(name: str, message: str) -> None:
     assert message in (RESULTS / f"{name}.out").read_text()
+
+
+@pytest.mark.unit
+def test_no_tick_mutation_names_only_its_property() -> None:
+    cfg = (MODEL_DIR / "mut_no_tick.cfg").read_text()
+    assert re.search(r"^PROPERTIES DeadlineFires$", cfg, re.MULTILINE)
+    out = (RESULTS / "mut_no_tick.out").read_text()
+    assert "Temporal property Terminates was violated" not in out
 
 
 @pytest.mark.unit
