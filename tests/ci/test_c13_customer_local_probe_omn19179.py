@@ -238,7 +238,7 @@ def test_a_vcs_or_path_install_fails() -> None:
 @pytest.mark.unit
 def test_a_source_tree_on_the_machine_fails() -> None:
     obs = _pass_observations()
-    obs["source_trees"] = ["/home/runner/work/omnibase_infra/omnibase_infra"]
+    obs["source_trees"] = ["/srv/work/omnibase_infra/omnibase_infra"]
     assert "no_checkout" in _failed(obs)
 
 
@@ -317,6 +317,90 @@ def test_an_attempt_above_the_local_tier_fails() -> None:
     attempts.insert(0, climbed)
     _set_receipt(obs, receipt)
     assert "local_model" in _failed(obs)
+
+
+def _move_attempts_to_terminal_payload(receipt: dict[str, Any]) -> list[dict[str, Any]]:
+    """Re-shape a recorded receipt the way a current ``onex delegate`` writes it.
+
+    A current receipt carries the routing attempts under
+    ``receipt.result.terminal_payload.payload.attempts``, not under
+    ``receipt.result.attempts``.
+    """
+    result = receipt["receipt"]["result"]
+    attempts: list[dict[str, Any]] = result.pop("attempts")
+    result["terminal_payload"] = {"payload": {"attempts": attempts}}
+    assert "attempts" not in result
+    return attempts
+
+
+@pytest.mark.unit
+def test_attempts_are_read_from_the_terminal_payload_of_a_current_receipt() -> None:
+    """Known good: the attempts of a current receipt are read and graded as local."""
+    obs = _pass_observations()
+    receipt = _receipt(obs)
+    _move_attempts_to_terminal_payload(receipt)
+    _set_receipt(obs, receipt)
+    assert "local_model" not in _failed(obs)
+    record = probe.grade(obs, as_of="2026-09-22T00:00:00Z")
+    local = next(c for c in record.clauses if c.name == "local_model")
+    assert local.evidence["attempts"], "the attempts the receipt carries were not read"
+
+
+@pytest.mark.unit
+def test_an_attempt_above_the_local_tier_in_a_current_receipt_fails() -> None:
+    """Known bad: a climbed attempt in the terminal payload still fails local_model."""
+    obs = _pass_observations()
+    receipt = _receipt(obs)
+    attempts = _move_attempts_to_terminal_payload(receipt)
+    climbed = copy.deepcopy(attempts[0])
+    climbed.update({"tier": "cheap_cloud", "acceptance_decision": "climb"})
+    attempts.insert(0, climbed)
+    _set_receipt(obs, receipt)
+    assert "local_model" in _failed(obs)
+
+
+@pytest.mark.unit
+def test_a_receipt_with_no_attempts_anywhere_fails() -> None:
+    """Known bad: a receipt that records no attempt at either path is still refused."""
+    obs = _pass_observations()
+    receipt = _receipt(obs)
+    receipt["receipt"]["result"].pop("attempts")
+    _set_receipt(obs, receipt)
+    reasons = _failed(obs).get("local_model", [])
+    assert "receipt records no routing attempt" in reasons
+
+
+@pytest.mark.live_contact(
+    "tests/fixtures/omn19179/recorded_delegate_receipt_terminal_payload.json"
+)
+@pytest.mark.unit
+def test_a_recorded_terminal_payload_attempt_is_read(
+    recorded_response: dict[str, object],
+) -> None:
+    """Known good and known bad on one recorded ``onex delegate`` receipt.
+
+    The recording carries its one routing attempt only under
+    ``receipt.result.terminal_payload.payload.attempts``. Known good: the grader
+    reads that attempt. Known bad: the old path, ``receipt.result.attempts``,
+    holds none of it, so a reader fixed to that path reads no attempt.
+    """
+    receipt = recorded_response["receipt"]
+    assert isinstance(receipt, dict)
+    result = receipt["receipt"]["result"]
+    assert result.get("attempts") is None  # the old path reads none
+    clause = probe.grade_local_model(
+        {"served_models": [receipt["model"]], "model_port": 8000}, receipt
+    )
+    assert clause.evidence["attempts"] == [
+        {
+            "tier": "local",
+            "backend_id": "local-coder",
+            "model_id": receipt["model"],
+            "acceptance_decision": "accept",
+        }
+    ]
+    assert "receipt records no routing attempt" not in clause.reasons
+    assert not any("accepted attempts" in r for r in clause.reasons)
 
 
 @pytest.mark.unit
