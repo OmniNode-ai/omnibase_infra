@@ -36,11 +36,12 @@ _ROSTER_PATH = (
 
 # The browser login client's Keycloak id is also a private repository name, so
 # it is read from the roster rather than spelled here: it is the one client
-# whose staging override declares ``attributes``, which the tests below assert.
+# whose staging override repeats the PKCE attribute, which the tests below assert.
 LOGIN_CLIENT = next(
     c["clientId"]
     for c in json.loads(_ROSTER_PATH.read_text(encoding="utf-8"))["clients"]
-    if "attributes" in c.get("environmentOverrides", {}).get("staging", {})
+    if "pkce.code.challenge.method"
+    in c.get("environmentOverrides", {}).get("staging", {}).get("attributes", {})
 )
 
 STAGING_SHAPE = {
@@ -140,7 +141,9 @@ class TestStagingGetsTheStagingHosts:
                     client["clientId"],
                     environment,
                 )
-        assert checked == 1, f"expected exactly one attributes override: {checked}"
+        # The login client (PKCE) and the dashboard client (OMN-23491, sign-out
+        # only). A third must be counted here on purpose.
+        assert checked == 2, f"expected exactly two attributes overrides: {checked}"
         attributes = _resolved("staging")[LOGIN_CLIENT]["attributes"]
         assert attributes["pkce.code.challenge.method"] == "S256"
 

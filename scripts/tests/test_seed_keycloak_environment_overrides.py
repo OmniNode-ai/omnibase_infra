@@ -56,11 +56,12 @@ _ROSTER_PATH = (
 
 # The browser login client's Keycloak id is also a private repository name, so
 # it is read from the roster rather than spelled here: it is the one client
-# whose staging override declares ``attributes``.
+# whose staging override repeats the PKCE attribute.
 LOGIN_CLIENT = next(
     c["clientId"]
     for c in json.loads(_ROSTER_PATH.read_text(encoding="utf-8"))["clients"]
-    if "attributes" in c.get("environmentOverrides", {}).get("staging", {})
+    if "pkce.code.challenge.method"
+    in c.get("environmentOverrides", {}).get("staging", {}).get("attributes", {})
 )
 
 
@@ -124,9 +125,10 @@ class TestTheRosterDeclaresTheException:
         assert isinstance(prod.get("reason"), str) and prod["reason"].strip()
 
     def test_the_declared_overrides_are_exactly_these(self) -> None:
-        """Each exception is deliberate: onex-api on prod (OMN-18582) and the
-        three browser clients on staging (OMN-23298). Another one needs its
-        own change here."""
+        """Each exception is deliberate: onex-api on prod (OMN-18582), the
+        three browser clients on staging (OMN-23298) and the dashboard
+        server's pushed secret on staging and prod (OMN-23491). Another one
+        needs its own change here."""
         declared = {
             c["clientId"]: sorted(c["environmentOverrides"])
             for c in _roster_clients()
@@ -136,6 +138,7 @@ class TestTheRosterDeclaresTheException:
             "onex-api": ["prod"],
             LOGIN_CLIENT: ["staging"],
             "omnidash-spa": ["staging"],
+            "omnidash": ["prod", "staging"],
             "onex-customer": ["staging"],
         }
 
