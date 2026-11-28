@@ -16,8 +16,9 @@ the token.
 On staging and prod the roster pushes the secret from ``OMNIDASH_CLIENT_SECRET``,
 which the seed job reads from the same keycloak slot the dashboard reads, so
 the realm and the app hold one value and the confidential secret guard
-(OMN-16504) never sees an empty secret. On dev there is no ``secretEnv``, so
-the dev seed job needs no new variable.
+(OMN-16504) never sees an empty secret. Dev pushes it the same way since
+OMN-26768: it declared no ``secretEnv`` while the dev seed job had no such
+variable, and omninode_infra#2199 added one.
 """
 
 from __future__ import annotations
@@ -130,9 +131,17 @@ class TestEachRealmGetsItsShape:
         assert spec["secretEnv"] == SECRET_ENV
         assert spec["redirectUris"] == _entry()["redirectUris"]
 
-    def test_dev_needs_no_new_variable(self) -> None:
+    def test_dev_pushes_the_secret_like_the_other_realms(self) -> None:
+        """OMN-26768. This asserted the opposite until 2026-11-28: dev
+        declared no secretEnv because the dev seed job had no such variable.
+        omninode_infra#2199 added it to the job and to the dev reconcile
+        credentials, so the premise is gone, and leaving dev out is now the
+        defect: a confidential client with no declared secret gets one minted
+        by Keycloak that is never written back to the omnidash-credentials
+        Secret the dashboard reads, so sign-in fails invalid_client while the
+        empty-secret guard (OMN-16504) sees a non-empty value."""
         spec = _resolved("dev")
-        assert "secretEnv" not in spec
+        assert spec["secretEnv"] == SECRET_ENV
         assert "consumerSecretEnv" not in spec
 
 
@@ -150,6 +159,10 @@ class TestTheSeederPushesTheSecret:
                 with pytest.raises(SystemExit):
                     _mod()._resolve_client_secret(spec)
 
-    def test_dev_resolves_no_pushed_secret(self) -> None:
+    def test_dev_reads_the_secret_and_fails_closed_without_it(self) -> None:
+        spec = _resolved("dev")
+        with patch.dict("os.environ", {SECRET_ENV: "value-from-the-dev-slot"}):
+            assert _mod()._resolve_client_secret(spec) == "value-from-the-dev-slot"
         with patch.dict("os.environ", {}, clear=True):
-            assert _mod()._resolve_client_secret(_resolved("dev")) is None
+            with pytest.raises(SystemExit):
+                _mod()._resolve_client_secret(spec)
