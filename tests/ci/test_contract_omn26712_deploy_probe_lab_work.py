@@ -44,6 +44,13 @@ def test_probe_goes_through_lab_work_on_the_dev_lane_at_head() -> None:
     assert "docker info" not in command
 
 
+def test_probe_needs_docker_host() -> None:
+    """Placement without ``--need docker`` can pick a host with no Docker daemon (h101)."""
+    (check,) = _items()[_PROBE_ID]["checks"]
+    command = str(check["check_value"])
+    assert "--need docker" in command
+
+
 def test_ac3_stays_bound_by_the_hosted_migration_test() -> None:
     hosted = _items()[_HOSTED_AC3_ID]
     assert hosted["binds_ac"] == ["AC3"]
