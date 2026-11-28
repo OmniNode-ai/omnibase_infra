@@ -2,16 +2,20 @@ schema_version: 1.0.0
 ticket_id: OMN-26724
 title: The dev deploy agent runs the merged omnibase_infra code, so today's build fixes take effect
 summary: >-
-  A queued build whose git_ref the deploy clone lacks (overdue dev builds published at 18:16Z on 2026-11-26 by the old agent process, carrying a sibling repository's sha) ended each window in "Could not parse object" and spent one stale record per window. node_build_repository_ref_compute decides, from what the clone holds before and after one fetch on a miss, whether a build may start; the consumer refuses a missing ref with the typed reason ref_not_in_clone and the next command runs in the same window. The agent restart and the hourly build readback (AC1 to AC3 of the ticket) are lab steps recorded on the ticket, not bound here.
+  A queued build whose git_ref the deploy clone lacks (overdue dev builds published at 18:16Z on 2026-11-26 by the old agent process, carrying a sibling repository's sha) ended each window in "Could not parse object" and spent one stale record per window. node_build_repository_ref_compute decides, from what the clone holds before and after one fetch on a miss, whether a build may start; the consumer refuses a missing ref with the typed reason ref_not_in_clone and the next command runs in the same window. The agent restart (AC1), the hourly build readback (AC2) and the untouched stability and prod agents (AC3) are lab readings of the live agents' /health; each is bound by a dod_evidence item scoped to the local Done gate, because the hosted runner cannot reach the lab hosts.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-omn26724-missing-ref-refused-next-runs
-    statement: A queued build whose ref the deploy clone lacks is refused with a typed reason and the next command runs; a real ref builds.
+  - id: req-omn26724-dev-agent-runs-merged-code
+    statement: The dev deploy agent runs the merged omnibase_infra code, rebuilds dev on its next window, and the stability and prod agents are untouched.
     acceptance:
-      - id: AC4
-        statement: "AC4: a record whose git_ref the clone lacks is refused with a typed reason and the next command runs in the same window; a record with a real ref builds -- falsifier: a unit test drives two queued commands through the consumer against a real git clone"
+      - id: AC1
+        statement: "AC1: the dev deploy agent's deploy-source clone is at current omnibase_infra dev and the agent was restarted once through its declared path (dev only) -- falsifier: the agent's new PID, its start time after the restart, and the clone's commit read on h201"
+      - id: AC2
+        statement: "AC2: the next hourly window builds dev from the build repository's own ref and the new runtime answers health within 5 minutes -- falsifier: the job record (git ref, success) and the health time from start"
+      - id: AC3
+        statement: "AC3: the stability and prod agents are untouched -- falsifier: their PIDs and start times read before and after"
 evidence_requirements:
   - kind: tests
     description: The build repository ref node and the consumer refusal.
@@ -71,4 +75,80 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/handlers/test_build_repository_ref_integration_omn26724.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26724-ac1-restart-reading-judged
+    description: "The node that judges AC1's live reading passes a dev agent restarted onto the merge and fails one with no loaded sha, no positive uptime, a sha lacking the merge or an uptime older than the merge."
+    source: manual
+    binds_ac: [AC1]
+    supersedes_ac_binding:
+      - item: dod-omn26724-ac4-missing-ref-refused-next-runs
+        label: AC4
+        reason_kind: no_longer_applicable
+        reason: AC4 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: q-close26724-0826
+        retired_at: '2026-11-28T08:55:00Z'
+      - item: dod-omn26724-ac4-node-decision
+        label: AC4
+        reason_kind: no_longer_applicable
+        reason: AC4 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: q-close26724-0826
+        retired_at: '2026-11-28T08:55:00Z'
+      - item: dod-omn26724-ac4-node-run
+        label: AC4
+        reason_kind: no_longer_applicable
+        reason: AC4 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: q-close26724-0826
+        retired_at: '2026-11-28T08:55:00Z'
+      - item: dod-omn26724-ac4-real-clone-integration
+        label: AC4
+        reason_kind: no_longer_applicable
+        reason: AC4 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: q-close26724-0826
+        retired_at: '2026-11-28T08:55:00Z'
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_deploy_agent_reading_omn26724.py -k 'known_good or ac1' -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26724-ac2-build-reading-judged
+    description: "The node that judges AC2's live reading passes a dev-lane success with phase results and fails a failed, other-lane or phase-less last result."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_deploy_agent_reading_omn26724.py -k 'known_good or ac2' -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26724-ac3-untouched-agents-judged
+    description: "The node that judges AC3's live reading passes stability and prod agents that ran longer than the dev agent and fails a shorter, equal or unanswered uptime."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_deploy_agent_reading_omn26724.py -k 'known_good or ac3' -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26724-ac1-dev-agent-loaded-merged-code
+    description: "Live reading for AC1 on the lab agents: the dev agent's /health loaded_code_sha contains the merge of the build-ref fix and its uptime is shorter than the merge's age. Judged by node_deploy_agent_reading_compute; exits non-zero when that criterion is not met or an agent is unreachable."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: |-
+          dev="$(ssh "$DEPLOY_PROBE_HOST" "curl -sf http://localhost:8098/health")" && stab="$(ssh "$STABILITY_PROBE_HOST" "curl -sf http://localhost:8098/health")" && prod="$(ssh "$PROD_PROBE_HOST" "curl -sf http://localhost:8098/health")" && DEV="$dev" STAB="$stab" PROD="$prod" PYTHONPATH=src uv run --frozen python -c 'import json,os,subprocess,sys,time;from omnibase_infra.handlers.deploy_agent_reading.handler_deploy_agent_reading import HandlerDeployAgentReading as H;from omnibase_infra.models.model_deploy_agent_reading_request import ModelDeployAgentReadingRequest as R;d,s,p=(json.loads(os.environ[k]) for k in ("DEV","STAB","PROD"));m=sys.argv[1];r=d.get("last_result") or {};sha=d.get("loaded_code_sha") or "";anc=bool(sha) and subprocess.run(["git","merge-base","--is-ancestor",m,sha]).returncode==0;t=int(subprocess.check_output(["git","show","-s","--format=%ct",m]));u=lambda h:None if h.get("uptime_seconds") is None else int(h["uptime_seconds"]);v=H().handle(R(dev_loaded_code_sha=sha,dev_uptime_seconds=u(d),dev_loaded_sha_has_merge=anc,merge_age_seconds=int(time.time())-t,dev_last_status=r.get("status") or "",dev_last_runtime_lane=r.get("runtime_lane") or "",dev_last_phase_result_count=len(r.get("phase_results") or []),stability_uptime_seconds=u(s),prod_uptime_seconds=u(p)));sys.exit(0 if v.ac1_met else 1)' 5b35e3658c6f3a6497913628f62ff908c05faff8
+        cwd: .
+  - id: dod-omn26724-ac2-dev-build-succeeded-from-own-ref
+    description: "Live reading for AC2: the dev agent's last result is a dev-lane success with phase results. Judged by node_deploy_agent_reading_compute; exits non-zero when that criterion is not met or an agent is unreachable."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: |-
+          dev="$(ssh "$DEPLOY_PROBE_HOST" "curl -sf http://localhost:8098/health")" && stab="$(ssh "$STABILITY_PROBE_HOST" "curl -sf http://localhost:8098/health")" && prod="$(ssh "$PROD_PROBE_HOST" "curl -sf http://localhost:8098/health")" && DEV="$dev" STAB="$stab" PROD="$prod" PYTHONPATH=src uv run --frozen python -c 'import json,os,subprocess,sys,time;from omnibase_infra.handlers.deploy_agent_reading.handler_deploy_agent_reading import HandlerDeployAgentReading as H;from omnibase_infra.models.model_deploy_agent_reading_request import ModelDeployAgentReadingRequest as R;d,s,p=(json.loads(os.environ[k]) for k in ("DEV","STAB","PROD"));m=sys.argv[1];r=d.get("last_result") or {};sha=d.get("loaded_code_sha") or "";anc=bool(sha) and subprocess.run(["git","merge-base","--is-ancestor",m,sha]).returncode==0;t=int(subprocess.check_output(["git","show","-s","--format=%ct",m]));u=lambda h:None if h.get("uptime_seconds") is None else int(h["uptime_seconds"]);v=H().handle(R(dev_loaded_code_sha=sha,dev_uptime_seconds=u(d),dev_loaded_sha_has_merge=anc,merge_age_seconds=int(time.time())-t,dev_last_status=r.get("status") or "",dev_last_runtime_lane=r.get("runtime_lane") or "",dev_last_phase_result_count=len(r.get("phase_results") or []),stability_uptime_seconds=u(s),prod_uptime_seconds=u(p)));sys.exit(0 if v.ac2_met else 1)' 5b35e3658c6f3a6497913628f62ff908c05faff8
+        cwd: .
+  - id: dod-omn26724-ac3-stability-prod-not-restarted
+    description: "Live reading for AC3: the stability and prod agents' uptime is longer than the dev agent's. Judged by node_deploy_agent_reading_compute; read-only; exits non-zero when that criterion is not met or an agent is unreachable."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: |-
+          dev="$(ssh "$DEPLOY_PROBE_HOST" "curl -sf http://localhost:8098/health")" && stab="$(ssh "$STABILITY_PROBE_HOST" "curl -sf http://localhost:8098/health")" && prod="$(ssh "$PROD_PROBE_HOST" "curl -sf http://localhost:8098/health")" && DEV="$dev" STAB="$stab" PROD="$prod" PYTHONPATH=src uv run --frozen python -c 'import json,os,subprocess,sys,time;from omnibase_infra.handlers.deploy_agent_reading.handler_deploy_agent_reading import HandlerDeployAgentReading as H;from omnibase_infra.models.model_deploy_agent_reading_request import ModelDeployAgentReadingRequest as R;d,s,p=(json.loads(os.environ[k]) for k in ("DEV","STAB","PROD"));m=sys.argv[1];r=d.get("last_result") or {};sha=d.get("loaded_code_sha") or "";anc=bool(sha) and subprocess.run(["git","merge-base","--is-ancestor",m,sha]).returncode==0;t=int(subprocess.check_output(["git","show","-s","--format=%ct",m]));u=lambda h:None if h.get("uptime_seconds") is None else int(h["uptime_seconds"]);v=H().handle(R(dev_loaded_code_sha=sha,dev_uptime_seconds=u(d),dev_loaded_sha_has_merge=anc,merge_age_seconds=int(time.time())-t,dev_last_status=r.get("status") or "",dev_last_runtime_lane=r.get("runtime_lane") or "",dev_last_phase_result_count=len(r.get("phase_results") or []),stability_uptime_seconds=u(s),prod_uptime_seconds=u(p)));sys.exit(0 if v.ac3_met else 1)' 5b35e3658c6f3a6497913628f62ff908c05faff8
         cwd: .

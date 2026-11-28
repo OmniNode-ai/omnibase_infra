@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_deploy_agent_reading_compute
+contract_name: node_deploy_agent_reading_compute
+node_name: node_deploy_agent_reading_compute
+node_type: COMPUTE_GENERIC
+descriptor:
+  node_archetype: compute
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  The dev deploy agent ticket's three acceptance readings were inline shell in a contract that the hosted gate could not run, so no control showed them to fail. This node judges them from the agents' health answers a reader supplies: the dev agent loaded code containing the merge and restarted after it (AC1), its last result is a dev-lane success with phase results (AC2), and the stability and prod agents ran longer than it (AC3). Pure: no clock, no I/O; an unanswered health is never a pass.
+input_model:
+  name: ModelDeployAgentReadingRequest
+  module: omnibase_infra.models.model_deploy_agent_reading_request
+  description: The agents' health facts and the merge's age.
+output_model:
+  name: ModelDeployAgentReadingVerdict
+  module: omnibase_infra.models.model_deploy_agent_reading_verdict
+  description: One boolean per criterion and a reason for each that is not met.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: deploy_agent_reading.judge
+      handler:
+        name: HandlerDeployAgentReading
+        module: omnibase_infra.handlers.deploy_agent_reading.handler_deploy_agent_reading
+      event_model:
+        name: ModelDeployAgentReadingRequest
+        module: omnibase_infra.models.model_deploy_agent_reading_request
+      output_events: [ModelDeployAgentReadingVerdict]
+capabilities:
+  - name: deploy_agent_reading.verdict
+    description: Judge the restart, build and untouched-agent readings of the dev deploy agent ticket.
+metadata:
+  ticket: OMN-26724
+  author: OmniNode Team
+  description: Pure judgment run by the Done gate's readers.
+  tags: [compute, deployment, dev]

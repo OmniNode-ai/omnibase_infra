@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# This handler is compute-side (pure judgment, OMN-26724). Its nearer declaration
+# keeps K4 active beneath the shared handlers package's effect boundary.
+node_type: "COMPUTE_GENERIC"
+descriptor:
+  node_archetype: compute
+handler:
+  name: HandlerDeployAgentReading
+  module: omnibase_infra.handlers.deploy_agent_reading.handler_deploy_agent_reading
