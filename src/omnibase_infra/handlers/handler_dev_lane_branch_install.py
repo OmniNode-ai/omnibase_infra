@@ -101,9 +101,19 @@ from omnibase_infra.enums.enum_dev_lane_branch_install_release_reason import (
 from omnibase_infra.enums.enum_dev_lane_branch_install_state import (
     EnumDevLaneBranchInstallState,
 )
+from omnibase_infra.handlers.util_dev_lane_branch_install_cli import build_parser
+from omnibase_infra.handlers.util_dev_lane_branch_install_entry_points import (
+    entry_point_rows,
+    entry_point_rows_no_container,
+    parse_entry_points,
+    put_entry_point,
+)
 from omnibase_infra.models.model_dev_lane_branch_install import (
     COMMIT_PATTERN,
     ModelDevLaneBranchInstall,
+)
+from omnibase_infra.models.model_dev_lane_branch_install_entry_point import (
+    ModelDevLaneBranchInstallEntryPoint,
 )
 from omnibase_infra.models.model_dev_lane_branch_install_file import (
     SHA256_PATTERN,
@@ -357,6 +367,7 @@ def register(
     restart: bool = True,
     replace: bool = False,
     expected_sha256: Mapping[str, str] | None = None,
+    entry_points: Sequence[ModelDevLaneBranchInstallEntryPoint] = (),
     now: datetime | None = None,
 ) -> ModelDevLaneBranchInstall:
     """Declare one install, keeping its bytes; refuse rather than guess.
@@ -411,6 +422,7 @@ def register(
                 registered_by=registered_by,
                 services=tuple(services),
                 files=tuple(files),
+                entry_points=tuple(entry_points),
                 restart=restart,
                 registered_at=when,
                 expires_at=expires,
@@ -547,6 +559,7 @@ class DevLaneContainerReader:
                     )
                     for f in install.files
                 )
+                rows.extend(entry_point_rows_no_container(service, install, why))
                 continue
             container = ids[0]
             for f in install.files:
@@ -570,6 +583,11 @@ class DevLaneContainerReader:
                         detail=detail,
                     )
                 )
+            rows.extend(
+                entry_point_rows(
+                    self._run, service, container, install, DOCKER_TIMEOUT_SECONDS
+                )
+            )
         whole = all(r.state in _WHOLE for r in rows)
         return ModelDevLaneBranchInstallReadback(
             install_key=install.id,
@@ -758,6 +776,7 @@ class HandlerDevLaneBranchInstall:
                 continue
             report_one(before)
             by_path = {f.path: f for f in install.files}
+            ep_by_path = {e.path: e for e in install.entry_points}
             for row in before.files:
                 key = (install.id, row.service, row.path)
                 was[key] = row.state
@@ -769,7 +788,13 @@ class HandlerDevLaneBranchInstall:
                 ):
                     failed[key] = row.detail or row.state.value
                     continue
-                problem = self._writer.copy_in(row.container, by_path[row.path])
+                problem = (
+                    put_entry_point(
+                        self._writer.cmd_ok, row.container, ep_by_path[row.path]
+                    )
+                    if row.path in ep_by_path
+                    else self._writer.copy_in(row.container, by_path[row.path])
+                )
                 if problem:
                     failed[key] = problem
                 elif install.restart:
@@ -1039,49 +1064,6 @@ def _pairs(values: Sequence[str], flag: str) -> dict[str, str]:
     return out
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m omnibase_infra.handlers.handler_dev_lane_branch_install",
-        description="Declare, check, apply and release dev-lane branch installs.",
-    )
-    sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("register", "release", "list", "check", "apply", "release-due"):
-        p = sub.add_parser(name)
-        p.add_argument("--state-dir", required=True, type=Path)
-        if name in ("check", "apply", "release-due"):
-            p.add_argument("--compose-project", required=True)
-        if name in ("apply", "release-due"):
-            p.add_argument(
-                "--clone", action="append", default=[], help="REPO=PATH of a clone"
-            )
-            p.add_argument(
-                "--running-ref",
-                action="append",
-                default=[],
-                help="REPO=SHA the running image was built from",
-            )
-    reg = sub.choices["register"]
-    reg.add_argument("--lane", required=True)
-    reg.add_argument("--id", dest="install_id")
-    reg.add_argument("--repo", required=True)
-    reg.add_argument("--pr", type=int)
-    reg.add_argument("--branch", required=True)
-    reg.add_argument("--head", required=True)
-    reg.add_argument("--ticket", required=True)
-    reg.add_argument("--registered-by", required=True)
-    reg.add_argument("--service", required=True, action="append", dest="services")
-    reg.add_argument("--file", required=True, action="append", dest="files")
-    reg.add_argument("--expect-sha256", action="append", default=[], dest="expect")
-    reg.add_argument("--expires-in-hours", required=True, type=float)
-    reg.add_argument("--no-restart", action="store_true")
-    reg.add_argument("--replace", action="store_true")
-    reg.add_argument("--compose-project", help="apply at once to this project")
-    rel = sub.choices["release"]
-    rel.add_argument("--id", required=True, dest="install_id")
-    rel.add_argument("--reason", required=True)
-    return parser
-
-
 def _probe(args: argparse.Namespace) -> MergedProbe | None:
     clones = _pairs(getattr(args, "clone", []), "--clone")
     refs = _pairs(getattr(args, "running_ref", []), "--running-ref")
@@ -1094,6 +1076,15 @@ def _probe(args: argparse.Namespace) -> MergedProbe | None:
 
 def _emit(line: str) -> None:
     sys.stdout.write(line + "\n")
+
+
+def entry_points_or_refuse(
+    values: Sequence[str],
+) -> tuple[ModelDevLaneBranchInstallEntryPoint, ...]:
+    try:
+        return parse_entry_points(values)
+    except ValueError as exc:
+        raise DevLaneBranchInstallRefusedError(str(exc)) from exc
 
 
 def main(
@@ -1109,7 +1100,7 @@ def main(
         stream=sys.stderr,
         format="%(asctime)s %(levelname)s branch-installs: %(message)s",
     )
-    args = _build_parser().parse_args(argv)
+    args = build_parser().parse_args(argv)
     store = DevLaneBranchInstallStore(args.state_dir)
     try:
         if args.command == "register":
@@ -1130,6 +1121,7 @@ def main(
                 restart=not args.no_restart,
                 replace=args.replace,
                 expected_sha256=_pairs(args.expect, "--expect-sha256"),
+                entry_points=entry_points_or_refuse(args.entry_points),
                 now=clock() if clock else None,
             )
             _emit(f"REGISTERED {install.model_dump_json()}")

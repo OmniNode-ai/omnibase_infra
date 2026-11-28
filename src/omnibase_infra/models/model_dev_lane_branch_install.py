@@ -6,9 +6,19 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
+from typing import TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+)
 
+from omnibase_infra.models.model_dev_lane_branch_install_entry_point import (
+    ModelDevLaneBranchInstallEntryPoint,
+)
 from omnibase_infra.models.model_dev_lane_branch_install_file import (
     ModelDevLaneBranchInstallFile,
 )
@@ -16,6 +26,9 @@ from omnibase_infra.models.model_dev_lane_branch_install_file import (
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _ID = re.compile(r"^[a-z0-9][a-z0-9._-]{2,79}$")
 _REPO = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+_PathT = TypeVar(
+    "_PathT", ModelDevLaneBranchInstallFile, ModelDevLaneBranchInstallEntryPoint
+)
 _TICKET = re.compile(r"^OMN-\d+$")
 _SERVICE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 _LANE_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
@@ -42,6 +55,7 @@ class ModelDevLaneBranchInstall(BaseModel):
     registered_by: str
     services: tuple[str, ...] = Field(min_length=1)
     files: tuple[ModelDevLaneBranchInstallFile, ...] = Field(min_length=1)
+    entry_points: tuple[ModelDevLaneBranchInstallEntryPoint, ...] = ()
     restart: bool = True
     registered_at: datetime
     expires_at: datetime
@@ -99,13 +113,13 @@ class ModelDevLaneBranchInstall(BaseModel):
             raise ValueError("services must be distinct compose service names")
         return value
 
-    @field_validator("files")
+    @field_validator("files", "entry_points")
     @classmethod
-    def _files_distinct(
-        cls, value: tuple[ModelDevLaneBranchInstallFile, ...]
-    ) -> tuple[ModelDevLaneBranchInstallFile, ...]:
-        if len({f.path for f in value}) != len(value):
-            raise ValueError("files must name distinct container paths")
+    def _paths_distinct(
+        cls, value: tuple[_PathT, ...], info: ValidationInfo
+    ) -> tuple[_PathT, ...]:
+        if len({v.path for v in value}) != len(value):
+            raise ValueError(f"{info.field_name} must name distinct paths")
         return value
 
     @field_validator("registered_at", "expires_at")
