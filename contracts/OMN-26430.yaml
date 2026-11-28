@@ -73,13 +73,13 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/ci/test_contract_omn26430_deploy_probe_symbol.py -q --no-cov -n 0 -p no:randomly
         cwd: .
   - id: dod-omn26430-deleted-acs-retired
-    description: AC3, AC4 and AC5 were deleted from OMN-26430. This item carries the retirement of the claim each of the three items that bound them made, and keeps the serial-dispatch and probe-symbol tests running, and a committed-contract test requires the contract to declare only AC1 and AC2 with each deleted binding retired; it binds no criterion.
+    description: AC3, AC4 and AC5 were deleted from OMN-26430. This item carries the retirement of the claim each of the three items that bound them made, and keeps the serial-dispatch and probe-symbol tests running, and a committed-contract test requires the contract to declare only AC1 and AC2 with each deleted binding retired; it is bound to the two live criteria so the merge-base control can fail on it.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn26430_db_owning_projection_serial_dispatch.py tests/ci/test_contract_omn26430_deploy_probe_symbol.py tests/ci/test_contract_omn26430_deleted_acs_retired.py -q --no-cov -n 0 -p no:randomly
         cwd: .
-    binds_ac: []
+    binds_ac: [AC1, AC2]
     supersedes_ac_binding:
       - item: dod-omn26430-ac3-serial-dispatch
         label: AC3

@@ -5,7 +5,7 @@
 The ticket carries AC1 and AC2 only. A contract that still declares AC3, AC4 or AC5
 as acceptance criteria claims criteria the ticket no longer has, and the items that
 bound them keep proving them. The contract retires each of the three bindings with a
-``supersedes_ac_binding`` entry on an item that binds no criterion itself. The read is
+``supersedes_ac_binding`` entry on an item that binds only the live criteria. The read is
 of the contract as committed at ``HEAD``: the hosted control copies the new contract
 over the older commit's tree, so a working-tree read could not tell the two apart,
 while the committed read at the older commit still declares the three criteria and
@@ -54,12 +54,12 @@ def test_contract_declares_only_the_criteria_the_ticket_carries() -> None:
     assert declared == _LIVE, declared
 
 
-def test_each_deleted_criterion_binding_is_retired_by_an_item_that_binds_nothing() -> (
+def test_each_deleted_criterion_binding_is_retired_by_an_item_that_binds_only_live_ones() -> (
     None
 ):
     retired: dict[str, str] = {}
     for item in _committed_contract()["dod_evidence"]:
         for entry in item.get("supersedes_ac_binding") or []:
-            assert not item.get("binds_ac"), item["id"]
+            assert set(item.get("binds_ac") or []) <= _LIVE, item["id"]
             retired[entry["label"]] = entry["item"]
     assert set(retired) == _DELETED, retired
