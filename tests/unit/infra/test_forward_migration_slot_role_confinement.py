@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from functools import cache
 from pathlib import Path
 
 import pytest
@@ -67,6 +68,7 @@ def test_slot_rewrite_preserves_other_slots_principals(
             rewritten.unlink(missing_ok=True)
 
 
+@cache
 def _helpers() -> str:
     text = RUNNER.read_text(encoding="utf-8")
     start = text.index("# Asserts a name is inside the slot's fence")
@@ -74,10 +76,11 @@ def _helpers() -> str:
     return text[start:end]
 
 
-def _managed_roles() -> list[str]:
+@cache
+def _managed_roles() -> tuple[str, ...]:
     match = re.search(r'^SLOT_MANAGED_ROLES="([^"]*)"', _helpers(), re.M)
     assert match, "the runner declares no SLOT_MANAGED_ROLES"
-    return match.group(1).split()
+    return tuple(match.group(1).split())
 
 
 def _rewrite(
