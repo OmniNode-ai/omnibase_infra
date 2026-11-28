@@ -43,13 +43,13 @@ dod_evidence:
         check_value: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_no_pr_omn26764.py -q -k dev_lane_branch_install_removed_on_roll
         cwd: .
   - id: dod-omn26764-ac3
-    description: 'hosted proxy for AC3: the existing install, apply and readback tests pass with the change; the lab install reading is on the pull request Lab line.'
+    description: 'hosted proxy for AC3: the real command line registers with no pull request flag, lists the record and releases it; it fails at the base commit. The lab install reading is on the pull request Lab line.'
     source: manual
     binds_ac:
       - AC3
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q
+        check_value: uv run pytest tests/integration/test_dev_lane_branch_install_no_pr_omn26764.py -q
         cwd: .
   - id: dod-omn26764-deploy-probe
     description: 'The handler on the dev branch declares the pull request number optional; the probe exits 0 once the change is merged and 1 at the merge base.'
