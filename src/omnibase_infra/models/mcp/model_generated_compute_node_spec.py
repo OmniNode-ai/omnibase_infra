@@ -37,6 +37,7 @@ class ModelGeneratedComputeNodeSpec(BaseModel):
         invocation_input_model_name: Class name of the invocation input model.
         invocation_output_model_module: Module of the invocation output model.
         invocation_output_model_name: Class name of the invocation output model.
+        tool_timeout_seconds: Maximum seconds one tool invocation may take.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -90,6 +91,11 @@ class ModelGeneratedComputeNodeSpec(BaseModel):
         ...,
         min_length=1,
         description="Class name of the invocation output model",
+    )
+    tool_timeout_seconds: int = Field(
+        ...,
+        gt=0,
+        description="Maximum wall-clock seconds one tool invocation may take",
     )
 
     @field_validator(

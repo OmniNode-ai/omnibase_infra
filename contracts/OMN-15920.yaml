@@ -1,0 +1,58 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-15920"
+title: "The infra MCP consumers read the contract mcp block as expose plus a tools list"
+summary: "omnibase_infra reads the contract mcp block through omnibase_core's typed model (expose plus a tools list, one entry per operation) in every consumer: the adapter's contract discovery, the server lifecycle's local discovery, the registry discovery and the node capabilities model. The infra single-tool model is deleted, the shipped orchestrator declaration and the wrapper contract emitter move to the list, and an old single-tool block is refused. Core is pinned to the dev tag dev-20261126164532-801c2557fa43, which carries omnibase_core#2376. This change holds the omnibase_infra half of the ticket only."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn15920-infra-tools-list"
+    statement: "Every infra consumer of the contract mcp block reads expose plus a tools list, refuses an old single-tool block, and lists the same tools as before for the shipped declarations."
+    acceptance:
+      - id: "AC1592001"
+        statement: "AC1592001: an old single-tool mcp block registers no tool in the adapter and in the server lifecycle -- falsifier: at the merge base the adapter registers old_block_tool from the old block, so the refusal tests fail there"
+      - id: "AC1592002"
+        statement: "AC1592002: the shipped declarations list the same tools as before, register_node with a 30 second timeout, through the adapter -- falsifier: with the shipped contract left on the old block the adapter refuses it and lists no tool"
+      - id: "AC1592003"
+        statement: "AC1592003: a two-entry mcp block yields one tool per entry in the adapter and in registry discovery -- falsifier: at the merge base the consumers read one tool_name per block and register no second tool"
+evidence_requirements:
+  - kind: "tests"
+    description: "The adapter, lifecycle, discovery and shipped-declaration tests pass at the head."
+    command: "uv run --frozen pytest tests/unit/handlers/mcp/test_adapter_onex_to_mcp.py tests/unit/handlers/mcp/test_shipped_mcp_declarations_omn15920.py tests/unit/services/mcp/test_mcp_server_lifecycle.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn15920-infra-ac1"
+    description: "Hosted probe. An old single-tool block registers no tool in the adapter and the lifecycle."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/handlers/mcp/test_adapter_onex_to_mcp.py tests/unit/services/mcp/test_mcp_server_lifecycle.py -k old_single_tool -q"
+        cwd: "."
+    binds_ac: ["AC1592001"]
+  - id: "dod-omn15920-infra-ac2"
+    description: "Hosted probe. The shipped declarations list register_node with its 30 second timeout."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/handlers/mcp/test_shipped_mcp_declarations_omn15920.py -q"
+        cwd: "."
+    binds_ac: ["AC1592002"]
+  - id: "dod-omn15920-infra-ac3"
+    description: "Hosted probe. A two-entry block yields one tool per entry in the adapter and in registry discovery."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/handlers/mcp/test_adapter_onex_to_mcp.py tests/integration/services/mcp/test_service_mcp_tool_discovery.py -k 'two_entry or one_tool_per_entry' -q"
+        cwd: "."
+    binds_ac: ["AC1592003"]
+  - id: "dod-omn15920-infra-ac4-pushed-emitter-entry"
+    description: "Deploy-scope probe, hosted-runnable. The pushed head's wrapper contract emitter builds the mcp tools list from ModelMCPWrapperToolEntry; read through the GitHub contents API at the exact head."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/services/mcp/service_mcp_wrapper_contract_emitter.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF ModelMCPWrapperToolEntry"
+        cwd: "."
+    binds_ac: ["AC1592002"]
