@@ -121,6 +121,14 @@ dod_evidence:
         check_value: |-
           ssh "$DEPLOY_PROBE_HOST" "curl -sf http://localhost:8098/health" | python3 -c 'import json,sys;r=json.load(sys.stdin).get("last_result") or {};assert r.get("status")=="success" and r.get("runtime_lane")=="dev" and r.get("phase_results")'
         cwd: .
+  - id: dod-omn26724-ac2-build-ref-decision-holds
+    description: The build-ref decision that AC2's hourly build relies on holds at the head and fails with the merged fix reverted - a ref still missing after one good fetch is refused and a held ref is built.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_build_repository_ref_omn26724.py -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
   - id: dod-omn26724-ac3-stability-prod-not-restarted
     description: "AC3 reading: the stability and prod deploy agents' /health uptime_seconds is longer than the dev agent's, so neither was restarted at or after the dev restart. It exits non-zero when either agent is unreachable or reports a shorter uptime. Read-only."
     source: manual
