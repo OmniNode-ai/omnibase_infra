@@ -7,13 +7,6 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-omn26430-one-message-at-a-time-per-adapter-owner
-    statement: The runtime hands a projection handler that owns its database adapter one message at a time, and leaves the parallelism of every other projection handler alone.
-    acceptance:
-      - id: AC3
-        statement: "AC3: with six concurrent messages through one dispatch callback, a handler that owns its adapter is never inside handle() on two threads at once and every message is still handled -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_omn26430_db_owning_projection_serial_dispatch.py fails at origin/dev with six threads inside handle() together and passes on the PR branch"
-      - id: AC4
-        statement: "AC4: a handler that holds no adapter of its own still runs on several threads at once -- falsifier: the control test in the same file reads a peak of 1 thread, so the serialisation is not scoped to adapter owners"
   - id: req-omn26430-rollback-image-health
     statement: The dev boot-good rollback image answers /health inside the compose start period, and the loop that held the answer is named from a thread dump of that image.
     acceptance:
@@ -21,11 +14,6 @@ requirements:
         statement: "AC1: the loop or call that holds the HTTP answer for 16 minutes is named from a thread dump or profile of this image -- falsifier: the report holds no stack frame naming it"
       - id: AC2
         statement: "AC2: first /health 200 on a boot of this image reads inside the compose start period -- falsifier: a boot reading above the start period from docker logs timestamps"
-  - id: req-omn26430-deploy-probe-names-real-symbol
-    statement: The contract's post-deploy probe greps a symbol that occurs in the source file it reads, so the probe can pass on a build that carries the change.
-    acceptance:
-      - id: AC5
-        statement: "AC5: the probe's grep pattern occurs in the source file it greps, as committed at HEAD -- falsifier: uv run pytest tests/ci/test_contract_omn26430_deploy_probe_symbol.py fails at the merge base, where the probe names serialize_owned_database, in no source file"
 evidence_requirements:
   - kind: tests
     description: The serial-dispatch regression and the existing projection-runner dispatch tests.
@@ -84,3 +72,30 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_contract_omn26430_deploy_probe_symbol.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn26430-deleted-acs-retired
+    description: AC3, AC4 and AC5 were deleted from OMN-26430. This item carries the retirement of the claim each of the three items that bound them made, and keeps the serial-dispatch, parallel-control and probe-symbol tests running; it binds no criterion.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_omn26430_db_owning_projection_serial_dispatch.py tests/ci/test_contract_omn26430_deploy_probe_symbol.py -q --no-cov -n 0 -p no:randomly
+        cwd: .
+    binds_ac: []
+    supersedes_ac_binding:
+      - item: dod-omn26430-ac3-serial-dispatch
+        label: AC3
+        reason_kind: no_longer_applicable
+        reason: AC3 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: q-close26430x-181500m
+        retired_at: '2026-11-28T14:00:00Z'
+      - item: dod-omn26430-ac4-injected-db-parallel
+        label: AC4
+        reason_kind: no_longer_applicable
+        reason: AC4 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: q-close26430x-181500m
+        retired_at: '2026-11-28T14:00:00Z'
+      - item: dod-omn26430-deploy-probe-symbol-exists
+        label: AC5
+        reason_kind: no_longer_applicable
+        reason: AC5 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: q-close26430x-181500m
+        retired_at: '2026-11-28T14:00:00Z'
