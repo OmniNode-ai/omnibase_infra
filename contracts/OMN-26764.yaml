@@ -52,14 +52,14 @@ dod_evidence:
         check_value: uv run pytest tests/integration/test_dev_lane_branch_install_no_pr_omn26764.py -q
         cwd: .
   - id: dod-omn26764-deploy-probe
-    description: 'The handler on the dev branch declares the pull request number optional; the probe exits 0 once the change is merged and 1 at the merge base.'
+    description: 'The handler declares the pull request number optional; the probe reads the PR branch through the GitHub contents API: it exits 0 at the branch head and 1 at the merge base.'
     source: manual
     binds_ac:
       - AC1
     checks:
       - check_type: command
         check_value: |-
-          bash -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_lane_branch_install.py?ref=dev" --jq .content | base64 -d | grep -qF "pr: int | None"'
+          bash -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_lane_branch_install.py?ref=omn-26764-branch-install-no-pr" --jq .content | base64 -d | grep -qF "pr: int | None"'
         cwd: .
   - id: dod-omn26764-restart-error-logged
     description: 'AC3 support: a failed docker restart of the runtime container logs the docker exit code and stderr (or the exception) on the branch_install_restart_failed line; it logged no cause on 2026-11-27 and fails at the base commit.'
