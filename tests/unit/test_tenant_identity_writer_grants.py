@@ -56,8 +56,11 @@ EXPECTED_GRANTS: frozenset[tuple[str, str, str, str | None]] = frozenset(
             )
         ),
         ("table", "plan_tiers", "SELECT", None),
+        ("table", "plan_entitlements", "SELECT", None),
         ("table", "tenant_plans", "SELECT", None),
         ("table", "tenant_plans", "INSERT", None),
+        ("column", "tenant_plans", "UPDATE", "is_active"),
+        ("column", "tenant_plans", "UPDATE", "ended_at"),
         ("table", "tenant_api_keys", "SELECT", None),
         ("table", "tenant_api_keys", "INSERT", None),
         ("column", "tenant_api_keys", "UPDATE", "is_active"),
