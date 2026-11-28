@@ -83,7 +83,13 @@ def test_normal_job_publishes_the_pulled_sha(
     store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
     fake = _FakeExecutor()
     monkeypatch.setattr(agent, "executor", fake)
+    # The settle step after a successful roll would build an image in a real
+    # subprocess (about 140 s, over the verifier's 30 s per-check ceiling) and
+    # deliver the onex-api pin; neither is the unit under test, so name them off.
+    monkeypatch.setattr(agent, "_build_onex_api_image", lambda *a, **k: None)
+    monkeypatch.setattr(agent, "_deliver_onex_api_pin", lambda *a, **k: None)
     agent._run_deploy(cmd)
+    agent.drain_settle(timeout=10)
 
     assert "git_pull" in fake.calls
     assert [p["git_sha"] for p in published] == [SHA]

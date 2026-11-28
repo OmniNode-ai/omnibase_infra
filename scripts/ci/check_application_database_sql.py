@@ -676,16 +676,15 @@ def _supplemental_ownership_identities(
         migration = (root / table.migration).resolve()
         if not migration.is_relative_to(root) or not migration.is_file():
             continue
-        identity = ModelApplicationDatabaseCatalogIdentity(
-            schema=table.schema,
-            name=table.name,
-            kind=EnumApplicationInventoryObjectKind.TABLE,
-        )
         created = application_database_created_catalog_identities(
             migration.read_text(encoding="utf-8")
         )
-        if identity.identity not in {item.identity for item in created}:
+        matches = [
+            i for i in created if i.schema == table.schema and i.name == table.name
+        ]
+        if not matches:
             continue
+        identity = matches[0]
         # An upstream declaration of the wrong kind must remain a gate failure,
         # not be repaired by assigning a second owner at the same location.
         if (identity.schema, identity.name) in manifest_locations:
