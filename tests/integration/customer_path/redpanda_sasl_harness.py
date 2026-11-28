@@ -160,6 +160,10 @@ SASL_PASSWORD = "omn18012-synthetic-not-a-real-secret"
 SASL_MECHANISM = "SCRAM-SHA-256"
 SECURITY_PROTOCOL = "SASL_PLAINTEXT"
 
+# The one-shot shell a credentialed ``rpk`` runs under: the password is read from the first
+# stdin line, exported for ``rpk`` to read natively, and never appears in any argv.
+_RPK_PASSWORD_FROM_STDIN = 'IFS= read -r RPK_PASS; export RPK_PASS; exec rpk "$@"'
+
 
 class HarnessError(RuntimeError):
     """The harness could not be brought up. Never swallowed into a skip."""
@@ -333,29 +337,53 @@ class RedpandaSasl:
         return f"{self.host}:{self.port}"
 
     # -- rpk -------------------------------------------------------------
+    def _authenticated_rpk(
+        self,
+        username: str,
+        password: str,
+        args: tuple[str, ...],
+        *,
+        body: str = "",
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run ``rpk`` in the broker container as ``username``, password on stdin.
+
+        The password is the first stdin line: the one-shot shell reads it into
+        ``RPK_PASS`` and execs ``rpk``, so it is in no argv on the host and none inside
+        the container (OMN-17427, OMN-19513). User and mechanism are not secrets and ride
+        ``-e``. ``body`` is whatever ``rpk`` itself reads from stdin after that line.
+        """
+        return subprocess.run(
+            [
+                "docker",
+                "exec",
+                "-i",
+                "-e",
+                f"RPK_USER={username}",
+                "-e",
+                f"RPK_SASL_MECHANISM={self.mechanism}",
+                self.container,
+                "sh",
+                "-c",
+                _RPK_PASSWORD_FROM_STDIN,
+                "rpk",
+                *args,
+                # In-container: the internal listener, which never leaves this
+                # container's namespace. Never self.bootstrap -- that is the
+                # runner-side address.
+                "-X",
+                f"brokers={self.internal_bootstrap}",
+            ],
+            input=f"{password}\n{body}",
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+
     def rpk(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         """Run authenticated ``rpk`` inside the broker container."""
-        cmd = [
-            "docker",
-            "exec",
-            self.container,
-            "rpk",
-            *args,
-            # In-container: the internal listener, which never leaves this
-            # container's namespace. Never self.bootstrap -- that is the
-            # runner-side address.
-            "-X",
-            f"brokers={self.internal_bootstrap}",
-            "-X",
-            f"user={self.username}",
-            "-X",
-            f"pass={self.password}",
-            "-X",
-            f"sasl.mechanism={self.mechanism}",
-        ]
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120, check=False
-        )
+        proc = self._authenticated_rpk(self.username, self.password, args, timeout=120)
         if check and proc.returncode != 0:
             raise HarnessError(
                 f"rpk {' '.join(args)} failed rc={proc.returncode}: "
@@ -391,30 +419,12 @@ class RedpandaSasl:
     def produce(self, topic: str, payloads: list[str]) -> None:
         """Produce one record per payload (newline-delimited)."""
         body = "".join(f"{p}\n" for p in payloads)
-        proc = subprocess.run(
-            [
-                "docker",
-                "exec",
-                "-i",
-                self.container,
-                "rpk",
-                "topic",
-                "produce",
-                topic,
-                "-X",
-                f"brokers={self.internal_bootstrap}",
-                "-X",
-                f"user={self.username}",
-                "-X",
-                f"pass={self.password}",
-                "-X",
-                f"sasl.mechanism={self.mechanism}",
-            ],
-            input=body,
-            capture_output=True,
-            text=True,
+        proc = self._authenticated_rpk(
+            self.username,
+            self.password,
+            ("topic", "produce", topic),
+            body=body,
             timeout=180,
-            check=False,
         )
         if proc.returncode != 0:
             raise HarnessError(
@@ -535,26 +545,8 @@ class RedpandaSasl:
         self, principal: RuntimePrincipal, *args: str
     ) -> subprocess.CompletedProcess[str]:
         """Run ``rpk`` inside the broker as ``principal`` (never raises)."""
-        return subprocess.run(
-            [
-                "docker",
-                "exec",
-                self.container,
-                "rpk",
-                *args,
-                "-X",
-                f"brokers={self.internal_bootstrap}",
-                "-X",
-                f"user={principal.username}",
-                "-X",
-                f"pass={principal.password}",
-                "-X",
-                f"sasl.mechanism={self.mechanism}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
+        return self._authenticated_rpk(
+            principal.username, principal.password, args, timeout=120
         )
 
     # -- env ---------------------------------------------------------------
