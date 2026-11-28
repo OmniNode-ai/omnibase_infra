@@ -127,8 +127,10 @@ class TestTheRosterDeclaresTheException:
     def test_the_declared_overrides_are_exactly_these(self) -> None:
         """Each exception is deliberate: onex-api on prod (OMN-18582), the
         three browser clients on staging (OMN-23298) and the dashboard
-        server's pushed secret on staging and prod (OMN-23491). Another one
-        needs its own change here."""
+        server's pushed secret on every deployed realm: staging and prod from
+        OMN-23491, dev from OMN-26768, which added the variable to the dev
+        seed job that OMN-23491 had none for. Another one needs its own
+        change here."""
         declared = {
             c["clientId"]: sorted(c["environmentOverrides"])
             for c in _roster_clients()
@@ -138,7 +140,7 @@ class TestTheRosterDeclaresTheException:
             "onex-api": ["prod"],
             LOGIN_CLIENT: ["staging"],
             "omnidash-spa": ["staging"],
-            "omnidash": ["prod", "staging"],
+            "omnidash": ["dev", "prod", "staging"],
             "onex-customer": ["staging"],
         }
 
