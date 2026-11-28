@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-26768
+title: The Keycloak client roster declares the omnidash client the dashboard asks for, so dev sign-in stops answering Client not found
+summary: >-
+  A sign-in on https://dev.dash.omninode.ai ended on Keycloak's Client not found page on 2026-11-28. The dev realm is seeded from docker/keycloak/desired-clients.json and carries every client in it: an unauthenticated authorization request answered 302 for omnidash-spa and for the other eight, and 400 with Client not found for omnidash alone. The omnidash Deployment asks for omnidash (KEYCLOAK_CLIENT_ID is that literal in the deployment repository's own omnidash Deployment) and takes a client secret from omnidash-credentials, so it is a confidential client and omnidash-spa, which is publicClient true and holds no secret, is not the client it asks for. The roster now declares omnidash: confidential, PKCE, secretEnv OMNIDASH_CLIENT_SECRET, the tenant and principal claim mappers and the onex-api audience mapper, with the production and dev dashboard callbacks in one base redirect list. No per-environment override, because the roster carries every environment's hosts in one list by design and an exception would have to be added to CLIENTS_ALLOWED_AN_ENVIRONMENT_OVERRIDE deliberately. The dev slot omninode/dev/keycloak already carries OMNIDASH_CLIENT_SECRET, read 2026-11-28; the reconcile job's own environment variable, and the two byte-identical roster copies in the deployment repository, move in that repository's pull request against the bumped sibling pin.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn26768-dashboard-client-declared
+    statement: The roster declares the confidential client the dashboard names, with the dev callback admitted.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the roster carries an omnidash client that is confidential, not bearer-only, declares secretEnv OMNIDASH_CLIENT_SECRET and PKCE S256, admits https://dev.dash.omninode.ai/auth/callback through its redirect list and carries that origin as a web origin"
+  - id: req-omn26768-token-shape
+    statement: The dashboard's token carries the claims the runtime reads and the audience the API checks.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the omnidash entry declares tenant_id, tenant_slug and principal_id access-token claim mappers and an onex-api audience mapper"
+  - id: req-omn26768-one-shape-every-realm
+    statement: The new client declares no per-environment exception and resolves identically in every realm.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the omnidash entry carries no environmentOverrides block, and apply_environment_overrides resolves it to the base shape with secretEnv intact on dev, staging and prod"
+evidence_requirements:
+  - kind: tests
+    description: The new roster test for this client, plus the existing roster and override tests it has to stay inside.
+    command: uv run --frozen pytest scripts/tests/test_seed_keycloak_omnidash_client_omn26768.py scripts/tests/test_seed_keycloak_staging_overrides_omn23298.py scripts/tests/test_seed_keycloak_environment_overrides.py tests/unit/scripts/test_desired_clients_introspection_not_bearer_only.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn26768-ac1-client-declared
+    description: "The roster declares a confidential omnidash client whose redirect list admits the dev callback. Fails at the merge base, where the client is absent and the lookup raises."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/tests/test_seed_keycloak_omnidash_client_omn26768.py -k "roster_declares or confidential or browser_login or dev_callback" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26768-ac2-token-shape
+    description: "The entry declares the three claim mappers and the onex-api audience mapper. Fails at the merge base for want of the client."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/tests/test_seed_keycloak_omnidash_client_omn26768.py -k "tenant_claims_and_the_api_audience" -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn26768-ac3-one-shape
+    description: "No override block, and the resolver returns the base shape with secretEnv on all three environments. Fails at the merge base for want of the client."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/tests/test_seed_keycloak_omnidash_client_omn26768.py -k "no_per_environment_override or resolves_the_base_shape" -q --no-cov -n 0 -p no:randomly
+        cwd: .
