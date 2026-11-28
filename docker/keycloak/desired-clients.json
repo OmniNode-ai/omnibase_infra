@@ -183,6 +183,11 @@
           "ticket": "OMN-23491",
           "reason": "The dashboard server signs in as a confidential client and reads its secret from the same keycloak slot the seed job mounts, so staging pushes that secret here and the realm and the app hold one value. The staging realm serves only the staging hosts. No PKCE attribute, here or in the base: keycloak-connect sends no code_challenge, so a required S256 would refuse every sign-in."
         },
+        "dev": {
+          "secretEnv": "OMNIDASH_CLIENT_SECRET",
+          "ticket": "OMN-26768",
+          "reason": "Dev pushes the dashboard secret for the same reason staging and prod do, and without this block it is the one environment that does not. The base entry declares no secretEnv, so a dev run leaves Keycloak to mint its own secret for a confidential client, and that minted value is never written back to the omnidash-credentials Secret the dashboard reads: sign-in then moves from Client not found to invalid_client, which the empty-secret guard (OMN-16504) cannot see because the value it reads is not empty. The dev slot omninode/dev/keycloak already carries OMNIDASH_CLIENT_SECRET (read 2026-11-28). No host keys here: the base already allows the dev return address, so dev needs the secret and nothing else."
+        },
         "prod": {
           "secretEnv": "OMNIDASH_CLIENT_SECRET",
           "ticket": "OMN-23491",
