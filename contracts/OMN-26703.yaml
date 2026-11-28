@@ -82,6 +82,16 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_dev_build_health_omn26703.py -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
+  - id: dod-omn26703-ci-summary-rerun-carry
+    description: >-
+      CI Summary on a rerun-failed attempt counts a gate that passed in an earlier attempt as present, so a merge is not held by a gate poll that waits for rows the rerun never wrote (omnibase_infra#6351, run 46027655660 attempt 2). A known good (earlier-attempt successes plus the in-progress summary row) reaches SUCCESS; a known bad (an earlier-attempt failure with no replacement) stays PENDING and a current-attempt failure reaches FAILURE.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_ci_summary_gate.py -k omn26703 -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
   - id: dod-omn26703-deploy-build-health-on-dev
     description: 'Deploy probe: the dev branch of omnibase_infra carries the handler that builds the dev_build_health event; read from GitHub at ref dev, so it exits non-zero until the change has merged and zero after. Scoped to the local Done gate with no criterion bound: the hosted gate runs this at a pull request head, where dev cannot yet carry the change, and the deploy gate reads the probe from the contract regardless of scope.'
     source: manual
