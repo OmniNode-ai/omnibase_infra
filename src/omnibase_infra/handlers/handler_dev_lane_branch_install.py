@@ -126,6 +126,7 @@ from omnibase_infra.models.model_dev_lane_branch_install_release import (
     ModelDevLaneBranchInstallRelease,
 )
 from omnibase_infra.models.operational_timeouts import TIMEOUTS
+from omnibase_infra.utils import util_error_sanitization as sanitize
 
 logger = logging.getLogger(__name__)
 
@@ -592,6 +593,7 @@ class DevLaneContainerWriter:
     ) -> None:
         self.blobs = blobs
         self._run = run
+        self.last_error = ""
         self._sleep = sleep
 
     def cmd_ok(
@@ -599,9 +601,16 @@ class DevLaneContainerWriter:
     ) -> subprocess.CompletedProcess[str] | None:
         try:
             result = self._run(list(argv), timeout=timeout)
-        except (OSError, subprocess.TimeoutExpired):
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self.last_error = sanitize.sanitize_error_message(exc)
             return None
-        return result if result.returncode == 0 else None
+        if result.returncode == 0:
+            return result
+        detail = (result.stderr or result.stdout).strip()
+        self.last_error = sanitize.sanitize_error_string(
+            f"{argv[1]} exit {result.returncode}: {detail}"
+        )
+        return None
 
     def copy_in(self, container: str, f: ModelDevLaneBranchInstallFile) -> str:
         """Put one file into one container keeping the owner and mode it had; "" is success."""
@@ -698,24 +707,16 @@ class HandlerDevLaneBranchInstall:
         out: list[ModelDevLaneBranchInstallRelease] = []
         for install in self.store.load().installs:
             if install.expires_at <= now:
-                done = release(
-                    self.store,
-                    install.id,
-                    EnumDevLaneBranchInstallReleaseReason.EXPIRED,
-                    f"expired {_utc(install.expires_at)} before {install.label} merged",
-                    now=now,
+                reason = EnumDevLaneBranchInstallReleaseReason.EXPIRED
+                evidence: str | None = (
+                    f"expired {_utc(install.expires_at)} before {install.label} merged"
                 )
             else:
+                reason = EnumDevLaneBranchInstallReleaseReason.MERGED
                 evidence = self._merged_probe(install) if self._merged_probe else None
-                if evidence is None:
-                    continue
-                done = release(
-                    self.store,
-                    install.id,
-                    EnumDevLaneBranchInstallReleaseReason.MERGED,
-                    evidence,
-                    now=now,
-                )
+            if evidence is None:
+                continue
+            done = release(self.store, install.id, reason, evidence, now=now)
             if done is not None:
                 logger.info(
                     "branch install RELEASED: id=%s repo=%s pr=%s reason=%s detail=%s",
@@ -730,12 +731,11 @@ class HandlerDevLaneBranchInstall:
 
     def _due_for_release(self) -> bool:
         now = self._clock()
-        for install in self.store.load().installs:
-            if install.expires_at <= now:
-                return True
-            if self._merged_probe is not None and self._merged_probe(install):
-                return True
-        return False
+        probe = self._merged_probe
+        return any(
+            i.expires_at <= now or (probe is not None and bool(probe(i)))
+            for i in self.store.load().installs
+        )
 
     # -- apply -------------------------------------------------------------
 
@@ -783,9 +783,10 @@ class HandlerDevLaneBranchInstall:
                 is None
             ):
                 logger.error(
-                    "branch install restart FAILED: container=%s "
+                    "branch install restart FAILED: container=%s error=%s "
                     "friction_type=branch_install_restart_failed",
                     container[:12],
+                    self._writer.last_error,
                 )
             elif not self._writer.await_running(container):
                 logger.error(
@@ -898,19 +899,12 @@ def report(receipt: ModelDevLaneBranchInstallReceipt) -> None:
             )
         else:
             report_one(readback)
+    states = [r.state for r in receipt.readbacks]
     logger.info(
         "branch installs: declared=%s present=%s reapplied=%s missing=%s released=%s",
-        len(receipt.readbacks),
-        sum(
-            1
-            for r in receipt.readbacks
-            if r.state is EnumDevLaneBranchInstallState.PRESENT
-        ),
-        sum(
-            1
-            for r in receipt.readbacks
-            if r.state is EnumDevLaneBranchInstallState.REAPPLIED
-        ),
+        len(states),
+        states.count(EnumDevLaneBranchInstallState.PRESENT),
+        states.count(EnumDevLaneBranchInstallState.REAPPLIED),
         len(receipt.missing),
         len(receipt.released),
     )
