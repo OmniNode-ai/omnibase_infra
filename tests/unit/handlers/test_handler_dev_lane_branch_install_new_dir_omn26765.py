@@ -146,3 +146,32 @@ def test_no_directory_is_created_for_a_path_outside_every_declared_root(
     with pytest.raises(DevLaneBranchInstallRefusedError):
         _declare(tmp_path, store, path)
     assert store.load().installs == ()
+
+
+def test_a_directory_is_made_only_under_a_declared_root(tmp_path: Path) -> None:
+    """The one directory made lies under a declared root; none lies outside one."""
+    store = DevLaneBranchInstallStore(tmp_path / "state")
+    _declare(tmp_path, store, NEW_NODE_FILE)
+    lane = _Lane()
+    handler = HandlerDevLaneBranchInstall(
+        store, PROJECT, run=lane, sleep=lambda _s: None, clock=lambda: NOW
+    )
+    handler.apply()
+    assert lane.mkdirs, "a file in a new directory must have its parent made"
+    roots = ("/app/", "/etc/onex/skill-overlays-branch/")
+    assert all(made.startswith(roots) for made in lane.mkdirs)
+
+
+def test_the_readback_of_a_new_directory_file_matches_the_declared_hash(
+    tmp_path: Path,
+) -> None:
+    store = DevLaneBranchInstallStore(tmp_path / "state")
+    _declare(tmp_path, store, NEW_NODE_FILE)
+    lane = _Lane()
+    handler = HandlerDevLaneBranchInstall(
+        store, PROJECT, run=lane, sleep=lambda _s: None, clock=lambda: NOW
+    )
+    receipt = handler.apply()
+    row = receipt.readbacks[0].files[0]
+    assert row.expected_sha256 == _sha(BRANCH_COPY)
+    assert row.observed_sha256 == row.expected_sha256
