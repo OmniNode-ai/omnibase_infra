@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-23491
+title: The dashboard server's confidential Keycloak client is in the client roster
+summary: >-
+  The dashboard deployment signs in with client id omnidash and a client secret, and its post-deploy verify expects that id, but docker/keycloak/desired-clients.json only had the public omnidash-spa, so staging sign-in failed with "Client not found". The roster now declares omnidash as a confidential standard-flow client with the tenant claims and no PKCE requirement, since keycloak-connect sends no code_challenge. On staging and prod it pushes its secret from OMNIDASH_CLIENT_SECRET, which the seed job reads from the same keycloak slot the dashboard reads, so the realm and the app hold one value and the confidential secret guard (OMN-16504) never sees an empty secret. Staging serves only the staging host. Dev declares no secretEnv, so the dev seed job needs no new variable. The deployment repository copies the roster and gives the seed job the variable in a separate PR.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn23491-client
+    statement: The roster declares the dashboard's confidential client in a shape the dashboard can sign in with.
+    acceptance:
+      - id: AC1
+        statement: "AC1: omnidash is confidential, standard flow only, requires no PKCE in any realm, carries the tenant claims and the onex-api audience, and lists the dashboard hosts as redirect URIs, web origins and sign-out URIs"
+  - id: req-omn23491-realms
+    statement: Each realm gets the shape it needs.
+    acceptance:
+      - id: AC2
+        statement: "AC2: resolved for staging it pushes OMNIDASH_CLIENT_SECRET and serves only the staging host; for prod it pushes OMNIDASH_CLIENT_SECRET on the base hosts; for dev it declares no secretEnv"
+  - id: req-omn23491-secret
+    statement: The seeder sets the secret from the named variable and refuses to run without it.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the seeder reads the secret from OMNIDASH_CLIENT_SECRET on staging and prod and fails closed when it is unset, and resolves no pushed secret on dev"
+evidence_requirements:
+  - kind: tests
+    description: The new client tests and the existing roster and override tests.
+    command: uv run --frozen pytest scripts/tests/test_seed_keycloak_omnidash_client_omn23491.py scripts/tests/test_seed_keycloak_staging_overrides_omn23298.py scripts/tests/test_seed_keycloak_environment_overrides.py tests/unit/scripts/test_desired_clients_introspection_not_bearer_only.py -q --no-cov -n 0 -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn23491-ac1-client-shape
+    description: "The client is confidential, standard flow only, asks for no PKCE, carries the tenant claims and lists the dashboard hosts. New test file, so it fails at the merge base."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/tests/test_seed_keycloak_omnidash_client_omn23491.py -k TestTheClientShape -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn23491-ac2-realms
+    description: "Staging and prod push the secret, staging serves only the staging host, dev declares no secretEnv. New test file."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/tests/test_seed_keycloak_omnidash_client_omn23491.py -k TestEachRealmGetsItsShape -q --no-cov -n 0 -p no:randomly
+        cwd: .
+  - id: dod-omn23491-ac3-secret
+    description: "The seeder reads OMNIDASH_CLIENT_SECRET on staging and prod, fails closed without it, and pushes nothing on dev. New test file."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/tests/test_seed_keycloak_omnidash_client_omn23491.py -k TestTheSeederPushesTheSecret -q --no-cov -n 0 -p no:randomly
+        cwd: .
