@@ -131,3 +131,54 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/test_dev_lane_build_window_omn25912.py -q --no-cov -n 0 -p no:randomly
         cwd: .
+  - id: dod-omn25912-ac1-four-starts-ticket-selector
+    description: The four recorded starts are held to the window by the case the ticket's own selector reaches under scripts/deploy-agent/tests/unit. The 2026-11-19 job records and container events are not retained on h201 (read 2026-11-27), so the recorded fixture is the evidence.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit -q --no-cov -n 0 -p no:randomly -k recreate_window_four_recorded
+        cwd: .
+    supersedes_ac_binding:
+      - item: dod-omn25912-ac1-four-starts
+        label: AC1
+        reason_kind: superseded_by
+        superseded_by: dod-omn25912-ac1-four-starts-ticket-selector
+        reason: 'The live ticket names the selector scripts/deploy-agent/tests/unit for this criterion, so the check runs under that path; the older item ran the same cases under tests/unit/handlers only.'
+        retired_by: q-tri25912-071500
+        retired_at: '2026-11-27T19:00:00Z'
+  - id: dod-omn25912-ac2-ticket-selector
+    description: The two-hour simulation with a merge every four minutes, the off-the-hour hold and the policy-owned window value run under the ticket's own selector, scripts/deploy-agent/tests/unit -k recreate_window.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit -q --no-cov -n 0 -p no:randomly -k recreate_window
+        cwd: .
+    supersedes_ac_binding:
+      - item: dod-omn25912-ac2-window
+        label: AC2
+        reason_kind: superseded_by
+        superseded_by: dod-omn25912-ac2-ticket-selector
+        reason: 'The live ticket names the selector scripts/deploy-agent/tests/unit for this criterion, so the check runs under that path; the older item ran the same cases under tests/unit/handlers only.'
+        retired_by: q-tri25912-071500
+        retired_at: '2026-11-27T19:00:00Z'
+  - id: dod-omn25912-ac4-ticket-selector
+    description: An unannounced recreate is refused under the ticket's own selector, scripts/deploy-agent/tests/unit -k recreate_announce; before this change that selector chose no test.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest scripts/deploy-agent/tests/unit -q --no-cov -n 0 -p no:randomly -k recreate_announce
+        cwd: .
+    supersedes_ac_binding:
+      - item: dod-omn25912-ac4-announce
+        label: AC4
+        reason_kind: superseded_by
+        superseded_by: dod-omn25912-ac4-ticket-selector
+        reason: 'The live ticket names the selector scripts/deploy-agent/tests/unit for this criterion, so the check runs under that path; the older item ran the same cases under tests/unit/handlers only.'
+        retired_by: q-tri25912-071500
+        retired_at: '2026-11-27T19:00:00Z'
