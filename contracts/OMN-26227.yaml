@@ -53,14 +53,17 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_core_dev_tag_pin_omn17427.py -q -n 0 --no-cov -p no:cacheprovider -k pyproject_core_tag_and_lock_core_release_name_the_same_release
         cwd: .
-  - id: dod-omn26227-ac4
+  - id: dod-omn26227-ac4-pin-agreement
     description: 'AC4: the pull request is ready, handed to landing-controller by one MSG, and one MSG to orchestrator-31d9-swarm names the pull request, its head and the omnibase_infra dev tag that carries the merge (or the exact rule that derives it when the merge has not landed yet) -- falsifier: grep -c ''to=landing-controller'' and grep -c ''to=orchestrator-31d9-swarm'' over the lane''s ledger rows each read 0'
     source: manual
     binds_ac:
       - AC4
     checks:
       - check_type: command
-        check_value: grep -q 'dev-20261127051535-94ed7507315d' pyproject.toml
+        check_value: uv lock --check && grep -Eq 'omnibase-core = \{ git = "[^"]+", tag = "dev-[0-9]{14}-[0-9a-f]{12}" \}' pyproject.toml
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py -q -n 0 --no-cov -p no:cacheprovider -k pyproject_core_tag_and_lock_core_release_name_the_same_release
         cwd: .
   - id: dod-omn26227-ac1-core-0-47-80
     description: 'The omnibase-core pin names core 0.47.80 (dev tag dev-20261125154033-214c1fa29b7b, commit 214c1fa29b7b), the lock agrees, and the core dependency-pin check exits zero on this tree.'
