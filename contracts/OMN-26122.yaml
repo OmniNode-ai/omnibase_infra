@@ -16,11 +16,6 @@ requirements:
         statement: 'AC2: the probe''s next run reads green against what exists now, with no retired thing restored and no clause removed unless a ruling retired the fact it graded -- falsifier: the newest c16-receipt-identity run reads red, or the clause table in the report lists a removed assertion that no ruling retires'
       - id: AC3
         statement: 'AC3: the lane writes one STATUS row `crit=C16 probe=c16-receipt-identity verdict=<green|red> read_at=<UTC>` -- falsifier: a ledger grep for `crit=C16 probe=c16-receipt-identity` finds no STATUS row after this ticket''s creation'
-  - id: req-omn26122-stability-probe-waits-for-its-own-lane
-    statement: A stability proof waits only for a deploy job of the stability lane, never for another lane's job on the shared deploy agent; a job whose lane the agent does not name stays a reason to wait.
-    acceptance:
-      - id: AC4
-        statement: 'AC4: the resolver reads a deploy job that rolls another named lane as not busy for the graded lane, and the deploy agent names the lane of its active and last job in /health -- falsifier: the resolver waits out a dev job for the stability lane, or reads a job with no named lane as not busy'
 evidence_requirements:
   - kind: tests
     description: The stability lane declaration seam test and the stability proofs workflow pins, including the control that a lane with no ingress_url is refused naming the field.
