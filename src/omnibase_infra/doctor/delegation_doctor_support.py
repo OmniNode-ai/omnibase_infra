@@ -117,7 +117,7 @@ def render_diagnosis(
         message = diagnosis.detail
     else:
         status = EnumHealthStatusValue.UNHEALTHY
-        message = f"[{diagnosis.fault.value}] {diagnosis.detail} Fix: {diagnosis.fix}"
+        message = f"{diagnosis.detail} Fix: {diagnosis.fix}"
     return ModelDoctorCheckResult(
         name=name,
         category=EnumDoctorCategory.SERVICES,

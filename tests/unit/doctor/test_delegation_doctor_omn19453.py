@@ -183,6 +183,7 @@ def fault_checks(tmp_path: Path) -> tuple[DiagnosticCheck, ...]:
         CheckDelegationLocalModel(
             overlay_path=tmp_path / "absent-overlay.yaml",
             environ={},
+            hosted_models_reader=lambda: (),
         ),
         CheckDelegationLocalModel(
             overlay_path=not_serving_overlay,
@@ -235,20 +236,28 @@ def test_each_fault_is_named_with_one_distinct_fix(
     assert {item.fault for item in diagnoses} == set(EnumDelegationDoctorFault)
     assert len({item.fix for item in diagnoses}) == 8
     if expected_fault is EnumDelegationDoctorFault.NO_LOCAL_MODEL:
-        assert str(tmp_path / "absent-overlay.yaml") in diagnosis.fix
-        assert "tier: local" in diagnosis.fix
-        assert "endpoint_url" in diagnosis.fix
+        assert "onex" in diagnosis.fix
+        assert "/config" in diagnosis.fix
+        for hidden in ("onex models", "onex setup", ".yaml"):
+            assert hidden not in diagnosis.fix
     if expected_fault is EnumDelegationDoctorFault.LOCAL_MODEL_ID_MISMATCH:
         assert _MODEL_ID in diagnosis.detail
         assert "some/other-model" in diagnosis.detail
 
     result = fault_checks[case_index].run()
     assert result.status is EnumHealthStatusValue.UNHEALTHY
-    assert result.message.startswith(f"[{expected_fault.value}] ")
+    assert not result.message.startswith("[")
+    assert result.message.startswith(diagnosis.detail)
     assert f"Fix: {diagnosis.fix}" in result.message
 
 
-def test_healthy_delegation_passes_all_five_checks(tmp_path: Path) -> None:
+def test_healthy_delegation_passes_all_five_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "omnibase_infra.doctor.checks.check_delegation_identity.read_install_identity",
+        lambda: "tenant-uuid",
+    )
     home = tmp_path / "onex"
     overlay = tmp_path / "overlay.yaml"
     _save_gateway(home)
@@ -323,7 +332,11 @@ def test_empty_machine_is_total_and_reports_actionable_results(tmp_path: Path) -
         CheckDelegationKey(onex_home=tmp_path),
         CheckDelegationGateway(onex_home=tmp_path),
         CheckDelegationQuota(onex_home=tmp_path),
-        CheckDelegationLocalModel(overlay_path=missing_overlay, environ={}),
+        CheckDelegationLocalModel(
+            overlay_path=missing_overlay,
+            environ={},
+            hosted_models_reader=lambda: (),
+        ),
     )
 
     results = [check.run() for check in checks]
@@ -447,7 +460,11 @@ def test_embedding_backend_is_not_the_declared_chat_model(tmp_path: Path) -> Non
         "    endpoint_url: http://embed.invalid/v1/embeddings\n"
     )
     assert (
-        CheckDelegationLocalModel(overlay_path=embeddings_only, environ={})
+        CheckDelegationLocalModel(
+            overlay_path=embeddings_only,
+            environ={},
+            hosted_models_reader=lambda: (),
+        )
         .diagnose()
         .fault
         is EnumDelegationDoctorFault.NO_LOCAL_MODEL
@@ -482,6 +499,7 @@ def test_local_server_without_served_models_is_not_healthy(
     assert diagnosis.fault is EnumDelegationDoctorFault.LOCAL_MODEL_NOT_SERVING
     assert diagnosis.fix == "Start the model server at http://model.invalid."
     assert result.status is EnumHealthStatusValue.UNHEALTHY
-    assert result.message.startswith("[local_model_not_serving] ")
+    assert not result.message.startswith("[")
+    assert result.message.startswith(diagnosis.detail)
     assert result.message.count("Fix:") == 1
     assert transport.urls == ["http://model.invalid/v1/models"] * 2

@@ -1,0 +1,70 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: "OMN-26616"
+title: "onex doctor and onex health judge only what a customer needs and never show a raw error"
+summary: "The delegation identity doctor check now asks the same local tenant identity that onex local identity reads, so the two agree on whether an identity is configured; an unreadable recorded identity is a refusal, not no_identity; delegation doctor failure messages no longer carry the internal fault tag in square brackets; and a healthy identity check no longer prints the tenant slug or gateway address."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26616-doctor-identity-agreement"
+    statement: "The delegation identity doctor check asks the same local tenant identity that onex local identity reads so that the two commands agree on whether an identity is configured, an unreadable recorded identity is reported as a refusal rather than no_identity, failure messages omit the internal fault tag, and a healthy identity check omits the tenant slug and gateway address."
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: onex doctor and onex local identity agree on whether an identity is configured; Falsifier: tests/unit/doctor/test_omn26616_ac2_identity_agreement.py::test_local_identity_present_is_not_no_identity"
+      - id: "AC4"
+        statement: "AC4: on a working customer install both commands exit 0; Falsifier: tests/integration/doctor/test_omn26616_identity_check_integration.py (the dod-omn26616-integration-proof item below runs it)"
+evidence_requirements:
+  - kind: "tests"
+    description: "Run the unit doctor test suite to verify identity agreement, refusal handling, and message wording."
+    command: "uv run pytest tests/unit/doctor -q -n 0 --no-cov -p no:cacheprovider"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn26616-ac2"
+    description: "AC2: onex doctor and onex local identity agree on whether an identity is configured"
+    source: "manual"
+    binds_ac:
+      - "AC2"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/doctor/test_omn26616_ac2_identity_agreement.py tests/unit/doctor -q -n 0 --no-cov -p no:cacheprovider"
+        cwd: "."
+  - id: "dod-omn26616-dependent-checks-agree"
+    description: "AC2: the gateway, API key and quota checks and the identity check decide identity from the one local reader, show no internal tag, and a gateway block without a local identity is not reported as configured"
+    source: "manual"
+    binds_ac:
+      - "AC2"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/doctor/test_omn26616_dependent_checks_agree.py -q -n 0 --no-cov -p no:cacheprovider"
+        cwd: "."
+  - id: "dod-omn26616-integration-proof"
+    description: "AC4: on a working customer install the identity check judges a readable identity healthy and an unreadable one as a plain refusal that never echoes upstream text, end to end through the contract's input model and handler."
+    source: "manual"
+    binds_ac:
+      - "AC4"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/integration/doctor/test_omn26616_identity_check_integration.py -q -n 0 --no-cov -p no:cacheprovider"
+        cwd: "."
+  - id: "dod-omn26616-optional-local-model"
+    description: "AC4: on a working customer install onex doctor exits 0 without a local model: the local-model check fails only when no model at all is set up, local or hosted, also fails when the rule in force is local models only and only hosted providers are set up, names onex and /config as the fix, and still fails a declared local model that is unreachable"
+    source: "manual"
+    binds_ac:
+      - "AC4"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/doctor/test_omn26616_ac4_optional_local_model.py -q -n 0 --no-cov -p no:cacheprovider"
+        cwd: "."
+  - id: "dod-omn26616-ac4-deploy-probe"
+    description: "Deploy-scope probe on a lab host at the pushed head: the identity check integration test, which routes the contract's input model to its handler and runs the real doctor check, passes on the lab's installed tree. It reaches the lab through onex lab-work run, which a hosted runner cannot do, so only the local Done gate runs it and it binds no acceptance criterion; AC4 stays bound by dod-omn26616-integration-proof and dod-omn26616-optional-local-model."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 onex lab-work run --bus-lane dev --repo OmniNode-ai/omnibase_infra --sha \"$(git rev-parse HEAD)\" --lane dod-integration-proof-26616 --kind test -- uv run --frozen pytest tests/integration/doctor/test_omn26616_identity_check_integration.py -q -n 0 --no-cov"
+        cwd: "."

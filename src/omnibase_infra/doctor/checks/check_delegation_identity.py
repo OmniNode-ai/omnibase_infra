@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Doctor check for a configured delegation identity."""
 
+import importlib
 from pathlib import Path
 from typing import ClassVar
 
@@ -10,25 +11,44 @@ from omnibase_core.enums.enum_doctor_category import EnumDoctorCategory
 from omnibase_core.models.doctor.model_doctor_check_result import (
     ModelDoctorCheckResult,
 )
+from omnibase_infra.cli.cli_delegate import (
+    DelegateTenantRefusedError,
+    read_install_identity,
+)
 from omnibase_infra.doctor.delegation_doctor_support import (
-    GATEWAY_BLOCK_INVALID,
-    GATEWAY_BLOCK_MISSING,
     default_onex_home,
-    gateway_text,
     read_gateway_block,
     render_diagnosis,
     unknown_result,
-)
-from omnibase_infra.doctor.enum_delegation_doctor_fault import (
-    EnumDelegationDoctorFault,
 )
 from omnibase_infra.doctor.model_delegation_diagnosis import (
     ModelDelegationDiagnosis,
 )
 
-_NO_IDENTITY_FIX = (
-    "pbpaste | onex auth login --tenant-slug <slug> --base-url <origin> --api-key-stdin"
-)
+_NO_IDENTITY_FIX = "onex local init"
+
+
+def _evaluate_identity(onex_home: Path) -> tuple[ModelDelegationDiagnosis, bool]:
+    module = importlib.import_module(
+        "omnibase_infra.handlers.handler_check_delegation_identity"
+    )
+    try:
+        local_identity = read_install_identity()
+        refusal_cause: BaseException | None = None
+    except DelegateTenantRefusedError as exc:
+        cause: BaseException = exc.__cause__ or exc
+        local_identity = None
+        if isinstance(cause, (ImportError, AttributeError)):
+            refusal_cause = None
+        else:
+            refusal_cause = cause
+    judged: tuple[ModelDelegationDiagnosis, bool] = module.evaluate_identity(
+        onex_home,
+        local_identity,
+        refusal_cause,
+        read_gateway_block,
+    )
+    return judged
 
 
 class CheckDelegationIdentity(DoctorCheckBase):
@@ -42,44 +62,7 @@ class CheckDelegationIdentity(DoctorCheckBase):
         self._onex_home = onex_home if onex_home is not None else default_onex_home()
 
     def _evaluate(self) -> tuple[ModelDelegationDiagnosis, bool]:
-        state, block = read_gateway_block(self._onex_home)
-        if state == GATEWAY_BLOCK_INVALID:
-            return (
-                ModelDelegationDiagnosis(
-                    fault=None,
-                    detail="Delegation identity was not judged because config.yaml is unreadable or invalid.",
-                    fix="",
-                ),
-                False,
-            )
-        if state == GATEWAY_BLOCK_MISSING or block is None:
-            return (
-                ModelDelegationDiagnosis(
-                    fault=EnumDelegationDoctorFault.NO_IDENTITY,
-                    detail="No delegation tenant identity is configured on this machine.",
-                    fix=_NO_IDENTITY_FIX,
-                ),
-                True,
-            )
-        tenant_slug = gateway_text(block, "tenant_slug")
-        base_url = gateway_text(block, "base_url")
-        if tenant_slug is None or base_url is None:
-            return (
-                ModelDelegationDiagnosis(
-                    fault=EnumDelegationDoctorFault.NO_IDENTITY,
-                    detail="The gateway block does not declare both tenant_slug and base_url.",
-                    fix=_NO_IDENTITY_FIX,
-                ),
-                True,
-            )
-        return (
-            ModelDelegationDiagnosis(
-                fault=None,
-                detail=f"Delegation identity '{tenant_slug}' is configured for {base_url}.",
-                fix="",
-            ),
-            True,
-        )
+        return _evaluate_identity(self._onex_home)
 
     def diagnose(self) -> ModelDelegationDiagnosis:
         """Return the identity diagnosis without raising."""

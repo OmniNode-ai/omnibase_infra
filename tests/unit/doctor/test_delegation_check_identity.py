@@ -15,6 +15,12 @@ from omnibase_infra.doctor.checks.check_delegation_identity import (
 from omnibase_infra.doctor.enum_delegation_doctor_fault import EnumDelegationDoctorFault
 
 
+@pytest.fixture(autouse=True)
+def _no_local_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep these gateway-block tests independent of any identity on the host."""
+    monkeypatch.setattr(module, "read_install_identity", lambda: None)
+
+
 @pytest.mark.parametrize(
     "config",
     [
@@ -39,11 +45,10 @@ def test_missing_identity_has_login_remediation(
     result = check.run()
 
     assert diagnosis.fault is EnumDelegationDoctorFault.NO_IDENTITY
-    assert diagnosis.fix == (
-        "pbpaste | onex auth login --tenant-slug <slug> --base-url <origin> --api-key-stdin"
-    )
+    assert diagnosis.fix == "onex local init"
     assert result.status is EnumHealthStatusValue.UNHEALTHY
-    assert "[no_identity]" in result.message
+    assert "[no_identity]" not in result.message
+    assert "[" not in result.message
     assert diagnosis.fix in result.message
 
 
@@ -70,7 +75,10 @@ def test_unreadable_config_is_unknown(tmp_path: Path) -> None:
     assert check.run().status is EnumHealthStatusValue.UNKNOWN
 
 
-def test_identity_is_trimmed_and_needs_no_key(tmp_path: Path) -> None:
+def test_identity_is_configured_by_local_identity_and_needs_no_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(module, "read_install_identity", lambda: "tenant-uuid")
     (tmp_path / "config.yaml").write_text(
         "gateway:\n  tenant_slug: ' acme '\n  base_url: ' https://gateway.invalid '\n",
         encoding="utf-8",
@@ -82,9 +90,9 @@ def test_identity_is_trimmed_and_needs_no_key(tmp_path: Path) -> None:
 
     assert diagnosis.fault is None
     assert diagnosis.fix == ""
-    assert diagnosis.detail == (
-        "Delegation identity 'acme' is configured for https://gateway.invalid."
-    )
+    assert diagnosis.detail == "Delegation identity is configured."
+    assert "acme" not in diagnosis.detail
+    assert "gateway.invalid" not in diagnosis.detail
     assert result.status is EnumHealthStatusValue.HEALTHY
     assert result.message == diagnosis.detail
 
@@ -92,6 +100,7 @@ def test_identity_is_trimmed_and_needs_no_key(tmp_path: Path) -> None:
 def test_default_home_uses_injected_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(module, "read_install_identity", lambda: "tenant-uuid")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     (tmp_path / ".onex").mkdir()
     (tmp_path / ".onex" / "config.yaml").write_text(

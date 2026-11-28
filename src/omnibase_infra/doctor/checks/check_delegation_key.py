@@ -15,7 +15,6 @@ from omnibase_core.models.doctor.model_doctor_check_result import (
 from omnibase_core.protocols.http.protocol_http_client import ProtocolHttpResponse
 from omnibase_infra.doctor.delegation_doctor_support import (
     GATEWAY_BLOCK_INVALID,
-    GATEWAY_BLOCK_MISSING,
     default_onex_home,
     gateway_text,
     read_gateway_block,
@@ -42,6 +41,7 @@ from omnibase_infra.gateway.client.store_gateway_credential import (
 from omnibase_infra.gateway.models.model_gateway_api_key import (
     ModelGatewayApiKeyCredential,
 )
+from omnibase_infra.handlers import handler_check_delegation_identity as ident
 
 
 class CheckDelegationKey(DoctorCheckBase):
@@ -80,13 +80,13 @@ class CheckDelegationKey(DoctorCheckBase):
         state, block = read_gateway_block(self._onex_home)
         if state == GATEWAY_BLOCK_INVALID:
             return self._unknown("config.yaml is unreadable or invalid")
-        if state == GATEWAY_BLOCK_MISSING or block is None:
-            return self._unknown("delegation_identity is not configured")
+        if block is None:
+            return self._unknown(ident.missing_gateway_reason())
 
         tenant_slug = gateway_text(block, "tenant_slug")
         base_url = gateway_text(block, "base_url")
         if tenant_slug is None or base_url is None:
-            return self._unknown("delegation_identity is incomplete")
+            return self._unknown("the gateway block in config.yaml is incomplete")
         if gateway_text(block, "api_key_ref") is None:
             return (
                 ModelDelegationDiagnosis(

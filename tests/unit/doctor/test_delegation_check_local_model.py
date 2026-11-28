@@ -65,16 +65,21 @@ def test_absent_chat_backend_never_probes(
     path = tmp_path / "overlay.yaml"
     if config is not None:
         path.write_text(config, encoding="utf-8")
-    check = CheckDelegationLocalModel(overlay_path=path, transport=transport)
+    check = CheckDelegationLocalModel(
+        overlay_path=path, transport=transport, hosted_models_reader=lambda: ()
+    )
 
     diagnosis = check.diagnose()
     result = check.run()
 
     assert diagnosis.fault is EnumDelegationDoctorFault.NO_LOCAL_MODEL
-    assert str(path) in diagnosis.fix
-    assert "tier: local" in diagnosis.fix
+    assert "onex" in diagnosis.fix
+    assert "/config" in diagnosis.fix
+    for hidden in ("onex models", "onex setup", ".yaml"):
+        assert hidden not in diagnosis.fix
     assert result.status is EnumHealthStatusValue.UNHEALTHY
-    assert "[no_local_model]" in result.message
+    assert "[no_local_model]" not in result.message
+    assert "[" not in result.message
     transport.get.assert_not_awaited()
 
 
@@ -146,7 +151,8 @@ def test_http_failure_reports_not_serving_without_reading_body(
     assert f"HTTP {status}" in diagnosis.detail
     assert diagnosis.fix == "Start the model server at https://model.invalid."
     assert result.status is EnumHealthStatusValue.UNHEALTHY
-    assert "[local_model_not_serving]" in result.message
+    assert "[local_model_not_serving]" not in result.message
+    assert "[" not in result.message
     transport.get.return_value.text.assert_not_awaited()
 
 
@@ -213,7 +219,8 @@ def test_model_id_mismatch_lists_sorted_valid_ids(
     assert str(overlay) in diagnosis.fix
     assert "set model_name" in diagnosis.fix
     assert result.status is EnumHealthStatusValue.UNHEALTHY
-    assert "[local_model_id_mismatch]" in result.message
+    assert "[local_model_id_mismatch]" not in result.message
+    assert "[" not in result.message
 
 
 def test_mismatch_on_a_later_local_backend_is_reported(
