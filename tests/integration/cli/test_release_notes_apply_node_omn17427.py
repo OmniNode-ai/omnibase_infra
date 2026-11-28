@@ -357,3 +357,27 @@ class TestRunThroughTheNodeCli:
         assert changelog.startswith("## v0.47.66 (")
         assert changelog.endswith("\n\n## v0.1.0 (2026-01-01)\n")
         assert not (clone / "README.md").exists()
+
+    def test_the_node_writes_no_changelog_into_a_repo_whose_removed_prose_lists_it(
+        self, tmp_path: Path
+    ) -> None:
+        """The 0.4.330 cut shape: the gate lists CHANGELOG.md, the prose test removed it (OMN-25958)."""
+        clone = tmp_path / "clone"
+        gate = clone / (
+            "src/omnimarket/nodes/node_ticket_contract_prerequisite_effect/"
+            "handlers/handler_ticket_contract_prerequisite.py"
+        )
+        gate.parent.mkdir(parents=True)
+        gate.write_text(
+            '_RELEASE_CUT_PATHS = frozenset({"CHANGELOG.md", "pyproject.toml"})\n',
+            encoding="utf-8",
+        )
+        prose = clone / "tests" / "ci" / "test_repository_prose_removed_omn17427.py"
+        prose.parent.mkdir(parents=True)
+        prose.write_text('REMOVED_PROSE = (\n    "CHANGELOG.md",\n)\n', "utf-8")
+        entry = tmp_path / "entry.md"
+        entry.write_text(_ENTRY, encoding="utf-8")
+        code, output = _run_node(tmp_path, clone, entry, repo_name="omnimarket")
+        assert code == 0, output
+        assert "release-pr-body" in output
+        assert not (clone / "CHANGELOG.md").exists()
