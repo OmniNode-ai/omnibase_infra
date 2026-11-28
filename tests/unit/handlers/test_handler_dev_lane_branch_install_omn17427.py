@@ -95,6 +95,8 @@ class _Lane:
         self.container = ""
         self.running = True
         self.docker_down = False
+        self.restart_error = ""
+        self.restart_times_out = False
         self.copy_is_ignored = False
         self.recreate()
 
@@ -136,6 +138,10 @@ class _Lane:
             return _done(argv)
         if argv[:2] == ["docker", "restart"]:
             self.restarts.append(argv[2])
+            if self.restart_times_out:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            if self.restart_error:
+                return _done(argv, code=1, err=self.restart_error)
             return _done(argv)
         if argv[:2] == ["docker", "inspect"]:
             return _done(argv, out="running|healthy\n")
@@ -896,3 +902,46 @@ def test_omn24013_a_whole_lane_restarts_nothing_and_publishes_no_start(
     assert code == bi.EXIT_OK
     assert lane.restarts == []
     assert starts.calls == []
+
+
+def _restart_failed_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if "branch_install_restart_failed" in r.getMessage()
+    ]
+
+
+def test_omn26764_a_failed_restart_logs_the_docker_error(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """q-hostverlive3-194000: restart failed in ~0.3 s and the log named no cause."""
+    store = _store(tmp_path)
+    lane = _lane()
+    _declare(tmp_path, store)
+    lane.recreate()
+    lane.restart_error = "Error response from daemon: cannot restart container: boom\n"
+
+    with caplog.at_level(logging.INFO):
+        receipt = _handler(store, lane).apply()
+
+    assert receipt.restarted == ()
+    lines = _restart_failed_lines(caplog)
+    assert len(lines) == 1
+    assert "exit 1" in lines[0] and "cannot restart container: boom" in lines[0]
+
+
+def test_omn26764_a_restart_that_raises_logs_the_exception(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    store = _store(tmp_path)
+    lane = _lane()
+    _declare(tmp_path, store)
+    lane.recreate()
+    lane.restart_times_out = True
+
+    with caplog.at_level(logging.INFO):
+        _handler(store, lane).apply()
+
+    lines = _restart_failed_lines(caplog)
+    assert len(lines) == 1 and "TimeoutExpired" in lines[0]
