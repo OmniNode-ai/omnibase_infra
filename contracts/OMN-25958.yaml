@@ -14,6 +14,11 @@ requirements:
         statement: A regression test built from the recorded 0.4.324 cut inputs fails on the unfixed node, which creates CHANGELOG.md, and passes when the tree is unchanged and the block is returned for the pull request body.
       - id: AC2
         statement: A checkout that still has a CHANGELOG.md keeps receiving the prepend, and the cut job accepts a receipt with no staged path only for the release-pr-body target.
+  - id: req-omn25958-removed-prose-policy
+    statement: A release cut writes no CHANGELOG.md into a repository whose removed-prose test lists it, whatever its release-cut gate lists.
+    acceptance:
+      - id: AC3
+        statement: A regression test built from the 0.4.330 cut shape (gate lists CHANGELOG.md, removed-prose test lists CHANGELOG.md) fails on the unfixed node, which writes the file, and passes when the tree is unchanged.
 evidence_requirements:
   - kind: tests
     description: Exercise the notes handler, the node CLI and the cut job's receipt readback.
@@ -38,4 +43,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_handler_release_notes_apply.py tests/integration/cli/test_release_notes_apply_node_omn17427.py -q -n 0 --no-cov
+        cwd: .
+  - id: dod-omn25958-removed-prose-outranks-gate
+    description: The 0.4.330 cut shape leaves the tree unchanged and returns the block for the release pull request body.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_release_notes_apply_effect/test_release_notes_removed_prose_omn25958.py -q -n 0 --no-cov
         cwd: .
