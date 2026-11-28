@@ -1,0 +1,64 @@
+{
+  "_provenance": {
+    "source": "onex delegate receipt.json, run 33da8f0d-774a-4c48-ae8d-0d1440639acb, dev lane, caller_lane eval-local-now-4660; top-level identity fields and receipt.result.terminal_payload.payload.attempts copied, every other field omitted; the host address and the model id are replaced by the names lab-model-host and recorded-local-model",
+    "captured_utc": "2026-11-11T19:29:08Z",
+    "source_sha256": "85066c7a815b61eca36a2cd17e37fc6a4e662a38bc76bd97623d62c8eed24dc1"
+  },
+  "receipt": {
+    "backend_id": "local-coder",
+    "endpoint": "local",
+    "model": "recorded-local-model",
+    "routing_tier": "local",
+    "status": "success",
+    "receipt": {
+      "result": {
+        "terminal_payload": {
+          "payload": {
+            "attempts": [
+              {
+                "acceptance_decision": "accept",
+                "acceptance_detail": "",
+                "acceptance_reason": "quality_bar_met",
+                "attempt_id": "43b88315-b5ef-5789-8498-0165bf17e9b8",
+                "attempt_kind": "first_try",
+                "backend_id": "local-coder",
+                "configuration": null,
+                "cost_usd": 0.0,
+                "error_message": "",
+                "failure_class": null,
+                "finish_reason": "absent",
+                "host": "lab-model-host",
+                "http_status": 200,
+                "input_token_budget": null,
+                "input_tokens_measured": null,
+                "model_id": "recorded-local-model",
+                "parent_attempt_id": null,
+                "provider_code": null,
+                "provider_id": "host:lab-model-host",
+                "quality_gate_passed": true,
+                "quality_score": 1.0,
+                "reasoning_preamble": "",
+                "reasoning_preamble_rule": "no_boundary_found",
+                "rubric_verdict": {
+                  "failed_criteria": [],
+                  "outcome": "UNDETERMINED",
+                  "rubric_version": "delegation-class-rubrics.v1",
+                  "task_class": "document",
+                  "undetermined_criteria": [
+                    "claims_traceable"
+                  ]
+                },
+                "size_band": null,
+                "split_id": null,
+                "substituted_from_backend_id": null,
+                "tier": "local",
+                "truncated": false,
+                "usage_source": null
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

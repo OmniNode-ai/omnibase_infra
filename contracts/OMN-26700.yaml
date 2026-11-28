@@ -6,6 +6,18 @@ summary: >-
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn26700-ac1-model-passes:
+      - label: AC1
+        criterion_hash: c108d754fd60af2fdd3ea7bb1adc8abe21de01d949d1a9c23799e0c18badb709
+        proposed_by: lane=dod-closeout-bind-2026-11-28T0145Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-28T0145Z-c0
+    dod-omn26700-ac3-sha-matches:
+      - label: AC3
+        criterion_hash: d9763bd74b4b73702304ea9a871c15e246772456529655eba7b9bc44d7acdfeb
+        proposed_by: lane=dod-closeout-bind-2026-11-28T0145Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-28T0145Z-c0
 requirements:
   - id: req-omn26700-lane-work-loop-model
     statement: The lane work loop has a TLA+ model whose nine properties pass on the real model and whose eight mutations each break their own property.
@@ -36,7 +48,7 @@ dod_evidence:
         check_value: grep -q "No error has been found" formal/lane_work_loop/results/Model.out
         cwd: "."
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_lane_work_loop_model_omn26700.py -q
+        check_value: uv run pytest tests/ci/test_lane_work_loop_model_omn26700.py -q --no-cov
         cwd: "."
   - id: dod-omn26700-ac2-mutations-break
     description: Each of the seven invariant mutations names its own invariant as violated.
@@ -44,10 +56,21 @@ dod_evidence:
     binds_ac: [AC2]
     checks:
       - check_type: command
-        check_value: bash -c 'cd formal/lane_work_loop && grep -q "Invariant OneTerminal is violated" results/mut_terminal_twice.out && grep -q "Invariant OneLiveWorkflowPerChange is violated" results/mut_random_workflow_id.out && grep -q "Invariant HandoffAtProvenHead is violated" results/mut_skip_confirmation.out && grep -q "Invariant NoLostOutput is violated" results/mut_commit_before_outputs.out && grep -q "Invariant NoDuplicateEffect is violated" results/mut_resend_without_readback.out && grep -q "Invariant RetryBound is violated" results/mut_count_refused_input.out && grep -q "Invariant AnswerInContract is violated" results/mut_answer_any_state.out && grep -q "Temporal properties were violated" results/mut_no_tick.out'
+        check_value: bash -c 'cd formal/lane_work_loop && grep -q "Invariant OneTerminal is violated" results/mut_terminal_twice.out && grep -q "Invariant OneLiveWorkflowPerChange is violated" results/mut_random_workflow_id.out && grep -q "Invariant HandoffAtProvenHead is violated" results/mut_skip_confirmation.out && grep -q "Invariant NoLostOutput is violated" results/mut_commit_before_outputs.out && grep -q "Invariant NoDuplicateEffect is violated" results/mut_resend_without_readback.out && grep -q "Invariant RetryBound is violated" results/mut_count_refused_input.out && grep -q "Invariant AnswerInContract is violated" results/mut_answer_any_state.out && grep -q "Temporal property DeadlineFires was violated" results/mut_no_tick.out'
         cwd: "."
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_lane_work_loop_model_omn26700.py -q
+        check_value: uv run pytest tests/ci/test_lane_work_loop_model_omn26700.py -q --no-cov
+        cwd: "."
+  - id: dod-omn26700-ac2-no-tick-names-property
+    description: mut_no_tick checks DeadlineFires alone and its output names that property as violated and not Terminates.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: bash -c 'cd formal/lane_work_loop && grep -qx "PROPERTIES DeadlineFires" mut_no_tick.cfg && grep -q "Temporal property DeadlineFires was violated" results/mut_no_tick.out && ! grep -q "Temporal property Terminates was violated" results/mut_no_tick.out'
+        cwd: "."
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lane_work_loop_model_omn26700.py -q --no-cov
         cwd: "."
   - id: dod-omn26700-ac3-sha-matches
     description: The digest file matches the spec and cfg files.
@@ -58,7 +81,7 @@ dod_evidence:
         check_value: bash -c 'cd formal/lane_work_loop && shasum -a 256 -c results/model.sha256'
         cwd: "."
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_lane_work_loop_model_omn26700.py -q
+        check_value: uv run pytest tests/ci/test_lane_work_loop_model_omn26700.py -q --no-cov
         cwd: "."
   - id: dod-omn26700-ac4-nine-properties
     description: The spec defines the nine named properties, one per line of the verdict.
@@ -69,5 +92,5 @@ dod_evidence:
         check_value: bash -c 'cd formal/lane_work_loop && test "$(grep -cE "^(OneTerminal|OneLiveWorkflowPerChange|HandoffAtProvenHead|NoLostOutput|NoDuplicateEffect|RetryBound|AnswerInContract|DeadlineFires|Terminates) ==" LaneWorkLoop.tla)" -eq 9'
         cwd: "."
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_lane_work_loop_model_omn26700.py -q
+        check_value: uv run pytest tests/ci/test_lane_work_loop_model_omn26700.py -q --no-cov
         cwd: "."

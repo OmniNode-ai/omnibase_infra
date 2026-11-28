@@ -1,3 +1,21 @@
+## v0.38.87 (2026-11-28)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.87 by the scheduled release train.
+- 9 release-relevant commit(s) merged since v0.38.86.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.86
+- feat: AC3 test that onex --help does not import extension command modules (#6363)
+- : a dev-lane branch install takes a repository, branch and sha with no pull request number (#6358)
+- : Dev-lane branch installer creates parent directories of new files under the package root (#6359)
+- : build stability follow of a pinned head as a declared open PR (#6019)
+- : the stability lane runs the integration build (#6328)
+- fix: declare and deliver the writer grant on savings_priced_models (#6183)
+- : grant the runtime account the lane_work_workflow table in the topology profiles (#6337)
+- : refuse a queued build whose ref the deploy clone lacks (#6336)
+- : the overdue dev build event ensures its topic before publishing (#6305)
+
 ## v0.38.86 (2026-11-27)
 
 ### Release

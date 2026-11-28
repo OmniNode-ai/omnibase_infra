@@ -25,7 +25,8 @@ class ModelDevLaneBranchInstall(BaseModel):
     """A fix installed from its branch into running dev-lane containers.
 
     The record is declared before the merge, so it names where the fix comes
-    from (repository, PR, branch and head), where it lands (services and the
+    from (repository, branch and full head sha, and the PR number when one is
+    open; OMN-26764: a fix is installed first and the change opened after), where it lands (services and the
     container path and sha256 of each file) and when it stops being re-applied
     (an expiry, or the merge).
     """
@@ -34,7 +35,7 @@ class ModelDevLaneBranchInstall(BaseModel):
 
     id: str
     repo: str
-    pr: int = Field(gt=0)
+    pr: int | None = Field(default=None, gt=0)
     branch: str = Field(min_length=1, max_length=200)
     head: str
     ticket: str
@@ -44,6 +45,17 @@ class ModelDevLaneBranchInstall(BaseModel):
     restart: bool = True
     registered_at: datetime
     expires_at: datetime
+
+    @property
+    def pr_text(self) -> str:
+        return f"#{self.pr}" if self.pr is not None else "none"
+
+    @property
+    def label(self) -> str:
+        """``repo#pr``, or ``repo@sha12`` when no pull request is open."""
+        if self.pr is not None:
+            return f"{self.repo}#{self.pr}"
+        return f"{self.repo}@{self.head[:12]}"
 
     @field_validator("id")
     @classmethod

@@ -965,11 +965,11 @@ class ModelRebuildRequested(_StrictFrozenModel):
     @model_validator(mode="after")
     def validate_open_pr(self) -> ModelRebuildRequested:
         if self.open_pr and (
-            self.runtime_lane != EnumRuntimeLane.DEV
+            self.runtime_lane is EnumRuntimeLane.PROD
             or self.rollback is None
             or not self.open_pr.endswith(f"@{self.git_ref}")
         ):
-            msg = "open_pr needs runtime_lane dev, a rollback declaration, git_ref = its head"
+            msg = "open_pr needs a non-prod lane, a rollback declaration, git_ref = its head"
             raise ValueError(msg)
         return self
 

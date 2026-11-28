@@ -45,12 +45,14 @@ class ModelDevLaneBranchInstallFile(BaseModel):
         return value
 
     def prepare_argv(self, container: str) -> tuple[list[str], ...]:
-        """Commands to run in the container before the copy: the directory of an overlay root.
+        """Commands to run in the container before the copy: the file's parent directory.
 
-        ``docker cp`` needs the parent directory, and an overlay root is not in the image.
+        ``docker cp`` needs the parent directory, and a new directory (an overlay root
+        or a new node directory in the installed package) is not in the image. The
+        path validator already confined ``path`` to a declared root, so ``mkdir -p``
+        never reaches a directory outside one.
         """
-        root = load_dev_lane_branch_install_roots().root_of(self.path)
-        if root is None or not root.overlay_root:
+        if load_dev_lane_branch_install_roots().root_of(self.path) is None:
             return ()
         parent = self.path.rpartition("/")[0]
         return (["docker", "exec", "-u", "0", container, "mkdir", "-p", "--", parent],)
