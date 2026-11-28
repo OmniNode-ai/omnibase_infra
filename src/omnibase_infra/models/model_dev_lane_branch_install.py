@@ -11,7 +11,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    ValidationInfo,
     field_validator,
 )
 
@@ -109,19 +108,22 @@ class ModelDevLaneBranchInstall(BaseModel):
             raise ValueError("services must be distinct compose service names")
         return value
 
-    @field_validator("files", "entry_points")
+    @field_validator("files")
     @classmethod
-    def _paths_distinct(
-        cls,
-        value: tuple[
-            ModelDevLaneBranchInstallFile | ModelDevLaneBranchInstallEntryPoint, ...
-        ],
-        info: ValidationInfo,
-    ) -> tuple[
-        ModelDevLaneBranchInstallFile | ModelDevLaneBranchInstallEntryPoint, ...
-    ]:
+    def _file_paths_distinct(
+        cls, value: tuple[ModelDevLaneBranchInstallFile, ...]
+    ) -> tuple[ModelDevLaneBranchInstallFile, ...]:
         if len({v.path for v in value}) != len(value):
-            raise ValueError(f"{info.field_name} must name distinct paths")
+            raise ValueError("files must name distinct paths")
+        return value
+
+    @field_validator("entry_points")
+    @classmethod
+    def _entry_point_paths_distinct(
+        cls, value: tuple[ModelDevLaneBranchInstallEntryPoint, ...]
+    ) -> tuple[ModelDevLaneBranchInstallEntryPoint, ...]:
+        if len({v.path for v in value}) != len(value):
+            raise ValueError("entry_points must name distinct paths")
         return value
 
     @field_validator("registered_at", "expires_at")
