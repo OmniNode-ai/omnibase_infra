@@ -96,9 +96,14 @@ dod_evidence:
         cwd: .
   - id: dod-omn26122-retire-deleted-ac4
     description: >-
-      AC4 was deleted from OMN-26122; the ticket now carries AC1 to AC3 only. This item retires the claim the item that bound AC4 made on a deleted criterion and binds no criterion. Its check keeps the resolver and deploy-agent health tests that item ran, so they still run.
+      AC4 was deleted from OMN-26122; the ticket now carries AC1 to AC3 only. This item retires the claim the item that bound AC4 made on a deleted criterion. It binds AC2 with a check that fails on the merge base, where the AC4 requirement is still declared, and passes once the contract carries AC1 to AC3 only; its second check keeps the resolver and deploy-agent health tests that item ran, so they still run.
     source: manual
+    binds_ac:
+      - AC2
     checks:
+      - check_type: command
+        check_value: "! grep -E 'req-omn26122-stability-probe-waits-for-its-own-lan[e]' contracts/OMN-26122.yaml"
+        cwd: .
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_resolve_lab_lane_other_lane_job_omn26122.py -q --no-cov -n 0 -p no:randomly
         cwd: .
