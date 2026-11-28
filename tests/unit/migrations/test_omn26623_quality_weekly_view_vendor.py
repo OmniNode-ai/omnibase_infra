@@ -23,8 +23,8 @@ NODE = "node_projection_delegation"
 FORWARD = ROOT / "docker/migrations/forward"
 VENDORED = {
     "0070_delegation_quality_weekly_view.sql": (
-        "b08ead16ff6e63488e505c709223041b12a57353e216956a6040de08ca1bc807",
-        "fa4ce186aa57a178a690b92ad2ef52e268fe69dd",
+        "ab07af95dbe35fbc2c80fc9f03d26450c01e3b83ffd35e0a56c0bf1bbb6d16d2",
+        "d16e5e1574135a31cc63650216885f55c534901f",
     ),
 }
 
