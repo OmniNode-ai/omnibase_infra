@@ -22,6 +22,9 @@ evidence_requirements:
   - kind: tests
     description: The declared help lines match the commands' own help lines.
     command: uv run pytest tests/unit/cli/test_onex_cli_help_table_omn26615.py -q -n 0 --no-cov -p no:cacheprovider
+  - kind: tests
+    description: Rendering the help page does not import extension command modules.
+    command: uv run pytest tests/unit/cli/test_cli_help_does_not_load_commands_omn26615.py -q -n 0 --no-cov -p no:cacheprovider
 emergency_bypass:
   enabled: false
   justification: ""

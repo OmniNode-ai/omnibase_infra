@@ -19,7 +19,6 @@ import json
 import subprocess
 import sys
 import textwrap
-from pathlib import Path
 
 import pytest
 
@@ -54,7 +53,7 @@ def _run_probe(*, remove_help_entry: bool) -> dict:
                     return eps
 
                 def __iter__(self):
-                    return iter(self._orig)
+                    return (e for e in self._orig if not (e.group == "onex.cli.help" and e.name == probe_command))
 
                 def __getattr__(self, name):
                     return getattr(self._orig, name)
@@ -65,10 +64,10 @@ def _run_probe(*, remove_help_entry: bool) -> dict:
         import click
 
         ctx = click.Context(cli)
-        cli.get_help(ctx)
+        help_text = cli.get_help(ctx)
 
         loaded = probe_module in sys.modules
-        json.dump({{"loaded": loaded, "remove_help": remove_help}}, sys.stdout)
+        json.dump({{"loaded": loaded, "remove_help": remove_help, "help_text": help_text}}, sys.stdout)
     """)
     result = subprocess.run(
         [_PYTHON, "-I", "-c", script],
@@ -90,6 +89,9 @@ def test_a_fresh_interpreter_help_page_leaves_the_declared_extension_unimported(
 ):
     """With the help entry present, rendering --help must NOT import the command module."""
     report = _run_probe(remove_help_entry=False)
+    assert _PROBE_COMMAND in report["help_text"], (
+        f"{_PROBE_COMMAND!r} does not appear in the rendered help page"
+    )
     assert not report["loaded"], (
         f"{_PROBE_MODULE} was imported by onex --help even though "
         f"onex.cli.help declares the {_PROBE_COMMAND!r} command's one-line help"
