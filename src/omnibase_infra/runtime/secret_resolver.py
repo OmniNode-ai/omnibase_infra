@@ -480,6 +480,10 @@ class SecretResolver:
         # === Rate Limiting for Warnings ===
         # Track last eviction warning time to rate-limit log output
         self._last_eviction_warning_time: float = 0.0
+        # OMN-26311: logical names already warned about for a configuration
+        # failure (no_mapping, handler_not_configured). A poller asking for the
+        # same unmapped name every tick warns once; later misses log at DEBUG.
+        self._warned: set[tuple[str, str]] = set()
 
         # Build lookup table from mappings
         self._mappings: dict[str, ModelSecretSourceSpec] = {
@@ -1325,29 +1329,25 @@ class SecretResolver:
         # Configuration issues (no_mapping, handler_not_configured) are warnings
         # since they indicate misconfiguration that should be addressed.
         # Expected failures (not_found for optional secrets) are debug level.
+        # A repeated configuration failure for the same name is debug level too
+        # (OMN-26311); the failure is still counted above on every call.
+        first_config_failure = False
         if reason in ("no_mapping", "handler_not_configured"):
-            logger.warning(
-                "Secret resolution failed (configuration issue): %s",
-                logical_name,
-                extra={
-                    "logical_name": logical_name,
-                    "source_type": source_type,
-                    "reason": reason,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-        else:
-            # not_found and other expected failures - debug level
-            logger.debug(
-                "Secret resolution failed: %s",
-                logical_name,
-                extra={
-                    "logical_name": logical_name,
-                    "source_type": source_type,
-                    "reason": reason,
-                    "correlation_id": str(correlation_id),
-                },
-            )
+            with self._lock:
+                first_config_failure = (logical_name, reason) not in self._warned
+                self._warned.add((logical_name, reason))
+        logger.log(
+            logging.WARNING if first_config_failure else logging.DEBUG,
+            "Secret resolution failed%s: %s",
+            " (configuration issue)" if first_config_failure else "",
+            logical_name,
+            extra={
+                "logical_name": logical_name,
+                "source_type": source_type,
+                "reason": reason,
+                "correlation_id": str(correlation_id),
+            },
+        )
 
     # === Introspection (non-sensitive) ===
 
