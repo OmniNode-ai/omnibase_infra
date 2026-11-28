@@ -13,9 +13,9 @@ summary: >-
   post.logout.redirect.uris. The dev slot omninode/dev/keycloak already holds OMNIDASH_CLIENT_SECRET (read live
   2026-11-28). Three tests asserted the opposite and are updated rather than deleted: what they pinned was a premise,
   stated in #6376's own docstring as "On dev there is no secretEnv, so the dev seed job needs no new variable", and
-  omninode_infra#2199 (merged 2026-11-28T15:59Z) adds that variable to the dev seed job and to the dev reconcile
+  the deployment repository's #2199 (merged 2026-11-28T15:59Z) adds that variable to the dev seed job and to the dev reconcile
   credentials template, so the premise is gone and the exclusion is what breaks sign-in. Each updated test records
-  that in its own docstring. The two deployment copies of the roster and the sibling pin follow in omninode_infra.
+  that in its own docstring. The two deployment copies of the roster and the sibling pin follow in the deployment repository.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []

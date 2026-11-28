@@ -18,7 +18,7 @@ which the seed job reads from the same keycloak slot the dashboard reads, so
 the realm and the app hold one value and the confidential secret guard
 (OMN-16504) never sees an empty secret. Dev pushes it the same way since
 OMN-26768: it declared no ``secretEnv`` while the dev seed job had no such
-variable, and omninode_infra#2199 added one.
+variable, and the deployment repository's #2199 added one.
 """
 
 from __future__ import annotations
@@ -134,7 +134,7 @@ class TestEachRealmGetsItsShape:
     def test_dev_pushes_the_secret_like_the_other_realms(self) -> None:
         """OMN-26768. This asserted the opposite until 2026-11-28: dev
         declared no secretEnv because the dev seed job had no such variable.
-        omninode_infra#2199 added it to the job and to the dev reconcile
+        the deployment repository's #2199 added it to the job and to the dev reconcile
         credentials, so the premise is gone, and leaving dev out is now the
         defect: a confidential client with no declared secret gets one minted
         by Keycloak that is never written back to the omnidash-credentials
