@@ -1,0 +1,39 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26623"
+title: "Vendor the weekly delegation-quality view"
+summary: >-
+  Deployment component of AC1: carry omnimarket's node_projection_delegation migration 0070 (projection_delegation_quality_weekly, one row per tenant whose cells list holds every ISO week, task type and first-rung model) byte for byte, with its exact tenant ledger binding, the forward-only class, the delegation writer's SELECT on the new view in the topology instances, and the nine re-rendered docker catalog profiles. These checks do not prove that omnimarket serves the three figures or that any figure equals a direct count; that is omnimarket's own change, and AC2, AC3 and AC4 are omnimarket's and omnidash's.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn26623-delegation-quality-weekly-deployment"
+    statement: "The deployment artifact carries the same weekly delegation-quality view as the delegation projection writer and lets that writer read it."
+    acceptance:
+      - id: "AC7"
+        statement: "AC7: omnibase_infra's copy of migration 0070 matches omnimarket's source byte for byte and grants SELECT to app_dashboard and tenant_projection_writer, so infra can vendor the weekly view -- falsifier: uv run pytest tests/unit/migrations/test_omn26623_quality_weekly_view_vendor.py fails at the infra merge base, where 0070 is absent, and on a one-byte change to the copy"
+evidence_requirements:
+  - kind: "tests"
+    description: "Exact migration source bytes, the unique tenant ledger binding, the forward-only class and the writer's SELECT on the view in every instance."
+    command: "uv run pytest tests/unit/migrations/test_omn26623_quality_weekly_view_vendor.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn26623-vendor-identity"
+    description: "Proves AC7: 0070 carries omnimarket's exact bytes (sha256 ab07af95dbe35fbc2c80fc9f03d26450c01e3b83ffd35e0a56c0bf1bbb6d16d2), one tenant ledger row, the forward-only class and the writer's SELECT on the view in every instance; fails when a byte, a ledger binding, the class or a grant is wrong."
+    source: "manual"
+    binds_ac: ["AC7"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/migrations/test_omn26623_quality_weekly_view_vendor.py -q -n 0 --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn26623-catalog-parity"
+    description: "Local Done gate only, so it binds no criterion here: the nine docker catalog profiles equal what scripts/render_application_database_topology.py renders from the topology instances, so each lists the view for the writer; it passes at the merge base as well, so it proves no criterion."
+    source: "manual"
+    execution_scope: local_done_gate
+    checks:
+      - check_type: "command"
+        check_value: 'for f in docker/catalog/database-topology/*.yaml; do e=$(basename "$f" .yaml); uv run python scripts/render_application_database_topology.py --environment "$e" --check "$f" || exit 1; done'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""

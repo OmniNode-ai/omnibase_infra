@@ -323,6 +323,7 @@ databases:
               - projection_delegation_daily
               - projection_delegation_model_routing
               - projection_delegation_quality_gate
+              - projection_delegation_quality_weekly
               - projection_delegation_savings
               - projection_delegation_summary
               - projection_delegation_token_usage
