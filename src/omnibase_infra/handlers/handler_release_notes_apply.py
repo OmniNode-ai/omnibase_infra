@@ -66,6 +66,10 @@ _RELEASE_CUT_GATE_PATH: Final = (
     "handler_ticket_contract_prerequisite.py"
 )
 _RELEASE_CUT_PATHS_NAME: Final = "_RELEASE_CUT_PATHS"
+# A repo declares itself changelog-free by listing CHANGELOG.md in the REMOVED_PROSE
+# tuple of its removed-prose test (OMN-17427, OMN-25958).
+_REMOVED_PROSE_TEST_PATH: Final = "tests/ci/test_repository_prose_removed_omn17427.py"
+_REMOVED_PROSE_NAME: Final = "REMOVED_PROSE"
 _ENTRY_HEADING: Final[re.Pattern[str]] = re.compile(
     r"^## v(\d+\.\d+\.\d+) \((\d{4}-\d{2}-\d{2})\)$"
 )
@@ -138,6 +142,32 @@ def release_cut_gate_needs_changelog(clone: Path) -> bool:
     )
 
 
+def repo_is_changelog_free(clone: Path) -> bool:
+    """Whether the repo's removed-prose test lists ``CHANGELOG.md`` as removed prose.
+
+    That list is the repo's declared policy (OMN-25958): the file must not exist on
+    its default branch, so no cut writes it, whatever the release-cut gate lists and
+    whether or not a stale copy is present. A missing or unparseable test answers
+    ``False``.
+    """
+    try:
+        tree = ast.parse((clone / _REMOVED_PROSE_TEST_PATH).read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeError):
+        return False
+    return any(
+        isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == _REMOVED_PROSE_NAME
+            for target in node.targets
+        )
+        and any(
+            isinstance(leaf, ast.Constant) and leaf.value == _CHANGELOG_PATH
+            for leaf in ast.walk(node.value)
+        )
+        for node in ast.walk(tree)
+    )
+
+
 def release_notes_target(clone: Path) -> str:
     """Where this repo's release notes live: ``CHANGELOG.md``, ``README.md`` or the PR.
 
@@ -149,11 +179,16 @@ def release_notes_target(clone: Path) -> str:
     go in the release pull request's body (``RELEASE_PR_BODY_TARGET``), unless the
     repo's own release-cut gate needs ``CHANGELOG.md`` in the cut
     (``release_cut_gate_needs_changelog``): then the cut carries it and the repo's
-    post-release bump removes it. No train-side key: a second copy of the answer
+    post-release bump removes it. A repo whose removed-prose test lists
+    ``CHANGELOG.md`` (``repo_is_changelog_free``) never gets one: that outranks the
+    gate and a stale file (OMN-25958). No train-side key: a second copy of the answer
     would drift from the gate that actually decides.
     """
     config = clone / README_ONLY_DOCS_FILE
+    changelog_free = repo_is_changelog_free(clone)
     if not config.is_file():
+        if changelog_free:
+            return RELEASE_PR_BODY_TARGET
         if (clone / _CHANGELOG_PATH).is_file() or release_cut_gate_needs_changelog(
             clone
         ):
@@ -170,7 +205,9 @@ def release_notes_target(clone: Path) -> str:
         for item in exceptions
         if isinstance(item, dict) and isinstance(item.get("path"), str)
     }
-    return _CHANGELOG_PATH if _CHANGELOG_PATH in allowed else _README_PATH
+    if _CHANGELOG_PATH in allowed and not changelog_free:
+        return _CHANGELOG_PATH
+    return _README_PATH
 
 
 def parse_release_entry(entry: str) -> ModelParsedReleaseEntry:
