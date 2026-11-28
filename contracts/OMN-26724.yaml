@@ -76,10 +76,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/handlers/test_build_repository_ref_integration_omn26724.py -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
-  - id: dod-omn26724-ac1-dev-agent-loaded-merged-code
-    description: "AC1 reading: the running dev deploy agent's /health reports a loaded_code_sha that contains the merge of the build-ref fix (5b35e3658c6f3a6497913628f62ff908c05faff8) and a positive uptime_seconds, so the agent was restarted after that merge. It exits non-zero for an empty or null sha, a sha that lacks the merge, an unreachable agent, or an uptime longer than the time since the merge commit."
+  - id: dod-omn26724-ac1-restart-reading-judged
+    description: "The node that judges AC1's live reading passes a dev agent restarted onto the merge and fails one with no loaded sha, no positive uptime, a sha lacking the merge or an uptime older than the merge."
     source: manual
-    execution_scope: local_done_gate
     binds_ac: [AC1]
     supersedes_ac_binding:
       - item: dod-omn26724-ac4-missing-ref-refused-next-runs
@@ -107,19 +106,8 @@ dod_evidence:
         retired_by: q-close26724-0826
         retired_at: '2026-11-28T08:55:00Z'
     checks:
-      - check_type: command
-        check_value: |-
-          ssh "$DEPLOY_PROBE_HOST" "curl -sf http://localhost:8098/health" | python3 -c 'import json,subprocess,sys,time;h=json.load(sys.stdin);sha=h.get("loaded_code_sha");up=h.get("uptime_seconds");m=sys.argv[1];assert sha and isinstance(up,int) and up>0;assert subprocess.run(["git","merge-base","--is-ancestor",m,sha]).returncode==0;t=int(subprocess.check_output(["git","show","-s","--format=%ct",m]));assert up<time.time()-t' 5b35e3658c6f3a6497913628f62ff908c05faff8
-        cwd: .
-  - id: dod-omn26724-ac2-dev-build-succeeded-from-own-ref
-    description: "AC2 reading: the dev deploy agent's /health last_result is a success for runtime_lane dev, with every phase result recorded, and the agent answers health. It exits non-zero for a failed or other-lane last result, an empty phase list, or an unreachable agent."
-    source: manual
-    execution_scope: local_done_gate
-    binds_ac: [AC2]
-    checks:
-      - check_type: command
-        check_value: |-
-          ssh "$DEPLOY_PROBE_HOST" "curl -sf http://localhost:8098/health" | python3 -c 'import json,sys;r=json.load(sys.stdin).get("last_result") or {};assert r.get("status")=="success" and r.get("runtime_lane")=="dev" and r.get("phase_results")'
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_deploy_agent_reading_omn26724.py -k 'known_good or ac1' -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
   - id: dod-omn26724-ac2-build-ref-decision-holds
     description: The build-ref decision that AC2's hourly build relies on holds at the head and fails with the merged fix reverted - a ref still missing after one good fetch is refused and a held ref is built.
@@ -129,13 +117,46 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/handlers/test_build_repository_ref_omn26724.py -q --no-cov -n 0 -p no:cacheprovider
         cwd: .
-  - id: dod-omn26724-ac3-stability-prod-not-restarted
-    description: "AC3 reading: the stability and prod deploy agents' /health uptime_seconds is longer than the dev agent's, so neither was restarted at or after the dev restart. It exits non-zero when either agent is unreachable or reports a shorter uptime. Read-only."
+  - id: dod-omn26724-ac2-build-reading-judged
+    description: "The node that judges AC2's live reading passes a dev-lane success with phase results and fails a failed, other-lane or phase-less last result."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_deploy_agent_reading_omn26724.py -k 'known_good or ac2' -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26724-ac3-untouched-agents-judged
+    description: "The node that judges AC3's live reading passes stability and prod agents that ran longer than the dev agent and fails a shorter, equal or unanswered uptime."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_deploy_agent_reading_omn26724.py -k 'known_good or ac3' -q --no-cov -n 0 -p no:cacheprovider
+        cwd: .
+  - id: dod-omn26724-ac1-dev-agent-loaded-merged-code
+    description: "Live reading for AC1 on the lab agents: the dev agent's /health loaded_code_sha contains the merge of the build-ref fix and its uptime is shorter than the merge's age. Judged by node_deploy_agent_reading_compute; exits non-zero when that criterion is not met or an agent is unreachable."
     source: manual
     execution_scope: local_done_gate
-    binds_ac: [AC3]
     checks:
       - check_type: command
         check_value: |-
-          dev="$(ssh "$DEPLOY_PROBE_HOST" "curl -sf http://localhost:8098/health" | python3 -c 'import json,sys;print(int(json.load(sys.stdin)["uptime_seconds"]))')" && for host in "$STABILITY_PROBE_HOST" "$PROD_PROBE_HOST"; do ssh "$host" "curl -sf http://localhost:8098/health" | python3 -c 'import json,sys;assert int(json.load(sys.stdin)["uptime_seconds"])>int(sys.argv[1])' "$dev" || exit 1; done
+          dev="$(ssh "$DEPLOY_PROBE_HOST" "curl -sf http://localhost:8098/health")" && stab="$(ssh "$STABILITY_PROBE_HOST" "curl -sf http://localhost:8098/health")" && prod="$(ssh "$PROD_PROBE_HOST" "curl -sf http://localhost:8098/health")" && DEV="$dev" STAB="$stab" PROD="$prod" PYTHONPATH=src uv run --frozen python -c 'import json,os,subprocess,sys,time;from omnibase_infra.handlers.deploy_agent_reading.handler_deploy_agent_reading import HandlerDeployAgentReading as H;from omnibase_infra.models.model_deploy_agent_reading_request import ModelDeployAgentReadingRequest as R;d,s,p=(json.loads(os.environ[k]) for k in ("DEV","STAB","PROD"));m=sys.argv[1];r=d.get("last_result") or {};sha=d.get("loaded_code_sha") or "";anc=bool(sha) and subprocess.run(["git","merge-base","--is-ancestor",m,sha]).returncode==0;t=int(subprocess.check_output(["git","show","-s","--format=%ct",m]));u=lambda h:None if h.get("uptime_seconds") is None else int(h["uptime_seconds"]);v=H().handle(R(dev_loaded_code_sha=sha,dev_uptime_seconds=u(d),dev_loaded_sha_has_merge=anc,merge_age_seconds=int(time.time())-t,dev_last_status=r.get("status") or "",dev_last_runtime_lane=r.get("runtime_lane") or "",dev_last_phase_result_count=len(r.get("phase_results") or []),stability_uptime_seconds=u(s),prod_uptime_seconds=u(p)));sys.exit(0 if v.ac1_met else 1)' 5b35e3658c6f3a6497913628f62ff908c05faff8
+        cwd: .
+  - id: dod-omn26724-ac2-dev-build-succeeded-from-own-ref
+    description: "Live reading for AC2: the dev agent's last result is a dev-lane success with phase results. Judged by node_deploy_agent_reading_compute; exits non-zero when that criterion is not met or an agent is unreachable."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: |-
+          dev="$(ssh "$DEPLOY_PROBE_HOST" "curl -sf http://localhost:8098/health")" && stab="$(ssh "$STABILITY_PROBE_HOST" "curl -sf http://localhost:8098/health")" && prod="$(ssh "$PROD_PROBE_HOST" "curl -sf http://localhost:8098/health")" && DEV="$dev" STAB="$stab" PROD="$prod" PYTHONPATH=src uv run --frozen python -c 'import json,os,subprocess,sys,time;from omnibase_infra.handlers.deploy_agent_reading.handler_deploy_agent_reading import HandlerDeployAgentReading as H;from omnibase_infra.models.model_deploy_agent_reading_request import ModelDeployAgentReadingRequest as R;d,s,p=(json.loads(os.environ[k]) for k in ("DEV","STAB","PROD"));m=sys.argv[1];r=d.get("last_result") or {};sha=d.get("loaded_code_sha") or "";anc=bool(sha) and subprocess.run(["git","merge-base","--is-ancestor",m,sha]).returncode==0;t=int(subprocess.check_output(["git","show","-s","--format=%ct",m]));u=lambda h:None if h.get("uptime_seconds") is None else int(h["uptime_seconds"]);v=H().handle(R(dev_loaded_code_sha=sha,dev_uptime_seconds=u(d),dev_loaded_sha_has_merge=anc,merge_age_seconds=int(time.time())-t,dev_last_status=r.get("status") or "",dev_last_runtime_lane=r.get("runtime_lane") or "",dev_last_phase_result_count=len(r.get("phase_results") or []),stability_uptime_seconds=u(s),prod_uptime_seconds=u(p)));sys.exit(0 if v.ac2_met else 1)' 5b35e3658c6f3a6497913628f62ff908c05faff8
+        cwd: .
+  - id: dod-omn26724-ac3-stability-prod-not-restarted
+    description: "Live reading for AC3: the stability and prod agents' uptime is longer than the dev agent's. Judged by node_deploy_agent_reading_compute; read-only; exits non-zero when that criterion is not met or an agent is unreachable."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: |-
+          dev="$(ssh "$DEPLOY_PROBE_HOST" "curl -sf http://localhost:8098/health")" && stab="$(ssh "$STABILITY_PROBE_HOST" "curl -sf http://localhost:8098/health")" && prod="$(ssh "$PROD_PROBE_HOST" "curl -sf http://localhost:8098/health")" && DEV="$dev" STAB="$stab" PROD="$prod" PYTHONPATH=src uv run --frozen python -c 'import json,os,subprocess,sys,time;from omnibase_infra.handlers.deploy_agent_reading.handler_deploy_agent_reading import HandlerDeployAgentReading as H;from omnibase_infra.models.model_deploy_agent_reading_request import ModelDeployAgentReadingRequest as R;d,s,p=(json.loads(os.environ[k]) for k in ("DEV","STAB","PROD"));m=sys.argv[1];r=d.get("last_result") or {};sha=d.get("loaded_code_sha") or "";anc=bool(sha) and subprocess.run(["git","merge-base","--is-ancestor",m,sha]).returncode==0;t=int(subprocess.check_output(["git","show","-s","--format=%ct",m]));u=lambda h:None if h.get("uptime_seconds") is None else int(h["uptime_seconds"]);v=H().handle(R(dev_loaded_code_sha=sha,dev_uptime_seconds=u(d),dev_loaded_sha_has_merge=anc,merge_age_seconds=int(time.time())-t,dev_last_status=r.get("status") or "",dev_last_runtime_lane=r.get("runtime_lane") or "",dev_last_phase_result_count=len(r.get("phase_results") or []),stability_uptime_seconds=u(s),prod_uptime_seconds=u(p)));sys.exit(0 if v.ac3_met else 1)' 5b35e3658c6f3a6497913628f62ff908c05faff8
         cwd: .
