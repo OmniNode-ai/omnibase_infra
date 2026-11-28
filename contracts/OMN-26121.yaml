@@ -104,7 +104,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          grep -F 'BROKER_SASL_ONESHOTS' src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py?ref=omn-26121-stability-sasl-flip-roll' --jq .content | base64 -d | grep 'BROKER_SASL_ONESHOTS' > /dev/null
+          grep -F 'BROKER_SASL_ONESHOTS' src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py > /dev/null
         cwd: .
   - id: dod-omn26121-integration-proof
     description: The shipped converge_broker_sasl runs against a real docker executable on PATH; both one-shots run in order and wait to exit 0, a non-zero exit raises, and a lane declaring neither starts nothing. It binds no criterion; the hosted proof is dod-omn26121-ac5-flip-order and dod-omn26121-ac6-one-shot-failure.
@@ -170,7 +170,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          grep -F ' with-declaration)' scripts/runtime_build/refresh_stability_lane.sh > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/refresh_stability_lane.sh?ref=omn-26121-stability-lane-declaration-mount' --jq .content | base64 -d | grep -F ' with-declaration)' > /dev/null
+          grep -F ' with-declaration)' scripts/runtime_build/refresh_stability_lane.sh > /dev/null
         cwd: .
   - id: dod-omn26121-ac7-stability-declaration-render
     description: The rendered stability runtime holds the real lane declaration folder read-only and the render refuses without the variable.
@@ -195,7 +195,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          grep -F "regexp_replace(line, 'TRIM" docker/migrations/seams/tenant_identity_schema_readback.sql > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/seams/tenant_identity_schema_readback.sql?ref=omn-26121-tenant-identity-readback-btrim' --jq .content | base64 -d | grep -F "regexp_replace(line, 'TRIM" > /dev/null
+          grep -F "regexp_replace(line, 'TRIM" docker/migrations/seams/tenant_identity_schema_readback.sql > /dev/null
         cwd: .
   - id: dod-omn26121-ac10-stability-projection-lane
     description: A projection readback block naming its authorization resolves to its name on a non-dev lane and an unauthorized one is refused.
@@ -220,7 +220,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          grep -F '_AUTHORIZED_BY_KEY = "authorized_by"' src/omnibase_infra/nodes/node_chain_canary_effect/lane_transport.py > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_chain_canary_effect/lane_transport.py?ref=omn-26121-stability-readback-lanes' --jq .content | base64 -d | grep -F '_AUTHORIZED_BY_KEY = "authorized_by"' > /dev/null
+          grep -F '_AUTHORIZED_BY_KEY = "authorized_by"' src/omnibase_infra/nodes/node_chain_canary_effect/lane_transport.py > /dev/null
         cwd: .
   - id: dod-omn26121-ac12-overlay-model-authorization
     description: The strict overlay model learns authorized_by as a string before the overlay carries it, and keeps extra forbid.
@@ -262,7 +262,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          grep -F 'uses: ./.github/actions/fetch-stability-secrets' .github/workflows/chain-canary.yml > /dev/null && gh api 'repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/chain-canary.yml?ref=omn-26121-stability-infisical-fetch' --jq .content | base64 -d | grep -F 'uses: ./.github/actions/fetch-stability-secrets' > /dev/null
+          grep -F 'uses: ./.github/actions/fetch-stability-secrets' .github/workflows/chain-canary.yml > /dev/null
         cwd: .
   - id: dod-omn26121-ac15-runtime-infisical
     description: The rendered stability runtime carries the four INFISICAL_* names from STABILITY_TEST_RUNTIME_INFISICAL_*, each absent name is refused by name, and the dev lane's names are not read.
@@ -271,4 +271,12 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/infra/test_stability_test_runtime_compose_render.py -k infisical -q --no-cov -n 0
+        cwd: .
+  - id: dod-omn26121-deploy-checks-read-tree
+    description: No command check of this contract reads GitHub; each hosted deploy probe greps the checked-out tree only, so a lane or a runner can run it after its PR branch is gone.
+    source: manual
+    binds_ac: []
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_omn26121_deploy_checks_read_tree.py -q --no-cov
         cwd: .
