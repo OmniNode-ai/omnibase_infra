@@ -1,0 +1,89 @@
+schema_version: 1.0.0
+ticket_id: OMN-18917
+title: Resolve the drain-proof gate's old_topic to its physical name before the lag lookups
+summary: ServiceDrainProofGate.evaluate compared the contract-declared canonical old_topic against consumer-group lag keyed by physical topic names, so under a configured topic namespace a completed drain could never be proven. omnibase_infra#4714 applies the namespace at the two lag lookups and keeps the decision record canonical. This contract records the acceptance-criterion bindings a second lane accepted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn18917-ac1-accepted-20261123t1745z:
+      - label: AC-1
+        criterion_hash: f49e0aad61798060f7f08841679b10ef56c71f425715874557bcc14ff5af1d5b
+        proposed_by: lane=dod-closeout-bind-2026-11-23T1745Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-23T1745Z-c0
+    dod-omn18917-ac2-accepted-20261123t1745z:
+      - label: AC-2
+        criterion_hash: 27893a866e0eb957cfa65429a3f11f8aa22ee32545dbe00abb47c57a8a9d436e
+        proposed_by: lane=dod-closeout-bind-2026-11-23T1745Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-23T1745Z-c0
+    dod-omn18917-ac3-accepted-20261123t1745z:
+      - label: AC-3
+        criterion_hash: 948b0a2655c2c3b81263726608018f66ff616443684408987c219878fe394015
+        proposed_by: lane=dod-closeout-bind-2026-11-23T1745Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-23T1745Z-c0
+    dod-omn18917-ac4-accepted-20261123t1745z:
+      - label: AC-4
+        criterion_hash: 0525c2d86f99399789be6e79c50d38beda7ea42e5317889c49e21befb9909a2d
+        proposed_by: lane=dod-closeout-bind-2026-11-23T1745Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-11-23T1745Z-c0
+requirements:
+  - id: req-omn-18917-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC-1
+        statement: 'AC-1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+      - id: AC-2
+        statement: 'AC-2: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+      - id: AC-3
+        statement: 'AC-3: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+      - id: AC-4
+        statement: 'AC-4: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC-1, AC-2, AC-4: the namespaced drain-proof cases. Five of the eight fail with the product change of omnibase_infra#4714 reverted.'
+    command: uv run pytest tests/unit/migration/test_consumer_group_lag.py -q -k "test_gate_namespaced_lag_preserves_canonical_decision"
+  - kind: tests
+    description: 'AC-3: the pre-existing non-namespaced drain-proof tests pass unchanged (the fix adds 94 lines and deletes none in that file).'
+    command: uv run pytest tests/unit/migration/test_consumer_group_lag.py -k 'not namespaced' -q -rA
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn18917-ac1-accepted-20261123t1745z
+    description: 'AC-1: physical-keyed lag at zero residual against the canonical contract topic gives retirement_allowed True. Fails with the product change of omnibase_infra#4714 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "tests/unit/migration/test_consumer_group_lag.py::test_gate_namespaced_lag_preserves_canonical_decision[namespaced-drained]" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC-1
+  - id: dod-omn18917-ac2-accepted-20261123t1745z
+    description: 'AC-2: every parametrized case, covering the four return paths, asserts decision.old_topic is the contract-declared canonical name. Five cases fail with the product change reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "tests/unit/migration/test_consumer_group_lag.py::test_gate_namespaced_lag_preserves_canonical_decision" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC-2
+  - id: dod-omn18917-ac3-accepted-20261123t1745z
+    description: 'AC-3: the twelve pre-existing non-namespaced tests pass unchanged. A preservation criterion, so they also pass at the parent by design.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migration/test_consumer_group_lag.py -k 'not namespaced' -q -rA
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC-3
+  - id: dod-omn18917-ac4-accepted-20261123t1745z
+    description: 'AC-4: physical-keyed lag with residual 3 is refused with the residual-lag reason, not the absence-of-evidence reason. Fails with the product change reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest "tests/unit/migration/test_consumer_group_lag.py::test_gate_namespaced_lag_preserves_canonical_decision[namespaced-residual-lag]" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC-4
