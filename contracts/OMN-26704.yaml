@@ -38,3 +38,11 @@ dod_evidence:
         check_value: "uv run --frozen pytest scripts/deploy-agent/tests/unit/test_terminal_event_never_empty_sha_omn26704.py -k pulled_sha -q -n 0"
         cwd: "."
     binds_ac: ["AC2"]
+  - id: "dod-omn26704-ac2-pulled-sha-in-budget"
+    description: "The pulled-sha test settles without a real image build, so it finishes inside the verifier's 30 s per-check ceiling and still fails if the published git_sha is not the pulled revision."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest scripts/deploy-agent/tests/unit/test_terminal_event_never_empty_sha_omn26704.py -k pulled_sha -q -n 0"
+        cwd: "."
+    binds_ac: ["AC2"]
