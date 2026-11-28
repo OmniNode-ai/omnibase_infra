@@ -1,0 +1,1715 @@
+# OMN-26732: every configuration value in this repository, its kind, its home and the order it moves in
+# Kept as YAML: the kb-doc-gate refuses tracked markdown here. Values are never printed here, only file and line.
+ticket: OMN-26732
+base_sha: af942f0388495323afbb1d8dd744f2f7dfb51b74
+scope: every tracked non-test file under this repository at base_sha whose lines match the kind patterns in tests/ci/test_config_value_audit_omn26732.py
+homes: [overlay, settings-store, contract-shape]
+rules:
+  R_EVIDENCE: {home: contract-shape, reason: "Ticket evidence contracts are frozen records of past checks; the value is data in a record, not a runtime read, and the contract format stays."}
+  R_GRANT_SHAPE: {home: contract-shape, reason: "Which role may touch which table is the authorization contract: it is derived from migrations and checked by the topology validators, so it stays in this repository."}
+  R_VALIDATOR: {home: contract-shape, reason: "The value is a pattern a validator matches (private ranges, URL shapes), not an address any lane reads."}
+  R_ADDR_OVERLAY: {home: overlay, reason: "A lab or lane address changes per host and per lane, so the value belongs in the lane overlay repository and this repository names only the slot."}
+  R_SRC_SHAPE: {home: contract-shape, reason: "Library code names a default, enum member or example that is a typed shape; the live value is read from the overlay or store at runtime."}
+  R_HOST_OVERLAY: {home: overlay, reason: "A host name or slot-to-host binding is lab topology and moves with the lab, so overlay hold it."}
+  R_PORT_SHAPE: {home: contract-shape, reason: "A protocol default or contract-declared port is part of the declared shape and is read by the loader, not chosen per lane."}
+  R_PORT_CONTAINER: {home: contract-shape, reason: "Container-to-container ports in service definitions, deploy and CI are hardcoded_env by repo rule; they do not vary per host."}
+  R_PORT_OVERLAY: {home: overlay, reason: "A published port that differs per lab host or lane belongs with the host address in overlay."}
+  R_MODEL_SHAPE: {home: contract-shape, reason: "Library code carries model-id enums and pricing keys as typed shape; which model a lane serves is not decided here."}
+  R_MODEL_OVERLAY: {home: overlay, reason: "Which model a lane or slot serves changes with the lab and is declared per lane, so overlay hold it."}
+  R_HW_SHAPE: {home: contract-shape, reason: "A capability enum or dependency pin names hardware as a type, not as a fact about one host."}
+  R_HW_OVERLAY: {home: overlay, reason: "A fact about one host (card, memory, core count) is lab inventory and belongs with the host in overlay."}
+  R_ENV_STORE: {home: settings-store, reason: "A per-environment value read by CI (repository variables, runner labels) is a setting an operator changes without a code change, so the settings store holds it."}
+  R_ENV_OVERLAY: {home: overlay, reason: "A per-environment or per-lane value used by a lane or script is a lane overlay value, not a contract."}
+  R_GRANT_CRED: {home: settings-store, reason: "A credential for a granted role is a secret and lives in the store."}
+  R_LANE_OVERLAY: {home: overlay, reason: "The file binds a lane or lab host to addresses, models or capacity, so it is lane overlay content and moves with the lab."}
+  R_OVERLAY_SHAPE: {home: contract-shape, reason: "A shipped example of the overlay file format per environment type; it documents the shape and holds no live lab value."}
+  R_LANE_COMPOSE: {home: contract-shape, reason: "A generated service topology for a lane class; its service definitions are the shape, and the values inside it are counted under the other kinds."}
+kinds:
+  addresses:
+    count_lines: 117
+    count_files: 68
+    by_home:
+      contract-shape: 34
+      overlay: 83
+    files:
+      - {path: .github/workflows/ci.yml, rule: R_ADDR_OVERLAY, lines: [127, 4114, 5582]}
+      - {path: .github/workflows/delegation-consumer-kwarg-parity.yml, rule: R_ADDR_OVERLAY, lines: [50]}
+      - {path: .github/workflows/dev-baseline-publisher.yml, rule: R_ADDR_OVERLAY, lines: [32]}
+      - {path: .github/workflows/dispatch-parity-gate.yml, rule: R_ADDR_OVERLAY, lines: [58]}
+      - {path: .github/workflows/nightly-integration.yml, rule: R_ADDR_OVERLAY, lines: [61]}
+      - {path: .github/workflows/reusable-runtime-boot.yml, rule: R_ADDR_OVERLAY, lines: [95]}
+      - {path: .github/workflows/s6-runtime-seam-gate.yml, rule: R_ADDR_OVERLAY, lines: [51]}
+      - {path: config/deploy_lane_routing.yaml, rule: R_ADDR_OVERLAY, lines: [113]}
+      - {path: config/lab_proof_profiles.yaml, rule: R_ADDR_OVERLAY, lines: [90, 141, 204, 250, 343, 396]}
+      - {path: config/runner_fleet.yaml, rule: R_ADDR_OVERLAY, lines: [148, 169, 359, 439, 444]}
+      - {path: contracts/OMN-10079.yaml, rule: R_EVIDENCE, lines: [36]}
+      - {path: contracts/OMN-10445.yaml, rule: R_EVIDENCE, lines: [17, 43]}
+      - {path: contracts/OMN-10867.yaml, rule: R_EVIDENCE, lines: [37]}
+      - {path: contracts/OMN-10943.yaml, rule: R_EVIDENCE, lines: [69]}
+      - {path: contracts/OMN-11061.yaml, rule: R_EVIDENCE, lines: [23, 28]}
+      - {path: contracts/OMN-11131.yaml, rule: R_EVIDENCE, lines: [25]}
+      - {path: contracts/OMN-11185.yaml, rule: R_EVIDENCE, lines: [23]}
+      - {path: contracts/OMN-11196.yaml, rule: R_EVIDENCE, lines: [25]}
+      - {path: contracts/OMN-11200.yaml, rule: R_EVIDENCE, lines: [23]}
+      - {path: contracts/OMN-11201.yaml, rule: R_EVIDENCE, lines: [23]}
+      - {path: contracts/OMN-11244.yaml, rule: R_EVIDENCE, lines: [23]}
+      - {path: contracts/OMN-11247.yaml, rule: R_EVIDENCE, lines: [25]}
+      - {path: contracts/OMN-11673.yaml, rule: R_EVIDENCE, lines: [28, 32, 36, 72, 79, 86]}
+      - {path: contracts/OMN-12522.yaml, rule: R_EVIDENCE, lines: [22, 52]}
+      - {path: contracts/OMN-12832.yaml, rule: R_EVIDENCE, lines: [6, 33]}
+      - {path: contracts/OMN-13554.yaml, rule: R_EVIDENCE, lines: [33]}
+      - {path: contracts/OMN-13664.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: docker/catalog/bundles.yaml, rule: R_ADDR_OVERLAY, lines: [158]}
+      - {path: docker/catalog/model_registry.yaml, rule: R_ADDR_OVERLAY, lines: [39, 55, 58, 66, 74]}
+      - {path: docker/dns-cache/unbound.conf, rule: R_ADDR_OVERLAY, lines: [71]}
+      - {path_sha1: 4c14d7e9bc0a, rule: R_ADDR_OVERLAY, lines: [36]}
+      - {path_sha1: 33382e5622d5, rule: R_ADDR_OVERLAY, lines: [32, 69, 217, 267, 304]}
+      - {path: docker/docker-compose.dns-cache.yml, rule: R_ADDR_OVERLAY, lines: [14, 37]}
+      - {path: docker/docker-compose.gate-runner.yml, rule: R_ADDR_OVERLAY, lines: [30]}
+      - {path: docker/docker-compose.gateway.yml, rule: R_ADDR_OVERLAY, lines: [32, 46, 169]}
+      - {path: docker/docker-compose.runners-omninode-studio-runner.yml, rule: R_ADDR_OVERLAY, lines: [37]}
+      - {path_sha1: 98f3dbd950fc, rule: R_ADDR_OVERLAY, lines: [77]}
+      - {path_sha1: 043a2bec889c, rule: R_ADDR_OVERLAY, lines: [24]}
+      - {path_sha1: ab79890539f8, rule: R_ADDR_OVERLAY, lines: [68]}
+      - {path: docker/docker-compose.runners.yml, rule: R_ADDR_OVERLAY, lines: [37]}
+      - {path_sha1: 29c36e56f96b, rule: R_ADDR_OVERLAY, lines: [29]}
+      - {path: docker/gateway/beta-gateway-canary.yaml, rule: R_ADDR_OVERLAY, lines: [106, 112, 113]}
+      - {path: docker/migrations/forward/096_grant_role_omnidash_omnidash_analytics.sql, rule: R_ADDR_OVERLAY, lines: [71]}
+      - {path_sha1: 2c4b15076a01, rule: R_ADDR_OVERLAY, lines: [16]}
+      - {path_sha1: ff50742659ad, rule: R_ADDR_OVERLAY, lines: [16]}
+      - {path_sha1: c14bcd28b927, rule: R_ADDR_OVERLAY, lines: [16]}
+      - {path_sha1: c06041ed5fad, rule: R_ADDR_OVERLAY, lines: [16]}
+      - {path: docker/runners/runner-job-started.sh, rule: R_ADDR_OVERLAY, lines: [85]}
+      - {path: docker/runners/runner-monitor.sh, rule: R_ADDR_OVERLAY, lines: [3, 1808]}
+      - {path: docker/runners/systemd/omninode-git-mirror-daemon.service, rule: R_ADDR_OVERLAY, lines: [3, 30]}
+      - {path_sha1: 9d4a66fd43b1, rule: R_ADDR_OVERLAY, lines: [7]}
+      - {path: docs/env-master-template.env, rule: R_ADDR_OVERLAY, lines: [31, 86, 186, 190, 192, 193]}
+      - {path: scripts/check_dep_provenance.py, rule: R_ADDR_OVERLAY, lines: [388]}
+      - {path_sha1: 331f67b9ca6d, rule: R_ADDR_OVERLAY, lines: [71]}
+      - {path: scripts/deploy-agent/deploy/deploy-agent-dev.service, rule: R_ADDR_OVERLAY, lines: [22, 269]}
+      - {path: scripts/deploy-agent/deploy/deploy-agent.service.d/override.conf, rule: R_ADDR_OVERLAY, lines: [32, 64]}
+      - {path: scripts/deploy-agent/deploy/launchd/deploy-agent-instance.plist.template, rule: R_ADDR_OVERLAY, lines: [76]}
+      - {path: scripts/deploy-runners.sh, rule: R_ADDR_OVERLAY, lines: [41, 187]}
+      - {path: scripts/deploy-timers.sh, rule: R_ADDR_OVERLAY, lines: [6]}
+      - {path: scripts/disk-watermark-check.sh, rule: R_ADDR_OVERLAY, lines: [54]}
+      - {path: scripts/generate_claude_lane_block.py, rule: R_ADDR_OVERLAY, lines: [24, 411]}
+      - {path: scripts/migrations/check_migration_applied_on_lane.py, rule: R_ADDR_OVERLAY, lines: [61]}
+      - {path: scripts/migrations/verify_migration_checksum_adoption.py, rule: R_ADDR_OVERLAY, lines: [136]}
+      - {path: scripts/provision-infisical.py, rule: R_ADDR_OVERLAY, lines: [234]}
+      - {path: scripts/trigger-deploy.sh, rule: R_ADDR_OVERLAY, lines: [22]}
+      - {path: src/omnibase_infra/mixins/mixin_llm_http_transport.py, rule: R_VALIDATOR, lines: [278, 280]}
+      - {path: src/omnibase_infra/observability/runner_health/collector_network_pool.py, rule: R_VALIDATOR, lines: [20, 93]}
+      - {path: src/omnibase_infra/utils/util_dsn_validation.py, rule: R_VALIDATOR, lines: [486, 505, 507, 509]}
+  host_names:
+    count_lines: 613
+    count_files: 227
+    by_home:
+      contract-shape: 305
+      overlay: 308
+    files:
+      - {path: .github/actions/resolve-lab-lane/resolve_lab_lane.py, rule: R_HOST_OVERLAY, lines: [78]}
+      - {path: .github/live-contact-exception/OMN-25796.md, rule: R_HOST_OVERLAY, lines: [1]}
+      - {path: .github/live-contact-exception/OMN-26105.md, rule: R_HOST_OVERLAY, lines: [1]}
+      - {path: .github/workflows/baselines-scheduler.yml, rule: R_HOST_OVERLAY, lines: [21]}
+      - {path: .github/workflows/build-and-push-migrate-image.yml, rule: R_HOST_OVERLAY, lines: [129, 130]}
+      - {path: .github/workflows/build-and-push-runtime.yml, rule: R_HOST_OVERLAY, lines: [123, 124]}
+      - {path: .github/workflows/build-workspace-candidate-runtime.yml, rule: R_HOST_OVERLAY, lines: [415, 416]}
+      - {path: .github/workflows/ci.yml, rule: R_HOST_OVERLAY, lines: [2495, 2496, 2500, 2501, 2502, 2503, 4242]}
+      - {path: .github/workflows/deliver-dev-candidate-to-staging.yml, rule: R_HOST_OVERLAY, lines: [730, 1416]}
+      - {path: .github/workflows/dev-lane-liveness.yml, rule: R_HOST_OVERLAY, lines: [123]}
+      - {path: .github/workflows/dlq-depth-monitor.yml, rule: R_HOST_OVERLAY, lines: [40]}
+      - {path: .github/workflows/hostile-reviewer.yml, rule: R_HOST_OVERLAY, lines: [116, 118, 120]}
+      - {path: .github/workflows/lane-census-refresh.yml, rule: R_HOST_OVERLAY, lines: [26]}
+      - {path: .github/workflows/msk-bastion-canary.yml, rule: R_HOST_OVERLAY, lines: [95]}
+      - {path: .github/workflows/onex-api-lab-delivery-reusable.yml, rule: R_HOST_OVERLAY, lines: [118, 121, 358, 364, 394, 395, 398, 472]}
+      - {path: .github/workflows/runtime-rebuild-trigger-reusable.yml, rule: R_HOST_OVERLAY, lines: [130, 133, 576, 584]}
+      - {path: .github/workflows/runtime-rebuild-trigger.yml, rule: R_HOST_OVERLAY, lines: [79, 82, 324, 793, 806, 813, 822]}
+      - {path: .github/workflows/shellcheck-gate.yml, rule: R_HOST_OVERLAY, lines: [52, 53, 59, 60, 61, 62]}
+      - {path: .gitignore, rule: R_HOST_OVERLAY, lines: [203, 280]}
+      - {path: .pre-commit-config.yaml, rule: R_HOST_OVERLAY, lines: [1640]}
+      - {path: config/c11_envelope_corpus.json, rule: R_HOST_OVERLAY, lines: [3]}
+      - {path: config/deploy_lane_routing.yaml, rule: R_HOST_OVERLAY, lines: [67, 113, 141, 142, 143, 146, 182, 183, 184, 185, 215, 216, 217, 218]}
+      - {path: config/lab_alarm.json, rule: R_HOST_OVERLAY, lines: [16, 26]}
+      - {path: config/machines.yaml, rule: R_HOST_OVERLAY, lines: [8]}
+      - {path_sha1: 3dba85c17c05, rule: R_HOST_OVERLAY, lines: [29, 32, 34, 37, 42, 43]}
+      - {path: config/runner_fleet.yaml, rule: R_HOST_OVERLAY, lines: [53]}
+      - {path: config/shared_key_registry.yaml, rule: R_HOST_OVERLAY, lines: [83]}
+      - {path: contracts/OMN-17292.yaml, rule: R_EVIDENCE, lines: [30, 50, 109]}
+      - {path: contracts/OMN-17427.yaml, rule: R_EVIDENCE, lines: [358]}
+      - {path: contracts/OMN-18866.yaml, rule: R_EVIDENCE, lines: [40]}
+      - {path: contracts/OMN-19339.yaml, rule: R_EVIDENCE, lines: [31]}
+      - {path: contracts/OMN-19404.yaml, rule: R_EVIDENCE, lines: [4, 34, 43, 52]}
+      - {path: contracts/OMN-19496.yaml, rule: R_EVIDENCE, lines: [4, 32]}
+      - {path: contracts/OMN-19975.yaml, rule: R_EVIDENCE, lines: [4, 59, 67]}
+      - {path: contracts/OMN-19991.yaml, rule: R_EVIDENCE, lines: [18]}
+      - {path: contracts/OMN-20275.yaml, rule: R_EVIDENCE, lines: [154, 199, 203, 206]}
+      - {path: contracts/OMN-20597.yaml, rule: R_EVIDENCE, lines: [47]}
+      - {path: contracts/OMN-20637.yaml, rule: R_EVIDENCE, lines: [4]}
+      - {path: contracts/OMN-20794.yaml, rule: R_EVIDENCE, lines: [17]}
+      - {path: contracts/OMN-20805.yaml, rule: R_EVIDENCE, lines: [3, 13, 15, 35]}
+      - {path: contracts/OMN-21279.yaml, rule: R_EVIDENCE, lines: [5, 40, 43, 61, 79, 82, 91, 258, 286, 368]}
+      - {path: contracts/OMN-21430.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-21629.yaml, rule: R_EVIDENCE, lines: [37]}
+      - {path: contracts/OMN-21928.yaml, rule: R_EVIDENCE, lines: [27, 86]}
+      - {path: contracts/OMN-22311.yaml, rule: R_EVIDENCE, lines: [21]}
+      - {path: contracts/OMN-22664.yaml, rule: R_EVIDENCE, lines: [33]}
+      - {path: contracts/OMN-22683.yaml, rule: R_EVIDENCE, lines: [10, 17, 20]}
+      - {path: contracts/OMN-22863.yaml, rule: R_EVIDENCE, lines: [13]}
+      - {path: contracts/OMN-23039.yaml, rule: R_EVIDENCE, lines: [15, 48, 66, 72]}
+      - {path: contracts/OMN-23058.yaml, rule: R_EVIDENCE, lines: [38]}
+      - {path: contracts/OMN-23075.yaml, rule: R_EVIDENCE, lines: [26]}
+      - {path: contracts/OMN-23106.yaml, rule: R_EVIDENCE, lines: [39, 49]}
+      - {path: contracts/OMN-23324.yaml, rule: R_EVIDENCE, lines: [15, 26, 45]}
+      - {path: contracts/OMN-23332.yaml, rule: R_EVIDENCE, lines: [5, 16, 19, 57]}
+      - {path: contracts/OMN-23359.yaml, rule: R_EVIDENCE, lines: [3, 4, 9, 10, 13, 15, 18, 26]}
+      - {path: contracts/OMN-23525.yaml, rule: R_EVIDENCE, lines: [5, 19, 54]}
+      - {path: contracts/OMN-23540.yaml, rule: R_EVIDENCE, lines: [5, 20, 22, 33, 40, 41]}
+      - {path: contracts/OMN-23624.yaml, rule: R_EVIDENCE, lines: [19, 30, 45, 46, 51]}
+      - {path: contracts/OMN-24013.yaml, rule: R_EVIDENCE, lines: [55]}
+      - {path: contracts/OMN-24017.yaml, rule: R_EVIDENCE, lines: [59]}
+      - {path: contracts/OMN-24186.yaml, rule: R_EVIDENCE, lines: [3, 5, 14, 16, 21, 43, 53, 63]}
+      - {path: contracts/OMN-24260.yaml, rule: R_EVIDENCE, lines: [19]}
+      - {path: contracts/OMN-24299.yaml, rule: R_EVIDENCE, lines: [4, 17, 19]}
+      - {path: contracts/OMN-24397.yaml, rule: R_EVIDENCE, lines: [26, 64]}
+      - {path: contracts/OMN-24446.yaml, rule: R_EVIDENCE, lines: [46, 51]}
+      - {path: contracts/OMN-24465.yaml, rule: R_EVIDENCE, lines: [49]}
+      - {path: contracts/OMN-24466.yaml, rule: R_EVIDENCE, lines: [50]}
+      - {path: contracts/OMN-24491.yaml, rule: R_EVIDENCE, lines: [25, 65]}
+      - {path: contracts/OMN-24524.yaml, rule: R_EVIDENCE, lines: [17, 28, 49, 54]}
+      - {path: contracts/OMN-24562.yaml, rule: R_EVIDENCE, lines: [65, 81, 215, 216, 221, 289, 308, 309, 332]}
+      - {path: contracts/OMN-24611.yaml, rule: R_EVIDENCE, lines: [4, 26, 29, 40, 47, 48, 57, 58, 114, 132, 138, 153]}
+      - {path: contracts/OMN-24617.yaml, rule: R_EVIDENCE, lines: [3, 20, 62]}
+      - {path: contracts/OMN-24674.yaml, rule: R_EVIDENCE, lines: [3]}
+      - {path: contracts/OMN-24695.yaml, rule: R_EVIDENCE, lines: [21]}
+      - {path: contracts/OMN-24854.yaml, rule: R_EVIDENCE, lines: [26]}
+      - {path: contracts/OMN-24860.yaml, rule: R_EVIDENCE, lines: [13, 32, 33]}
+      - {path: contracts/OMN-24899.yaml, rule: R_EVIDENCE, lines: [5, 16, 19]}
+      - {path: contracts/OMN-25106.yaml, rule: R_EVIDENCE, lines: [3, 5, 42, 54]}
+      - {path: contracts/OMN-25110.yaml, rule: R_EVIDENCE, lines: [14]}
+      - {path: contracts/OMN-25169.yaml, rule: R_EVIDENCE, lines: [18, 90]}
+      - {path: contracts/OMN-25179.yaml, rule: R_EVIDENCE, lines: [17, 21]}
+      - {path: contracts/OMN-25191.yaml, rule: R_EVIDENCE, lines: [5, 18, 57]}
+      - {path: contracts/OMN-25194.yaml, rule: R_EVIDENCE, lines: [3]}
+      - {path: contracts/OMN-25201.yaml, rule: R_EVIDENCE, lines: [21]}
+      - {path: contracts/OMN-25202.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-25253.yaml, rule: R_EVIDENCE, lines: [4, 13, 19, 38, 65]}
+      - {path: contracts/OMN-25330.yaml, rule: R_EVIDENCE, lines: [3, 4, 10, 13, 26]}
+      - {path: contracts/OMN-25536.yaml, rule: R_EVIDENCE, lines: [15, 37, 63, 64, 69]}
+      - {path: contracts/OMN-25650.yaml, rule: R_EVIDENCE, lines: [18]}
+      - {path: contracts/OMN-25709.yaml, rule: R_EVIDENCE, lines: [21]}
+      - {path: contracts/OMN-25796.yaml, rule: R_EVIDENCE, lines: [3, 17]}
+      - {path: contracts/OMN-25912.yaml, rule: R_EVIDENCE, lines: [13, 21, 32, 68, 73, 76]}
+      - {path: contracts/OMN-25942.yaml, rule: R_EVIDENCE, lines: [36, 37, 40, 66, 67]}
+      - {path: contracts/OMN-26105.yaml, rule: R_EVIDENCE, lines: [3, 21, 24, 50, 72]}
+      - {path: contracts/OMN-26106.yaml, rule: R_EVIDENCE, lines: [32, 34, 36, 78, 87, 92, 95, 104, 109, 130, 138, 165]}
+      - {path: contracts/OMN-26117.yaml, rule: R_EVIDENCE, lines: [80]}
+      - {path: contracts/OMN-26258.yaml, rule: R_EVIDENCE, lines: [15, 21]}
+      - {path: contracts/OMN-26316.yaml, rule: R_EVIDENCE, lines: [56, 68, 365, 395]}
+      - {path: contracts/OMN-26369.yaml, rule: R_EVIDENCE, lines: [14]}
+      - {path: contracts/OMN-26379.yaml, rule: R_EVIDENCE, lines: [5, 17, 39, 48, 66, 75]}
+      - {path: contracts/OMN-26494.yaml, rule: R_EVIDENCE, lines: [87, 92, 109]}
+      - {path: contracts/OMN-26524.yaml, rule: R_EVIDENCE, lines: [69]}
+      - {path: contracts/OMN-26709.yaml, rule: R_EVIDENCE, lines: [60]}
+      - {path: contracts/llm_endpoints.yaml, rule: R_HOST_OVERLAY, lines: [44, 142, 160, 222]}
+      - {path: contracts/services/runtime_policy.contract.yaml, rule: R_HOST_OVERLAY, lines: [386, 427]}
+      - {path: deploy/disk-gc/install-disk-gc.sh, rule: R_HOST_OVERLAY, lines: [50]}
+      - {path: deploy/disk-gc/install-worktree-prune.sh, rule: R_HOST_OVERLAY, lines: [86, 153, 154, 180, 262]}
+      - {path: deploy/disk-gc/keep-list.yaml, rule: R_HOST_OVERLAY, lines: [76]}
+      - {path: deploy/disk-gc/onex-buildx-orphan-sweep.service, rule: R_HOST_OVERLAY, lines: [32]}
+      - {path: deploy/disk-gc/onex-disk-gc.service, rule: R_HOST_OVERLAY, lines: [41]}
+      - {path: deploy/disk-gc/onex-runner-disk-guard.service, rule: R_HOST_OVERLAY, lines: [34]}
+      - {path: deploy/disk-gc/onex-worktree-prune.service, rule: R_HOST_OVERLAY, lines: [68, 94]}
+      - {path: deploy/disk-gc/onex-worktree-reaper.service, rule: R_HOST_OVERLAY, lines: [47]}
+      - {path: deploy/infra-watchdog.service, rule: R_HOST_OVERLAY, lines: [35]}
+      - {path: deploy/lane-census/install-lane-census.sh, rule: R_HOST_OVERLAY, lines: [174]}
+      - {path: deploy/maintenance/omninode-system-slack-report.sh, rule: R_HOST_OVERLAY, lines: [1296, 1327, 1328, 1330]}
+      - {path: deploy/prepush-cloud/bootstrap.sh, rule: R_HOST_OVERLAY, lines: [129, 152]}
+      - {path: deploy/prepush-cloud/warm_cache.sh, rule: R_HOST_OVERLAY, lines: [35]}
+      - {path: deploy/rung-eval/onex-rung-eval.service, rule: R_HOST_OVERLAY, lines: [58, 68, 70]}
+      - {path: deploy/rung-eval/rung-eval.env.example, rule: R_HOST_OVERLAY, lines: [39]}
+      - {path: deploy/shadow-review/onex-shadow-review.service, rule: R_HOST_OVERLAY, lines: [60, 62]}
+      - {path: deploy/systemd/cpu-boost-off.service, rule: R_HOST_OVERLAY, lines: [4, 9, 16]}
+      - {path: deploy/unit-drift-manifest.yaml, rule: R_HOST_OVERLAY, lines: [165]}
+      - {path: docker/catalog/bundles.yaml, rule: R_HOST_OVERLAY, lines: [152, 153, 154, 155]}
+      - {path_sha1: 4c14d7e9bc0a, rule: R_HOST_OVERLAY, lines: [35, 39]}
+      - {path_sha1: 33382e5622d5, rule: R_HOST_OVERLAY, lines: [67, 68]}
+      - {path: docker/docker-compose.dev-bus-ha.yml, rule: R_HOST_OVERLAY, lines: [10, 53, 55, 56, 71, 101, 102]}
+      - {path: docker/docker-compose.dev-lane.yml, rule: R_HOST_OVERLAY, lines: [1213]}
+      - {path: docker/docker-compose.dev-tenant-fold.yml, rule: R_HOST_OVERLAY, lines: [129, 161, 162]}
+      - {path: docker/docker-compose.runners-omninode-air-runner.yml, rule: R_HOST_OVERLAY, lines: [102]}
+      - {path: docker/docker-compose.runners-omninode-mini-runner.yml, rule: R_HOST_OVERLAY, lines: [101]}
+      - {path: docker/docker-compose.runners-omninode-studio-runner.yml, rule: R_HOST_OVERLAY, lines: [33, 36, 37, 120, 130]}
+      - {path_sha1: 98f3dbd950fc, rule: R_HOST_OVERLAY, lines: [100]}
+      - {path_sha1: ab79890539f8, rule: R_HOST_OVERLAY, lines: [41, 68, 87, 97]}
+      - {path: docker/docker-compose.runners.yml, rule: R_HOST_OVERLAY, lines: [100, 509, 511, 550, 553, 572, 610, 681, 698, 819, 836, 876, 893]}
+      - {path_sha1: 29c36e56f96b, rule: R_HOST_OVERLAY, lines: [481, 518]}
+      - {path: docker/lane-overlays/local.bifrost.example.yaml, rule: R_HOST_OVERLAY, lines: [20, 26]}
+      - {path: docker/migrations/forward/nodes/node_projection_local_alerts/0000_create_local_alerts.sql, rule: R_HOST_OVERLAY, lines: [2]}
+      - {path: docker/migrations/forward/nodes/node_projection_local_identity/0000_create_local_identity.sql, rule: R_HOST_OVERLAY, lines: [2]}
+      - {path: docker/redpanda/dev-bus-ha/h200.env.example, rule: R_HOST_OVERLAY, lines: [1, 4, 5]}
+      - {path: docker/redpanda/dev-bus-ha/h201.env.example, rule: R_HOST_OVERLAY, lines: [1, 2, 3]}
+      - {path: docker/redpanda/dev-bus-ha/h202.env.example, rule: R_HOST_OVERLAY, lines: [1, 2, 3, 4]}
+      - {path: docker/redpanda/dev-bus-ha/hosts.tsv, rule: R_HOST_OVERLAY, lines: [3, 7, 8, 9]}
+      - {path: docker/redpanda/dev_broker_upgrade_path.yaml, rule: R_HOST_OVERLAY, lines: [10, 65]}
+      - {path: docs/env-master-template.env, rule: R_HOST_OVERLAY, lines: [187]}
+      - {path: docs/incidents/OMN-21279/dev-broker-crash-cause.json, rule: R_HOST_OVERLAY, lines: [67, 68, 77, 113, 115, 117, 153, 155, 187, 202, 287, 362, 613]}
+      - {path: docs/readbacks/OMN-26713_runtime_image_proof.yaml, rule: R_HOST_OVERLAY, lines: [11]}
+      - {path: formal/hourly_send/README.txt, rule: R_HOST_OVERLAY, lines: [18, 42]}
+      - {path: formal/hourly_send/results/design_review_verdict.txt, rule: R_HOST_OVERLAY, lines: [8]}
+      - {path: scripts/buildx-orphan-sweep.sh, rule: R_HOST_OVERLAY, lines: [52, 62]}
+      - {path: scripts/check_contract_topic_parity.py, rule: R_HOST_OVERLAY, lines: [92, 187, 188]}
+      - {path: scripts/check_reconciler_privilege.py, rule: R_HOST_OVERLAY, lines: [16]}
+      - {path: scripts/ci/adequacy_receipts/omnibase_infra.nodes.node_chain_replay_compute.equivalence.json, rule: R_HOST_OVERLAY, lines: [4]}
+      - {path: scripts/ci/adequacy_receipts/omnibase_infra.nodes.node_contract_validate_compute.equivalence.json, rule: R_HOST_OVERLAY, lines: [4]}
+      - {path: scripts/ci/adequacy_receipts/omnibase_infra.nodes.node_scope_extract_compute.equivalence.json, rule: R_HOST_OVERLAY, lines: [4]}
+      - {path: scripts/ci/lab_pass_receipt.py, rule: R_HOST_OVERLAY, lines: [1487, 1488, 2039, 2047, 2048, 2049]}
+      - {path_sha1: 331f67b9ca6d, rule: R_HOST_OVERLAY, lines: [57, 61]}
+      - {path: scripts/deploy-agent/deploy/deploy-agent-dev.service, rule: R_HOST_OVERLAY, lines: [223, 227, 250]}
+      - {path: scripts/deploy-agent/deploy/deploy-agent.service.d/override.conf, rule: R_HOST_OVERLAY, lines: [52, 64]}
+      - {path: scripts/deploy-agent/deploy/launchd/deploy-agent-instance.plist.template, rule: R_HOST_OVERLAY, lines: [50]}
+      - {path: scripts/deploy-agent/deploy_agent/unit_drift.py, rule: R_HOST_OVERLAY, lines: [101]}
+      - {path: scripts/deploy-agent/pyproject.toml, rule: R_HOST_OVERLAY, lines: [12]}
+      - {path: scripts/deploy-build-loop-trigger.sh, rule: R_HOST_OVERLAY, lines: [9, 52, 62, 63, 64, 65]}
+      - {path: scripts/disk-gc.sh, rule: R_HOST_OVERLAY, lines: [36, 44]}
+      - {path: scripts/disk-watermark-check.sh, rule: R_HOST_OVERLAY, lines: [79, 90]}
+      - {path: scripts/disk_gc_plan.py, rule: R_HOST_OVERLAY, lines: [449]}
+      - {path: scripts/docker-volume-gc.sh, rule: R_HOST_OVERLAY, lines: [20]}
+      - {path: scripts/git-maintenance.sh, rule: R_HOST_OVERLAY, lines: [34, 102, 132]}
+      - {path: scripts/hooks/prepush_dispatch.sh, rule: R_HOST_OVERLAY, lines: [134, 143, 230, 235, 568, 620, 621, 690, 1061, 1062, 1103, 1105, 1121, 1123, 1152, 1419, 1453, 1726, 1736, 1739, 1740, 1744, 1811]}
+      - {path: scripts/hooks/prepush_smart_tests.sh, rule: R_HOST_OVERLAY, lines: [418, 484, 674, 680, 1503]}
+      - {path: scripts/hooks/pytest_full_suite_host_guard.py, rule: R_HOST_OVERLAY, lines: [53]}
+      - {path: scripts/infra-watchdog.sh, rule: R_HOST_OVERLAY, lines: [11, 19]}
+      - {path: scripts/lab_alarm.py, rule: R_HOST_OVERLAY, lines: [156, 2398, 2476]}
+      - {path: scripts/lane-census-check.sh, rule: R_HOST_OVERLAY, lines: [105, 116, 262]}
+      - {path: scripts/launchd/com.omninode.lab-alarm.plist.template, rule: R_HOST_OVERLAY, lines: [48]}
+      - {path: scripts/launchd/com.omninode.worktree-prune.plist.template, rule: R_HOST_OVERLAY, lines: [49]}
+      - {path: scripts/onex, rule: R_HOST_OVERLAY, lines: [22]}
+      - {path: scripts/onex-build-loop-trigger.sh, rule: R_HOST_OVERLAY, lines: [10]}
+      - {path: scripts/provision-infisical.py, rule: R_HOST_OVERLAY, lines: [446, 447]}
+      - {path: scripts/push_lanes/queue-runner.py, rule: R_HOST_OVERLAY, lines: [31]}
+      - {path: scripts/reconcile-workspace-venvs.sh, rule: R_HOST_OVERLAY, lines: [853, 855, 1001]}
+      - {path: scripts/runner-disk-admission-restore.sh, rule: R_HOST_OVERLAY, lines: [57, 64, 65]}
+      - {path: scripts/runtime_build/deploy_source_ref.py, rule: R_HOST_OVERLAY, lines: [490]}
+      - {path: scripts/runtime_build/prepr_pool_prove.sh, rule: R_HOST_OVERLAY, lines: [36]}
+      - {path: scripts/runtime_build/prepr_teardown_slot.py, rule: R_HOST_OVERLAY, lines: [1189]}
+      - {path: scripts/runtime_build/refresh_dev_lane.sh, rule: R_HOST_OVERLAY, lines: [300]}
+      - {path: scripts/runtime_build/refresh_stability_lane.sh, rule: R_HOST_OVERLAY, lines: [358]}
+      - {path: scripts/runtime_build/sibling_clone_manifest.sh, rule: R_HOST_OVERLAY, lines: [161]}
+      - {path: scripts/runtime_build/stage_workspace.sh, rule: R_HOST_OVERLAY, lines: [193]}
+      - {path: scripts/seed-profiles/cloud-omniweb.env, rule: R_HOST_OVERLAY, lines: [4, 5]}
+      - {path: scripts/system_health_check.sh, rule: R_HOST_OVERLAY, lines: [112, 114]}
+      - {path: scripts/systemd/onex-build-loop.service, rule: R_HOST_OVERLAY, lines: [16]}
+      - {path: scripts/systemd/onex-nightly-sweep.service, rule: R_HOST_OVERLAY, lines: [7]}
+      - {path: scripts/validation/validate_clean_root.py, rule: R_HOST_OVERLAY, lines: [65]}
+      - {path: scripts/worktree-gc.sh, rule: R_HOST_OVERLAY, lines: [32, 46]}
+      - {path: src/omnibase_infra/cli/cli_delegate.py, rule: R_SRC_SHAPE, lines: [2273]}
+      - {path: src/omnibase_infra/docker/catalog/generator.py, rule: R_SRC_SHAPE, lines: [287, 523]}
+      - {path: src/omnibase_infra/docker/catalog/validator_healthcheck_semantic_probe.py, rule: R_SRC_SHAPE, lines: [111]}
+      - {path: src/omnibase_infra/gateway/services/service_policy_engine.py, rule: R_SRC_SHAPE, lines: [89]}
+      - {path: src/omnibase_infra/handlers/handler_dev_lane_code_ref_pin.py, rule: R_SRC_SHAPE, lines: [12]}
+      - {path: src/omnibase_infra/handlers/handler_runtime_deploy.sh, rule: R_SRC_SHAPE, lines: [809, 2570, 2572, 2574, 2575, 2580]}
+      - {path: src/omnibase_infra/handlers/placement/handler_placement_serving.py, rule: R_SRC_SHAPE, lines: [5]}
+      - {path: src/omnibase_infra/models/delegation/model_delegate_lineage.py, rule: R_SRC_SHAPE, lines: [8]}
+      - {path: src/omnibase_infra/models/lane_census/model_lane_census_registry.py, rule: R_SRC_SHAPE, lines: [60]}
+      - {path: src/omnibase_infra/models/model_runner_lab_host_table_policy.py, rule: R_SRC_SHAPE, lines: [50]}
+      - {path: src/omnibase_infra/models/security/classification_levels.py, rule: R_SRC_SHAPE, lines: [17, 56]}
+      - {path: src/omnibase_infra/models/security/model_environment_policy.py, rule: R_SRC_SHAPE, lines: [82, 83, 115]}
+      - {path: src/omnibase_infra/models/security/model_handler_security_policy.py, rule: R_SRC_SHAPE, lines: [69, 92]}
+      - {path: src/omnibase_infra/nodes/node_board_probe_effect/contract.yaml, rule: R_SRC_SHAPE, lines: [82]}
+      - {path: src/omnibase_infra/nodes/node_chain_canary_effect/lane_transport.py, rule: R_SRC_SHAPE, lines: [8, 13, 28, 30, 126, 127, 128, 129, 131, 342]}
+      - {path: src/omnibase_infra/nodes/node_chain_canary_effect/models/model_chain_canary_request.py, rule: R_SRC_SHAPE, lines: [71, 359]}
+      - {path: src/omnibase_infra/nodes/node_deploy_job_reading_effect/contract.yaml, rule: R_SRC_SHAPE, lines: [90]}
+      - {path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py, rule: R_SRC_SHAPE, lines: [182]}
+      - {path: src/omnibase_infra/nodes/node_setup_local_provision_effect/handlers/handler_local_provision.py, rule: R_SRC_SHAPE, lines: [184, 185, 186, 187, 255, 258, 261, 269]}
+      - {path: src/omnibase_infra/nodes/node_setup_local_provision_effect/handlers/handler_local_status.py, rule: R_SRC_SHAPE, lines: [116, 118]}
+      - {path: src/omnibase_infra/nodes/node_setup_local_provision_effect/handlers/handler_local_teardown.py, rule: R_SRC_SHAPE, lines: [121, 122, 123, 124, 174, 176]}
+      - {path: src/omnibase_infra/nodes/node_setup_validate_effect/handlers/handler_service_validate.py, rule: R_SRC_SHAPE, lines: [119, 198, 203]}
+      - {path: src/omnibase_infra/runtime/invocation_security_enforcer.py, rule: R_SRC_SHAPE, lines: [29, 142]}
+      - {path: src/omnibase_infra/runtime/models/model_event_bus_config.py, rule: R_SRC_SHAPE, lines: [109]}
+      - {path: src/omnibase_infra/runtime/node_invocation_adapter.py, rule: R_SRC_SHAPE, lines: [18, 179, 180, 185, 390, 462, 506]}
+      - {path: src/omnibase_infra/runtime/security_metadata_validator.py, rule: R_SRC_SHAPE, lines: [148]}
+      - {path: src/omnibase_infra/runtime/service_kernel.py, rule: R_SRC_SHAPE, lines: [5885]}
+      - {path: src/omnibase_infra/testing/service_effect_mock_registry_thread_local.py, rule: R_SRC_SHAPE, lines: [7, 49]}
+      - {path: src/omnibase_infra/topics/model_bus_descriptor.py, rule: R_SRC_SHAPE, lines: [35, 50]}
+      - {path: src/omnibase_infra/topics/platform_topic_suffixes.py, rule: R_SRC_SHAPE, lines: [1910, 2005, 2006]}
+      - {path: src/omnibase_infra/validation/validation_exemptions.yaml, rule: R_SRC_SHAPE, lines: [2542, 2548, 3331, 3337]}
+      - {path: src/omnibase_infra/validation/validator_registration_security.py, rule: R_SRC_SHAPE, lines: [393]}
+  ports:
+    count_lines: 1302
+    count_files: 350
+    by_home:
+      contract-shape: 1183
+      overlay: 119
+    files:
+      - {path: .env.example, rule: R_PORT_OVERLAY, lines: [51, 68, 74]}
+      - {path: .github/workflows/artifact-reconciliation-webhook.yml, rule: R_PORT_CONTAINER, lines: [14]}
+      - {path: .github/workflows/baselines-scheduler.yml, rule: R_PORT_CONTAINER, lines: [12, 15, 16, 17]}
+      - {path: .github/workflows/ci.yml, rule: R_PORT_CONTAINER, lines: [1571, 6293]}
+      - {path: .github/workflows/deliver-dev-candidate-to-staging.yml, rule: R_PORT_CONTAINER, lines: [828]}
+      - {path: .github/workflows/dlq-depth-monitor.yml, rule: R_PORT_CONTAINER, lines: [50]}
+      - {path: .github/workflows/evidence-autoclose-sweep.yml, rule: R_PORT_CONTAINER, lines: [65]}
+      - {path: .github/workflows/onex-api-lab-delivery-reusable.yml, rule: R_PORT_CONTAINER, lines: [364, 394, 395, 398, 472]}
+      - {path: .github/workflows/pr-merged-event.yml, rule: R_PORT_CONTAINER, lines: [16]}
+      - {path: .github/workflows/reusable-runtime-boot.yml, rule: R_PORT_CONTAINER, lines: [361, 364, 390, 424, 426, 530, 717, 1114, 1375, 1525, 1579]}
+      - {path: .github/workflows/runtime-rebuild-trigger-reusable.yml, rule: R_PORT_CONTAINER, lines: [584]}
+      - {path: .github/workflows/runtime-rebuild-trigger.yml, rule: R_PORT_CONTAINER, lines: [680, 813, 822, 835]}
+      - {path: .github/workflows/sibling-lock-refresh.yml, rule: R_PORT_CONTAINER, lines: [92]}
+      - {path: .secretresolver_allowlist, rule: R_PORT_SHAPE, lines: [49, 122, 123, 124, 125, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205]}
+      - {path: CLAUDE.md, rule: R_PORT_OVERLAY, lines: [51, 52]}
+      - {path: Makefile, rule: R_PORT_OVERLAY, lines: [43, 170, 171, 185, 191, 198]}
+      - {path: config/deploy_lane_routing.yaml, rule: R_PORT_OVERLAY, lines: [81, 115, 119, 141, 142, 143, 146, 182, 183, 184, 185, 215, 216, 217, 218]}
+      - {path: config/lab_proof_profiles.yaml, rule: R_PORT_OVERLAY, lines: [129, 187]}
+      - {path_sha1: 3dba85c17c05, rule: R_PORT_OVERLAY, lines: [30, 32, 35, 38, 42, 43]}
+      - {path_sha1: ee17eb46925b, rule: R_PORT_OVERLAY, lines: [26, 30]}
+      - {path_sha1: 8a2b7487b37e, rule: R_PORT_OVERLAY, lines: [21, 23, 26, 29, 33, 34]}
+      - {path_sha1: 3d7d5843123c, rule: R_PORT_OVERLAY, lines: [23, 29, 30, 31, 34, 37, 41, 42]}
+      - {path: config/release_train_policy.yaml, rule: R_PORT_OVERLAY, lines: [26, 111, 112, 163, 164]}
+      - {path: config/runner_fleet.yaml, rule: R_PORT_OVERLAY, lines: [18, 23, 33, 41, 326]}
+      - {path: config/runner_routing_policy.yaml, rule: R_PORT_OVERLAY, lines: [217]}
+      - {path: config/worktree_prune_timer.yaml, rule: R_PORT_OVERLAY, lines: [24, 27]}
+      - {path: contracts/OMN-10345.yaml, rule: R_EVIDENCE, lines: [43]}
+      - {path: contracts/OMN-10449.yaml, rule: R_EVIDENCE, lines: [18, 21, 45, 51]}
+      - {path: contracts/OMN-10450.yaml, rule: R_EVIDENCE, lines: [18, 41]}
+      - {path: contracts/OMN-10943.yaml, rule: R_EVIDENCE, lines: [69]}
+      - {path: contracts/OMN-11673.yaml, rule: R_EVIDENCE, lines: [28, 32, 36, 72, 79, 86]}
+      - {path: contracts/OMN-12522.yaml, rule: R_EVIDENCE, lines: [22, 52]}
+      - {path: contracts/OMN-12536.yaml, rule: R_EVIDENCE, lines: [14, 38]}
+      - {path: contracts/OMN-13190.yaml, rule: R_EVIDENCE, lines: [8]}
+      - {path: contracts/OMN-13417.yaml, rule: R_EVIDENCE, lines: [7, 14]}
+      - {path: contracts/OMN-16994.yaml, rule: R_EVIDENCE, lines: [43]}
+      - {path: contracts/OMN-19077.yaml, rule: R_EVIDENCE, lines: [4]}
+      - {path: contracts/OMN-19925.yaml, rule: R_EVIDENCE, lines: [59, 60]}
+      - {path: contracts/OMN-19972.yaml, rule: R_EVIDENCE, lines: [23]}
+      - {path: contracts/OMN-20820.yaml, rule: R_EVIDENCE, lines: [21]}
+      - {path: contracts/OMN-21288.yaml, rule: R_EVIDENCE, lines: [487]}
+      - {path: contracts/OMN-21592.yaml, rule: R_EVIDENCE, lines: [93]}
+      - {path: contracts/OMN-21629.yaml, rule: R_EVIDENCE, lines: [37]}
+      - {path: contracts/OMN-21683.yaml, rule: R_EVIDENCE, lines: [86]}
+      - {path: contracts/OMN-21688.yaml, rule: R_EVIDENCE, lines: [57]}
+      - {path: contracts/OMN-21733.yaml, rule: R_EVIDENCE, lines: [51]}
+      - {path: contracts/OMN-21916.yaml, rule: R_EVIDENCE, lines: [64]}
+      - {path: contracts/OMN-22097.yaml, rule: R_EVIDENCE, lines: [17]}
+      - {path: contracts/OMN-22311.yaml, rule: R_EVIDENCE, lines: [21]}
+      - {path: contracts/OMN-22392.yaml, rule: R_EVIDENCE, lines: [39]}
+      - {path: contracts/OMN-23009.yaml, rule: R_EVIDENCE, lines: [56]}
+      - {path: contracts/OMN-23039.yaml, rule: R_EVIDENCE, lines: [63]}
+      - {path: contracts/OMN-23332.yaml, rule: R_EVIDENCE, lines: [62]}
+      - {path: contracts/OMN-23540.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-24213.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-26121.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-26316.yaml, rule: R_EVIDENCE, lines: [121, 139, 164, 207, 252]}
+      - {path: contracts/OMN-26320.yaml, rule: R_EVIDENCE, lines: [85]}
+      - {path: contracts/OMN-26338.yaml, rule: R_EVIDENCE, lines: [14, 98]}
+      - {path: contracts/OMN-26359.yaml, rule: R_EVIDENCE, lines: [112]}
+      - {path: contracts/OMN-26362.yaml, rule: R_EVIDENCE, lines: [74]}
+      - {path: contracts/OMN-26396.yaml, rule: R_EVIDENCE, lines: [109]}
+      - {path: contracts/OMN-26417.yaml, rule: R_EVIDENCE, lines: [5, 31, 76]}
+      - {path: contracts/OMN-26418.yaml, rule: R_EVIDENCE, lines: [59]}
+      - {path: contracts/OMN-26724.yaml, rule: R_EVIDENCE, lines: [65]}
+      - {path: contracts/OMN-9728.yaml, rule: R_EVIDENCE, lines: [26]}
+      - {path: contracts/llm_endpoints.yaml, rule: R_PORT_SHAPE, lines: [32]}
+      - {path: contracts/services/runtime_policy.contract.yaml, rule: R_PORT_SHAPE, lines: [22]}
+      - {path: deploy/buildkit/builders.yaml, rule: R_PORT_CONTAINER, lines: [39]}
+      - {path: deploy/buildkit/buildkitd.toml, rule: R_PORT_CONTAINER, lines: [61, 63]}
+      - {path: deploy/disk-gc/install-worktree-reaper.sh, rule: R_PORT_CONTAINER, lines: [23, 77]}
+      - {path: deploy/disk-gc/onex-worktree-reaper.service, rule: R_PORT_CONTAINER, lines: [39]}
+      - {path: deploy/maintenance/omninode-runner-tree-converge.sh, rule: R_PORT_CONTAINER, lines: [65]}
+      - {path_sha1: ee649dfb5427, rule: R_PORT_CONTAINER, lines: [65, 66]}
+      - {path_sha1: a825eb4c26eb, rule: R_PORT_CONTAINER, lines: [33]}
+      - {path: docker/.env.example, rule: R_PORT_CONTAINER, lines: [37, 50]}
+      - {path: docker/application-acl-proof/compose.yml, rule: R_PORT_CONTAINER, lines: [35]}
+      - {path: docker/application-domain-enforcement/compose.yml, rule: R_PORT_CONTAINER, lines: [35, 37, 38, 39, 40]}
+      - {path: docker/catalog/bundles.yaml, rule: R_PORT_CONTAINER, lines: [14, 146, 147, 148, 152, 153, 154, 155, 329, 352]}
+      - {path: docker/catalog/services/agent-actions-consumer.yaml, rule: R_PORT_CONTAINER, lines: [9, 10, 11, 23]}
+      - {path: docker/catalog/services/ci-relay.yaml, rule: R_PORT_CONTAINER, lines: [9, 11, 19]}
+      - {path: docker/catalog/services/cloud-migration.yaml, rule: R_PORT_CONTAINER, lines: [21]}
+      - {path: docker/catalog/services/consumer-health-projection.yaml, rule: R_PORT_CONTAINER, lines: [9, 10, 11, 24]}
+      - {path: docker/catalog/services/context-audit-consumer.yaml, rule: R_PORT_CONTAINER, lines: [9, 10, 11, 22]}
+      - {path: docker/catalog/services/contract-resolver.yaml, rule: R_PORT_CONTAINER, lines: [13, 14, 15, 21, 24, 26, 35, 37, 42]}
+      - {path: docker/catalog/services/decision-store-consumer.yaml, rule: R_PORT_CONTAINER, lines: [8, 9, 10, 24]}
+      - {path: docker/catalog/services/dlq-replay-consumer.yaml, rule: R_PORT_CONTAINER, lines: [22, 23, 24, 31, 34, 38, 47, 71]}
+      - {path: docker/catalog/services/fault-inject-fixture.yaml, rule: R_PORT_CONTAINER, lines: [22, 23, 24, 38, 41, 45, 54, 75]}
+      - {path: docker/catalog/services/forward-migration.yaml, rule: R_PORT_CONTAINER, lines: [10]}
+      - {path: docker/catalog/services/infisical.yaml, rule: R_PORT_CONTAINER, lines: [12, 21, 36]}
+      - {path: docker/catalog/services/infra-routing-decisions-consumer.yaml, rule: R_PORT_CONTAINER, lines: [9, 10, 11, 26]}
+      - {path: docker/catalog/services/injection-effectiveness-consumer.yaml, rule: R_PORT_CONTAINER, lines: [9, 10, 20]}
+      - {path: docker/catalog/services/intelligence-migration.yaml, rule: R_PORT_CONTAINER, lines: [10]}
+      - {path: docker/catalog/services/keycloak.yaml, rule: R_PORT_CONTAINER, lines: [10, 14]}
+      - {path: docker/catalog/services/linear-relay.yaml, rule: R_PORT_CONTAINER, lines: [9, 11, 19]}
+      - {path: docker/catalog/services/llm-cost-aggregation-consumer.yaml, rule: R_PORT_CONTAINER, lines: [9, 10, 11, 23]}
+      - {path: docker/catalog/services/local-tenant-registry-seed.yaml, rule: R_PORT_CONTAINER, lines: [16]}
+      - {path: docker/catalog/services/migration-gate.yaml, rule: R_PORT_CONTAINER, lines: [10]}
+      - {path: docker/catalog/services/omnibase-infra-memgraph.yaml, rule: R_PORT_CONTAINER, lines: [9, 10, 18]}
+      - {path: docker/catalog/services/omnidash.yaml, rule: R_PORT_CONTAINER, lines: [15]}
+      - {path: docker/catalog/services/omnimarket-projection-baselines.yaml, rule: R_PORT_CONTAINER, lines: [11]}
+      - {path: docker/catalog/services/omnimarket-projection-cost-by-repo.yaml, rule: R_PORT_CONTAINER, lines: [11]}
+      - {path: docker/catalog/services/omnimarket-projection-delegation.yaml, rule: R_PORT_CONTAINER, lines: [17, 18, 21, 27]}
+      - {path: docker/catalog/services/omnimarket-projection-live-events.yaml, rule: R_PORT_CONTAINER, lines: [11]}
+      - {path: docker/catalog/services/omnimarket-projection-llm-cost.yaml, rule: R_PORT_CONTAINER, lines: [17, 18, 23, 31]}
+      - {path: docker/catalog/services/omnimarket-projection-registration.yaml, rule: R_PORT_CONTAINER, lines: [11]}
+      - {path: docker/catalog/services/omnimarket-projection-run-trace.yaml, rule: R_PORT_CONTAINER, lines: [18, 19, 21, 31]}
+      - {path: docker/catalog/services/omnimarket-projection-savings.yaml, rule: R_PORT_CONTAINER, lines: [17]}
+      - {path: docker/catalog/services/omnimarket-projection-session-outcome.yaml, rule: R_PORT_CONTAINER, lines: [17]}
+      - {path: docker/catalog/services/omnimarket-projection-tenant-credentials.yaml, rule: R_PORT_CONTAINER, lines: [15, 16, 18, 24]}
+      - {path: docker/catalog/services/omnimemory-kreuzberg.yaml, rule: R_PORT_CONTAINER, lines: [9, 14]}
+      - {path: docker/catalog/services/omnimemory-memgraph.yaml, rule: R_PORT_CONTAINER, lines: [9, 10]}
+      - {path: docker/catalog/services/omnimemory-qdrant.yaml, rule: R_PORT_CONTAINER, lines: [13, 14, 20]}
+      - {path: docker/catalog/services/omnimemory-valkey.yaml, rule: R_PORT_CONTAINER, lines: [9]}
+      - {path: docker/catalog/services/omninode-runtime.yaml, rule: R_PORT_CONTAINER, lines: [23, 24, 25, 30, 37, 40, 55, 74]}
+      - {path: docker/catalog/services/onex-api.yaml, rule: R_PORT_CONTAINER, lines: [26, 30, 34, 45, 85]}
+      - {path: docker/catalog/services/phoenix.yaml, rule: R_PORT_CONTAINER, lines: [19]}
+      - {path: docker/catalog/services/projection-api.yaml, rule: R_PORT_CONTAINER, lines: [13, 14, 25]}
+      - {path: docker/catalog/services/projection-claude-hook-events-writer.yaml, rule: R_PORT_CONTAINER, lines: [21, 22, 23, 24, 37, 40, 63, 74]}
+      - {path: docker/catalog/services/redpanda-local-sasl.yaml, rule: R_PORT_CONTAINER, lines: [52, 53]}
+      - {path: docker/catalog/services/redpanda-partition-cap.yaml, rule: R_PORT_CONTAINER, lines: [26, 27, 31, 32, 33]}
+      - {path: docker/catalog/services/redpanda.yaml, rule: R_PORT_CONTAINER, lines: [38, 40, 42, 43]}
+      - {path: docker/catalog/services/retry-worker.yaml, rule: R_PORT_CONTAINER, lines: [9]}
+      - {path: docker/catalog/services/runtime-canary.yaml, rule: R_PORT_CONTAINER, lines: [21, 22, 23, 25, 31, 35, 46, 64]}
+      - {path: docker/catalog/services/runtime-effects.yaml, rule: R_PORT_CONTAINER, lines: [24, 25, 26, 37, 40, 62, 72, 90]}
+      - {path: docker/catalog/services/runtime-worker.yaml, rule: R_PORT_CONTAINER, lines: [15, 16, 17, 28, 31, 35, 44, 60]}
+      - {path: docker/catalog/services/skill-lifecycle-consumer.yaml, rule: R_PORT_CONTAINER, lines: [9, 10, 11, 22]}
+      - {path: docker/catalog/services/tenant-projection-writer.yaml, rule: R_PORT_CONTAINER, lines: [19, 20, 21, 29, 32, 46, 59]}
+      - {path: docker/catalog/services/waitlist-signup-notifier.yaml, rule: R_PORT_CONTAINER, lines: [10, 11, 20]}
+      - {path: docker/docker-compose.broker-profile.yml, rule: R_PORT_CONTAINER, lines: [30, 31]}
+      - {path_sha1: f515dd9cf1d5, rule: R_PORT_CONTAINER, lines: [43, 69, 110, 159, 160, 161, 169, 176, 177, 279, 280, 364, 430, 431, 465, 485, 486]}
+      - {path: docker/docker-compose.cost-estimator-web.yml, rule: R_PORT_CONTAINER, lines: [61]}
+      - {path_sha1: 4c14d7e9bc0a, rule: R_PORT_CONTAINER, lines: [85, 86, 126, 128]}
+      - {path_sha1: 33382e5622d5, rule: R_PORT_CONTAINER, lines: [96, 97, 137, 139]}
+      - {path: docker/docker-compose.dev-bus-ha.yml, rule: R_PORT_CONTAINER, lines: [50, 52, 75, 76, 77, 79]}
+      - {path: docker/docker-compose.dev-lane.yml, rule: R_PORT_CONTAINER, lines: [90, 183, 192, 199, 240, 242, 476, 477, 486, 489, 490, 491, 498, 566, 568, 570, 571, 683, 788, 789, 875, 1555, 1556, 1576, 1587, 1629, 1630, 1635, 1641, 1716, 1717, 1724, 1735, 1777, 1778, 1780, 1786, 1828, 1829, 1831, 1837, 1878, 1879, 1881, 1887, 1984, 1985]}
+      - {path: docker/docker-compose.dev-member.yml, rule: R_PORT_CONTAINER, lines: [70, 108]}
+      - {path: docker/docker-compose.dev-tenant-fold.yml, rule: R_PORT_CONTAINER, lines: [43, 98]}
+      - {path: docker/docker-compose.dogfood.yml, rule: R_PORT_CONTAINER, lines: [16, 62, 63, 64, 70, 72, 73, 77, 155, 157, 216, 270, 272, 327, 348, 379, 407, 430, 449, 487, 498, 543, 545, 554, 588, 593]}
+      - {path: docker/docker-compose.e2e.yml, rule: R_PORT_CONTAINER, lines: [88, 123, 125, 127, 128, 139, 141, 143, 145, 178, 179, 180, 181, 182, 185, 186, 187, 188, 189, 190, 191, 192, 195, 198, 201, 202, 203, 204, 205, 206, 207, 208, 209, 212, 213, 214, 215, 216, 217, 220, 233, 258, 259, 265, 268, 273, 302, 307, 308, 310, 313, 317, 319, 322, 336, 344]}
+      - {path: docker/docker-compose.factory-floor-web.yml, rule: R_PORT_CONTAINER, lines: [48]}
+      - {path: docker/docker-compose.gateway.yml, rule: R_PORT_CONTAINER, lines: [167]}
+      - {path: docker/docker-compose.infra.yml, rule: R_PORT_CONTAINER, lines: [53, 146, 148, 149, 150, 154, 155, 273, 276, 279, 280, 329, 378, 385, 397, 415, 419, 520, 662, 706, 729, 731, 733, 734, 782, 784, 786, 793, 794, 796, 877, 907, 908, 915, 916, 924, 955, 990, 995, 1029, 1035, 1091, 1223, 1307, 1338, 1420, 1424, 1426, 1473, 1515, 1517, 1578, 1588, 1692, 1783, 1810, 1811, 1812, 1815, 1821, 1826, 1831, 1866, 1868, 1871, 1876, 1881, 1916, 1918, 1921, 1926, 1931, 1973, 2038, 2039, 2042, 2049, 2073, 2074, 2083, 2092, 2147]}
+      - {path: docker/docker-compose.judge.yml, rule: R_PORT_CONTAINER, lines: [35, 38, 81, 82, 83, 90, 96, 97, 101, 182, 184, 219, 273, 275, 314, 315, 331, 352, 455, 483, 530, 541, 585, 587, 596, 630, 635]}
+      - {path_sha1: 05d3a62ed557, rule: R_PORT_CONTAINER, lines: [88, 94, 148, 149, 150, 156, 158, 159, 163, 240, 242, 299, 353, 355, 393, 394, 410, 431, 465, 493, 552, 563, 608, 617, 627, 658, 659, 661, 676, 709, 714, 760, 785, 786, 787, 790, 794, 795, 796, 816, 840, 841, 842, 845, 851]}
+      - {path: docker/docker-compose.prepr.yml, rule: R_PORT_CONTAINER, lines: [95, 96, 97, 98, 103, 107, 323]}
+      - {path: docker/docker-compose.principal-issuer.yml, rule: R_PORT_CONTAINER, lines: [43, 44]}
+      - {path: docker/docker-compose.prod.yml, rule: R_PORT_CONTAINER, lines: [25, 52, 56, 60, 62, 64, 65, 77, 78, 92, 165, 203, 224]}
+      - {path: docker/docker-compose.pypi-cache.yml, rule: R_PORT_CONTAINER, lines: [22, 51, 65]}
+      - {path: docker/docker-compose.runners-omninode-studio-runner.yml, rule: R_PORT_CONTAINER, lines: [36]}
+      - {path_sha1: 98f3dbd950fc, rule: R_PORT_CONTAINER, lines: [11]}
+      - {path_sha1: 043a2bec889c, rule: R_PORT_CONTAINER, lines: [6]}
+      - {path: docker/docker-compose.runners.yml, rule: R_PORT_CONTAINER, lines: [3, 58, 129, 249, 251, 508]}
+      - {path_sha1: 3a0244274ec8, rule: R_PORT_CONTAINER, lines: [94, 96, 98]}
+      - {path: docker/docker-compose.stability-host-broker.yml, rule: R_PORT_CONTAINER, lines: [24, 59, 61]}
+      - {path_sha1: 29c36e56f96b, rule: R_PORT_CONTAINER, lines: [29, 30, 34, 126, 128, 130, 139, 192, 206, 245, 247, 315, 346, 347, 400, 404, 449, 498, 499, 677, 728, 880, 881, 894, 900, 942, 943, 945, 951, 992, 993, 995, 1001, 1043, 1044, 1046, 1052, 1094, 1095, 1097, 1103, 1144, 1145, 1147, 1153]}
+      - {path: docker/domain-adapter-proof/compose.yml, rule: R_PORT_CONTAINER, lines: [28, 30, 32, 34]}
+      - {path: docker/env-example-full.txt, rule: R_PORT_CONTAINER, lines: [40, 51, 53, 85, 131, 133, 138, 139, 140, 141, 142, 163, 173, 176, 190, 204, 215, 221, 234, 338, 354, 377, 382, 383, 384, 388, 389, 390, 416, 419, 422]}
+      - {path: docker/gateway/beta-gateway-canary.yaml, rule: R_PORT_CONTAINER, lines: [41, 113, 177, 178, 181, 201]}
+      - {path: docker/gateway/dns-bastion/dnsmasq.conf, rule: R_PORT_CONTAINER, lines: [24]}
+      - {path: docker/keycloak/desired-clients.json, rule: R_PORT_CONTAINER, lines: [14, 19, 20, 28, 29, 123, 124, 129, 130]}
+      - {path: docker/lane-overlays/local.bifrost.example.yaml, rule: R_PORT_CONTAINER, lines: [26]}
+      - {path: docker/lane-overlays/local.lane-mirror.example.yaml, rule: R_PORT_CONTAINER, lines: [35, 46]}
+      - {path: docker/legacy-rds-fixture/cutover-proof/prove.sh, rule: R_PORT_CONTAINER, lines: [13]}
+      - {path: docker/legacy-rds-fixture/legacy-seed.sql, rule: R_PORT_CONTAINER, lines: [169, 176, 177]}
+      - {path: docker/legacy-rds-fixture/prove.sh, rule: R_PORT_CONTAINER, lines: [9, 10]}
+      - {path: docker/migrations/forward/fenced-node-migrations.yaml, rule: R_PORT_CONTAINER, lines: [316]}
+      - {path_sha1: 4ba125c6e307, rule: R_PORT_CONTAINER, lines: [6]}
+      - {path_sha1: d308f99208ab, rule: R_PORT_CONTAINER, lines: [3]}
+      - {path: docker/projection-runtime-binding/registration-writer.yaml, rule: R_PORT_CONTAINER, lines: [26]}
+      - {path: docker/projection-runtime-binding/runtime-read.yaml, rule: R_PORT_CONTAINER, lines: [26]}
+      - {path: docker/projection-runtime-binding/tenant-registry-writer.yaml, rule: R_PORT_CONTAINER, lines: [26]}
+      - {path: docker/pypi-cache/Dockerfile, rule: R_PORT_CONTAINER, lines: [39]}
+      - {path: docker/pypi-cache/entrypoint.sh, rule: R_PORT_CONTAINER, lines: [11]}
+      - {path: docker/redpanda/broker_readiness_declaration.conf, rule: R_PORT_CONTAINER, lines: [69]}
+      - {path: docker/runners/runner-job-started.sh, rule: R_PORT_CONTAINER, lines: [86, 1094]}
+      - {path: docker/runners/systemd/omnirunners.slice, rule: R_PORT_CONTAINER, lines: [39]}
+      - {path: docker/runtime-policy.env, rule: R_PORT_CONTAINER, lines: [3, 22, 38, 88, 96, 118, 126, 146, 154, 171, 179, 187, 207, 217]}
+      - {path: docker/tenant-uuid-conversion-proof/compose.yml, rule: R_PORT_CONTAINER, lines: [36]}
+      - {path: docs/env-example-full.txt, rule: R_PORT_OVERLAY, lines: [11, 13, 46, 49, 50, 53, 56, 57, 58, 74, 77, 121, 124, 148, 151, 170, 176, 179, 182, 183, 197, 203, 206, 256, 629, 640, 641, 642, 668, 669, 685, 706, 714, 716, 720, 721, 722]}
+      - {path: docs/env-master-template.env, rule: R_PORT_OVERLAY, lines: [33, 87, 132, 137, 138, 162, 166, 256, 259, 273, 282, 372, 408]}
+      - {path: observability/prometheus/prometheus.yml, rule: R_PORT_OVERLAY, lines: [11, 25, 32, 38, 42, 47]}
+      - {path: scripts/apply_application_database_acl.py, rule: R_PORT_CONTAINER, lines: [18]}
+      - {path: scripts/audit-runner-routing.py, rule: R_PORT_CONTAINER, lines: [785]}
+      - {path: scripts/backfill_capabilities.py, rule: R_PORT_CONTAINER, lines: [59, 66, 242, 967]}
+      - {path: scripts/bootstrap-infisical.sh, rule: R_PORT_CONTAINER, lines: [194, 201, 281, 313, 321, 438, 439, 440, 442, 444, 446, 448]}
+      - {path: scripts/check_lane_env_drift.py, rule: R_PORT_CONTAINER, lines: [48, 57, 132]}
+      - {path: scripts/check_migrations_complete.sh, rule: R_PORT_CONTAINER, lines: [26]}
+      - {path: scripts/ci/check_delegation_tenant_conversion_readiness.py, rule: R_PORT_CONTAINER, lines: [102]}
+      - {path: scripts/ci/check_incident_replay_coverage.py, rule: R_PORT_CONTAINER, lines: [169]}
+      - {path: scripts/ci/check_integration_skips.py, rule: R_PORT_CONTAINER, lines: [266]}
+      - {path: scripts/ci/check_lockfile_registry_allowlist.py, rule: R_PORT_CONTAINER, lines: [13]}
+      - {path: scripts/ci/lab_pass_receipt.py, rule: R_PORT_CONTAINER, lines: [1487, 1488, 2047, 2048, 2049, 6391, 6478]}
+      - {path: scripts/ci/normalize_product_clone.sh, rule: R_PORT_CONTAINER, lines: [11]}
+      - {path: scripts/ci_check_kafka_no_localhost_default.py, rule: R_PORT_CONTAINER, lines: [4, 7, 12, 13, 14, 16, 96, 108]}
+      - {path: scripts/cloud-bus-tunnel.sh, rule: R_PORT_CONTAINER, lines: [9, 10, 11]}
+      - {path: scripts/create_kafka_topics.py, rule: R_PORT_CONTAINER, lines: [21, 25, 115, 119, 134]}
+      - {path: scripts/delete_orphan_branch.py, rule: R_PORT_CONTAINER, lines: [15]}
+      - {path_sha1: 331f67b9ca6d, rule: R_PORT_CONTAINER, lines: [68]}
+      - {path: scripts/deploy-agent/deploy/deploy-agent-dev.service, rule: R_PORT_CONTAINER, lines: [257]}
+      - {path: scripts/deploy-agent/deploy/deploy-agent.service, rule: R_PORT_CONTAINER, lines: [103]}
+      - {path: scripts/deploy-agent/deploy/deploy-agent.service.d/override.conf, rule: R_PORT_CONTAINER, lines: [31]}
+      - {path: scripts/deploy-agent/deploy_agent/compose_budget.py, rule: R_PORT_CONTAINER, lines: [16]}
+      - {path: scripts/deploy-agent/deploy_agent/recreate_supervisor.py, rule: R_PORT_CONTAINER, lines: [9]}
+      - {path: scripts/diagnose_e2e.sh, rule: R_PORT_CONTAINER, lines: [194]}
+      - {path: scripts/dlq_replay.py, rule: R_PORT_CONTAINER, lines: [124, 135]}
+      - {path: scripts/emit_baselines_raw_snapshot.py, rule: R_PORT_CONTAINER, lines: [43, 494]}
+      - {path: scripts/generate-local-env.sh, rule: R_PORT_CONTAINER, lines: [73]}
+      - {path: scripts/generate_claude_lane_block.py, rule: R_PORT_CONTAINER, lines: [147]}
+      - {path: scripts/lab_alarm.py, rule: R_PORT_CONTAINER, lines: [102, 749]}
+      - {path: scripts/lint_compose_dangling_deps.py, rule: R_PORT_CONTAINER, lines: [67]}
+      - {path: scripts/migrations/prove_migration_revision_equivalence.py, rule: R_PORT_CONTAINER, lines: [30]}
+      - {path: scripts/migrations/verify_migration_checksum_adoption.py, rule: R_PORT_CONTAINER, lines: [99]}
+      - {path: scripts/omnidash-lifecycle.sh, rule: R_PORT_CONTAINER, lines: [47]}
+      - {path: scripts/preflight-check.sh, rule: R_PORT_CONTAINER, lines: [56, 58]}
+      - {path: scripts/provision-cross-repo-tables.py, rule: R_PORT_CONTAINER, lines: [17, 21]}
+      - {path: scripts/provision-infisical.py, rule: R_PORT_CONTAINER, lines: [19, 425, 427]}
+      - {path: scripts/provision-keycloak.py, rule: R_PORT_CONTAINER, lines: [15, 26, 27, 30, 201, 595, 607, 664, 770, 773, 774]}
+      - {path: scripts/provision_db_slot.sh, rule: R_PORT_CONTAINER, lines: [461]}
+      - {path: scripts/publish_pr_merged_event.py, rule: R_PORT_CONTAINER, lines: [21]}
+      - {path: scripts/publish_pr_webhook_event.py, rule: R_PORT_CONTAINER, lines: [21]}
+      - {path: scripts/register-repo.py, rule: R_PORT_CONTAINER, lines: [23, 439, 775, 1057]}
+      - {path: scripts/run-forward-migrations.sh, rule: R_PORT_CONTAINER, lines: [109]}
+      - {path: scripts/run-intelligence-migrations.sh, rule: R_PORT_CONTAINER, lines: [29]}
+      - {path: scripts/run_baselines_batch_compute.py, rule: R_PORT_CONTAINER, lines: [21]}
+      - {path: scripts/runtime_build/prepr_pool_prove.sh, rule: R_PORT_CONTAINER, lines: [51]}
+      - {path: scripts/runtime_build/prepr_runtime_pool.py, rule: R_PORT_CONTAINER, lines: [163]}
+      - {path: scripts/runtime_build/scoped_effects_deploy.py, rule: R_PORT_CONTAINER, lines: [54, 850]}
+      - {path: scripts/runtime_build/verify_dev_refresh.py, rule: R_PORT_CONTAINER, lines: [97, 741, 742]}
+      - {path: scripts/runtime_build/verify_stability_refresh.py, rule: R_PORT_CONTAINER, lines: [690, 852, 1354, 1355, 1356]}
+      - {path: scripts/seed-infisical.py, rule: R_PORT_CONTAINER, lines: [214]}
+      - {path: scripts/seed-keycloak-clients.py, rule: R_PORT_CONTAINER, lines: [8]}
+      - {path: scripts/seed-keycloak.sh, rule: R_PORT_CONTAINER, lines: [9, 40]}
+      - {path: scripts/seed-profiles/cloud-omniweb.env, rule: R_PORT_CONTAINER, lines: [4, 5]}
+      - {path: scripts/seed-profiles/local-omniweb.env, rule: R_PORT_CONTAINER, lines: [2, 3]}
+      - {path: scripts/system_health_check.sh, rule: R_PORT_CONTAINER, lines: [105, 109, 190, 230]}
+      - {path: scripts/trigger-deploy.sh, rule: R_PORT_CONTAINER, lines: [27]}
+      - {path: scripts/validation/check_kafka_no_hardcoded_fallback.sh, rule: R_PORT_CONTAINER, lines: [72]}
+      - {path: scripts/validation/topic_literal_baseline.txt, rule: R_PORT_CONTAINER, lines: [57, 58, 130, 131]}
+      - {path: scripts/verify-omnidash-health.sh, rule: R_PORT_CONTAINER, lines: [17, 27]}
+      - {path: scripts/worktree_prune_timer.py, rule: R_PORT_CONTAINER, lines: [47]}
+      - {path: scripts/worktree_reaper.py, rule: R_PORT_CONTAINER, lines: [22, 171, 180]}
+      - {path: src/omnibase_infra/adapters/llm/adapter_code_analysis_enrichment.py, rule: R_PORT_SHAPE, lines: [151]}
+      - {path: src/omnibase_infra/adapters/llm/adapter_code_review_analysis.py, rule: R_PORT_SHAPE, lines: [215]}
+      - {path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py, rule: R_PORT_SHAPE, lines: [204]}
+      - {path: src/omnibase_infra/adapters/llm/adapter_summarization_enrichment.py, rule: R_PORT_SHAPE, lines: [168]}
+      - {path: src/omnibase_infra/adapters/llm/adapter_test_boilerplate_generation.py, rule: R_PORT_SHAPE, lines: [220]}
+      - {path: src/omnibase_infra/cli/cli_delegate.py, rule: R_PORT_SHAPE, lines: [3502]}
+      - {path: src/omnibase_infra/cli/commands.py, rule: R_PORT_SHAPE, lines: [265, 266, 267]}
+      - {path: src/omnibase_infra/cli/infra_test/_helpers.py, rule: R_PORT_SHAPE, lines: [43, 44]}
+      - {path: src/omnibase_infra/cli/infra_test/infra_test_settings.yaml, rule: R_PORT_SHAPE, lines: [11, 12]}
+      - {path: src/omnibase_infra/contracts/handlers/graph/handler_contract.yaml, rule: R_PORT_SHAPE, lines: [21]}
+      - {path: src/omnibase_infra/contracts/integrations/catalog.yaml, rule: R_PORT_SHAPE, lines: [105, 118]}
+      - {path: src/omnibase_infra/diagnostics/__init__.py, rule: R_PORT_SHAPE, lines: [10]}
+      - {path: src/omnibase_infra/diagnostics/bus_audit.py, rule: R_PORT_SHAPE, lines: [12, 93]}
+      - {path: src/omnibase_infra/dlq/__init__.py, rule: R_PORT_SHAPE, lines: [38]}
+      - {path: src/omnibase_infra/dlq/models/model_dlq_tracking_config.py, rule: R_PORT_SHAPE, lines: [70, 83, 98]}
+      - {path: src/omnibase_infra/dlq/service_dlq_tracking.py, rule: R_PORT_SHAPE, lines: [109]}
+      - {path: src/omnibase_infra/docker/catalog/validator_healthcheck_semantic_probe.py, rule: R_PORT_SHAPE, lines: [45, 52, 55, 57, 128]}
+      - {path: src/omnibase_infra/errors/error_catalog.py, rule: R_PORT_SHAPE, lines: [46, 61, 69, 77]}
+      - {path: src/omnibase_infra/errors/error_lane_mirror.py, rule: R_PORT_SHAPE, lines: [79]}
+      - {path: src/omnibase_infra/event_bus/configs/kafka_event_bus_config.yaml, rule: R_PORT_SHAPE, lines: [21, 24]}
+      - {path: src/omnibase_infra/event_bus/event_bus_kafka.py, rule: R_PORT_SHAPE, lines: [25, 26, 152, 482, 526, 729, 772, 5305, 5306]}
+      - {path: src/omnibase_infra/event_bus/models/config/model_kafka_event_bus_config.py, rule: R_PORT_SHAPE, lines: [24, 25, 241, 1287, 1616]}
+      - {path: src/omnibase_infra/event_bus/models/model_publish_receipt.py, rule: R_PORT_SHAPE, lines: [65]}
+      - {path: src/omnibase_infra/handlers/handler_db.py, rule: R_PORT_SHAPE, lines: [603, 604]}
+      - {path: src/omnibase_infra/handlers/handler_graph.py, rule: R_PORT_SHAPE, lines: [156, 232, 239, 275]}
+      - {path: src/omnibase_infra/handlers/handler_runtime_deploy.sh, rule: R_PORT_SHAPE, lines: [3305, 3309]}
+      - {path: src/omnibase_infra/handlers/models/graph/contract_descriptor.py, rule: R_PORT_SHAPE, lines: [11, 56, 77]}
+      - {path: src/omnibase_infra/handlers/models/graph/model_graph_handler_config.py, rule: R_PORT_SHAPE, lines: [18]}
+      - {path: src/omnibase_infra/idempotency/models/model_postgres_idempotency_store_config.py, rule: R_PORT_SHAPE, lines: [113, 139, 155]}
+      - {path: src/omnibase_infra/idempotency/store_postgres.py, rule: R_PORT_SHAPE, lines: [138]}
+      - {path: src/omnibase_infra/mixins/mixin_node_introspection.py, rule: R_PORT_SHAPE, lines: [1267, 1268]}
+      - {path: src/omnibase_infra/models/endpoint_defaults/endpoint_defaults.yaml, rule: R_PORT_SHAPE, lines: [23]}
+      - {path: src/omnibase_infra/nodes/node_board_probe_effect/contract.yaml, rule: R_PORT_SHAPE, lines: [59, 82]}
+      - {path: src/omnibase_infra/nodes/node_board_probe_effect/handlers/_consumer_flow_constants.py, rule: R_PORT_SHAPE, lines: [99]}
+      - {path: src/omnibase_infra/nodes/node_bus_forwarder_effect/models/model_gateway_publish_receipt.py, rule: R_PORT_SHAPE, lines: [9]}
+      - {path: src/omnibase_infra/nodes/node_chain_canary_effect/lane_transport.py, rule: R_PORT_SHAPE, lines: [8, 342]}
+      - {path: src/omnibase_infra/nodes/node_chain_canary_effect/models/model_chain_canary_request.py, rule: R_PORT_SHAPE, lines: [71, 359]}
+      - {path: src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/contract.yaml, rule: R_PORT_SHAPE, lines: [225, 305]}
+      - {path: src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/handlers/handler_evidence_autoclose_sweep.py, rule: R_PORT_SHAPE, lines: [138, 1773]}
+      - {path: src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/models/model_evidence_autoclose_sweep_request.py, rule: R_PORT_SHAPE, lines: [459]}
+      - {path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/contract.yaml, rule: R_PORT_SHAPE, lines: [126, 151]}
+      - {path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py, rule: R_PORT_SHAPE, lines: [183]}
+      - {path: src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/handler_bifrost_gateway.py, rule: R_PORT_SHAPE, lines: [247]}
+      - {path: src/omnibase_infra/nodes/node_registration_orchestrator/dispatchers/dispatcher_node_introspected.py, rule: R_PORT_SHAPE, lines: [358]}
+      - {path: src/omnibase_infra/nodes/node_registration_storage_effect/models/model_registration_update.py, rule: R_PORT_SHAPE, lines: [48, 53]}
+      - {path: src/omnibase_infra/nodes/node_registration_storage_effect/protocols/protocol_registration_persistence.py, rule: R_PORT_SHAPE, lines: [248]}
+      - {path: src/omnibase_infra/nodes/node_service_discovery_effect/models/model_service_discovery_health_check_details.py, rule: R_PORT_SHAPE, lines: [41, 52]}
+      - {path: src/omnibase_infra/nodes/node_service_discovery_effect/models/model_service_discovery_health_check_result.py, rule: R_PORT_SHAPE, lines: [61]}
+      - {path: src/omnibase_infra/nodes/node_service_discovery_effect/protocols/protocol_discovery_operations.py, rule: R_PORT_SHAPE, lines: [271]}
+      - {path: src/omnibase_infra/nodes/node_vector_store_effect/contract.yaml, rule: R_PORT_SHAPE, lines: [56]}
+      - {path: src/omnibase_infra/observability/handlers/__init__.py, rule: R_PORT_SHAPE, lines: [60]}
+      - {path: src/omnibase_infra/observability/handlers/model_metrics_handler_config.py, rule: R_PORT_SHAPE, lines: [40]}
+      - {path: src/omnibase_infra/observability/handlers/model_metrics_handler_payload.py, rule: R_PORT_SHAPE, lines: [22, 66]}
+      - {path: src/omnibase_infra/onboarding/policies/interactive_onboarding.yaml, rule: R_PORT_SHAPE, lines: [170, 172, 174, 186, 188, 190]}
+      - {path: src/omnibase_infra/projectors/snapshot_publisher_registration.py, rule: R_PORT_SHAPE, lines: [52, 234, 241, 857, 874]}
+      - {path: src/omnibase_infra/runtime/auto_wiring/models/model_consume_concurrency.py, rule: R_PORT_SHAPE, lines: [101]}
+      - {path: src/omnibase_infra/runtime/bounded_delegation_routes.py, rule: R_PORT_SHAPE, lines: [10, 168]}
+      - {path: src/omnibase_infra/runtime/dogfood_delegation_fault_routes.py, rule: R_PORT_SHAPE, lines: [229]}
+      - {path: src/omnibase_infra/runtime/health/container_healthcheck.py, rule: R_PORT_SHAPE, lines: [99]}
+      - {path: src/omnibase_infra/runtime/models/model_bounded_lane_broker_topology.py, rule: R_PORT_SHAPE, lines: [8]}
+      - {path: src/omnibase_infra/runtime/models/model_event_bus_aggregate_health.py, rule: R_PORT_SHAPE, lines: [26]}
+      - {path: src/omnibase_infra/runtime/models/model_kafka_producer_config.py, rule: R_PORT_SHAPE, lines: [66]}
+      - {path: src/omnibase_infra/runtime/models/model_postgres_pool_config.py, rule: R_PORT_SHAPE, lines: [144]}
+      - {path: src/omnibase_infra/runtime/models/model_runtime_aggregate_health.py, rule: R_PORT_SHAPE, lines: [66]}
+      - {path: src/omnibase_infra/runtime/request_response_wiring.py, rule: R_PORT_SHAPE, lines: [250]}
+      - {path: src/omnibase_infra/runtime/security_metadata_validator.py, rule: R_PORT_SHAPE, lines: [445, 448, 546]}
+      - {path: src/omnibase_infra/runtime/service_kernel.py, rule: R_PORT_SHAPE, lines: [37, 1675, 1696, 2004]}
+      - {path: src/omnibase_infra/runtime/tracing.py, rule: R_PORT_SHAPE, lines: [16]}
+      - {path: src/omnibase_infra/runtime/tracing_contract.yaml, rule: R_PORT_SHAPE, lines: [10]}
+      - {path: src/omnibase_infra/runtime/tracing_contract_descriptor.py, rule: R_PORT_SHAPE, lines: [10]}
+      - {path: src/omnibase_infra/runtime/util_schema_fingerprint.py, rule: R_PORT_SHAPE, lines: [800, 801]}
+      - {path: src/omnibase_infra/services/health_checker.py, rule: R_PORT_SHAPE, lines: [250, 251, 730, 731, 992]}
+      - {path: src/omnibase_infra/services/observability/__init__.py, rule: R_PORT_SHAPE, lines: [20, 21]}
+      - {path: src/omnibase_infra/services/observability/agent_actions/__init__.py, rule: R_PORT_SHAPE, lines: [34, 35]}
+      - {path: src/omnibase_infra/services/observability/agent_actions/config.py, rule: R_PORT_SHAPE, lines: [38]}
+      - {path: src/omnibase_infra/services/observability/agent_actions/config_ttl_cleanup.py, rule: R_PORT_SHAPE, lines: [63]}
+      - {path: src/omnibase_infra/services/observability/agent_actions/consumer.py, rule: R_PORT_SHAPE, lines: [41, 42, 137, 138, 545, 546, 569, 570]}
+      - {path: src/omnibase_infra/services/observability/agent_actions/service_ttl_cleanup.py, rule: R_PORT_SHAPE, lines: [43]}
+      - {path: src/omnibase_infra/services/observability/consumer_health/config.py, rule: R_PORT_SHAPE, lines: [26]}
+      - {path: src/omnibase_infra/services/observability/consumer_health/consumer.py, rule: R_PORT_SHAPE, lines: [22, 23]}
+      - {path: src/omnibase_infra/services/observability/context_audit/__init__.py, rule: R_PORT_SHAPE, lines: [29, 30]}
+      - {path: src/omnibase_infra/services/observability/context_audit/config.py, rule: R_PORT_SHAPE, lines: [33]}
+      - {path: src/omnibase_infra/services/observability/context_audit/consumer.py, rule: R_PORT_SHAPE, lines: [40, 41]}
+      - {path: src/omnibase_infra/services/observability/infra_routing_decisions/config.py, rule: R_PORT_SHAPE, lines: [53]}
+      - {path: src/omnibase_infra/services/observability/infra_routing_decisions/consumer.py, rule: R_PORT_SHAPE, lines: [22, 23]}
+      - {path: src/omnibase_infra/services/observability/injection_effectiveness/__init__.py, rule: R_PORT_SHAPE, lines: [27, 28]}
+      - {path: src/omnibase_infra/services/observability/injection_effectiveness/config.py, rule: R_PORT_SHAPE, lines: [47, 48, 92]}
+      - {path: src/omnibase_infra/services/observability/injection_effectiveness/consumer.py, rule: R_PORT_SHAPE, lines: [41, 42, 122, 123, 397, 398, 421, 422]}
+      - {path: src/omnibase_infra/services/observability/injection_effectiveness/service_effectiveness_invalidation_notifier.py, rule: R_PORT_SHAPE, lines: [29]}
+      - {path: src/omnibase_infra/services/observability/llm_cost_aggregation/__init__.py, rule: R_PORT_SHAPE, lines: [29, 30]}
+      - {path: src/omnibase_infra/services/observability/llm_cost_aggregation/config.py, rule: R_PORT_SHAPE, lines: [33, 41, 139]}
+      - {path: src/omnibase_infra/services/observability/llm_cost_aggregation/consumer.py, rule: R_PORT_SHAPE, lines: [37, 38]}
+      - {path: src/omnibase_infra/services/observability/skill_lifecycle/config.py, rule: R_PORT_SHAPE, lines: [30]}
+      - {path: src/omnibase_infra/services/observability/skill_lifecycle/consumer.py, rule: R_PORT_SHAPE, lines: [35, 36]}
+      - {path: src/omnibase_infra/services/post_merge/config.py, rule: R_PORT_SHAPE, lines: [24]}
+      - {path: src/omnibase_infra/services/post_merge/consumer.py, rule: R_PORT_SHAPE, lines: [47]}
+      - {path: src/omnibase_infra/services/retry_worker/config_retry_worker.py, rule: R_PORT_SHAPE, lines: [47]}
+      - {path: src/omnibase_infra/services/retry_worker/service_retry_worker.py, rule: R_PORT_SHAPE, lines: [54]}
+      - {path: src/omnibase_infra/services/service_llm_endpoint_health.py, rule: R_PORT_SHAPE, lines: [653]}
+      - {path: src/omnibase_infra/services/service_runtime_health_monitor.py, rule: R_PORT_SHAPE, lines: [585]}
+      - {path: src/omnibase_infra/services/session/config_consumer.py, rule: R_PORT_SHAPE, lines: [26]}
+      - {path: src/omnibase_infra/services/session/consumer.py, rule: R_PORT_SHAPE, lines: [257]}
+      - {path: src/omnibase_infra/topics/model_bus_descriptor.py, rule: R_PORT_SHAPE, lines: [54]}
+      - {path: src/omnibase_infra/topics/topic_resolver.py, rule: R_PORT_SHAPE, lines: [176]}
+      - {path: src/omnibase_infra/utils/util_dsn_validation.py, rule: R_PORT_SHAPE, lines: [24, 238, 370, 421, 422]}
+      - {path: src/omnibase_infra/utils/util_error_sanitization.py, rule: R_PORT_SHAPE, lines: [158, 215, 341, 342, 354, 355, 360, 361]}
+      - {path: src/omnibase_infra/utils/util_pydantic_validators.py, rule: R_PORT_SHAPE, lines: [195, 196, 264, 267]}
+      - {path: src/omnibase_infra/verification/models/model_contract_verification_report.py, rule: R_PORT_SHAPE, lines: [37]}
+  model_ids:
+    count_lines: 506
+    count_files: 168
+    by_home:
+      contract-shape: 280
+      overlay: 226
+    files:
+      - {path: .claude/settings.local.json, rule: R_MODEL_OVERLAY, lines: [20]}
+      - {path: .github/workflows/call-reject-skip.yml, rule: R_MODEL_OVERLAY, lines: [6]}
+      - {path: .github/workflows/hostile-reviewer.yml, rule: R_MODEL_OVERLAY, lines: [42, 109]}
+      - {path: .github/workflows/nightly-integration.yml, rule: R_MODEL_OVERLAY, lines: [556]}
+      - {path: .github/workflows/nightly-tests.yml, rule: R_MODEL_OVERLAY, lines: [102]}
+      - {path: .github/workflows/pr-ci-zombie-detector.yml, rule: R_MODEL_OVERLAY, lines: [270, 340, 389]}
+      - {path: .github/workflows/required-check-skip-guard-caller.yml, rule: R_MODEL_OVERLAY, lines: [28]}
+      - {path: .github/workflows/runner-label-exists-caller.yml, rule: R_MODEL_OVERLAY, lines: [21]}
+      - {path: .gitignore, rule: R_MODEL_OVERLAY, lines: [248, 249]}
+      - {path: .pre-commit-config.yaml, rule: R_MODEL_OVERLAY, lines: [1608]}
+      - {path: architecture-handshakes/validator-requirements.yaml, rule: R_MODEL_OVERLAY, lines: [315]}
+      - {path: config/hardcoded_model_config_baseline.yaml, rule: R_MODEL_OVERLAY, lines: [458, 461, 464, 467, 470, 473, 476, 479, 482, 3815, 3818, 3821, 3824, 3827, 3830, 3833, 3836, 3839]}
+      - {path: config/lab_proof_profiles.yaml, rule: R_MODEL_OVERLAY, lines: [56, 315]}
+      - {path: config/release_train_policy.yaml, rule: R_MODEL_OVERLAY, lines: [212]}
+      - {path: config/runner_routing_policy.yaml, rule: R_MODEL_OVERLAY, lines: [1130, 1154, 1167]}
+      - {path: config/shared_key_registry.yaml, rule: R_MODEL_OVERLAY, lines: [78, 81, 85, 113, 119, 124]}
+      - {path: config/validation/stack_shape.yaml, rule: R_MODEL_OVERLAY, lines: [615, 674, 702, 756]}
+      - {path: contracts/OMN-10137.yaml, rule: R_EVIDENCE, lines: [11]}
+      - {path: contracts/OMN-10449.yaml, rule: R_EVIDENCE, lines: [18, 21, 45, 51]}
+      - {path: contracts/OMN-10450.yaml, rule: R_EVIDENCE, lines: [18, 41]}
+      - {path: contracts/OMN-10943.yaml, rule: R_EVIDENCE, lines: [69]}
+      - {path: contracts/OMN-11061.yaml, rule: R_EVIDENCE, lines: [28]}
+      - {path: contracts/OMN-11673.yaml, rule: R_EVIDENCE, lines: [28, 32, 36, 72, 79, 86]}
+      - {path: contracts/OMN-12245.yaml, rule: R_EVIDENCE, lines: [43, 49]}
+      - {path: contracts/OMN-12522.yaml, rule: R_EVIDENCE, lines: [22, 52]}
+      - {path: contracts/OMN-13664.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-16322.yaml, rule: R_EVIDENCE, lines: [56, 65, 67, 68]}
+      - {path: contracts/OMN-17427.yaml, rule: R_EVIDENCE, lines: [452, 576, 2587, 2939]}
+      - {path: contracts/OMN-19455.yaml, rule: R_EVIDENCE, lines: [44, 48]}
+      - {path: contracts/OMN-19513.yaml, rule: R_EVIDENCE, lines: [14, 39, 44, 52, 89, 109, 218]}
+      - {path: contracts/OMN-19925.yaml, rule: R_EVIDENCE, lines: [64]}
+      - {path: contracts/OMN-20113.yaml, rule: R_EVIDENCE, lines: [42]}
+      - {path: contracts/OMN-20387.yaml, rule: R_EVIDENCE, lines: [4, 13]}
+      - {path: contracts/OMN-20422.yaml, rule: R_EVIDENCE, lines: [3, 10, 13, 41, 59]}
+      - {path: contracts/OMN-20489.yaml, rule: R_EVIDENCE, lines: [4]}
+      - {path: contracts/OMN-20764.yaml, rule: R_EVIDENCE, lines: [98]}
+      - {path: contracts/OMN-20794.yaml, rule: R_EVIDENCE, lines: [4]}
+      - {path: contracts/OMN-20910.yaml, rule: R_EVIDENCE, lines: [126]}
+      - {path: contracts/OMN-21147.yaml, rule: R_EVIDENCE, lines: [52, 60, 72, 98]}
+      - {path: contracts/OMN-21288.yaml, rule: R_EVIDENCE, lines: [99, 467]}
+      - {path: contracts/OMN-21341.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-21431.yaml, rule: R_EVIDENCE, lines: [4, 13, 15, 18, 32]}
+      - {path: contracts/OMN-21891.yaml, rule: R_EVIDENCE, lines: [10, 13]}
+      - {path: contracts/OMN-22027.yaml, rule: R_EVIDENCE, lines: [33]}
+      - {path: contracts/OMN-22648.yaml, rule: R_EVIDENCE, lines: [62]}
+      - {path: contracts/OMN-23884.yaml, rule: R_EVIDENCE, lines: [5, 10, 11, 14, 59, 69]}
+      - {path: contracts/llm_endpoints.yaml, rule: R_MODEL_OVERLAY, lines: [51, 64, 65, 69, 73, 77, 78, 87, 88, 94, 103, 105, 106, 108, 139, 152, 170, 208, 221, 222]}
+      - {path: contracts/services/runtime_policy.contract.yaml, rule: R_MODEL_OVERLAY, lines: [336]}
+      - {path: deploy/shadow-review/onex-shadow-review.service, rule: R_MODEL_OVERLAY, lines: [13]}
+      - {path: deploy/systemd/provision-vllm-0.27-venv.sh, rule: R_MODEL_OVERLAY, lines: [6, 54]}
+      - {path_sha1: ee649dfb5427, rule: R_MODEL_OVERLAY, lines: [4, 7, 11, 20, 54, 76, 91, 92, 98]}
+      - {path_sha1: a825eb4c26eb, rule: R_MODEL_OVERLAY, lines: [7, 19, 22, 25, 27, 30, 33, 35, 38, 40, 44, 47, 51, 53, 65, 72, 78, 82, 92, 128, 209, 215, 216, 224, 246, 247, 253, 254, 260, 261]}
+      - {path: docker/Dockerfile.runtime, rule: R_MODEL_OVERLAY, lines: [764, 767, 778]}
+      - {path: docker/catalog/bundles.yaml, rule: R_MODEL_OVERLAY, lines: [155]}
+      - {path: docker/catalog/database-consumers.yaml, rule: R_MODEL_OVERLAY, lines: [64]}
+      - {path: docker/catalog/model_registry.yaml, rule: R_MODEL_OVERLAY, lines: [31, 37, 39, 40, 54, 55, 64, 65, 70, 73, 74, 75, 79, 89, 100, 101, 103, 112]}
+      - {path: docker/catalog/services/dlq-replay-consumer.yaml, rule: R_MODEL_OVERLAY, lines: [17]}
+      - {path: docker/catalog/services/fault-inject-fixture.yaml, rule: R_MODEL_OVERLAY, lines: [17]}
+      - {path: docker/catalog/services/omninode-runtime.yaml, rule: R_MODEL_OVERLAY, lines: [15]}
+      - {path: docker/catalog/services/projection-claude-hook-events-writer.yaml, rule: R_MODEL_OVERLAY, lines: [1, 8, 41, 67, 104]}
+      - {path: docker/catalog/services/runtime-canary.yaml, rule: R_MODEL_OVERLAY, lines: [15]}
+      - {path: docker/catalog/services/runtime-effects.yaml, rule: R_MODEL_OVERLAY, lines: [15]}
+      - {path_sha1: 4c14d7e9bc0a, rule: R_MODEL_OVERLAY, lines: [328]}
+      - {path_sha1: 33382e5622d5, rule: R_MODEL_OVERLAY, lines: [350]}
+      - {path: docker/docker-compose.dev-member.yml, rule: R_MODEL_OVERLAY, lines: [7]}
+      - {path: docker/docker-compose.dev-tenant-fold.yml, rule: R_MODEL_OVERLAY, lines: [175]}
+      - {path: docker/docker-compose.dogfood.yml, rule: R_MODEL_OVERLAY, lines: [109, 121]}
+      - {path: docker/docker-compose.e2e.yml, rule: R_MODEL_OVERLAY, lines: [201]}
+      - {path: docker/docker-compose.infra.yml, rule: R_MODEL_OVERLAY, lines: [446, 453, 1747, 1749, 1760, 1764, 1789]}
+      - {path: docker/docker-compose.judge.yml, rule: R_MODEL_OVERLAY, lines: [141, 155]}
+      - {path_sha1: 05d3a62ed557, rule: R_MODEL_OVERLAY, lines: [194, 206]}
+      - {path: docker/docker-compose.prepr.yml, rule: R_MODEL_OVERLAY, lines: [515]}
+      - {path: docker/docker-compose.runners-omninode-studio-runner.yml, rule: R_MODEL_OVERLAY, lines: [18]}
+      - {path: docker/generated-compose-required-env.manifest.txt, rule: R_MODEL_OVERLAY, lines: [59]}
+      - {path: docker/judge.env.example, rule: R_MODEL_OVERLAY, lines: [29, 30, 52]}
+      - {path: docker/lane-overlays/local.bifrost.example.yaml, rule: R_MODEL_OVERLAY, lines: [27, 34]}
+      - {path: docker/migrations/forward/031_create_llm_call_metrics_and_cost_aggregates.sql, rule: R_MODEL_OVERLAY, lines: [131, 399]}
+      - {path: docker/migrations/forward/039_create_delta_bundles.sql, rule: R_MODEL_OVERLAY, lines: [100]}
+      - {path: docker/migrations/forward/040_create_delta_metrics_by_model.sql, rule: R_MODEL_OVERLAY, lines: [75]}
+      - {path: docker/migrations/forward/065_create_llm_routing_decisions.sql, rule: R_MODEL_OVERLAY, lines: [6]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/076_create_delegation_savings_projection_view.sql, rule: R_MODEL_OVERLAY, lines: [36, 96]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/078_create_delegation_savings_series_projection_view.sql, rule: R_MODEL_OVERLAY, lines: [50]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/079_add_savings_series_tier_mix.sql, rule: R_MODEL_OVERLAY, lines: [66]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/082_savings_estimates_task_type_and_tokens.sql, rule: R_MODEL_OVERLAY, lines: [10]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/083_reconcile_delegation_savings_projection_views.sql, rule: R_MODEL_OVERLAY, lines: [9, 48, 105, 170, 229]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/087_savings_views_read_persisted_provenance.sql, rule: R_MODEL_OVERLAY, lines: [109, 180, 233]}
+      - {path: docker/migrations/intelligence/020_plan_reviewer_accuracy_and_runs.sql, rule: R_MODEL_OVERLAY, lines: [41, 42, 43, 44]}
+      - {path: docker/migrations/rollback/rollback_028_absorb_omniclaude_columns.sql, rule: R_MODEL_OVERLAY, lines: [15]}
+      - {path: docker/required-env-vars.manifest.txt, rule: R_MODEL_OVERLAY, lines: [58]}
+      - {path: docker/runtime-policy.env, rule: R_MODEL_OVERLAY, lines: [55]}
+      - {path: docs/env-master-template.env, rule: R_MODEL_OVERLAY, lines: [44, 191, 192, 317]}
+      - {path: scripts/check_contract_topic_parity.py, rule: R_MODEL_OVERLAY, lines: [299]}
+      - {path: scripts/check_dockerfile_pins.py, rule: R_MODEL_OVERLAY, lines: [58, 81]}
+      - {path: scripts/check_llm_endpoints.sh, rule: R_MODEL_OVERLAY, lines: [8, 9, 62, 63, 66]}
+      - {path: scripts/ci/post_hostile_review_threads.py, rule: R_MODEL_OVERLAY, lines: [54]}
+      - {path: scripts/ci/provider_rung_canary_observe.py, rule: R_MODEL_OVERLAY, lines: [34]}
+      - {path: scripts/deploy-agent/deploy/dev-instance.env.template, rule: R_MODEL_OVERLAY, lines: [86]}
+      - {path: scripts/deploy-agent/deploy_agent/load_gate.py, rule: R_MODEL_OVERLAY, lines: [10, 12]}
+      - {path: scripts/edge_delegation_worker/__init__.py, rule: R_MODEL_OVERLAY, lines: [6]}
+      - {path: scripts/generate_claude_lane_block.py, rule: R_MODEL_OVERLAY, lines: [38, 58, 512, 545]}
+      - {path: scripts/generate_feature_inventory.py, rule: R_MODEL_OVERLAY, lines: [95, 96]}
+      - {path: scripts/pull-all.sh, rule: R_MODEL_OVERLAY, lines: [704]}
+      - {path: scripts/runtime_change_classifier.py, rule: R_MODEL_OVERLAY, lines: [163]}
+      - {path: scripts/validate_env.py, rule: R_MODEL_OVERLAY, lines: [167, 168, 169, 171]}
+      - {path: src/omnibase_infra/adapters/llm/adapter_code_review_analysis.py, rule: R_MODEL_SHAPE, lines: [5, 181]}
+      - {path: src/omnibase_infra/adapters/llm/adapter_documentation_generation.py, rule: R_MODEL_SHAPE, lines: [5, 8, 16, 86, 90, 170, 202, 203, 241, 244, 263, 274, 381, 383]}
+      - {path: src/omnibase_infra/adapters/llm/adapter_model_router.py, rule: R_MODEL_SHAPE, lines: [59]}
+      - {path: src/omnibase_infra/adapters/llm/adapter_similarity_enrichment.py, rule: R_MODEL_SHAPE, lines: [7, 73, 92, 124, 163, 200]}
+      - {path: src/omnibase_infra/adapters/llm/adapter_summarization_enrichment.py, rule: R_MODEL_SHAPE, lines: [8, 16, 127, 130, 166, 167, 193, 215, 223, 225, 287, 332]}
+      - {path: src/omnibase_infra/adapters/llm/adapter_test_boilerplate_generation.py, rule: R_MODEL_SHAPE, lines: [5, 8, 91, 185, 300, 416, 420]}
+      - {path: src/omnibase_infra/adapters/llm/model_llm_adapter_request.py, rule: R_MODEL_SHAPE, lines: [51, 55]}
+      - {path: src/omnibase_infra/adapters/llm/model_llm_adapter_response.py, rule: R_MODEL_SHAPE, lines: [47]}
+      - {path: src/omnibase_infra/adapters/llm/model_llm_health_response.py, rule: R_MODEL_SHAPE, lines: [39]}
+      - {path: src/omnibase_infra/adapters/llm/model_llm_model_capabilities.py, rule: R_MODEL_SHAPE, lines: [27, 37]}
+      - {path: src/omnibase_infra/adapters/llm/model_llm_provider_config.py, rule: R_MODEL_SHAPE, lines: [47]}
+      - {path: src/omnibase_infra/adapters/llm/plugin_llm.py, rule: R_MODEL_SHAPE, lines: [96]}
+      - {path: src/omnibase_infra/cli/cli_delegate.py, rule: R_MODEL_SHAPE, lines: [334, 3932]}
+      - {path: src/omnibase_infra/cli/cli_env.py, rule: R_MODEL_SHAPE, lines: [118]}
+      - {path: src/omnibase_infra/cli/skill_mapping.yaml, rule: R_MODEL_SHAPE, lines: [568]}
+      - {path: src/omnibase_infra/configs/pricing_manifest.yaml, rule: R_MODEL_SHAPE, lines: [20, 37, 54, 71, 88, 105, 122, 139, 156, 172, 173, 189, 190, 206, 241, 256, 271, 286, 301, 316, 331, 346, 361, 365, 376, 395, 406, 423, 440, 457, 471, 473, 474, 488, 490, 491, 506, 521, 536, 566, 582, 583, 599, 600, 616, 617, 633, 634, 650, 651, 667, 668, 684, 685, 701]}
+      - {path: src/omnibase_infra/contracts/rsd_pinned_model_identity.yaml, rule: R_MODEL_SHAPE, lines: [9, 10, 11, 12, 13, 14, 15]}
+      - {path: src/omnibase_infra/handlers/handler_delegation_dispatch_terminal.py, rule: R_MODEL_SHAPE, lines: [66]}
+      - {path: src/omnibase_infra/models/delegation/model_delegate_named_tests.py, rule: R_MODEL_SHAPE, lines: [6]}
+      - {path: src/omnibase_infra/models/delegation/model_delegate_session_model.py, rule: R_MODEL_SHAPE, lines: [33, 34]}
+      - {path: src/omnibase_infra/models/eval/model_auto_eval_result.py, rule: R_MODEL_SHAPE, lines: [84]}
+      - {path: src/omnibase_infra/models/eval/model_auto_eval_task.py, rule: R_MODEL_SHAPE, lines: [62]}
+      - {path: src/omnibase_infra/models/health/model_llm_endpoint_health_config.py, rule: R_MODEL_SHAPE, lines: [95]}
+      - {path: src/omnibase_infra/models/llm/adapter_llm_usage_to_contract.py, rule: R_MODEL_SHAPE, lines: [108, 109]}
+      - {path: src/omnibase_infra/models/llm/model_llm_inference_response.py, rule: R_MODEL_SHAPE, lines: [85]}
+      - {path: src/omnibase_infra/models/pricing/model_cost_estimate.py, rule: R_MODEL_SHAPE, lines: [41, 66]}
+      - {path: src/omnibase_infra/models/pricing/model_pricing_table.py, rule: R_MODEL_SHAPE, lines: [69, 129]}
+      - {path: src/omnibase_infra/models/runtime_kernel_defaults/runtime_kernel_defaults.yaml, rule: R_MODEL_SHAPE, lines: [18]}
+      - {path: src/omnibase_infra/models/third_party_endpoints/third_party_endpoints.yaml, rule: R_MODEL_SHAPE, lines: [18]}
+      - {path: src/omnibase_infra/nodes/node_delta_metrics_effect/models/model_payload_upsert_metrics.py, rule: R_MODEL_SHAPE, lines: [54]}
+      - {path: src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py, rule: R_MODEL_SHAPE, lines: [194]}
+      - {path: src/omnibase_infra/nodes/node_llm_embedding_effect/__init__.py, rule: R_MODEL_SHAPE, lines: [39]}
+      - {path: src/omnibase_infra/nodes/node_llm_embedding_effect/handlers/handler_embedding_openai_compatible.py, rule: R_MODEL_SHAPE, lines: [11]}
+      - {path: src/omnibase_infra/nodes/node_llm_embedding_effect/models/model_llm_embedding_request.py, rule: R_MODEL_SHAPE, lines: [33, 50, 69]}
+      - {path: src/omnibase_infra/nodes/node_llm_embedding_effect/models/model_llm_embedding_response.py, rule: R_MODEL_SHAPE, lines: [69]}
+      - {path: src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/config/model_shadow_decision_log.py, rule: R_MODEL_SHAPE, lines: [67, 68]}
+      - {path: src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifrost_config.py, rule: R_MODEL_SHAPE, lines: [50, 52, 59, 130, 131, 143]}
+      - {path: src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifrost_response.py, rule: R_MODEL_SHAPE, lines: [58]}
+      - {path: src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifrost_routing_rule.py, rule: R_MODEL_SHAPE, lines: [56]}
+      - {path: src/omnibase_infra/nodes/node_llm_inference_effect/handlers/handler_llm_openai_compatible.py, rule: R_MODEL_SHAPE, lines: [562]}
+      - {path: src/omnibase_infra/nodes/node_llm_inference_effect/models/model_llm_call_completed_event.py, rule: R_MODEL_SHAPE, lines: [20]}
+      - {path: src/omnibase_infra/nodes/node_llm_inference_effect/models/model_llm_call_completed_infra_event.py, rule: R_MODEL_SHAPE, lines: [18]}
+      - {path: src/omnibase_infra/nodes/node_llm_inference_effect/models/model_llm_inference_request.py, rule: R_MODEL_SHAPE, lines: [95, 99, 200]}
+      - {path: src/omnibase_infra/nodes/node_llm_inference_effect/services/service_llm_usage_normalizer.py, rule: R_MODEL_SHAPE, lines: [47]}
+      - {path: src/omnibase_infra/nodes/node_model_router_compute/models/model_registry_entry.py, rule: R_MODEL_SHAPE, lines: [16]}
+      - {path: src/omnibase_infra/nodes/node_savings_estimation_compute/contract.yaml, rule: R_MODEL_SHAPE, lines: [96, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107]}
+      - {path: src/omnibase_infra/nodes/node_waste_detection_compute/contract.yaml, rule: R_MODEL_SHAPE, lines: [34]}
+      - {path: src/omnibase_infra/runtime/config_discovery/transport_config_map.py, rule: R_MODEL_SHAPE, lines: [88, 92]}
+      - {path: src/omnibase_infra/runtime/emit_daemon/topics.py, rule: R_MODEL_SHAPE, lines: [7]}
+      - {path: src/omnibase_infra/runtime/models/model_rsd_live_delegation_authority_envelope.py, rule: R_MODEL_SHAPE, lines: [32]}
+      - {path: src/omnibase_infra/runtime/models/model_rsd_live_delegation_overlay.py, rule: R_MODEL_SHAPE, lines: [34]}
+      - {path: src/omnibase_infra/services/agent_learning_extraction/consumer.py, rule: R_MODEL_SHAPE, lines: [9]}
+      - {path: src/omnibase_infra/services/agent_learning_extraction/entrypoint.py, rule: R_MODEL_SHAPE, lines: [21]}
+      - {path: src/omnibase_infra/services/agent_learning_extraction/summary_generator.py, rule: R_MODEL_SHAPE, lines: [5]}
+      - {path: src/omnibase_infra/services/observability/agent_actions/config.py, rule: R_MODEL_SHAPE, lines: [66, 67]}
+      - {path: src/omnibase_infra/services/observability/agent_actions/contracts/intelligence_hook_event_v1.yaml, rule: R_MODEL_SHAPE, lines: [6]}
+      - {path: src/omnibase_infra/services/observability/agent_actions/models/model_envelope.py, rule: R_MODEL_SHAPE, lines: [53]}
+      - {path: src/omnibase_infra/services/observability/static_context_attribution/service_token_counter.py, rule: R_MODEL_SHAPE, lines: [38, 100]}
+      - {path: src/omnibase_infra/services/service_llm_endpoint_health.py, rule: R_MODEL_SHAPE, lines: [217, 494]}
+      - {path: src/omnibase_infra/services/session_registry/decision_embedder.py, rule: R_MODEL_SHAPE, lines: [8, 39]}
+      - {path: src/omnibase_infra/services/session_registry/decision_search.py, rule: R_MODEL_SHAPE, lines: [18]}
+      - {path: src/omnibase_infra/topics/platform_topic_suffixes.py, rule: R_MODEL_SHAPE, lines: [43, 211]}
+      - {path: src/omnibase_infra/utils/util_consumer_group.py, rule: R_MODEL_SHAPE, lines: [159, 163]}
+      - {path: src/omnibase_infra/validation/validation_exemptions.yaml, rule: R_MODEL_SHAPE, lines: [97, 2697, 2744, 2749, 2757, 2762, 2770, 2799, 2805, 2941, 3020, 3022, 3026, 3042, 3117]}
+  hardware_facts:
+    count_lines: 142
+    count_files: 58
+    by_home:
+      contract-shape: 31
+      overlay: 111
+    files:
+      - {path: .github/workflows/docker-build.yml, rule: R_HW_OVERLAY, lines: [465, 466, 467, 468, 495, 512, 519]}
+      - {path: .github/workflows/runner-disk-preflight.yml, rule: R_HW_OVERLAY, lines: [13, 20, 30, 77]}
+      - {path: config/runner_fleet.yaml, rule: R_HW_OVERLAY, lines: [140, 213]}
+      - {path: config/shared_key_registry.yaml, rule: R_HW_OVERLAY, lines: [79, 90]}
+      - {path: contracts/OMN-19507.yaml, rule: R_EVIDENCE, lines: [76]}
+      - {path: contracts/OMN-21279.yaml, rule: R_EVIDENCE, lines: [61, 267]}
+      - {path: contracts/OMN-24153.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-24179.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-24308.yaml, rule: R_EVIDENCE, lines: [4]}
+      - {path: contracts/OMN-25674.yaml, rule: R_EVIDENCE, lines: [24]}
+      - {path: contracts/OMN-26093.yaml, rule: R_EVIDENCE, lines: [38]}
+      - {path: contracts/llm_endpoints.yaml, rule: R_HW_OVERLAY, lines: [54, 88, 108, 124, 128]}
+      - {path: contracts/runtime/runtime_orchestrator.yaml, rule: R_HW_OVERLAY, lines: [342]}
+      - {path: contracts/services/runtime_policy.contract.yaml, rule: R_HW_OVERLAY, lines: [427]}
+      - {path: deploy/buildkit/builders.yaml, rule: R_HW_OVERLAY, lines: [42]}
+      - {path: deploy/buildkit/buildkitd.toml, rule: R_HW_OVERLAY, lines: [40, 43, 44, 47, 49]}
+      - {path: deploy/disk-gc/daemon-builder-gc.json, rule: R_HW_OVERLAY, lines: [8, 12, 13, 14]}
+      - {path: deploy/disk-gc/keep-list.yaml, rule: R_HW_OVERLAY, lines: [85, 87, 93, 109, 115, 116, 117, 128]}
+      - {path_sha1: ee649dfb5427, rule: R_HW_OVERLAY, lines: [18, 20, 42, 76]}
+      - {path_sha1: a825eb4c26eb, rule: R_HW_OVERLAY, lines: [4, 35, 44, 45, 47, 51, 53, 90, 92, 114, 125, 140, 196, 204, 224, 253]}
+      - {path: docker/Dockerfile.runtime, rule: R_HW_OVERLAY, lines: [222, 460]}
+      - {path: docker/catalog/model_registry.yaml, rule: R_HW_OVERLAY, lines: [52, 56, 78, 87]}
+      - {path_sha1: f515dd9cf1d5, rule: R_HW_OVERLAY, lines: [131]}
+      - {path: docker/docker-compose.gate-runner.yml, rule: R_HW_OVERLAY, lines: [31, 40, 42]}
+      - {path: docker/docker-compose.infra.yml, rule: R_HW_OVERLAY, lines: [749, 750, 751, 763]}
+      - {path: docker/docker-compose.pypi-cache.yml, rule: R_HW_OVERLAY, lines: [57, 58]}
+      - {path: docker/docker-compose.runners-hp051-omnibase-ci-runner.yml, rule: R_HW_OVERLAY, lines: [8, 23]}
+      - {path_sha1: 98f3dbd950fc, rule: R_HW_OVERLAY, lines: [39]}
+      - {path: docker/docker-compose.runners.yml, rule: R_HW_OVERLAY, lines: [49, 51, 758]}
+      - {path_sha1: 29c36e56f96b, rule: R_HW_OVERLAY, lines: [211, 215, 217]}
+      - {path: docker/migrations/forward/073_add_llm_call_metrics_gpu_fields.sql, rule: R_HW_OVERLAY, lines: [30]}
+      - {path: docker/migrations/forward/nodes/node_projection_consumer_flow/0005_add_node_id_ingest_index.sql, rule: R_HW_OVERLAY, lines: [46]}
+      - {path: docker/migrations/forward/nodes/node_projection_consumer_flow/0006_grant_role_omnidash_consumer_flow_windows_retention.sql, rule: R_HW_OVERLAY, lines: [16]}
+      - {path: docker/runners/runner-job-started.sh, rule: R_HW_OVERLAY, lines: [841]}
+      - {path: docker/runners/systemd/pools/hp051-omnibase-ci-runner/omnirunners.slice, rule: R_HW_OVERLAY, lines: [7]}
+      - {path_sha1: 9d4a66fd43b1, rule: R_HW_OVERLAY, lines: [14]}
+      - {path: docs/incidents/OMN-21279/dev-broker-crash-cause.json, rule: R_HW_OVERLAY, lines: [357, 362, 363]}
+      - {path: docs/readbacks/OMN-26713_runtime_image_proof.yaml, rule: R_HW_OVERLAY, lines: [46]}
+      - {path: scripts/ci/c28_consumer_flow_probe.py, rule: R_HW_OVERLAY, lines: [146]}
+      - {path: scripts/disk-gc.sh, rule: R_HW_OVERLAY, lines: [163, 165, 189]}
+      - {path: scripts/disk-watermark-check.sh, rule: R_HW_OVERLAY, lines: [36]}
+      - {path: scripts/disk-watermark-thresholds.json, rule: R_HW_OVERLAY, lines: [20]}
+      - {path: scripts/disk_gc_plan.py, rule: R_HW_OVERLAY, lines: [25, 105, 138, 341, 428]}
+      - {path: scripts/hooks/prepush_dispatch.sh, rule: R_HW_OVERLAY, lines: [1389, 1390, 1798]}
+      - {path: scripts/reconcile-workspace-venvs.sh, rule: R_HW_OVERLAY, lines: [1934]}
+      - {path: scripts/runner-disk-admission-restore.sh, rule: R_HW_OVERLAY, lines: [9]}
+      - {path: src/omnibase_infra/configs/pricing_manifest.yaml, rule: R_HW_SHAPE, lines: [5, 8, 9, 12, 245, 290, 305, 320, 365, 380]}
+      - {path: src/omnibase_infra/contracts/rsd_pinned_model_identity.yaml, rule: R_HW_SHAPE, lines: [12, 14]}
+      - {path: src/omnibase_infra/errors/error_dlq_topic.py, rule: R_HW_SHAPE, lines: [12, 13]}
+      - {path: src/omnibase_infra/event_bus/models/config/model_kafka_connect_retry_policy.py, rule: R_HW_SHAPE, lines: [24]}
+      - {path: src/omnibase_infra/event_bus/topic_constants.py, rule: R_HW_SHAPE, lines: [350]}
+      - {path: src/omnibase_infra/handlers/handler_filesystem.py, rule: R_HW_SHAPE, lines: [66]}
+      - {path: src/omnibase_infra/models/pricing/model_pricing_table.py, rule: R_HW_SHAPE, lines: [196]}
+      - {path: src/omnibase_infra/models/projection/model_snapshot_topic_config.py, rule: R_HW_SHAPE, lines: [205]}
+      - {path: src/omnibase_infra/nodes/node_board_probe_effect/handlers/_consumer_flow_constants.py, rule: R_HW_SHAPE, lines: [33]}
+      - {path: src/omnibase_infra/nodes/node_runtime_orchestrator/contract.yaml, rule: R_HW_SHAPE, lines: [369]}
+      - {path: src/omnibase_infra/runtime/auto_wiring/handler_wiring.py, rule: R_HW_SHAPE, lines: [7872]}
+      - {path: src/omnibase_infra/runtime/models/model_rsd_model_artifact_provenance.py, rule: R_HW_SHAPE, lines: [46]}
+  topology_grants:
+    count_lines: 2246
+    count_files: 448
+    by_home:
+      contract-shape: 2246
+    files:
+      - {path: .github/CODEOWNERS, rule: R_GRANT_SHAPE, lines: [6]}
+      - {path: .github/actions/fetch-stability-secrets/action.yml, rule: R_GRANT_SHAPE, lines: [122]}
+      - {path: .github/workflows/build-and-push-runtime.yml, rule: R_GRANT_SHAPE, lines: [65]}
+      - {path: .github/workflows/build-workspace-candidate-runtime.yml, rule: R_GRANT_SHAPE, lines: [20]}
+      - {path: .github/workflows/chain-canary-c12-provider-catalogue.yml, rule: R_GRANT_SHAPE, lines: [51]}
+      - {path: .github/workflows/chain-canary-c16-receipt-identity.yml, rule: R_GRANT_SHAPE, lines: [59]}
+      - {path: .github/workflows/chain-canary-c28-consumer-flow.yml, rule: R_GRANT_SHAPE, lines: [46]}
+      - {path: .github/workflows/ci.yml, rule: R_GRANT_SHAPE, lines: [3636, 3810, 3971, 3974, 5401, 5413, 5597, 5652, 5675, 5677]}
+      - {path: .github/workflows/legacy-rds-fixture-proof.yml, rule: R_GRANT_SHAPE, lines: [20]}
+      - {path: .github/workflows/release-train-nightly.yml, rule: R_GRANT_SHAPE, lines: [116]}
+      - {path: .github/workflows/runner-label-exists-caller.yml, rule: R_GRANT_SHAPE, lines: [47]}
+      - {path: .pre-commit-config.yaml, rule: R_GRANT_SHAPE, lines: [1564, 1566, 1574, 1579]}
+      - {path: config/application_database_domain_enforcement.yaml, rule: R_GRANT_SHAPE, lines: [120]}
+      - {path: config/migration_classes.yaml, rule: R_GRANT_SHAPE, lines: [151, 163, 296, 297, 329, 333, 335, 421, 423, 476, 508, 519, 522, 524, 526, 566, 568, 571]}
+      - {path: config/omninode_internal_live_acl_allowlist.yaml, rule: R_GRANT_SHAPE, lines: [13]}
+      - {path: config/prod_promotion_grants.yaml, rule: R_GRANT_SHAPE, lines: [4, 9, 13]}
+      - {path: config/shared_key_registry.yaml, rule: R_GRANT_SHAPE, lines: [67]}
+      - {path: config/skip_count_baseline.yaml, rule: R_GRANT_SHAPE, lines: [123]}
+      - {path: contracts/OMN-13666.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-15361.yaml, rule: R_EVIDENCE, lines: [4]}
+      - {path: contracts/OMN-17232.yaml, rule: R_EVIDENCE, lines: [97]}
+      - {path: contracts/OMN-17292.yaml, rule: R_EVIDENCE, lines: [18, 183, 191]}
+      - {path: contracts/OMN-17427.yaml, rule: R_EVIDENCE, lines: [217, 375, 516, 574, 734, 899, 1315, 1791, 1827, 1873, 2766, 2921, 3345, 3370]}
+      - {path: contracts/OMN-18353.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-18892.yaml, rule: R_EVIDENCE, lines: [25, 49]}
+      - {path: contracts/OMN-19064.yaml, rule: R_EVIDENCE, lines: [15, 35]}
+      - {path: contracts/OMN-19339.yaml, rule: R_EVIDENCE, lines: [23, 31]}
+      - {path: contracts/OMN-19975.yaml, rule: R_EVIDENCE, lines: [4, 24, 32, 40, 59]}
+      - {path: contracts/OMN-19983.yaml, rule: R_EVIDENCE, lines: [4, 13, 20, 23, 26]}
+      - {path: contracts/OMN-19986.yaml, rule: R_EVIDENCE, lines: [5, 12, 26]}
+      - {path: contracts/OMN-19987.yaml, rule: R_EVIDENCE, lines: [4, 16]}
+      - {path: contracts/OMN-19988.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-19991.yaml, rule: R_EVIDENCE, lines: [5, 12, 35]}
+      - {path: contracts/OMN-19998.yaml, rule: R_EVIDENCE, lines: [172, 175, 584]}
+      - {path: contracts/OMN-20232.yaml, rule: R_EVIDENCE, lines: [4]}
+      - {path: contracts/OMN-20275.yaml, rule: R_EVIDENCE, lines: [16, 19, 58]}
+      - {path: contracts/OMN-20604.yaml, rule: R_EVIDENCE, lines: [16]}
+      - {path: contracts/OMN-20737.yaml, rule: R_EVIDENCE, lines: [3, 4, 16]}
+      - {path: contracts/OMN-20802.yaml, rule: R_EVIDENCE, lines: [24]}
+      - {path: contracts/OMN-20821.yaml, rule: R_EVIDENCE, lines: [5, 14, 20, 38, 65]}
+      - {path: contracts/OMN-21000.yaml, rule: R_EVIDENCE, lines: [16, 24]}
+      - {path: contracts/OMN-21015.yaml, rule: R_EVIDENCE, lines: [5, 150]}
+      - {path: contracts/OMN-21090.yaml, rule: R_EVIDENCE, lines: [4, 11, 43, 73]}
+      - {path: contracts/OMN-21099.yaml, rule: R_EVIDENCE, lines: [52]}
+      - {path: contracts/OMN-21115.yaml, rule: R_EVIDENCE, lines: [3, 4]}
+      - {path: contracts/OMN-21336.yaml, rule: R_EVIDENCE, lines: [3, 5, 12, 26]}
+      - {path: contracts/OMN-21339.yaml, rule: R_EVIDENCE, lines: [3, 13, 15]}
+      - {path: contracts/OMN-21401.yaml, rule: R_EVIDENCE, lines: [13, 20, 26, 44, 64]}
+      - {path: contracts/OMN-21403.yaml, rule: R_EVIDENCE, lines: [5, 16, 30, 33, 39, 57, 86, 91, 94]}
+      - {path: contracts/OMN-21622.yaml, rule: R_EVIDENCE, lines: [3, 5, 12, 20, 24, 33, 59]}
+      - {path: contracts/OMN-21920.yaml, rule: R_EVIDENCE, lines: [5, 55, 84]}
+      - {path: contracts/OMN-21933.yaml, rule: R_EVIDENCE, lines: [5, 37]}
+      - {path: contracts/OMN-21934.yaml, rule: R_EVIDENCE, lines: [5, 37]}
+      - {path: contracts/OMN-21935.yaml, rule: R_EVIDENCE, lines: [5, 19, 36, 45]}
+      - {path: contracts/OMN-21947.yaml, rule: R_EVIDENCE, lines: [4, 10, 30, 38, 46, 54]}
+      - {path: contracts/OMN-21970.yaml, rule: R_EVIDENCE, lines: [21]}
+      - {path: contracts/OMN-22103.yaml, rule: R_EVIDENCE, lines: [11]}
+      - {path: contracts/OMN-22258.yaml, rule: R_EVIDENCE, lines: [106]}
+      - {path: contracts/OMN-22547.yaml, rule: R_EVIDENCE, lines: [6, 15]}
+      - {path: contracts/OMN-22555.yaml, rule: R_EVIDENCE, lines: [4, 10, 32]}
+      - {path: contracts/OMN-22561.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-22715.yaml, rule: R_EVIDENCE, lines: [3, 5]}
+      - {path: contracts/OMN-22899.yaml, rule: R_EVIDENCE, lines: [3, 10, 13, 15, 18, 33]}
+      - {path: contracts/OMN-23002.yaml, rule: R_EVIDENCE, lines: [15, 24, 40]}
+      - {path: contracts/OMN-23063.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-23152.yaml, rule: R_EVIDENCE, lines: [4, 10, 20, 28, 36, 44]}
+      - {path: contracts/OMN-23362.yaml, rule: R_EVIDENCE, lines: [3, 5, 12, 16, 19, 23, 41]}
+      - {path: contracts/OMN-23418.yaml, rule: R_EVIDENCE, lines: [16]}
+      - {path: contracts/OMN-23459.yaml, rule: R_EVIDENCE, lines: [37]}
+      - {path: contracts/OMN-23539.yaml, rule: R_EVIDENCE, lines: [14]}
+      - {path: contracts/OMN-23705.yaml, rule: R_EVIDENCE, lines: [4, 10, 19, 22, 30, 38, 46, 54]}
+      - {path: contracts/OMN-23858.yaml, rule: R_EVIDENCE, lines: [3, 10, 15, 19, 22, 62, 78]}
+      - {path: contracts/OMN-23888.yaml, rule: R_EVIDENCE, lines: [20, 36]}
+      - {path: contracts/OMN-23896.yaml, rule: R_EVIDENCE, lines: [10, 13, 17, 19, 22, 46]}
+      - {path: contracts/OMN-24037.yaml, rule: R_EVIDENCE, lines: [4, 10, 15, 20]}
+      - {path: contracts/OMN-24118.yaml, rule: R_EVIDENCE, lines: [20, 36]}
+      - {path: contracts/OMN-24323.yaml, rule: R_EVIDENCE, lines: [3, 10, 13, 15, 17, 22, 46]}
+      - {path: contracts/OMN-25103.yaml, rule: R_EVIDENCE, lines: [4, 10, 26, 42, 50, 64]}
+      - {path: contracts/OMN-25104.yaml, rule: R_EVIDENCE, lines: [10, 13, 44]}
+      - {path: contracts/OMN-25505.yaml, rule: R_EVIDENCE, lines: [3, 22]}
+      - {path: contracts/OMN-26121.yaml, rule: R_EVIDENCE, lines: [20]}
+      - {path: contracts/OMN-26151.yaml, rule: R_EVIDENCE, lines: [11, 30, 34, 50]}
+      - {path: contracts/OMN-26302.yaml, rule: R_EVIDENCE, lines: [14]}
+      - {path: contracts/OMN-26444.yaml, rule: R_EVIDENCE, lines: [14, 17, 25]}
+      - {path: contracts/OMN-26471.yaml, rule: R_EVIDENCE, lines: [3, 11, 15, 46, 97]}
+      - {path: contracts/OMN-26472.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-26495.yaml, rule: R_EVIDENCE, lines: [34]}
+      - {path: contracts/OMN-26635.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-26663.yaml, rule: R_EVIDENCE, lines: [4, 10, 13, 44]}
+      - {path: contracts/OMN-26708.yaml, rule: R_EVIDENCE, lines: [4, 13, 18]}
+      - {path: contracts/OMN-26712.yaml, rule: R_EVIDENCE, lines: [5, 11, 15, 24, 47]}
+      - {path: contracts/OMN-26732.yaml, rule: R_EVIDENCE, lines: [4, 10]}
+      - {path: deploy/lab/dev-contractor-usage-grants.sql, rule: R_GRANT_SHAPE, lines: [16, 27, 29, 43]}
+      - {path: deploy/lab/developer-principal-bindings.yaml, rule: R_GRANT_SHAPE, lines: [11, 134, 170, 178, 187, 204]}
+      - {path: deploy/lab/developer-principal-grants.yaml, rule: R_GRANT_SHAPE, lines: [14, 19]}
+      - {path: deploy/lab/h105-scm-pr-create-bindings.yaml, rule: R_GRANT_SHAPE, lines: [10]}
+      - {path: deploy/local/developer-principal-grants.yaml, rule: R_GRANT_SHAPE, lines: [13]}
+      - {path: deploy/principal-grant-audit/onex-principal-grant-audit.service, rule: R_GRANT_SHAPE, lines: [9, 23]}
+      - {path: deploy/principal-grant-audit/onex-principal-grant-audit.timer, rule: R_GRANT_SHAPE, lines: [4, 9]}
+      - {path: docker/Dockerfile.runtime, rule: R_GRANT_SHAPE, lines: [311, 733]}
+      - {path: docker/application-acl-proof/seed.sql, rule: R_GRANT_SHAPE, lines: [38, 39, 40, 41, 43, 45, 46, 48, 53, 54, 55, 56, 57, 137, 138, 139, 140, 141, 142, 143, 144, 145, 147, 149, 150, 152, 154, 156, 158, 159, 160, 161, 162, 165, 167, 169, 171, 173, 175, 186]}
+      - {path: docker/application-domain-enforcement/seed.sql, rule: R_GRANT_SHAPE, lines: [79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90]}
+      - {path: docker/catalog/services/cloud-migration.yaml, rule: R_GRANT_SHAPE, lines: [10]}
+      - {path: docker/catalog/services/redpanda-local-sasl.yaml, rule: R_GRANT_SHAPE, lines: [9, 64]}
+      - {path_sha1: f515dd9cf1d5, rule: R_GRANT_SHAPE, lines: [414, 435, 470, 471]}
+      - {path: docker/docker-compose.dev-lane.yml, rule: R_GRANT_SHAPE, lines: [188, 192, 199, 212, 754, 793, 846, 1512, 1514, 1516]}
+      - {path: docker/docker-compose.infra.yml, rule: R_GRANT_SHAPE, lines: [640, 641, 651, 1124, 1125, 1135, 1150, 1166]}
+      - {path: docker/docker-compose.judge.yml, rule: R_GRANT_SHAPE, lines: [377, 378, 388, 403, 419]}
+      - {path_sha1: 05d3a62ed557, rule: R_GRANT_SHAPE, lines: [19, 33]}
+      - {path_sha1: 29c36e56f96b, rule: R_GRANT_SHAPE, lines: [135, 139, 272, 357]}
+      - {path: docker/domain-adapter-proof/prove.py, rule: R_GRANT_SHAPE, lines: [238, 266, 268, 270, 272, 275, 277]}
+      - {path: docker/legacy-rds-fixture/cluster-seed.sql, rule: R_GRANT_SHAPE, lines: [50, 51, 52, 55, 58]}
+      - {path: docker/legacy-rds-fixture/legacy-seed.sql, rule: R_GRANT_SHAPE, lines: [137, 138, 141, 208]}
+      - {path: docker/migrations/forward/000_create_multiple_databases.sh, rule: R_GRANT_SHAPE, lines: [105, 106, 127, 146, 161, 307, 313, 315, 317, 319, 320, 321, 322, 459, 475, 510, 550, 553]}
+      - {path: docker/migrations/forward/052_create_role_omniweb.sql, rule: R_GRANT_SHAPE, lines: [2, 40, 41, 43, 53, 64]}
+      - {path: docker/migrations/forward/096_grant_role_omnidash_omnidash_analytics.sql, rule: R_GRANT_SHAPE, lines: [31, 107, 111, 118, 133, 227, 238, 242, 250, 266, 271, 284, 294, 295, 297, 299, 303, 307, 311, 317]}
+      - {path: docker/migrations/forward/097_grant_app_dashboard_connect_omnidash_analytics.sql, rule: R_GRANT_SHAPE, lines: [16, 49, 63, 93, 100, 105, 123, 138, 150, 162, 167, 177]}
+      - {path: docker/migrations/forward/098_create_omninode_internal_schema.sql, rule: R_GRANT_SHAPE, lines: [34, 47, 58]}
+      - {path: docker/migrations/forward/099_create_omninode_internal_live_events.sql, rule: R_GRANT_SHAPE, lines: [16, 57, 139, 147, 175, 183, 196, 212, 215, 219, 283, 312, 313, 322]}
+      - {path: docker/migrations/forward/103_create_tenant_projection_writer_role.sql, rule: R_GRANT_SHAPE, lines: [52, 63, 112, 161, 163, 173, 174, 178, 332, 334, 358, 364, 368, 393, 395, 399, 409]}
+      - {path: docker/migrations/forward/105_create_ledger_chain.sql, rule: R_GRANT_SHAPE, lines: [173]}
+      - {path: docker/migrations/forward/108_create_pr_landing_workflow_state.sql, rule: R_GRANT_SHAPE, lines: [31]}
+      - {path: docker/migrations/forward/110_add_ledger_chain_chain_state.sql, rule: R_GRANT_SHAPE, lines: [12]}
+      - {path: docker/migrations/forward/113_create_floor_fill_state.sql, rule: R_GRANT_SHAPE, lines: [30]}
+      - {path: docker/migrations/forward/114_create_code_eval_trial_state.sql, rule: R_GRANT_SHAPE, lines: [30]}
+      - {path: docker/migrations/forward/115_grant_role_omnibase_infra_state_io_omn19998.sql, rule: R_GRANT_SHAPE, lines: [29, 30, 36, 37, 45]}
+      - {path: docker/migrations/forward/116_create_branch_deploy_state.sql, rule: R_GRANT_SHAPE, lines: [50]}
+      - {path: docker/migrations/forward/fenced-node-migrations.yaml, rule: R_GRANT_SHAPE, lines: [184, 392, 397, 440]}
+      - {path: docker/migrations/forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql, rule: R_GRANT_SHAPE, lines: [196, 207, 208, 209, 212]}
+      - {path: docker/migrations/forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql, rule: R_GRANT_SHAPE, lines: [172]}
+      - {path: docker/migrations/forward/nodes/node_canary_score_reducer/0004_capability_scores_policy_atomic_restatement.sql, rule: R_GRANT_SHAPE, lines: [32, 77, 102, 108, 154]}
+      - {path: docker/migrations/forward/nodes/node_canary_score_reducer/0004_grant_tenant_projection_writer_capability_scores_sequence.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 15, 24, 31, 34, 51, 53, 59, 62]}
+      - {path: docker/migrations/forward/nodes/node_context_install_confirm_trigger_effect/0001_grant_compaction_activations.sql, rule: R_GRANT_SHAPE, lines: [3, 4]}
+      - {path: docker/migrations/forward/nodes/node_contract_registry/0001_grant_omninode_runtime_contract_registry.sql, rule: R_GRANT_SHAPE, lines: [30, 32, 38, 40, 70, 73, 77, 89, 94, 97, 98]}
+      - {path: docker/migrations/forward/nodes/node_contract_registry/0002_grant_omninode_runtime_contract_registry_sequence.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 15, 24, 31, 34, 51, 53, 59, 62]}
+      - {path: docker/migrations/forward/nodes/node_delegate_skill_orchestrator/0001_grant_omninode_runtime_delegate_skill_command_claims.sql, rule: R_GRANT_SHAPE, lines: [10, 13, 25, 27, 48, 54, 65, 70, 75, 77]}
+      - {path: docker/migrations/forward/nodes/node_delegation_routing_reducer/0003_grant_tenant_projection_writer_overlay_sequence.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 15, 24, 31, 34, 51, 53, 59, 62]}
+      - {path: docker/migrations/forward/nodes/node_delegation_routing_reducer/0006_grant_app_dashboard_overlay.sql, rule: R_GRANT_SHAPE, lines: [11, 25, 27, 43, 46, 51, 54, 56]}
+      - {path: docker/migrations/forward/nodes/node_deployment_evidence_reducer/0002_grant_omninode_runtime_deployment_evidence_tables.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 97, 100, 101]}
+      - {path: docker/migrations/forward/nodes/node_evidence_dashboard_reducer/0002_grant_omninode_runtime_evidence_dashboard_tables.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 97, 98, 101, 102]}
+      - {path: docker/migrations/forward/nodes/node_gate_store_effect/0001_grant_omninode_runtime_gate_store.sql, rule: R_GRANT_SHAPE, lines: [5, 13, 15, 17, 21, 25, 29]}
+      - {path: docker/migrations/forward/nodes/node_gateway_link_health_write_effect/0002_revoke_omninode_runtime_gateway_link_health_status.sql, rule: R_GRANT_SHAPE, lines: [15, 48, 49, 52]}
+      - {path: docker/migrations/forward/nodes/node_gateway_link_health_write_effect/0003_grant_omninode_runtime_gateway_link_health.sql, rule: R_GRANT_SHAPE, lines: [4, 26, 35, 36, 44, 45, 48, 50]}
+      - {path: docker/migrations/forward/nodes/node_hook_event_capture/0002_hook_events_tenant_rls.sql, rule: R_GRANT_SHAPE, lines: [79, 90, 91, 94, 98, 101, 104]}
+      - {path: docker/migrations/forward/nodes/node_llm_delegation_call_effect/0000_delegation_lab_job_execution.sql, rule: R_GRANT_SHAPE, lines: [46, 47, 48]}
+      - {path: docker/migrations/forward/nodes/node_llm_delegation_projection/0002_grant_omninode_runtime_llm_delegation_daily_projection.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_log_persistence_effect/0000_create_log_entries.sql, rule: R_GRANT_SHAPE, lines: [60, 61, 63, 66, 94, 228, 264, 265]}
+      - {path: docker/migrations/forward/nodes/node_merge_override_alarm_effect/0002_grant_omninode_runtime_merge_override_tables.sql, rule: R_GRANT_SHAPE, lines: [2, 10, 12]}
+      - {path: docker/migrations/forward/nodes/node_merge_state_projection/0002_grant_omninode_runtime_merge_state_transitions.sql, rule: R_GRANT_SHAPE, lines: [37, 39, 45, 47, 77, 80, 84, 96, 101, 104, 105]}
+      - {path: docker/migrations/forward/nodes/node_merge_state_projection/0003_grant_omninode_runtime_merge_state_sequence.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 15, 24, 33, 36, 53, 55, 61, 64]}
+      - {path: docker/migrations/forward/nodes/node_nightly_loop_controller/002_grant_omninode_runtime_nightly_loop_tables.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 97, 100, 101]}
+      - {path: docker/migrations/forward/nodes/node_omnigate_projection/0001_grant_omninode_runtime_gate_projection_tables.sql, rule: R_GRANT_SHAPE, lines: [30, 32, 38, 40, 70, 73, 77, 88, 93, 94, 97, 98]}
+      - {path: docker/migrations/forward/nodes/node_omnigate_projection/0002_grant_omninode_runtime_gate_activity_sequence.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 15, 24, 31, 34, 51, 53, 59, 62]}
+      - {path: docker/migrations/forward/nodes/node_pr_lifecycle_state_reducer/0002_grant_omninode_runtime_pr_lifecycle_ledger_entries.sql, rule: R_GRANT_SHAPE, lines: [37, 39, 45, 47, 77, 80, 84, 96, 101, 104, 105]}
+      - {path: docker/migrations/forward/nodes/node_pr_lifecycle_state_reducer/0003_grant_omninode_runtime_pr_lifecycle_sequence.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 15, 24, 33, 36, 53, 55, 61, 64]}
+      - {path: docker/migrations/forward/nodes/node_pr_merged_projection/0002_grant_omninode_runtime_pr_merged_events.sql, rule: R_GRANT_SHAPE, lines: [1, 6, 14, 17, 21, 50, 53, 79, 86, 100, 108, 113, 131, 133, 138]}
+      - {path: docker/migrations/forward/nodes/node_projection_agent_actions/0001_grant_tenant_projection_writer_agent_observability_tables.sql, rule: R_GRANT_SHAPE, lines: [4, 17, 20, 21]}
+      - {path: docker/migrations/forward/nodes/node_projection_alert_channel_liveness/0001_grant_omninode_runtime_alert_channel_liveness_verdicts.sql, rule: R_GRANT_SHAPE, lines: [11, 20, 45, 52, 57, 64, 69]}
+      - {path: docker/migrations/forward/nodes/node_projection_automation_liveness/0001_grant_omninode_runtime_automation_liveness.sql, rule: R_GRANT_SHAPE, lines: [2, 4, 8, 12]}
+      - {path: docker/migrations/forward/nodes/node_projection_baselines/0003_grant_omninode_runtime_baselines_tables.sql, rule: R_GRANT_SHAPE, lines: [31, 33, 39, 41, 71, 74, 79, 88, 93, 94, 95, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_baselines_quality/003_grant_omninode_runtime_baselines_quality_snapshots.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_baselines_roi/003_grant_omninode_runtime_baselines_roi_snapshots.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_board_probe_results/0001_grant_omninode_runtime_board_probe_results.sql, rule: R_GRANT_SHAPE, lines: [2, 4, 8]}
+      - {path: docker/migrations/forward/nodes/node_projection_capsule_store/080_grant_omninode_runtime_capsule_store.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_ci_attempt_outcome/0000_create_ci_attempt_outcome.sql, rule: R_GRANT_SHAPE, lines: [90]}
+      - {path: docker/migrations/forward/nodes/node_projection_ci_attempt_outcome/0001_grant_omninode_runtime_ci_attempt_outcome.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 24, 44, 48, 49, 59, 66, 71, 76, 84, 88, 93]}
+      - {path: docker/migrations/forward/nodes/node_projection_claude_hook_events/0000_create_claude_hook_events.sql, rule: R_GRANT_SHAPE, lines: [47, 48, 60]}
+      - {path: docker/migrations/forward/nodes/node_projection_claude_hook_events/0001_grant_omninode_runtime_claude_hook_events.sql, rule: R_GRANT_SHAPE, lines: [13, 25, 33, 38, 41, 45, 48]}
+      - {path: docker/migrations/forward/nodes/node_projection_compaction_current_context/0001_grant_omninode_runtime_compaction_current_context.sql, rule: R_GRANT_SHAPE, lines: [11, 20, 46, 53, 58, 65, 70]}
+      - {path: docker/migrations/forward/nodes/node_projection_compaction_receipts/0001_grant_omninode_runtime_compaction_receipts.sql, rule: R_GRANT_SHAPE, lines: [11, 20, 45, 52, 57, 64, 69]}
+      - {path: docker/migrations/forward/nodes/node_projection_consumer_flow/0003_grant_omninode_runtime_consumer_flow_tables.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 97, 100, 101]}
+      - {path: docker/migrations/forward/nodes/node_projection_consumer_flow/0004_grant_omninode_runtime_consumer_flow_cursor_sequence.sql, rule: R_GRANT_SHAPE, lines: [7, 16, 47, 49, 73, 76, 82, 106, 115, 120, 125]}
+      - {path: docker/migrations/forward/nodes/node_projection_consumer_flow/0006_grant_role_omnidash_consumer_flow_windows_retention.sql, rule: R_GRANT_SHAPE, lines: [1, 29, 30, 32, 34, 38]}
+      - {path: docker/migrations/forward/nodes/node_projection_consumer_flow/0007_autovacuum_consumer_flow_windows.sql, rule: R_GRANT_SHAPE, lines: [39]}
+      - {path: docker/migrations/forward/nodes/node_projection_context_audit/0001_grant_tenant_projection_writer_context_audit_events.sql, rule: R_GRANT_SHAPE, lines: [5, 16, 44, 45, 46]}
+      - {path: docker/migrations/forward/nodes/node_projection_context_roi/003_context_roi_scores_tenant_id_and_rls.sql, rule: R_GRANT_SHAPE, lines: [98, 109, 110, 113]}
+      - {path: docker/migrations/forward/nodes/node_projection_cost_by_repo/0002_grant_omninode_runtime_cost_by_repo_snapshots.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_cost_summary/0002_llm_cost_aggregates_tenant_id_and_rls.sql, rule: R_GRANT_SHAPE, lines: [98, 109, 110, 111, 114]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0023_delegation_rls_tenant_isolation.sql, rule: R_GRANT_SHAPE, lines: [10, 36, 52, 66, 80]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0026_delegation_judge_verdict_events_rls_tenant_isolation.sql, rule: R_GRANT_SHAPE, lines: [16, 41, 55, 66]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0027_generation_events_tenant_rls.sql, rule: R_GRANT_SHAPE, lines: [30, 47, 48, 80, 81, 86, 87]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0031_delegation_events_tenant_id_to_uuid.sql, rule: R_GRANT_SHAPE, lines: [189]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0032_delegation_events_tenant_id_uuid_via_registry.sql, rule: R_GRANT_SHAPE, lines: [94, 382]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0033_delegation_events_uuid_via_registry_single_transaction.sql, rule: R_GRANT_SHAPE, lines: [2, 38, 43, 77, 137, 143, 156, 389]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0034_delegation_events_uuid_via_registry_role_set_guard.sql, rule: R_GRANT_SHAPE, lines: [49, 51, 101, 108, 168, 174, 187, 445]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0035_grant_omninode_runtime_generation_events.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0036_delegation_events_uuid_mixed_representation.sql, rule: R_GRANT_SHAPE, lines: [110, 121, 127, 198, 203, 597]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql, rule: R_GRANT_SHAPE, lines: [101, 111, 113, 117, 124, 130, 171, 254, 259, 349, 370, 371, 752]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0038_delegation_events_writer_identity.sql, rule: R_GRANT_SHAPE, lines: [68, 101, 105]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql, rule: R_GRANT_SHAPE, lines: [516, 525, 532, 539, 540, 541, 542, 543, 544, 545, 546]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0041_delegation_budget_state_rls_tenant_isolation.sql, rule: R_GRANT_SHAPE, lines: [30, 67, 73, 89, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0042_delegation_events_drop_house_tenant_default.sql, rule: R_GRANT_SHAPE, lines: [76]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0043z_preflight_delegation_shadow_comparisons.sql, rule: R_GRANT_SHAPE, lines: [216, 217, 221, 222]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0044_restore_delegation_shadow_comparisons.sql, rule: R_GRANT_SHAPE, lines: [117, 118, 119, 120]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0056_delegation_budget_applied_events.sql, rule: R_GRANT_SHAPE, lines: [105, 106]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0057_delegation_budget_applied_events_rls.sql, rule: R_GRANT_SHAPE, lines: [25]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls.sql, rule: R_GRANT_SHAPE, lines: [105, 106]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0066_delegation_events_projection_cursor.sql, rule: R_GRANT_SHAPE, lines: [28]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0067_delegation_daily_view.sql, rule: R_GRANT_SHAPE, lines: [68, 69]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_budget_readings/0001_grant_omninode_runtime_delegation_budget_readings.sql, rule: R_GRANT_SHAPE, lines: [5, 7, 11]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_capability_map/0000_create_delegation_capability_cells.sql, rule: R_GRANT_SHAPE, lines: [137]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_capability_map/0001_grant_tenant_projection_writer_delegation_capability_cells.sql, rule: R_GRANT_SHAPE, lines: [15, 16]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_capability_map/0002_force_rls_delegation_capability_cells.sql, rule: R_GRANT_SHAPE, lines: [11]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_disposition/0000_create_delegation_dispositions.sql, rule: R_GRANT_SHAPE, lines: [99]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_disposition/0001_grant_tenant_projection_writer_delegation_dispositions.sql, rule: R_GRANT_SHAPE, lines: [15, 16]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_disposition/0002_force_rls_delegation_dispositions.sql, rule: R_GRANT_SHAPE, lines: [11]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_eval/0000_create_delegation_eval_items.sql, rule: R_GRANT_SHAPE, lines: [96]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_eval/0001_grant_tenant_projection_writer_delegation_eval_items.sql, rule: R_GRANT_SHAPE, lines: [15, 16, 19]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_eval/0002_force_rls_delegation_eval_items.sql, rule: R_GRANT_SHAPE, lines: [31]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_eval/0003_create_delegation_eval_item_verdicts.sql, rule: R_GRANT_SHAPE, lines: [102]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_eval/0004_create_delegation_eval_results.sql, rule: R_GRANT_SHAPE, lines: [147]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_eval/0005_grant_tenant_projection_writer_delegation_eval_run_tables.sql, rule: R_GRANT_SHAPE, lines: [15, 16, 19, 29, 32]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_eval/0006_force_rls_delegation_eval_run_tables.sql, rule: R_GRANT_SHAPE, lines: [16, 24]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_inference_response/0003_inference_response_text_rls_tenant_isolation.sql, rule: R_GRANT_SHAPE, lines: [12, 33, 47, 58]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation_inference_response/0004_grant_tenant_projection_writer.sql, rule: R_GRANT_SHAPE, lines: [32, 47, 62, 73, 75, 78, 102, 107, 119, 122, 125, 128, 131, 134, 137, 140, 143, 146, 149, 152, 155, 158, 161, 164, 167]}
+      - {path: docker/migrations/forward/nodes/node_projection_demo_readiness/0001_grant_omninode_runtime_demo_readiness_latest.sql, rule: R_GRANT_SHAPE, lines: [2, 3, 5]}
+      - {path: docker/migrations/forward/nodes/node_projection_dep_health/002_dep_health_findings_tenant_id_and_rls.sql, rule: R_GRANT_SHAPE, lines: [98, 109, 110, 111, 114]}
+      - {path: docker/migrations/forward/nodes/node_projection_dep_health/003_grant_tenant_projection_writer_dep_health_sequence.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 15, 24, 31, 34, 51, 53, 59, 62]}
+      - {path: docker/migrations/forward/nodes/node_projection_dep_health/004_grant_tenant_projection_writer_dep_health_findings.sql, rule: R_GRANT_SHAPE, lines: [1, 12]}
+      - {path: docker/migrations/forward/nodes/node_projection_dod_verdict/0001_grant_omninode_runtime_dod_verify_runs.sql, rule: R_GRANT_SHAPE, lines: [12, 20, 47, 54, 59, 66, 71]}
+      - {path: docker/migrations/forward/nodes/node_projection_done_items/0001_grant_omninode_runtime_done_items.sql, rule: R_GRANT_SHAPE, lines: [4, 6]}
+      - {path: docker/migrations/forward/nodes/node_projection_eval_results/0000_create_eval_results_tables.sql, rule: R_GRANT_SHAPE, lines: [488, 496, 504, 512]}
+      - {path: docker/migrations/forward/nodes/node_projection_eval_results/0001_grant_tenant_projection_writer_eval_results.sql, rule: R_GRANT_SHAPE, lines: [15, 16, 19]}
+      - {path: docker/migrations/forward/nodes/node_projection_eval_results/0002_force_rls_eval_results_tables.sql, rule: R_GRANT_SHAPE, lines: [14, 22, 30, 38]}
+      - {path: docker/migrations/forward/nodes/node_projection_event_chain/0002_grant_omninode_runtime_event_chain.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_experiment_result/0001_grant_tenant_projection_writer_experiment_arm_results.sql, rule: R_GRANT_SHAPE, lines: [6, 20, 21]}
+      - {path: docker/migrations/forward/nodes/node_projection_experiment_result/0002_force_rls_experiment_arm_results.sql, rule: R_GRANT_SHAPE, lines: [14]}
+      - {path: docker/migrations/forward/nodes/node_projection_floor_integration/0001_grant_omninode_runtime_floor_integration_rows.sql, rule: R_GRANT_SHAPE, lines: [4, 6]}
+      - {path: docker/migrations/forward/nodes/node_projection_floor_integration/0003_grant_omninode_runtime_floor_integration_pass.sql, rule: R_GRANT_SHAPE, lines: [4, 6]}
+      - {path: docker/migrations/forward/nodes/node_projection_goal_trace/0001_grant_omninode_runtime_goal_trace.sql, rule: R_GRANT_SHAPE, lines: [13, 22, 24, 27, 31]}
+      - {path: docker/migrations/forward/nodes/node_projection_host_disk/0001_grant_omninode_runtime_host_disk.sql, rule: R_GRANT_SHAPE, lines: [5, 15, 17, 20, 23, 25, 29, 33, 37, 41]}
+      - {path: docker/migrations/forward/nodes/node_projection_instruction_eval/0002_instruction_eval_aggregate_snapshots_tenant_id_and_rls.sql, rule: R_GRANT_SHAPE, lines: [98, 109, 110, 113]}
+      - {path: docker/migrations/forward/nodes/node_projection_intent_classification/0002_grant_omninode_runtime_intent_classification_events.sql, rule: R_GRANT_SHAPE, lines: [30, 32, 38, 40, 70, 73, 77, 89, 94, 97, 98]}
+      - {path: docker/migrations/forward/nodes/node_projection_intent_classification/0003_grant_omninode_runtime_intent_classification_sequence.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 15, 24, 31, 34, 51, 53, 59, 62]}
+      - {path: docker/migrations/forward/nodes/node_projection_lab_alerts/0001_grant_omninode_runtime_lab_alerts.sql, rule: R_GRANT_SHAPE, lines: [5, 9, 11, 13]}
+      - {path: docker/migrations/forward/nodes/node_projection_lab_container_memory/0001_grant_omninode_runtime_lab_container_memory_window.sql, rule: R_GRANT_SHAPE, lines: [5, 7, 10, 11, 19, 21, 23, 27]}
+      - {path: docker/migrations/forward/nodes/node_projection_lab_job/0001_grant_omninode_runtime_lab_job.sql, rule: R_GRANT_SHAPE, lines: [5, 12, 16, 18, 21, 24, 26, 30, 34, 38]}
+      - {path: docker/migrations/forward/nodes/node_projection_lab_job/0002_grant_role_omnidash_lab_job_state_select.sql, rule: R_GRANT_SHAPE, lines: [1, 22, 23, 25, 27, 31]}
+      - {path: docker/migrations/forward/nodes/node_projection_lab_lane_health/0001_grant_omninode_runtime_lab_lane_health.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 24, 25, 31, 48, 51, 54, 61, 68, 73]}
+      - {path: docker/migrations/forward/nodes/node_projection_lab_proof_receipts/0001_grant_omninode_runtime_lab_proof_receipts.sql, rule: R_GRANT_SHAPE, lines: [4, 6, 10]}
+      - {path: docker/migrations/forward/nodes/node_projection_lane_work/0001_grant_omninode_runtime_lane_work_workflow.sql, rule: R_GRANT_SHAPE, lines: [12, 14, 21, 26]}
+      - {path: docker/migrations/forward/nodes/node_projection_live_events/0002_create_omninode_internal_live_events.sql, rule: R_GRANT_SHAPE, lines: [56, 57, 60, 61, 62, 63, 65, 69, 106, 127, 148, 159, 163, 166, 168, 173, 182, 292, 298, 299, 300, 378, 379]}
+      - {path: docker/migrations/forward/nodes/node_projection_llm_cost/0002_grant_omninode_runtime_llm_call_metrics.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_llm_routing/0002_grant_omninode_runtime_llm_routing_decisions.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_local_alerts/0000_create_local_alerts.sql, rule: R_GRANT_SHAPE, lines: [192]}
+      - {path: docker/migrations/forward/nodes/node_projection_local_alerts/0001_grant_tenant_projection_writer_local_alerts.sql, rule: R_GRANT_SHAPE, lines: [15, 18, 22]}
+      - {path: docker/migrations/forward/nodes/node_projection_local_alerts/0002_force_rls_local_alerts.sql, rule: R_GRANT_SHAPE, lines: [25]}
+      - {path: docker/migrations/forward/nodes/node_projection_local_environment/0000_create_local_environment.sql, rule: R_GRANT_SHAPE, lines: [176]}
+      - {path: docker/migrations/forward/nodes/node_projection_local_environment/0001_grant_tenant_projection_writer_local_environment.sql, rule: R_GRANT_SHAPE, lines: [15, 18, 22]}
+      - {path: docker/migrations/forward/nodes/node_projection_local_environment/0002_force_rls_local_environment.sql, rule: R_GRANT_SHAPE, lines: [25]}
+      - {path: docker/migrations/forward/nodes/node_projection_local_environment/0003_grant_delete_local_environment.sql, rule: R_GRANT_SHAPE, lines: [6, 19]}
+      - {path: docker/migrations/forward/nodes/node_projection_local_identity/0000_create_local_identity.sql, rule: R_GRANT_SHAPE, lines: [71]}
+      - {path: docker/migrations/forward/nodes/node_projection_local_identity/0001_grant_tenant_projection_writer_local_identity.sql, rule: R_GRANT_SHAPE, lines: [15, 18, 22]}
+      - {path: docker/migrations/forward/nodes/node_projection_local_identity/0002_force_rls_local_identity.sql, rule: R_GRANT_SHAPE, lines: [25]}
+      - {path: docker/migrations/forward/nodes/node_projection_mcp_tools/0002_grant_omninode_runtime_mcp_tools.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_metering_summary/0001_grant_tenant_projection_writer_metering_summary.sql, rule: R_GRANT_SHAPE, lines: [2]}
+      - {path: docker/migrations/forward/nodes/node_projection_open_obligations/0001_create_open_obligations.sql, rule: R_GRANT_SHAPE, lines: [104, 106, 109, 119, 329, 333, 334, 406, 408, 410, 411]}
+      - {path: docker/migrations/forward/nodes/node_projection_overlay_store/0001_grant_omninode_runtime_overlay_store.sql, rule: R_GRANT_SHAPE, lines: [2, 9, 11]}
+      - {path: docker/migrations/forward/nodes/node_projection_overlay_store/0004_grant_omninode_runtime_overlay_store_write.sql, rule: R_GRANT_SHAPE, lines: [2, 9, 11]}
+      - {path: docker/migrations/forward/nodes/node_projection_overnight/0002_grant_omninode_runtime_overnight_sessions_tables.sql, rule: R_GRANT_SHAPE, lines: [30, 32, 38, 40, 70, 73, 77, 89, 94, 95, 98, 99]}
+      - {path: docker/migrations/forward/nodes/node_projection_overnight/0003_grant_omninode_runtime_overnight_phases_sequence.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 15, 24, 31, 34, 51, 53, 59, 62]}
+      - {path: docker/migrations/forward/nodes/node_projection_pattern_learning/0001_pattern_learning_artifacts_tenant_id_and_rls.sql, rule: R_GRANT_SHAPE, lines: [98, 109, 110, 111, 114]}
+      - {path: docker/migrations/forward/nodes/node_projection_pattern_learning/002_grant_tenant_projection_writer_pattern_learning_artifacts.sql, rule: R_GRANT_SHAPE, lines: [1, 12]}
+      - {path: docker/migrations/forward/nodes/node_projection_pr_landing/0001_grant_omninode_runtime_pr_landing.sql, rule: R_GRANT_SHAPE, lines: [5, 12, 16, 18, 21, 24, 26, 30, 34, 38, 42]}
+      - {path: docker/migrations/forward/nodes/node_projection_pr_state/0001_grant_omninode_runtime_pr_state.sql, rule: R_GRANT_SHAPE, lines: [5, 6]}
+      - {path: docker/migrations/forward/nodes/node_projection_pr_state/0002_grant_role_omnidash_pr_state_select.sql, rule: R_GRANT_SHAPE, lines: [1, 22, 23, 25, 27, 31]}
+      - {path: docker/migrations/forward/nodes/node_projection_prod_promotion_gate/0000_create_prod_promotion_gate_decisions.sql, rule: R_GRANT_SHAPE, lines: [78, 98]}
+      - {path: docker/migrations/forward/nodes/node_projection_prod_promotion_gate/0001_grant_omninode_runtime_prod_promotion_gate_decisions.sql, rule: R_GRANT_SHAPE, lines: [12, 21, 46, 53, 58, 65, 70]}
+      - {path: docker/migrations/forward/nodes/node_projection_provider_quota/0000_create_provider_quota_state.sql, rule: R_GRANT_SHAPE, lines: [130]}
+      - {path: docker/migrations/forward/nodes/node_projection_provider_quota/0001_grant_tenant_projection_writer_provider_quota_state.sql, rule: R_GRANT_SHAPE, lines: [15, 16, 19]}
+      - {path: docker/migrations/forward/nodes/node_projection_provider_quota/0002_force_rls_provider_quota_state.sql, rule: R_GRANT_SHAPE, lines: [26]}
+      - {path: docker/migrations/forward/nodes/node_projection_receipt_gate/0001_grant_omninode_runtime_receipt_gate_rows.sql, rule: R_GRANT_SHAPE, lines: [37, 39, 45, 47, 77, 80, 84, 96, 101, 104, 105]}
+      - {path: docker/migrations/forward/nodes/node_projection_receipt_gate/0002_grant_omninode_runtime_receipt_gate_sequence.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 15, 24, 33, 36, 53, 55, 61, 64]}
+      - {path: docker/migrations/forward/nodes/node_projection_registration/0002_node_service_registry_tenant_rls.sql, rule: R_GRANT_SHAPE, lines: [9, 38, 55]}
+      - {path: docker/migrations/forward/nodes/node_projection_registration/0005_create_projection_watermarks.sql, rule: R_GRANT_SHAPE, lines: [72, 78, 173, 174]}
+      - {path: docker/migrations/forward/nodes/node_projection_registration/0006_grant_omninode_runtime_node_service_registry.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_registration/0007_node_service_registry_drop_tenant_posture.sql, rule: R_GRANT_SHAPE, lines: [57]}
+      - {path: docker/migrations/forward/nodes/node_projection_registration/0008_grant_role_omnidash_projection_watermarks.sql, rule: R_GRANT_SHAPE, lines: [1, 23, 24, 26, 28, 32]}
+      - {path: docker/migrations/forward/nodes/node_projection_routing_decision/0022_agent_routing_decisions_tenant_id_and_rls.sql, rule: R_GRANT_SHAPE, lines: [98, 109, 110, 111, 114]}
+      - {path: docker/migrations/forward/nodes/node_projection_routing_decision/0023_grant_tenant_projection_writer_agent_routing_decisions.sql, rule: R_GRANT_SHAPE, lines: [1, 3, 13]}
+      - {path: docker/migrations/forward/nodes/node_projection_routing_feedback/0000_create_delegation_routing_feedback.sql, rule: R_GRANT_SHAPE, lines: [58]}
+      - {path: docker/migrations/forward/nodes/node_projection_routing_feedback/0001_grant_tenant_projection_writer_delegation_routing_feedback.sql, rule: R_GRANT_SHAPE, lines: [17, 18]}
+      - {path: docker/migrations/forward/nodes/node_projection_run_trace/0000_create_run_trace.sql, rule: R_GRANT_SHAPE, lines: [163]}
+      - {path: docker/migrations/forward/nodes/node_projection_run_trace/0001_grant_tenant_projection_writer_run_trace.sql, rule: R_GRANT_SHAPE, lines: [15, 18, 19, 22]}
+      - {path: docker/migrations/forward/nodes/node_projection_run_trace/0002_force_rls_run_trace.sql, rule: R_GRANT_SHAPE, lines: [25]}
+      - {path: docker/migrations/forward/nodes/node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 23, 26, 32, 59, 63, 64, 75, 77, 84, 89, 94, 105, 109, 114]}
+      - {path: docker/migrations/forward/nodes/node_projection_runtime_error_fingerprints/0001_grant_omninode_runtime_runtime_error_fingerprints.sql, rule: R_GRANT_SHAPE, lines: [12, 29, 50, 57, 62, 69, 74]}
+      - {path: docker/migrations/forward/nodes/node_projection_sandbox_decisions/0002_grant_omninode_runtime_sandbox_decisions.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/081_savings_estimates_rls_tenant_isolation.sql, rule: R_GRANT_SHAPE, lines: [9, 25, 41, 52]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/088_savings_views_invoker_scoped.sql, rule: R_GRANT_SHAPE, lines: [49]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql, rule: R_GRANT_SHAPE, lines: [94, 109, 112, 712, 713, 714, 715, 716, 717, 718, 719]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/090_grant_tenant_projection_writer_savings_estimates.sql, rule: R_GRANT_SHAPE, lines: [1, 12]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/090_savings_aggregate_excludes_model_text.sql, rule: R_GRANT_SHAPE, lines: [41]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/091_grant_app_dashboard_savings_series.sql, rule: R_GRANT_SHAPE, lines: [11, 21, 39, 41, 48, 51]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/094_savings_overview_measured_provenance.sql, rule: R_GRANT_SHAPE, lines: [291, 292]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/096_delegation_savings_unpriced_calls.sql, rule: R_GRANT_SHAPE, lines: [18]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/097_savings_overview_all_runs.sql, rule: R_GRANT_SHAPE, lines: [290, 291]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/100_savings_overview_token_directions.sql, rule: R_GRANT_SHAPE, lines: [297, 298]}
+      - {path: docker/migrations/forward/nodes/node_projection_savings/102_delegation_savings_unpriced_matches_refresh.sql, rule: R_GRANT_SHAPE, lines: [53, 54, 55]}
+      - {path: docker/migrations/forward/nodes/node_projection_session_content/0001_create_session_content.sql, rule: R_GRANT_SHAPE, lines: [46, 171, 172]}
+      - {path: docker/migrations/forward/nodes/node_projection_session_outcome/0022_grant_omninode_runtime_session_outcomes.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_session_replay/0002_grant_omninode_runtime_session_replay_snapshots.sql, rule: R_GRANT_SHAPE, lines: [1, 34, 44, 52, 57, 60, 61]}
+      - {path: docker/migrations/forward/nodes/node_projection_skill_executions/0002_skill_execution_snapshots_tenant_id_and_rls.sql, rule: R_GRANT_SHAPE, lines: [98, 109, 110, 113]}
+      - {path: docker/migrations/forward/nodes/node_projection_skill_lifecycle/0002_grant_tenant_projection_writer_skill_executions.sql, rule: R_GRANT_SHAPE, lines: [4, 36, 39, 40]}
+      - {path: docker/migrations/forward/nodes/node_projection_skill_lifecycle/0003_grant_app_dashboard_select_skill_executions.sql, rule: R_GRANT_SHAPE, lines: [3, 18, 19]}
+      - {path: docker/migrations/forward/nodes/node_projection_swarm/0002_grant_omninode_runtime_swarm_runs.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql, rule: R_GRANT_SHAPE, lines: [1, 12]}
+      - {path: docker/migrations/forward/nodes/node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql, rule: R_GRANT_SHAPE, lines: [8, 15, 17, 23, 80]}
+      - {path: docker/migrations/forward/nodes/node_projection_tenant_registry/0000_create_tenant_registry_mirror.sql, rule: R_GRANT_SHAPE, lines: [167, 177, 187, 198]}
+      - {path: docker/migrations/forward/nodes/node_projection_tenant_registry/0001_grant_omninode_runtime_tenant_registry_mirror.sql, rule: R_GRANT_SHAPE, lines: [1, 78, 109, 114, 117, 126, 131, 135]}
+      - {path: docker/migrations/forward/nodes/node_projection_topic_activity/0001_grant_omninode_runtime_topic_activity.sql, rule: R_GRANT_SHAPE, lines: [4, 6, 10]}
+      - {path: docker/migrations/forward/nodes/node_projection_traces/0002_grant_omninode_runtime_traces.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_usage_by_model_day/0001_grant_usage_by_model_day.sql, rule: R_GRANT_SHAPE, lines: [75, 76, 77, 79, 80, 83]}
+      - {path: docker/migrations/forward/nodes/node_projection_usage_by_model_day/0003_usage_by_model_day_tier_share.sql, rule: R_GRANT_SHAPE, lines: [39]}
+      - {path: docker/migrations/forward/nodes/node_projection_voice_sessions/0002_grant_omninode_runtime_voice_sessions.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_projection_work_events/0001_create_work_events.sql, rule: R_GRANT_SHAPE, lines: [41, 71, 74, 78, 88, 210, 214, 215, 277, 281, 282]}
+      - {path: docker/migrations/forward/nodes/node_projection_work_ledger/0001_grant_omninode_runtime_work_ledger.sql, rule: R_GRANT_SHAPE, lines: [2, 11, 13, 17]}
+      - {path: docker/migrations/forward/nodes/node_projection_work_ledger/0004_grant_work_ledger_ro_work_ledger_state.sql, rule: R_GRANT_SHAPE, lines: [2, 13, 15, 17, 24]}
+      - {path: docker/migrations/forward/nodes/node_projection_work_ledger/0005_grant_role_omnidash_work_ledger_rows_select.sql, rule: R_GRANT_SHAPE, lines: [1, 22, 23, 25, 27, 31]}
+      - {path: docker/migrations/forward/nodes/node_projection_work_ledger/0008_grant_omninode_runtime_ledger_line_citation.sql, rule: R_GRANT_SHAPE, lines: [4, 16, 18, 23]}
+      - {path: docker/migrations/forward/nodes/node_projection_work_ledger/0010_grant_work_ledger_seq_conflicts.sql, rule: R_GRANT_SHAPE, lines: [7, 12]}
+      - {path: docker/migrations/forward/nodes/node_projection_work_ledger/0012_grant_omninode_runtime_work_ledger_latest.sql, rule: R_GRANT_SHAPE, lines: [6]}
+      - {path: docker/migrations/forward/nodes/node_projection_work_ledger/0013_work_ledger_seq_provisional.sql, rule: R_GRANT_SHAPE, lines: [16]}
+      - {path: docker/migrations/forward/nodes/node_projection_work_questions/0001_grant_omninode_runtime_work_questions.sql, rule: R_GRANT_SHAPE, lines: [14, 16, 20, 24, 28, 32]}
+      - {path: docker/migrations/forward/nodes/node_projection_worktree_reconcile/0001_grant_runtime_worktree_reconcile.sql, rule: R_GRANT_SHAPE, lines: [4, 5]}
+      - {path: docker/migrations/forward/nodes/node_renderer_capability_projection/0002_grant_omninode_runtime_renderer_capability_projection.sql, rule: R_GRANT_SHAPE, lines: [28, 41, 43, 49, 51, 75, 78, 80, 82, 91, 96, 99, 100]}
+      - {path: docker/migrations/forward/nodes/node_savings_estimation_compute/0001_create_savings_signal_tables.sql, rule: R_GRANT_SHAPE, lines: [208, 209, 210]}
+      - {path: docker/migrations/forward/nodes/node_savings_estimation_compute/0002_create_savings_correlation_finalizations.sql, rule: R_GRANT_SHAPE, lines: [24, 38, 122, 123]}
+      - {path: docker/migrations/forward/nodes/node_view_seam_reading_reducer/0002_grant_tenant_projection_writer_view_seam_readings.sql, rule: R_GRANT_SHAPE, lines: [15, 16]}
+      - {path: docker/migrations/rollback/rollback_094_create_app_dashboard_role.sql, rule: R_GRANT_SHAPE, lines: [7]}
+      - {path: docker/migrations/rollback/rollback_097_grant_app_dashboard_connect_omnidash_analytics.sql, rule: R_GRANT_SHAPE, lines: [32]}
+      - {path: docker/migrations/rollback/rollback_103_create_tenant_projection_writer_role.sql, rule: R_GRANT_SHAPE, lines: [9]}
+      - {path: docker/migrations/rollback/rollback_node_gateway_link_health_0002.sql, rule: R_GRANT_SHAPE, lines: [24]}
+      - {path: docker/migrations/rollback/rollback_node_gateway_link_health_0003.sql, rule: R_GRANT_SHAPE, lines: [12, 17]}
+      - {path: docker/migrations/rollback/rollback_node_projection_tenant_credentials_004.sql, rule: R_GRANT_SHAPE, lines: [12, 16]}
+      - {path: docker/migrations/seams/cloud/apply_cloud_database.sql, rule: R_GRANT_SHAPE, lines: [21]}
+      - {path: docker/migrations/seams/cloud/gateway_grants.sql, rule: R_GRANT_SHAPE, lines: [6, 11, 22, 29, 30, 31, 32, 33, 34, 36, 39]}
+      - {path: docker/migrations/seams/cloud/tenant_identity_writer_grants.sql, rule: R_GRANT_SHAPE, lines: [14, 25, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 45, 49, 76, 78, 84, 85]}
+      - {path: docker/migrations/seams/gateway_runtime_grants.sql, rule: R_GRANT_SHAPE, lines: [7, 11, 25, 49, 54, 67, 68, 69, 70, 71, 72, 76, 77, 102]}
+      - {path: docker/migrations/seams/tenant_identity_gateway_lane.sql, rule: R_GRANT_SHAPE, lines: [7]}
+      - {path: docker/migrations/seams/tenant_identity_writer_grants.sql, rule: R_GRANT_SHAPE, lines: [4, 28, 36, 66, 71, 96, 97, 98, 99, 100, 101, 102, 103, 104, 107, 111, 113, 117, 159, 161, 168, 172, 176, 187]}
+      - {path: docker/runners/entrypoint.sh, rule: R_GRANT_SHAPE, lines: [69]}
+      - {path: docker/runners/runner-job-started.sh, rule: R_GRANT_SHAPE, lines: [1347]}
+      - {path: docker/tenant-uuid-conversion-proof/seed-roles.sql, rule: R_GRANT_SHAPE, lines: [6]}
+      - {path: formal/declared_state_reconcile/run_checks.sh, rule: R_GRANT_SHAPE, lines: [9]}
+      - {path: formal/generic_lease/GenericLease.tla, rule: R_GRANT_SHAPE, lines: [4, 15, 32, 58, 65, 70, 102, 140, 180, 181, 188]}
+      - {path: formal/generic_lease/results/design_review_verdict.txt, rule: R_GRANT_SHAPE, lines: [25, 39, 45]}
+      - {path: formal/host_bringup/HostBringup.tla, rule: R_GRANT_SHAPE, lines: [10, 88]}
+      - {path: formal/runtime_primary_election/RuntimePrimaryElection.tla, rule: R_GRANT_SHAPE, lines: [4, 6]}
+      - {path: formal/runtime_primary_election/results/design_review_verdict.txt, rule: R_GRANT_SHAPE, lines: [27]}
+      - {path: formal/runtime_start_first/results/design_review_verdict.txt, rule: R_GRANT_SHAPE, lines: [110]}
+      - {path: scripts/apply_application_database_acl.py, rule: R_GRANT_SHAPE, lines: [374, 390]}
+      - {path: scripts/apply_governed_compose_config.py, rule: R_GRANT_SHAPE, lines: [7, 9, 10, 36, 37, 105, 151, 153, 174, 177, 187, 190, 244, 371]}
+      - {path: scripts/ci/c16_receipt_identity_probe.py, rule: R_GRANT_SHAPE, lines: [53]}
+      - {path: scripts/ci/check_application_database_sql.py, rule: R_GRANT_SHAPE, lines: [125, 305, 413, 425, 429, 656]}
+      - {path: scripts/ci/check_delegation_tenant_conversion_readiness.py, rule: R_GRANT_SHAPE, lines: [183, 192]}
+      - {path: scripts/ci/check_dev_lane_staleness.py, rule: R_GRANT_SHAPE, lines: [712, 1091, 1299]}
+      - {path: scripts/ci/check_omnimarket_contract_pin_advance.py, rule: R_GRANT_SHAPE, lines: [8, 97]}
+      - {path: scripts/ci/check_pin_reachability.py, rule: R_GRANT_SHAPE, lines: [63]}
+      - {path: scripts/ci/governed_helper_gate.py, rule: R_GRANT_SHAPE, lines: [55]}
+      - {path: scripts/ci/lab_pass_receipt.py, rule: R_GRANT_SHAPE, lines: [1366, 1411, 1420, 2911, 3037, 3040, 3095]}
+      - {path: scripts/ci/prove_application_database_acl.py, rule: R_GRANT_SHAPE, lines: [1147, 1164, 1234, 1271, 1298, 1367, 1372, 1379, 1635, 1652, 1658, 1705, 1943, 1944, 1946, 1949, 1953, 1956, 2134]}
+      - {path: scripts/ci/prove_application_database_domain_enforcement.py, rule: R_GRANT_SHAPE, lines: [2215]}
+      - {path: scripts/ci/prove_tenant_uuid_conversion.py, rule: R_GRANT_SHAPE, lines: [306]}
+      - {path: scripts/ci/test_selection_adjacency.yaml, rule: R_GRANT_SHAPE, lines: [42]}
+      - {path: scripts/deploy-agent/deploy/deploy-agent-dev.service, rule: R_GRANT_SHAPE, lines: [112]}
+      - {path: scripts/deploy-agent/deploy/deploy-agent.service, rule: R_GRANT_SHAPE, lines: [69]}
+      - {path: scripts/deploy-agent/deploy_agent/executor.py, rule: R_GRANT_SHAPE, lines: [757]}
+      - {path: scripts/deploy-agent/deploy_agent/tracking_ref.py, rule: R_GRANT_SHAPE, lines: [48]}
+      - {path: scripts/edge_delegation_worker/gateway_control_plane.py, rule: R_GRANT_SHAPE, lines: [63]}
+      - {path: scripts/generate_application_database_table_grants.py, rule: R_GRANT_SHAPE, lines: [83, 158, 161, 166, 174, 255]}
+      - {path: scripts/heavy_lock.py, rule: R_GRANT_SHAPE, lines: [316]}
+      - {path: scripts/hooks/prepush_dispatch.sh, rule: R_GRANT_SHAPE, lines: [1248, 1626, 2052]}
+      - {path: scripts/hooks/prepush_override_grant.py, rule: R_GRANT_SHAPE, lines: [4, 34, 145, 147, 369, 378, 397, 458, 474, 477, 478, 505, 512, 526, 544, 554, 566, 580, 594, 610, 826, 845]}
+      - {path: scripts/hooks/prepush_smart_tests.sh, rule: R_GRANT_SHAPE, lines: [125, 191, 201, 248, 251, 547, 921, 928, 933, 937, 947, 951]}
+      - {path: scripts/hooks/pytest_full_suite_host_guard.py, rule: R_GRANT_SHAPE, lines: [8, 208, 224, 310]}
+      - {path: scripts/lab_principal_issuer.py, rule: R_GRANT_SHAPE, lines: [62, 69, 70, 85, 88, 150, 182, 199, 232, 312, 329, 394, 423, 491, 526, 584, 588, 791, 1131, 1145]}
+      - {path: scripts/preflight_lane_deploy_attribution.py, rule: R_GRANT_SHAPE, lines: [4, 19, 31, 36, 46, 50, 54, 79, 108, 109, 155, 158, 167, 174, 209, 224, 232, 236, 238, 240, 297, 304, 329, 333, 337, 343, 347, 370, 397, 401, 417, 477, 482, 508, 540, 563, 579, 597, 649, 654, 660, 662, 737, 766, 811, 814]}
+      - {path: scripts/provision-keycloak.py, rule: R_GRANT_SHAPE, lines: [238, 293]}
+      - {path: scripts/provision_db_slot.sh, rule: R_GRANT_SHAPE, lines: [124, 296, 746, 748, 750, 752, 753, 754, 759, 760, 761, 762, 769, 774, 779, 795, 799, 801, 806, 813, 825]}
+      - {path: scripts/reconcile-workspace-venvs.sh, rule: R_GRANT_SHAPE, lines: [526, 537, 1596, 1846, 1852]}
+      - {path: scripts/run-forward-migrations.sh, rule: R_GRANT_SHAPE, lines: [100, 199, 216, 404, 797, 2014, 2022, 2189, 2196, 2203, 2217, 2223, 2241, 2252, 2259, 2267, 2273, 2281, 2297, 2298, 2314, 2329, 2347, 2353, 2359, 2362, 2363, 2367, 2369, 2389, 2402, 2432, 2459, 2476, 2484, 2585, 2589, 2591, 2593, 2594, 2595, 2598, 2632, 2704, 2708, 2711]}
+      - {path: scripts/runtime_build/health_payload.py, rule: R_GRANT_SHAPE, lines: [31]}
+      - {path: scripts/runtime_build/prepr_verify_lane.sh, rule: R_GRANT_SHAPE, lines: [61]}
+      - {path: scripts/runtime_build/refresh_stability_lane.sh, rule: R_GRANT_SHAPE, lines: [46, 53, 58, 305, 560, 570, 571, 744]}
+      - {path: scripts/validation/check_migration_class.py, rule: R_GRANT_SHAPE, lines: [456]}
+      - {path: scripts/validation/check_tenant_guc_domain_parity.py, rule: R_GRANT_SHAPE, lines: [358, 381, 443]}
+      - {path: scripts/validation/check_topology_grant_delivery.py, rule: R_GRANT_SHAPE, lines: [5, 24, 29, 30, 45, 58, 66, 73, 95, 96, 102, 106, 109, 116, 123, 124, 126, 130, 136, 188, 223, 272, 288, 327, 335, 347, 371, 524, 541, 555, 563, 578, 581, 588, 604, 632, 651, 671, 675, 712, 763, 810, 819, 821, 826, 848, 892, 900, 901]}
+      - {path: scripts/worktree_reaper.py, rule: R_GRANT_SHAPE, lines: [16]}
+      - {path: src/omnibase_infra/backends/backend_probe.py, rule: R_GRANT_SHAPE, lines: [295, 305, 327, 762]}
+      - {path: src/omnibase_infra/cli/cli_auth.py, rule: R_GRANT_SHAPE, lines: [441]}
+      - {path: src/omnibase_infra/cli/delegate_locus.py, rule: R_GRANT_SHAPE, lines: [179, 180, 688, 726]}
+      - {path: src/omnibase_infra/cli/prod_dispatch_locality_guard.py, rule: R_GRANT_SHAPE, lines: [41]}
+      - {path: src/omnibase_infra/errors/error_infra.py, rule: R_GRANT_SHAPE, lines: [922]}
+      - {path: src/omnibase_infra/event_bus/event_bus_kafka.py, rule: R_GRANT_SHAPE, lines: [1917]}
+      - {path: src/omnibase_infra/gateway/client/cloud_ledger_reader.py, rule: R_GRANT_SHAPE, lines: [34, 37, 92]}
+      - {path: src/omnibase_infra/gateway/client/gateway_identity_verifier.py, rule: R_GRANT_SHAPE, lines: [20]}
+      - {path: src/omnibase_infra/gateway/client/gateway_renewal_planner.py, rule: R_GRANT_SHAPE, lines: [96, 113]}
+      - {path: src/omnibase_infra/gateway/client/gateway_session_keeper.py, rule: R_GRANT_SHAPE, lines: [16, 68, 102, 181, 217]}
+      - {path: src/omnibase_infra/gateway/client/gateway_token_minter.py, rule: R_GRANT_SHAPE, lines: [5, 9, 171, 201, 213, 228, 255]}
+      - {path: src/omnibase_infra/gateway/client/gateway_transport_httpx.py, rule: R_GRANT_SHAPE, lines: [46, 169]}
+      - {path: src/omnibase_infra/gateway/models/model_gateway_api_key.py, rule: R_GRANT_SHAPE, lines: [10]}
+      - {path: src/omnibase_infra/handlers/handler_broker_grant_derive/handler.py, rule: R_GRANT_SHAPE, lines: [34, 38]}
+      - {path: src/omnibase_infra/handlers/handler_broker_principal_apply.py, rule: R_GRANT_SHAPE, lines: [67, 75]}
+      - {path: src/omnibase_infra/handlers/handler_developer_principal_plan/handler.py, rule: R_GRANT_SHAPE, lines: [5, 13, 85, 117, 187, 207, 278, 307]}
+      - {path: src/omnibase_infra/handlers/handler_runtime_deploy.sh, rule: R_GRANT_SHAPE, lines: [775, 783, 786, 787, 1583, 1602, 1652, 1658, 1698, 1728, 2901, 4657]}
+      - {path: src/omnibase_infra/handlers/handler_table_grant_derivation/handler.py, rule: R_GRANT_SHAPE, lines: [4]}
+      - {path: src/omnibase_infra/handlers/placement/handler_placement_election.py, rule: R_GRANT_SHAPE, lines: [6]}
+      - {path: src/omnibase_infra/handlers/placement/handler_placement_etcd.py, rule: R_GRANT_SHAPE, lines: [86]}
+      - {path: src/omnibase_infra/handlers/placement/handler_placement_session.py, rule: R_GRANT_SHAPE, lines: [9, 11, 79]}
+      - {path: src/omnibase_infra/handlers/shared_listener.py, rule: R_GRANT_SHAPE, lines: [164]}
+      - {path: src/omnibase_infra/handlers/shared_listener_broker_client.py, rule: R_GRANT_SHAPE, lines: [20]}
+      - {path: src/omnibase_infra/models/developer_principal/model_developer_principal_grant.py, rule: R_GRANT_SHAPE, lines: [3]}
+      - {path: src/omnibase_infra/models/developer_principal/model_developer_principal_plan.py, rule: R_GRANT_SHAPE, lines: [17]}
+      - {path: src/omnibase_infra/models/developer_principal/model_developer_principal_plan_request.py, rule: R_GRANT_SHAPE, lines: [24]}
+      - {path: src/omnibase_infra/models/developer_principal/topics.py, rule: R_GRANT_SHAPE, lines: [5]}
+      - {path: src/omnibase_infra/models/model_table_grant_prune_query.py, rule: R_GRANT_SHAPE, lines: [4, 10]}
+      - {path: src/omnibase_infra/models/security/model_broker_grant.py, rule: R_GRANT_SHAPE, lines: [37]}
+      - {path: src/omnibase_infra/nodes/node_broker_grant_derive_compute/__init__.py, rule: R_GRANT_SHAPE, lines: [3]}
+      - {path: src/omnibase_infra/nodes/node_broker_grant_derive_compute/contract.yaml, rule: R_GRANT_SHAPE, lines: [30]}
+      - {path: src/omnibase_infra/nodes/node_broker_grant_derive_compute/node.py, rule: R_GRANT_SHAPE, lines: [3]}
+      - {path: src/omnibase_infra/nodes/node_broker_principal_effect/contract.yaml, rule: R_GRANT_SHAPE, lines: [31, 135]}
+      - {path: src/omnibase_infra/nodes/node_bus_forwarder_effect/services/service_gateway_egress_health.py, rule: R_GRANT_SHAPE, lines: [42, 185]}
+      - {path: src/omnibase_infra/nodes/node_developer_principal_plan_compute/contract.yaml, rule: R_GRANT_SHAPE, lines: [9, 12, 39, 85]}
+      - {path: src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/handlers/handler_evidence_autoclose_sweep.py, rule: R_GRANT_SHAPE, lines: [105, 310, 332, 348, 351]}
+      - {path: src/omnibase_infra/nodes/node_gateway_attach_effect/contract.yaml, rule: R_GRANT_SHAPE, lines: [192, 214]}
+      - {path: src/omnibase_infra/nodes/node_gateway_attach_effect/models/enum_gateway_renewal_mode.py, rule: R_GRANT_SHAPE, lines: [15]}
+      - {path: src/omnibase_infra/nodes/node_gateway_attach_effect/models/model_gateway_attach_config.py, rule: R_GRANT_SHAPE, lines: [57, 118]}
+      - {path: src/omnibase_infra/nodes/node_gateway_attach_effect/models/model_gateway_attach_request.py, rule: R_GRANT_SHAPE, lines: [16]}
+      - {path: src/omnibase_infra/nodes/node_gateway_attach_effect/models/model_gateway_renewal_directive.py, rule: R_GRANT_SHAPE, lines: [17]}
+      - {path: src/omnibase_infra/nodes/node_gateway_attach_effect/services/service_gateway_renewal_policy.py, rule: R_GRANT_SHAPE, lines: [107]}
+      - {path: src/omnibase_infra/nodes/node_savings_estimation_compute/contract.yaml, rule: R_GRANT_SHAPE, lines: [38]}
+      - {path: src/omnibase_infra/nodes/node_savings_estimation_compute/handlers/handler_savings_correlation.py, rule: R_GRANT_SHAPE, lines: [60, 144, 203]}
+      - {path: src/omnibase_infra/nodes/node_table_grant_derivation/__init__.py, rule: R_GRANT_SHAPE, lines: [3]}
+      - {path: src/omnibase_infra/probes/probe_gateway_attach.py, rule: R_GRANT_SHAPE, lines: [9, 27, 97, 130]}
+      - {path: src/omnibase_infra/protocols/protocol_placement_session.py, rule: R_GRANT_SHAPE, lines: [27]}
+      - {path: src/omnibase_infra/runtime/auto_wiring/handler_wiring.py, rule: R_GRANT_SHAPE, lines: [2612, 2627, 2744]}
+      - {path: src/omnibase_infra/runtime/models/model_runtime_policy_contract.py, rule: R_GRANT_SHAPE, lines: [23]}
+      - {path: src/omnibase_infra/runtime/service_kernel.py, rule: R_GRANT_SHAPE, lines: [2565]}
+      - {path: src/omnibase_infra/topology/table_grant_derivation.py, rule: R_GRANT_SHAPE, lines: [8, 192, 450, 543, 615, 671]}
+      - {path: src/omnibase_infra/validation/application_database_acl.py, rule: R_GRANT_SHAPE, lines: [844, 1482, 3233, 3515, 3589]}
+      - {path: src/omnibase_infra/validation/application_database_acl_apply.py, rule: R_GRANT_SHAPE, lines: [139]}
+      - {path: src/omnibase_infra/validation/application_database_domain_enforcement.py, rule: R_GRANT_SHAPE, lines: [644, 2136]}
+      - {path: src/omnibase_infra/validation/models/model_application_database_acl_object.py, rule: R_GRANT_SHAPE, lines: [55]}
+      - {path: src/omnibase_infra/validation/omninode_internal_live_acl.py, rule: R_GRANT_SHAPE, lines: [5, 19, 186, 196, 254, 258]}
+      - {path: src/omnibase_infra/validation/service_artifact_store.py, rule: R_GRANT_SHAPE, lines: [578]}
+      - {path: src/omnibase_infra/validation/validator_no_direct_adapter.py, rule: R_GRANT_SHAPE, lines: [147]}
+      - {path: src/omnibase_infra/validation/validator_physical_public_tables.py, rule: R_GRANT_SHAPE, lines: [18]}
+  per_environment_values:
+    count_lines: 566
+    count_files: 263
+    by_home:
+      contract-shape: 317
+      overlay: 216
+      settings-store: 33
+    files:
+      - {path: .github/actions/fetch-stability-secrets/action.yml, rule: R_ENV_STORE, lines: [49, 141]}
+      - {path: .github/live-contact-exception.md, rule: R_ENV_STORE, lines: [25]}
+      - {path: .github/workflows/build-workspace-candidate-runtime.yml, rule: R_ENV_STORE, lines: [16, 17, 317, 596, 642]}
+      - {path: .github/workflows/chain-canary-c11-negative-paths.yml, rule: R_ENV_STORE, lines: [99]}
+      - {path: .github/workflows/chain-canary-c12-provider-catalogue.yml, rule: R_ENV_STORE, lines: [86]}
+      - {path: .github/workflows/chain-canary-c16-receipt-identity.yml, rule: R_ENV_STORE, lines: [83]}
+      - {path: .github/workflows/chain-canary-c28-consumer-flow.yml, rule: R_ENV_STORE, lines: [89]}
+      - {path: .github/workflows/chain-canary.yml, rule: R_ENV_STORE, lines: [56, 132]}
+      - {path: .github/workflows/ci.yml, rule: R_ENV_STORE, lines: [5095, 5699]}
+      - {path: .github/workflows/deliver-dev-candidate-to-staging.yml, rule: R_ENV_STORE, lines: [49, 50, 931, 1146, 1219, 1361]}
+      - {path: .github/workflows/dev-lane-staleness.yml, rule: R_ENV_STORE, lines: [22]}
+      - {path: .github/workflows/dlq-depth-monitor.yml, rule: R_ENV_STORE, lines: [61]}
+      - {path: .github/workflows/provider-rung-canary.yml, rule: R_ENV_STORE, lines: [74]}
+      - {path: .github/workflows/r1-front-door-probe.yml, rule: R_ENV_STORE, lines: [63]}
+      - {path: .github/workflows/reusable-runtime-boot.yml, rule: R_ENV_STORE, lines: [1375, 1456, 1515, 1518, 1533, 1544]}
+      - {path: .github/workflows/runner-image-build-smoke.yml, rule: R_ENV_STORE, lines: [90]}
+      - {path: .pre-commit-config.yaml, rule: R_ENV_OVERLAY, lines: [2278]}
+      - {path: architecture-handshakes/orchestration-monolith-baseline.yaml, rule: R_ENV_OVERLAY, lines: [152]}
+      - {path: config/ci_evidence_policy.yaml, rule: R_ENV_OVERLAY, lines: [181]}
+      - {path: config/delegation_health_check.yaml, rule: R_ENV_OVERLAY, lines: [19]}
+      - {path: config/lab_alarm.json, rule: R_ENV_OVERLAY, lines: [12]}
+      - {path: config/runner_fleet.yaml, rule: R_ENV_OVERLAY, lines: [58]}
+      - {path: contracts/OMN-10207.yaml, rule: R_EVIDENCE, lines: [20, 50]}
+      - {path: contracts/OMN-10281.yaml, rule: R_EVIDENCE, lines: [17]}
+      - {path: contracts/OMN-10345.yaml, rule: R_EVIDENCE, lines: [17, 37]}
+      - {path: contracts/OMN-10943.yaml, rule: R_EVIDENCE, lines: [55]}
+      - {path: contracts/OMN-11061.yaml, rule: R_EVIDENCE, lines: [23, 28]}
+      - {path: contracts/OMN-11067.yaml, rule: R_EVIDENCE, lines: [15, 32, 39]}
+      - {path: contracts/OMN-11068.yaml, rule: R_EVIDENCE, lines: [49]}
+      - {path: contracts/OMN-11104.yaml, rule: R_EVIDENCE, lines: [51]}
+      - {path: contracts/OMN-12503.yaml, rule: R_EVIDENCE, lines: [21, 47]}
+      - {path: contracts/OMN-12513.yaml, rule: R_EVIDENCE, lines: [21, 47]}
+      - {path: contracts/OMN-12522.yaml, rule: R_EVIDENCE, lines: [26, 59]}
+      - {path: contracts/OMN-12627.yaml, rule: R_EVIDENCE, lines: [20, 43]}
+      - {path: contracts/OMN-12700.yaml, rule: R_EVIDENCE, lines: [45]}
+      - {path: contracts/OMN-12832.yaml, rule: R_EVIDENCE, lines: [6, 33]}
+      - {path: contracts/OMN-12912.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-13011.yaml, rule: R_EVIDENCE, lines: [7]}
+      - {path: contracts/OMN-13201.yaml, rule: R_EVIDENCE, lines: [8]}
+      - {path: contracts/OMN-13405.yaml, rule: R_EVIDENCE, lines: [19]}
+      - {path: contracts/OMN-13406.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-13417.yaml, rule: R_EVIDENCE, lines: [7]}
+      - {path: contracts/OMN-13554.yaml, rule: R_EVIDENCE, lines: [33]}
+      - {path: contracts/OMN-13664.yaml, rule: R_EVIDENCE, lines: [3, 5]}
+      - {path: contracts/OMN-13666.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-16994.yaml, rule: R_EVIDENCE, lines: [43]}
+      - {path: contracts/OMN-17101.yaml, rule: R_EVIDENCE, lines: [13, 15, 49]}
+      - {path: contracts/OMN-17292.yaml, rule: R_EVIDENCE, lines: [18]}
+      - {path: contracts/OMN-17427.yaml, rule: R_EVIDENCE, lines: [36, 63, 141, 291, 609, 670, 710, 724]}
+      - {path: contracts/OMN-18693.yaml, rule: R_EVIDENCE, lines: [20, 34]}
+      - {path: contracts/OMN-19513.yaml, rule: R_EVIDENCE, lines: [24, 29, 70, 155]}
+      - {path: contracts/OMN-19812.yaml, rule: R_EVIDENCE, lines: [132]}
+      - {path: contracts/OMN-19998.yaml, rule: R_EVIDENCE, lines: [75]}
+      - {path: contracts/OMN-20275.yaml, rule: R_EVIDENCE, lines: [26]}
+      - {path: contracts/OMN-20388.yaml, rule: R_EVIDENCE, lines: [33]}
+      - {path: contracts/OMN-20439.yaml, rule: R_EVIDENCE, lines: [29]}
+      - {path: contracts/OMN-20772.yaml, rule: R_EVIDENCE, lines: [28]}
+      - {path: contracts/OMN-20933.yaml, rule: R_EVIDENCE, lines: [13]}
+      - {path: contracts/OMN-20999.yaml, rule: R_EVIDENCE, lines: [13]}
+      - {path: contracts/OMN-21099.yaml, rule: R_EVIDENCE, lines: [5, 23, 27, 39, 45, 86, 99]}
+      - {path: contracts/OMN-21146.yaml, rule: R_EVIDENCE, lines: [31]}
+      - {path: contracts/OMN-21268.yaml, rule: R_EVIDENCE, lines: [4, 15]}
+      - {path: contracts/OMN-21272.yaml, rule: R_EVIDENCE, lines: [17]}
+      - {path: contracts/OMN-21279.yaml, rule: R_EVIDENCE, lines: [21, 82, 208, 267, 281]}
+      - {path: contracts/OMN-21288.yaml, rule: R_EVIDENCE, lines: [39, 99]}
+      - {path: contracts/OMN-21339.yaml, rule: R_EVIDENCE, lines: [4]}
+      - {path: contracts/OMN-21433.yaml, rule: R_EVIDENCE, lines: [14, 65]}
+      - {path: contracts/OMN-21481.yaml, rule: R_EVIDENCE, lines: [21]}
+      - {path: contracts/OMN-21485.yaml, rule: R_EVIDENCE, lines: [4, 13, 15]}
+      - {path: contracts/OMN-21487.yaml, rule: R_EVIDENCE, lines: [79]}
+      - {path: contracts/OMN-21551.yaml, rule: R_EVIDENCE, lines: [11, 15, 31, 40, 44]}
+      - {path: contracts/OMN-21587.yaml, rule: R_EVIDENCE, lines: [5, 17, 68]}
+      - {path: contracts/OMN-21611.yaml, rule: R_EVIDENCE, lines: [3, 18, 21]}
+      - {path: contracts/OMN-21920.yaml, rule: R_EVIDENCE, lines: [17]}
+      - {path: contracts/OMN-21928.yaml, rule: R_EVIDENCE, lines: [13, 18, 34]}
+      - {path: contracts/OMN-21933.yaml, rule: R_EVIDENCE, lines: [16, 23]}
+      - {path: contracts/OMN-21934.yaml, rule: R_EVIDENCE, lines: [16]}
+      - {path: contracts/OMN-21968.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-22027.yaml, rule: R_EVIDENCE, lines: [33]}
+      - {path: contracts/OMN-22144.yaml, rule: R_EVIDENCE, lines: [15]}
+      - {path: contracts/OMN-22172.yaml, rule: R_EVIDENCE, lines: [19]}
+      - {path: contracts/OMN-22691.yaml, rule: R_EVIDENCE, lines: [15]}
+      - {path: contracts/OMN-22692.yaml, rule: R_EVIDENCE, lines: [13, 47]}
+      - {path: contracts/OMN-22712.yaml, rule: R_EVIDENCE, lines: [13]}
+      - {path: contracts/OMN-22870.yaml, rule: R_EVIDENCE, lines: [13]}
+      - {path: contracts/OMN-23011.yaml, rule: R_EVIDENCE, lines: [13, 53]}
+      - {path: contracts/OMN-23062.yaml, rule: R_EVIDENCE, lines: [58]}
+      - {path: contracts/OMN-23362.yaml, rule: R_EVIDENCE, lines: [5, 16]}
+      - {path: contracts/OMN-23395.yaml, rule: R_EVIDENCE, lines: [14]}
+      - {path: contracts/OMN-23459.yaml, rule: R_EVIDENCE, lines: [15]}
+      - {path: contracts/OMN-23508.yaml, rule: R_EVIDENCE, lines: [16, 18]}
+      - {path: contracts/OMN-23624.yaml, rule: R_EVIDENCE, lines: [43]}
+      - {path: contracts/OMN-23981.yaml, rule: R_EVIDENCE, lines: [17]}
+      - {path: contracts/OMN-24119.yaml, rule: R_EVIDENCE, lines: [4, 13, 15, 17, 19]}
+      - {path: contracts/OMN-24134.yaml, rule: R_EVIDENCE, lines: [4, 13, 17]}
+      - {path: contracts/OMN-24191.yaml, rule: R_EVIDENCE, lines: [4, 13, 17]}
+      - {path: contracts/OMN-24260.yaml, rule: R_EVIDENCE, lines: [4, 15, 17, 19]}
+      - {path: contracts/OMN-24429.yaml, rule: R_EVIDENCE, lines: [22, 57]}
+      - {path: contracts/OMN-24476.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-24509.yaml, rule: R_EVIDENCE, lines: [16, 19, 22]}
+      - {path: contracts/OMN-24551.yaml, rule: R_EVIDENCE, lines: [3, 16, 22, 25]}
+      - {path: contracts/OMN-24562.yaml, rule: R_EVIDENCE, lines: [4, 13, 20, 33, 35, 37, 42, 49, 53, 63, 65, 70, 72, 74, 79, 81, 86, 91]}
+      - {path: contracts/OMN-24617.yaml, rule: R_EVIDENCE, lines: [5, 14, 20, 32]}
+      - {path: contracts/OMN-24674.yaml, rule: R_EVIDENCE, lines: [16, 44]}
+      - {path: contracts/OMN-24714.yaml, rule: R_EVIDENCE, lines: [50]}
+      - {path: contracts/OMN-24716.yaml, rule: R_EVIDENCE, lines: [4, 13]}
+      - {path: contracts/OMN-24740.yaml, rule: R_EVIDENCE, lines: [15]}
+      - {path: contracts/OMN-24780.yaml, rule: R_EVIDENCE, lines: [14, 18]}
+      - {path: contracts/OMN-24854.yaml, rule: R_EVIDENCE, lines: [41]}
+      - {path: contracts/OMN-24860.yaml, rule: R_EVIDENCE, lines: [13]}
+      - {path: contracts/OMN-24903.yaml, rule: R_EVIDENCE, lines: [64, 100]}
+      - {path: contracts/OMN-25110.yaml, rule: R_EVIDENCE, lines: [18]}
+      - {path: contracts/OMN-25191.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-25194.yaml, rule: R_EVIDENCE, lines: [54]}
+      - {path: contracts/OMN-25313.yaml, rule: R_EVIDENCE, lines: [16, 20]}
+      - {path: contracts/OMN-25339.yaml, rule: R_EVIDENCE, lines: [22, 24]}
+      - {path: contracts/OMN-25367.yaml, rule: R_EVIDENCE, lines: [18]}
+      - {path: contracts/OMN-25390.yaml, rule: R_EVIDENCE, lines: [19]}
+      - {path: contracts/OMN-25536.yaml, rule: R_EVIDENCE, lines: [61]}
+      - {path: contracts/OMN-25709.yaml, rule: R_EVIDENCE, lines: [53]}
+      - {path: contracts/OMN-25839.yaml, rule: R_EVIDENCE, lines: [69]}
+      - {path: contracts/OMN-25856.yaml, rule: R_EVIDENCE, lines: [18, 74]}
+      - {path: contracts/OMN-25901.yaml, rule: R_EVIDENCE, lines: [55]}
+      - {path: contracts/OMN-25912.yaml, rule: R_EVIDENCE, lines: [21]}
+      - {path: contracts/OMN-25942.yaml, rule: R_EVIDENCE, lines: [25]}
+      - {path: contracts/OMN-26102.yaml, rule: R_EVIDENCE, lines: [4]}
+      - {path: contracts/OMN-26106.yaml, rule: R_EVIDENCE, lines: [36, 147]}
+      - {path: contracts/OMN-26121.yaml, rule: R_EVIDENCE, lines: [5, 29, 34, 36, 55, 62, 223, 265]}
+      - {path: contracts/OMN-26122.yaml, rule: R_EVIDENCE, lines: [5, 38, 81]}
+      - {path: contracts/OMN-26151.yaml, rule: R_EVIDENCE, lines: [15]}
+      - {path: contracts/OMN-26227.yaml, rule: R_EVIDENCE, lines: [75, 81]}
+      - {path: contracts/OMN-26232.yaml, rule: R_EVIDENCE, lines: [20, 124]}
+      - {path: contracts/OMN-26314.yaml, rule: R_EVIDENCE, lines: [18]}
+      - {path: contracts/OMN-26360.yaml, rule: R_EVIDENCE, lines: [16, 69]}
+      - {path: contracts/OMN-26471.yaml, rule: R_EVIDENCE, lines: [94]}
+      - {path: contracts/OMN-26472.yaml, rule: R_EVIDENCE, lines: [21]}
+      - {path: contracts/OMN-26473.yaml, rule: R_EVIDENCE, lines: [15]}
+      - {path: contracts/OMN-26566.yaml, rule: R_EVIDENCE, lines: [47]}
+      - {path: contracts/OMN-26604.yaml, rule: R_EVIDENCE, lines: [5]}
+      - {path: contracts/OMN-26715.yaml, rule: R_EVIDENCE, lines: [5, 14]}
+      - {path: deploy/maintenance/omninode-system-slack-report.sh, rule: R_ENV_OVERLAY, lines: [135, 351, 359, 1167]}
+      - {path: docker/Dockerfile.runtime, rule: R_ENV_OVERLAY, lines: [311, 944, 945, 1196]}
+      - {path: docker/docker-compose.canary.yml, rule: R_ENV_OVERLAY, lines: [13]}
+      - {path: docker/docker-compose.dev-lane.yml, rule: R_ENV_OVERLAY, lines: [143, 159, 166, 175, 182, 191, 198, 239, 241, 276, 331, 349, 350, 365, 369, 408, 410, 432, 727, 881]}
+      - {path: docker/docker-compose.infra.yml, rule: R_ENV_OVERLAY, lines: [659, 803, 1143]}
+      - {path: docker/docker-compose.judge.yml, rule: R_ENV_OVERLAY, lines: [396]}
+      - {path_sha1: 05d3a62ed557, rule: R_ENV_OVERLAY, lines: [7, 121, 143, 273, 624, 849]}
+      - {path: docker/docker-compose.prepr.yml, rule: R_ENV_OVERLAY, lines: [37]}
+      - {path: docker/docker-compose.prod.yml, rule: R_ENV_OVERLAY, lines: [126, 138, 181, 263]}
+      - {path: docker/docker-compose.runners.yml, rule: R_ENV_OVERLAY, lines: [1052, 1054, 1141]}
+      - {path_sha1: 29c36e56f96b, rule: R_ENV_OVERLAY, lines: [62, 86, 97, 120, 125, 127, 128, 129, 130, 297, 298, 420, 513, 622, 723, 727]}
+      - {path: docker/env-example-full.txt, rule: R_ENV_OVERLAY, lines: [187]}
+      - {path: docker/gateway/beta-gateway-canary.yaml, rule: R_ENV_OVERLAY, lines: [130, 161]}
+      - {path: docker/keycloak/desired-clients.json, rule: R_ENV_OVERLAY, lines: [32, 38, 101, 106, 133, 176, 177, 178]}
+      - {path: docker/migrations/forward/004_capability_fields_concurrent.sql, rule: R_ENV_OVERLAY, lines: [2]}
+      - {path: docker/migrations/forward/fenced-node-migrations.yaml, rule: R_ENV_OVERLAY, lines: [529, 537]}
+      - {path: docker/migrations/forward/nodes/node_projection_baselines/0002_realign_child_tables_to_producer_schema.sql, rule: R_ENV_OVERLAY, lines: [19]}
+      - {path: docker/migrations/forward/nodes/node_projection_baselines_quality/002_realign_quality_snapshots_to_producer_schema.sql, rule: R_ENV_OVERLAY, lines: [19]}
+      - {path: docker/migrations/forward/nodes/node_projection_baselines_roi/002_realign_roi_snapshots_to_producer_schema.sql, rule: R_ENV_OVERLAY, lines: [17]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0024_drop_unwired_routing_columns.sql, rule: R_ENV_OVERLAY, lines: [25]}
+      - {path: docker/migrations/forward/nodes/node_projection_delegation/0025_delegation_judge_verdict_events_tenant_id.sql, rule: R_ENV_OVERLAY, lines: [8]}
+      - {path: docker/runners/Dockerfile, rule: R_ENV_OVERLAY, lines: [338]}
+      - {path: docs/env-example-full.txt, rule: R_ENV_OVERLAY, lines: [154]}
+      - {path: docs/incidents/OMN-21337/broker-abort-crash-report.json, rule: R_ENV_OVERLAY, lines: [6]}
+      - {path: scripts/bind_delegation_projection_evidence.py, rule: R_ENV_OVERLAY, lines: [181, 184, 212, 219]}
+      - {path: scripts/check_placeholder_topics.sh, rule: R_ENV_OVERLAY, lines: [56]}
+      - {path: scripts/check_prod_promotion_lineage.py, rule: R_ENV_OVERLAY, lines: [10, 25, 261, 273, 328, 413, 422, 429, 433]}
+      - {path: scripts/check_reconciler_movement_proof.py, rule: R_ENV_OVERLAY, lines: [26]}
+      - {path: scripts/check_subscribe_wiring_health.py, rule: R_ENV_OVERLAY, lines: [84]}
+      - {path: scripts/ci/check_dev_lane_staleness.py, rule: R_ENV_OVERLAY, lines: [29, 2146, 2147]}
+      - {path: scripts/ci/ci_summary_sweep_exclusions.json, rule: R_ENV_OVERLAY, lines: [51]}
+      - {path: scripts/ci/lab_pass_receipt.py, rule: R_ENV_OVERLAY, lines: [17, 6034]}
+      - {path: scripts/ci/r1_front_door_probe.py, rule: R_ENV_OVERLAY, lines: [55]}
+      - {path: scripts/ci/skip_count_ratchet.py, rule: R_ENV_OVERLAY, lines: [12]}
+      - {path: scripts/deploy-agent/deploy/deploy-agent-dev.service, rule: R_ENV_OVERLAY, lines: [55, 60]}
+      - {path: scripts/deploy-agent/deploy/deploy-agent-launch.sh, rule: R_ENV_OVERLAY, lines: [9]}
+      - {path: scripts/deploy-agent/deploy/deploy-agent.service.d/override.conf, rule: R_ENV_OVERLAY, lines: [26, 64]}
+      - {path: scripts/deploy-agent/deploy_agent/agent.py, rule: R_ENV_OVERLAY, lines: [1415, 1456, 1468, 1752, 2065]}
+      - {path: scripts/deploy-agent/deploy_agent/events.py, rule: R_ENV_OVERLAY, lines: [54, 1000]}
+      - {path: scripts/deploy-agent/deploy_agent/executor.py, rule: R_ENV_OVERLAY, lines: [911, 954, 1224, 1229, 3293, 5335, 5364, 5381, 5412, 6283, 6627, 6654, 6666]}
+      - {path: scripts/deploy-agent/deploy_agent/idle_converge.py, rule: R_ENV_OVERLAY, lines: [985]}
+      - {path: scripts/deploy-agent/deploy_agent/instance_lanes.py, rule: R_ENV_OVERLAY, lines: [531, 532, 534]}
+      - {path: scripts/deploy-agent/deploy_agent/lane_policy.py, rule: R_ENV_OVERLAY, lines: [101]}
+      - {path: scripts/deploy-agent/deploy_agent/queue_depth.py, rule: R_ENV_OVERLAY, lines: [13]}
+      - {path: scripts/deploy-gateway.sh, rule: R_ENV_OVERLAY, lines: [514, 549]}
+      - {path: scripts/disk-gc.sh, rule: R_ENV_OVERLAY, lines: [87]}
+      - {path: scripts/finalize_delegation_projection_evidence.py, rule: R_ENV_OVERLAY, lines: [122, 125, 163, 198, 203, 229]}
+      - {path: scripts/generate_claude_lane_block.py, rule: R_ENV_OVERLAY, lines: [88, 109, 165, 166]}
+      - {path: scripts/migrations/verify_migration_checksum_adoption.py, rule: R_ENV_OVERLAY, lines: [77]}
+      - {path: scripts/preflight_lane_deploy_attribution.py, rule: R_ENV_OVERLAY, lines: [652, 660]}
+      - {path: scripts/reconcile-workspace-venvs.sh, rule: R_ENV_OVERLAY, lines: [733, 764, 777, 997, 1889, 1894]}
+      - {path: scripts/render_runtime_policy_env.py, rule: R_ENV_OVERLAY, lines: [44, 46, 51]}
+      - {path: scripts/rollback_lane_to_known_good.py, rule: R_ENV_OVERLAY, lines: [51]}
+      - {path: scripts/run-forward-migrations.sh, rule: R_ENV_OVERLAY, lines: [1743, 2006, 2675]}
+      - {path: scripts/runtime_build/compose_files.sh, rule: R_ENV_OVERLAY, lines: [235]}
+      - {path: scripts/runtime_build/health_payload.py, rule: R_ENV_OVERLAY, lines: [26, 170]}
+      - {path: scripts/runtime_build/prepr_pool_prove.sh, rule: R_ENV_OVERLAY, lines: [570]}
+      - {path: scripts/runtime_build/prepr_slot_policy.py, rule: R_ENV_OVERLAY, lines: [84, 90, 94]}
+      - {path: scripts/runtime_build/prepr_teardown_slot.py, rule: R_ENV_OVERLAY, lines: [12, 511, 742, 881, 886, 938, 1016, 1108, 1109, 1266]}
+      - {path: scripts/runtime_build/prepr_teardown_slot.sh, rule: R_ENV_OVERLAY, lines: [79]}
+      - {path: scripts/runtime_build/prepr_verify_lane.sh, rule: R_ENV_OVERLAY, lines: [178, 480, 781]}
+      - {path: scripts/runtime_build/refresh_dev_lane.sh, rule: R_ENV_OVERLAY, lines: [115, 155]}
+      - {path: scripts/runtime_build/refresh_stability_lane.sh, rule: R_ENV_OVERLAY, lines: [167, 211]}
+      - {path: scripts/runtime_build/repoint_dev_lane_onex_api.py, rule: R_ENV_OVERLAY, lines: [199]}
+      - {path: scripts/runtime_build/stage_workspace.sh, rule: R_ENV_OVERLAY, lines: [45, 116, 495, 542]}
+      - {path: scripts/runtime_build/verify_dev_refresh.py, rule: R_ENV_OVERLAY, lines: [447]}
+      - {path: scripts/runtime_build/verify_stability_refresh.py, rule: R_ENV_OVERLAY, lines: [211]}
+      - {path: scripts/runtime_change_classifier.py, rule: R_ENV_OVERLAY, lines: [292]}
+      - {path: scripts/system_health_check.sh, rule: R_ENV_OVERLAY, lines: [644]}
+      - {path: scripts/systemd/onex-build-loop.service, rule: R_ENV_OVERLAY, lines: [11]}
+      - {path: scripts/trigger-deploy.sh, rule: R_ENV_OVERLAY, lines: [60, 101, 103]}
+      - {path: scripts/trigger_rebuild_on_merge.py, rule: R_ENV_OVERLAY, lines: [23]}
+      - {path: scripts/validation/check_topology_grant_delivery.py, rule: R_ENV_OVERLAY, lines: [84]}
+      - {path: scripts/validation/validate_clean_root.py, rule: R_ENV_OVERLAY, lines: [177]}
+      - {path: src/omnibase_infra/backends/backend_probe.py, rule: R_SRC_SHAPE, lines: [937]}
+      - {path: src/omnibase_infra/contracts/integrations/catalog.yaml, rule: R_SRC_SHAPE, lines: [117]}
+      - {path: src/omnibase_infra/docker/catalog/validator_healthcheck_start_period.py, rule: R_SRC_SHAPE, lines: [40]}
+      - {path: src/omnibase_infra/enums/enum_environment.py, rule: R_SRC_SHAPE, lines: [38, 40, 47, 48]}
+      - {path: src/omnibase_infra/event_bus/service_topic_manager.py, rule: R_SRC_SHAPE, lines: [492]}
+      - {path: src/omnibase_infra/gate/signer.py, rule: R_SRC_SHAPE, lines: [32]}
+      - {path: src/omnibase_infra/handlers/handler_action_archive_cache_fill.py, rule: R_SRC_SHAPE, lines: [94]}
+      - {path: src/omnibase_infra/handlers/handler_dev_lane_branch_install.py, rule: R_SRC_SHAPE, lines: [3]}
+      - {path: src/omnibase_infra/handlers/handler_dev_lane_pin.py, rule: R_SRC_SHAPE, lines: [20, 298]}
+      - {path: src/omnibase_infra/handlers/handler_runtime_deploy.sh, rule: R_SRC_SHAPE, lines: [633, 1420, 1538, 1549, 1579, 1714, 2840, 2878, 3077, 4416, 4417, 4626]}
+      - {path: src/omnibase_infra/handlers/handler_stability_rollback_waiver.py, rule: R_SRC_SHAPE, lines: [11]}
+      - {path: src/omnibase_infra/handlers/venv_atomic_install/atomic_venv_install.py, rule: R_SRC_SHAPE, lines: [393]}
+      - {path: src/omnibase_infra/models/discovery/model_introspection_task_config.py, rule: R_SRC_SHAPE, lines: [71]}
+      - {path: src/omnibase_infra/models/health/model_projection_liveness_verdict.py, rule: R_SRC_SHAPE, lines: [99]}
+      - {path: src/omnibase_infra/models/model_node_identity.py, rule: R_SRC_SHAPE, lines: [60]}
+      - {path: src/omnibase_infra/models/operational_timeouts/operational_timeouts.yaml, rule: R_SRC_SHAPE, lines: [38, 42]}
+      - {path: src/omnibase_infra/models/registry/model_domain_constraint.py, rule: R_SRC_SHAPE, lines: [20]}
+      - {path: src/omnibase_infra/models/runtime/model_runtime_introspection_config.py, rule: R_SRC_SHAPE, lines: [76]}
+      - {path: src/omnibase_infra/models/validation/model_localhandler_violation.py, rule: R_SRC_SHAPE, lines: [79]}
+      - {path: src/omnibase_infra/nodes/node_deploy_job_reading_effect/contract.yaml, rule: R_SRC_SHAPE, lines: [13]}
+      - {path: src/omnibase_infra/nodes/node_deploy_job_reading_effect/runtime_untagged_head_gate.py, rule: R_SRC_SHAPE, lines: [16]}
+      - {path: src/omnibase_infra/nodes/node_dev_lane_code_ref_pin_effect/__init__.py, rule: R_SRC_SHAPE, lines: [3]}
+      - {path: src/omnibase_infra/nodes/node_dev_lane_pin_compose_guard_effect/__init__.py, rule: R_SRC_SHAPE, lines: [3]}
+      - {path: src/omnibase_infra/nodes/node_dev_roll_events_effect/runtime_dev_registered_installs.py, rule: R_SRC_SHAPE, lines: [3]}
+      - {path: src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/contract.yaml, rule: R_SRC_SHAPE, lines: [610]}
+      - {path: src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/handlers/handler_evidence_autoclose_sweep.py, rule: R_SRC_SHAPE, lines: [6436]}
+      - {path: src/omnibase_infra/nodes/node_invariant_evaluate_compute/evaluator_invariant.py, rule: R_SRC_SHAPE, lines: [213]}
+      - {path: src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_cost_estimator_build.py, rule: R_SRC_SHAPE, lines: [244, 533, 615, 646, 688]}
+      - {path: src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_llm_endpoint_env.py, rule: R_SRC_SHAPE, lines: [353]}
+      - {path: src/omnibase_infra/nodes/node_setup_local_provision_effect/runtime_overlay_revision.py, rule: R_SRC_SHAPE, lines: [151, 152]}
+      - {path: src/omnibase_infra/nodes/node_stability_integration_refresh_effect/__init__.py, rule: R_SRC_SHAPE, lines: [3]}
+      - {path: src/omnibase_infra/nodes/node_stability_integration_refresh_effect/contract.yaml, rule: R_SRC_SHAPE, lines: [13]}
+      - {path: src/omnibase_infra/nodes/node_stability_rollback_waiver_effect/__init__.py, rule: R_SRC_SHAPE, lines: [3]}
+      - {path: src/omnibase_infra/nodes/node_verify_stability_refresh/__init__.py, rule: R_SRC_SHAPE, lines: [3]}
+      - {path: src/omnibase_infra/observability/handlers/handler_metrics_prometheus.py, rule: R_SRC_SHAPE, lines: [37]}
+      - {path: src/omnibase_infra/runtime/auto_wiring/handler_wiring.py, rule: R_SRC_SHAPE, lines: [2172]}
+      - {path: src/omnibase_infra/runtime/health/projection_liveness.py, rule: R_SRC_SHAPE, lines: [653]}
+      - {path: src/omnibase_infra/runtime/health/runtime_health_block.py, rule: R_SRC_SHAPE, lines: [12]}
+      - {path: src/omnibase_infra/runtime/models/model_binding_config_resolver_config.py, rule: R_SRC_SHAPE, lines: [94]}
+      - {path: src/omnibase_infra/runtime/observability/projection_apply_counters.py, rule: R_SRC_SHAPE, lines: [279]}
+      - {path: src/omnibase_infra/runtime/registry/registry_message_type.py, rule: R_SRC_SHAPE, lines: [159]}
+      - {path: src/omnibase_infra/runtime/runtime_profile.py, rule: R_SRC_SHAPE, lines: [214, 218]}
+      - {path: src/omnibase_infra/runtime/util_wiring.py, rule: R_SRC_SHAPE, lines: [214]}
+      - {path: src/omnibase_infra/services/health_checker.py, rule: R_SRC_SHAPE, lines: [1103]}
+      - {path: src/omnibase_infra/services/mcp/mcp_server_lifecycle.py, rule: R_SRC_SHAPE, lines: [200]}
+      - {path: src/omnibase_infra/topology/application_database.py, rule: R_SRC_SHAPE, lines: [80, 82, 87, 90, 95, 100, 101, 113, 120, 122, 128, 195, 224]}
+      - {path: src/omnibase_infra/validation/checker_first_party_sources.py, rule: R_SRC_SHAPE, lines: [261, 325, 366, 672, 673]}
+      - {path: src/omnibase_infra/validation/validator_chain_propagation.py, rule: R_SRC_SHAPE, lines: [82]}
+      - {path: src/omnibase_infra/validators/no_literal_event_type_in_tests.py, rule: R_SRC_SHAPE, lines: [275]}
+  lane_overlay:
+    count_lines: 8716
+    count_files: 24
+    by_home:
+      contract-shape: 6334
+      overlay: 2382
+    files:
+      - {path: config/deploy_lane_routing.yaml, rule: R_LANE_OVERLAY, line_range: [1, 227]}
+      - {path: config/lab_proof_profiles.yaml, rule: R_LANE_OVERLAY, line_range: [1, 443]}
+      - {path: config/machines.yaml, rule: R_LANE_OVERLAY, line_range: [1, 11]}
+      - {path: config/runner_fleet.yaml, rule: R_LANE_OVERLAY, line_range: [1, 460]}
+      - {path: docker/canary-s7-override.yml, rule: R_LANE_OVERLAY, line_range: [1, 57]}
+      - {path: docker/compose-overrides.list, rule: R_LANE_OVERLAY, line_range: [1, 23]}
+      - {path_sha1: 4c14d7e9bc0a, rule: R_LANE_OVERLAY, line_range: [1, 366]}
+      - {path_sha1: 33382e5622d5, rule: R_LANE_OVERLAY, line_range: [1, 388]}
+      - {path: docker/docker-compose.dev-member.yml, rule: R_LANE_OVERLAY, line_range: [1, 120]}
+      - {path: docker/docker-compose.canary.yml, rule: R_LANE_OVERLAY, line_range: [1, 91]}
+      - {path: docker/docker-compose.stability-host-broker.yml, rule: R_LANE_OVERLAY, line_range: [1, 63]}
+      - {path: docker/catalog/model_registry.yaml, rule: R_LANE_OVERLAY, line_range: [1, 133]}
+      - {path_sha1: 3dba85c17c05, rule: R_OVERLAY_SHAPE, line_range: [1, 56]}
+      - {path_sha1: ee17eb46925b, rule: R_OVERLAY_SHAPE, line_range: [1, 30]}
+      - {path_sha1: 8a2b7487b37e, rule: R_OVERLAY_SHAPE, line_range: [1, 57]}
+      - {path_sha1: 3d7d5843123c, rule: R_OVERLAY_SHAPE, line_range: [1, 57]}
+      - {path: docker/docker-compose.dev-lane.yml, rule: R_LANE_COMPOSE, line_range: [1, 2031]}
+      - {path: docker/docker-compose.dev-bus-ha.yml, rule: R_LANE_COMPOSE, line_range: [1, 103]}
+      - {path: docker/docker-compose.dev-tenant-fold.yml, rule: R_LANE_COMPOSE, line_range: [1, 176]}
+      - {path: docker/docker-compose.dogfood.yml, rule: R_LANE_COMPOSE, line_range: [1, 638]}
+      - {path: docker/docker-compose.judge.yml, rule: R_LANE_COMPOSE, line_range: [1, 675]}
+      - {path_sha1: 05d3a62ed557, rule: R_LANE_COMPOSE, line_range: [1, 897]}
+      - {path: docker/docker-compose.prod.yml, rule: R_LANE_COMPOSE, line_range: [1, 322]}
+      - {path_sha1: 29c36e56f96b, rule: R_LANE_COMPOSE, line_range: [1, 1292]}
+runtime_account_grants:
+  answer: contract-shape
+  home: contract-shape
+  where:
+    - src/omnibase_infra/topology/instances/
+  kind: the PR 6337 grant of the lane_work_workflow table to the runtime account, written into every topology instance file in the directory named under where
+  reason: "A grant says which role may read or write which table. It is identical in meaning across lanes, is derived from the vendored migrations and ownership declarations by the grant generator and checked by its --check mode and the migration integration test, and carries no address, host, secret or per-lane value. It therefore stays in this repository as a contract shape and never moves to overlay. What is configuration is the credential that logs in as the granted role: the topology instances hold only the environment variable name or the secret reference, and the value belongs in the settings store."
+  not_moved:
+    - the role name and the table list (shape)
+    - the choice of which instance a profile resolves to, in src/omnibase_infra/topology/application_database_profiles.yaml (shape)
+  moved_to_store:
+    - the database login value behind each dsn_env or secret_ref binding
+move_plan:
+  principle: A value is moved in this order only. The value lands in overlay or the settings store and is read back there; then this repository switches to read it; then the literal is deleted in the same change as the switch. No step switches a reader before the value is held.
+  steps:
+    - {id: S1, group: lab-addresses-hosts-ports-hardware-models, kind: land, action: "Add each value of the addresses, host_names, ports (overlay rule), hardware_facts (overlay rule) and model_ids (overlay rule) kinds to the lane overlay repository, one key per slot or lane, with the endpoint_urls shape the slot loader already reads.", requires: []}
+    - {id: S2, group: lab-addresses-hosts-ports-hardware-models, kind: verify, action: "Read every landed key back through the real overlay source with the endpoint overlay main check (tests/integration/models/test_llm_endpoint_overlay_main_check_omn26709.py), with no fixture overlay, and confirm the repository variable OMNI_CI_ENDPOINT_OVERLAY_REPO names the lane overlay repository.", requires: [S1]}
+    - {id: S3, group: lab-addresses-hosts-ports-hardware-models, kind: switch, action: "Switch the loader, the compose generator and the deploy agent to read each key from the overlay, one kind per change, running compose_gen against the real overlay.", requires: [S2]}
+    - {id: S4, group: lab-addresses-hosts-ports-hardware-models, kind: delete, action: "Delete the literal from this repository in the same change as its S3 switch.", requires: [S3]}
+    - {id: S5, group: lane-overlay-files, kind: land, action: "Add the contents of the lane_overlay files under rule R_LANE_OVERLAY (per-host lane routing, runner fleet, lab proof profiles, machines, per-host compose, the model registry) to the lane overlay repository.", requires: [S2]}
+    - {id: S6, group: lane-overlay-files, kind: switch, action: "Switch the deploy agent and the generators to read those files from overlay.", requires: [S5]}
+    - {id: S7, group: lane-overlay-files, kind: delete, action: "Delete the files from this repository in the same change as S6.", requires: [S6]}
+    - {id: S8, group: per-environment-ci-values, kind: land, action: "Seed each per_environment_values entry under rule R_ENV_STORE into the settings store (seed-infisical dry run first), then read it back.", requires: []}
+    - {id: S9, group: per-environment-ci-values, kind: switch, action: "Switch the workflow or script to read the setting from the store or the repository variable.", requires: [S8]}
+    - {id: S10, group: per-environment-ci-values, kind: delete, action: "Delete the literal in the same change as S9.", requires: [S9]}
+    - {id: S11, group: topology-grants-and-contract-shape, kind: keep, action: "Move nothing for the contract-shape rows, including topology grants. Guard the shape with the existing topology tests.", requires: []}

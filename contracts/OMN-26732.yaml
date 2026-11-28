@@ -1,0 +1,60 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-26732"
+title: "Every configuration value in omnibase_infra is listed with where it belongs, with a move plan that keeps dev building"
+summary: "A read-only audit record, docs/decisions/config-value-audit-omn-26732.yaml, lists every configuration value by kind with file and line, names its home with a reason, orders the move value first, and answers the runtime account grant question. Nothing in the repository is moved by this change."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-config-value-audit"
+    statement: "The audit record lists, homes and orders every configuration value and answers the topology grant kind, and a test holds it to the tree."
+    acceptance:
+      - id: "AC2673201"
+        statement: "AC2673201: a list of every configuration value in omnibase_infra with file and line, grouped by kind and counted -- falsifier: a tracked non-test file that holds the coder slot id or a private address and is absent from the list fails the test"
+      - id: "AC2673202"
+        statement: "AC2673202: each listed value names its home with one reason line -- falsifier: a row whose rule is missing, whose home is outside overlay, settings-store and contract-shape, or whose reason is empty fails the test"
+      - id: "AC2673203"
+        statement: "AC2673203: a move plan ordered value first -- falsifier: a switch step with no land step among its requirements fails the test"
+      - id: "AC2673204"
+        statement: "AC2673204: an explicit answer for runtime account table grants in the topology profiles -- falsifier: a missing answer, reason or topology instance fails the test"
+evidence_requirements:
+  - kind: "tests"
+    description: "The audit tests pass at the head; the test file and the record are absent at the merge base."
+    command: "uv run --frozen pytest tests/ci/test_config_value_audit_omn26732.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn26732-ac1"
+    description: "Every file with a coder slot id or a private address is named in the audit, kinds are counted, and the control detects an unnamed file."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_config_value_audit_omn26732.py -k ac1 -q"
+        cwd: "."
+    binds_ac: ["AC2673201"]
+  - id: "dod-omn26732-ac2"
+    description: "Every row carries a rule whose home is one of the three and whose reason is non-empty."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_config_value_audit_omn26732.py -k ac2 -q"
+        cwd: "."
+    binds_ac: ["AC2673202"]
+  - id: "dod-omn26732-ac3"
+    description: "No step switches a reader before a land step holds the value."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_config_value_audit_omn26732.py -k ac3 -q"
+        cwd: "."
+    binds_ac: ["AC2673203"]
+  - id: "dod-omn26732-ac4"
+    description: "The runtime account grants are answered as a contract shape with their location in the three topology instances."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_config_value_audit_omn26732.py -k ac4 -q"
+        cwd: "."
+    binds_ac: ["AC2673204"]
